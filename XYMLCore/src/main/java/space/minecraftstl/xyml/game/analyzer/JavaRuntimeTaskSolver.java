@@ -86,6 +86,17 @@ record JavaRuntimeTaskSolver(
         return requireReady(repair.createTask(candidateId));
     }
 
+    /// Creates a candidate-bound task while forwarding retained retry progress to the application boundary.
+    ///
+    /// @param candidateId selected candidate identifier, or null for ordinary automatic selection
+    /// @param checkpoint immutable progress from an earlier repair attempt
+    /// @return stopped repair task
+    @Override
+    public Task<?> createTask(@Nullable String candidateId, RepairCheckpoint checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        return requireReady(repair.createTask(candidateId, checkpoint));
+    }
+
     /// Ensures the application boundary returns a fresh stopped task.
     ///
     /// @param task task returned by the application boundary

@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.game.JavaRuntimeRepairTaskFactory;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.launch.DefaultLauncher;
@@ -1342,8 +1343,10 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     requireInstanceDirectory(id, instanceDirectory);
                     requireTrackedLaunchStopped(repositoryDirectory, id, "change settings");
                     GameSettings.Instance setting = writableSettings(id);
+                    waitForSettingsSaves();
                     mutation.accept(setting);
-                    repository.saveGameSettings(id);
+                    waitForSettingsSaves();
+                    repository.saveGameSettingsSync(id);
                     return instanceSettings(id);
                 }),
                 TaskResource.gameInstance(instanceDirectory),
@@ -1764,6 +1767,15 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 return guardRepairTask(
                         checkedExecutionAllowed,
                         () -> delegate.createTask(candidateId));
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId, RepairCheckpoint checkpoint) {
+                Objects.requireNonNull(checkpoint, "checkpoint");
+                return guardRepairTask(
+                        checkedExecutionAllowed,
+                        () -> delegate.createTask(candidateId, checkpoint));
             }
         };
     }

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
@@ -280,6 +281,93 @@ final class XYMLMcpCrashRepairCoordinatorTest {
             assertEquals(retryOperation.get("operation_id"), staleOperation.get("current_operation_id"));
             assertEquals("FAILED", staleOperation.get("status"));
             assertEquals("SUCCEEDED", staleOperation.get("plan_state"));
+        }
+    }
+
+    /// Forwards the retained checkpoint to both source validation and the selected solver boundary on retry.
+    @Test
+    void forwardsRepairCheckpointToValidatorAndSolverFactories() throws Exception {
+        AtomicReference<@Nullable RepairCheckpoint> validatorCheckpoint = new AtomicReference<>();
+        AtomicReference<@Nullable RepairCheckpoint> solverCheckpoint = new AtomicReference<>();
+        AtomicInteger solverAttempts = new AtomicInteger();
+        String log = "java.lang.UnsupportedClassVersionError: example.Main has been compiled by a more recent "
+                + "version of the Java Runtime (class file version 61.0), this version of the Java Runtime only "
+                + "recognizes class file versions up to 52.0";
+        LogAnalyzable.JavaRuntimeRepair javaRepair = new LogAnalyzable.JavaRuntimeRepair() {
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask() {
+                return Task.runAsync(() -> {
+                });
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId) {
+                return createTask();
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(
+                    @Nullable String candidateId,
+                    RepairCheckpoint checkpoint) {
+                solverCheckpoint.set(checkpoint);
+                if (solverAttempts.incrementAndGet() == 1) {
+                    throw new IllegalStateException("solver factory unavailable");
+                }
+                return Task.runAsync(() -> {
+                });
+            }
+        };
+        XYMLMcpCrashRepairCoordinator.SourceValidator validator =
+                new XYMLMcpCrashRepairCoordinator.SourceValidator() {
+                    /// {@inheritDoc}
+                    @Override
+                    public Task<?> createTask() {
+                        return validationTask(() -> {
+                        });
+                    }
+
+                    /// {@inheritDoc}
+                    @Override
+                    public Task<?> createTask(RepairCheckpoint checkpoint) {
+                        validatorCheckpoint.set(checkpoint);
+                        return validationTask(() -> {
+                        });
+                    }
+                };
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:checkpoint-forwarding",
+                    baseInput(log, 17, 8).withJavaRuntimeRepair(javaRepair),
+                    validator);
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            Map<String, Object> firstTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(firstOperation.get("operation_id")));
+            assertEquals("FAILED", firstTerminal.get("status"));
+            assertEquals(List.of(), java.util.Objects.requireNonNull(validatorCheckpoint.get()).completedSteps());
+            assertEquals(List.of(), java.util.Objects.requireNonNull(solverCheckpoint.get()).completedSteps());
+
+            Map<String, Object> retryOperation = coordinator.retry(planId);
+            Map<String, Object> retryTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retryOperation.get("operation_id")));
+            assertEquals("SUCCEEDED", retryTerminal.get("status"));
+            RepairCheckpoint retryValidatorCheckpoint = java.util.Objects.requireNonNull(validatorCheckpoint.get());
+            RepairCheckpoint retrySolverCheckpoint = java.util.Objects.requireNonNull(solverCheckpoint.get());
+            assertFalse(retryValidatorCheckpoint.completedSteps().isEmpty());
+            assertEquals(retryValidatorCheckpoint, retrySolverCheckpoint);
+            assertEquals(2, solverAttempts.get());
         }
     }
 

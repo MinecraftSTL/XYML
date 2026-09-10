@@ -101,6 +101,22 @@ public interface Solver {
         return createTask();
     }
 
+    /// Creates a fresh task for one selected candidate and a retained retry checkpoint.
+    ///
+    /// Existing solver boundaries remain compatible because the default delegates to the candidate-only method.
+    /// Solver implementations that own a [RepairTaskFactory] should override this method so the checkpoint reaches
+    /// the domain task factory instead of being retained only by the MCP operation registry.
+    ///
+    /// @param candidateId selected candidate identifier, or null to use the default automatic path
+    /// @param checkpoint immutable progress from an earlier repair attempt
+    /// @return executable repair task, or null when the repair requires user action
+    default @Nullable Task<?> createTask(
+            @Nullable String candidateId,
+            RepairCheckpoint checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        return createTask(candidateId);
+    }
+
     /// Creates an automatic solver around a fresh-task factory.
     ///
     /// The generic action is deliberately classified conservatively because Core cannot infer the supplied task's

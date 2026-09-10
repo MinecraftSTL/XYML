@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.GameSettings;
@@ -121,6 +122,15 @@ public final class JavaRuntimeRepairTaskFactory {
                                 checkedManifest,
                                 candidateId,
                                 validator);
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId, RepairCheckpoint checkpoint) {
+                Objects.requireNonNull(checkpoint, "checkpoint");
+                // Runtime selection has no durable, reusable JavaRuntime snapshot. Re-enter the existing factory so
+                // every retry performs a fresh preflight and lock acquisition while retaining already published files.
+                return createTask(candidateId);
             }
         };
     }

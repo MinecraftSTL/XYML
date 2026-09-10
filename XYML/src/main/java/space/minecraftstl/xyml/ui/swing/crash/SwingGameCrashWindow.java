@@ -615,7 +615,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             rows.add(createRepairRowOnEdt(
                     resultId,
                     reason,
-                    i18n("game.crash.repair.evidence", evidence),
+                    evidence,
                     null,
                     List.of()));
             rows.add(Box.createVerticalStrut(6));
@@ -682,21 +682,16 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         return row;
     }
 
-    /// Bounds and escapes evidence before it enters a Swing label.
+    /// Bounds evidence before it enters a plain Swing label.
     ///
     /// @param evidence matched log fragment
-    /// @return bounded plain-text evidence label
+    /// @return bounded plain-text evidence
     private static String boundedEvidence(String evidence) {
         String normalized = Objects.requireNonNull(evidence, "evidence")
                 .replaceAll("[\\r\\n\\t]+", " ")
                 .strip();
         String bounded = normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
-        return "<html>" + bounded
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;") + "</html>";
+        return bounded;
     }
 
     /// Claims one row and schedules creation and execution of a fresh solver task off the EDT.

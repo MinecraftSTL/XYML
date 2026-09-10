@@ -296,6 +296,19 @@ public record LogAnalyzable(
             }
             return createTask();
         }
+
+        /// Creates a candidate-bound task while forwarding retained retry progress.
+        ///
+        /// Existing application boundaries remain source-compatible because the default delegates to the legacy
+        /// candidate-only method. Implementations that can resume durable steps may override this hook.
+        ///
+        /// @param candidateId stable candidate identifier, or null for the ordinary automatic path
+        /// @param checkpoint immutable progress from an earlier repair attempt
+        /// @return stopped repair task
+        default Task<?> createTask(@Nullable String candidateId, RepairCheckpoint checkpoint) {
+            Objects.requireNonNull(checkpoint, "checkpoint");
+            return createTask(candidateId);
+        }
     }
 
     /// Creates a stopped task that searches for one or more validated missing mod identifiers.

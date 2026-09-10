@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.task.Task;
 
@@ -69,10 +70,32 @@ record TaskSolver(
     /// @return independent repair task in the ready state
     @Override
     public Task<?> createTask() {
-        Task<?> task = Objects.requireNonNull(taskFactory.createTask(), "repair task factory result");
-        if (task.getState() != Task.TaskState.READY) {
+        return requireReady(taskFactory.createTask());
+    }
+
+    /// Creates a fresh task while forwarding retained progress to the underlying factory.
+    ///
+    /// @param candidateId candidate identifier, which is unsupported for this generic solver
+    /// @param checkpoint immutable progress from an earlier repair attempt
+    /// @return independent repair task in the ready state
+    @Override
+    public Task<?> createTask(@Nullable String candidateId, RepairCheckpoint checkpoint) {
+        if (candidateId != null) {
+            throw new IllegalArgumentException("Repair candidate selection is unavailable");
+        }
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        return requireReady(taskFactory.createTask(checkpoint));
+    }
+
+    /// Verifies that one factory result is a fresh stopped task.
+    ///
+    /// @param task task returned by the factory
+    /// @return the validated task
+    private static Task<?> requireReady(Task<?> task) {
+        Task<?> checkedTask = Objects.requireNonNull(task, "repair task factory result");
+        if (checkedTask.getState() != Task.TaskState.READY) {
             throw new IllegalStateException("Repair task factory must return a task in the ready state");
         }
-        return task;
+        return checkedTask;
     }
 }

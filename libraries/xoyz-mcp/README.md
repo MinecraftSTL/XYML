@@ -10,6 +10,8 @@ The API accepts independent providers for the three MCP capability families. A c
 provider is present. Applications retain ownership of scheduling, authorization, filesystem access, and business
 operations. An empty bearer token preserves the unauthenticated loopback mode; applications that expose the listener
 beyond a tightly controlled process should configure a non-empty token and still retain their own authorization policy.
+The transport-layer Bearer gate and the application's authorization policy are separate layers: passing the former
+does not grant a client permission to invoke every exposed operation.
 
 ## Authentication
 

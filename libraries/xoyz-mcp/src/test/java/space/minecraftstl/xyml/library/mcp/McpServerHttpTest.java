@@ -854,6 +854,26 @@ public final class McpServerHttpTest {
         }
     }
 
+    /// Applies the Origin policy before Bearer authentication when both headers are supplied.
+    @Test
+    public void rejectsInvalidOriginBeforeBearerAuthentication() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder(endpoint)
+                    .header("Accept", ACCEPT_BOTH)
+                    .header("Content-Type", "application/json")
+                    .header("Origin", "https://example.com")
+                    .header("Authorization", "Bearer " + AUTH_TOKEN)
+                    .POST(HttpRequest.BodyPublishers.ofString(initializeBody(1)))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(403, response.statusCode());
+            assertTrue(response.headers().firstValue("WWW-Authenticate").isEmpty());
+        }
+    }
+
     /// Rejects duplicate Origin fields before NanoHTTPD collapses them into one map entry.
     @Test
     public void rejectsDuplicateOriginHeaders() throws Exception {
@@ -1013,6 +1033,7 @@ public final class McpServerHttpTest {
     public void redactsBearerTokenFromStructuredPropertyNames() {
         JsonObject source = new JsonObject();
         source.add(AUTH_TOKEN, new JsonObject());
+        source.add("prefix-" + AUTH_TOKEN + "-suffix", new JsonObject());
         source.add("[REDACTED]", new JsonObject());
 
         String redacted = JsonCredentialRedactor.redact(source, AUTH_TOKEN).toString();
@@ -1020,6 +1041,15 @@ public final class McpServerHttpTest {
         assertFalse(redacted.contains(AUTH_TOKEN));
         assertTrue(redacted.contains("[REDACTED]"));
         assertTrue(redacted.contains("[REDACTED]#1"));
+    }
+
+    /// Leaves structured output untouched when transport authentication is disabled with an empty token.
+    @Test
+    public void doesNotRedactWithEmptyBearerToken() {
+        JsonObject source = new JsonObject();
+        source.addProperty("message", "unchanged");
+
+        assertEquals(source, JsonCredentialRedactor.redact(source, ""));
     }
 
     /// Redacts a one-character credential from values without corrupting JSON-RPC property names.

@@ -186,6 +186,34 @@ class DefaultGameCrashAnalysisServiceTest {
         }
     }
 
+    /// Keeps the explicit native-memory diagnosis when the broad out-of-memory rule matches the same source.
+    ///
+    /// @throws Exception when temporary I/O or bounded asynchronous completion fails
+    @Test
+    void memoryExceededSupersedesOutOfMemoryWithoutVirtualMemoryDiagnosis() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(executor);
+            String failure = "Native memory allocation failed to reserve 671088640 bytes\n"
+                    + "Out of Memory Error";
+            GameCrashAnalysis analysis = service.analyze(
+                            input(List.of(new Log(failure)), Bits.BIT_64),
+                            temporaryDirectory.resolve("missing-memory-log.log"))
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+
+            assertEquals(List.of(CrashReportAnalyzer.Rule.MEMORY_EXCEEDED), analysis.results().stream()
+                    .map(CrashReportAnalyzer.Result::rule)
+                    .toList());
+            assertEquals(List.of(CrashReportAnalyzer.Rule.OUT_OF_MEMORY), analysis.suppressedResults().stream()
+                    .map(CrashReportAnalyzer.Result::rule)
+                    .toList());
+            assertTrue(analysis.logResults().isEmpty());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     /// Adapts the Swing `Log` model into one deterministic immutable Core input.
     ///
     /// @param logs captured process-output entries

@@ -363,6 +363,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             throw failure;
         }
         RepairPlan plan = Objects.requireNonNull(claimedPlan, "claimed crash repair plan");
+        RepairCheckpoint executionCheckpoint = checkpoint;
 
         Map<String, Object> operation;
         try {
@@ -372,12 +373,12 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             operation = operations.startForOwner(
                     descriptor.actionType().name(),
                     descriptor.actionType() == RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH,
-                    checkpoint,
+                    executionCheckpoint,
                     () -> Objects.requireNonNull(
-                            validator.createTask(),
+                            validator.createTask(executionCheckpoint),
                             "Crash source validator did not create a task")
                             .thenComposeAsync(() -> Objects.requireNonNull(
-                                    solution.solver.createTask(plan.candidateId),
+                                    solution.solver.createTask(plan.candidateId, executionCheckpoint),
                                     "Crash repair solver did not create a task"))
                             .asOrchestration());
         } catch (RuntimeException failure) {
@@ -544,6 +545,11 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     }
 
     /// Clears analyses and plans, then requests cancellation of active operations.
+    ///
+    /// This is an application/process-shutdown boundary rather than a hot-restart recovery operation. The operation
+    /// registry keeps task-owned residual-resource markers while cancellation is in flight; after this coordinator is
+    /// closed there is intentionally no retry route through the discarded analysis plans, and a subsequent process
+    /// starts with a fresh in-memory resource registry.
     @Override
     public void close() {
         List<String> retainedOperations;
@@ -1246,6 +1252,18 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         ///
         /// @return fresh stopped task with a concrete resource declaration
         Task<?> createTask();
+
+        /// Creates one validation task while forwarding retained retry progress.
+        ///
+        /// Existing validators remain source-compatible because the default delegates to [#createTask()].
+        /// Validators that persist durable checkpoints may override this hook to resume from the supplied step.
+        ///
+        /// @param checkpoint immutable progress from an earlier repair attempt
+        /// @return fresh stopped task with a concrete resource declaration
+        default Task<?> createTask(RepairCheckpoint checkpoint) {
+            Objects.requireNonNull(checkpoint, "checkpoint");
+            return createTask();
+        }
     }
 
     /// Immutable retained analysis and its application boundaries.
