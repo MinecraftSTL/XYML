@@ -26,6 +26,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
@@ -98,6 +99,25 @@ public final class StrictNBTCodecTest {
 
         assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(encoded));
         assertEquals(root, NBTCodec.of().readTag(encoded));
+    }
+
+    /// Ensures the strict byte-array entry point enforces the configured nesting limit before allocation.
+    @Test
+    void rejectsExcessiveNestingBeforeObjectParsing() throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (DataOutputStream data = new DataOutputStream(output)) {
+            data.writeByte(10);
+            data.writeShort(0);
+            for (int index = 0; index < 512; index++) {
+                data.writeByte(10);
+                data.writeShort(0);
+            }
+            for (int index = 0; index < 513; index++) {
+                data.writeByte(0);
+            }
+        }
+
+        assertThrows(IOException.class, () -> NBTCodec.of().readTag(output.toByteArray()));
     }
 
     private static CompoundTag sampleTag() {

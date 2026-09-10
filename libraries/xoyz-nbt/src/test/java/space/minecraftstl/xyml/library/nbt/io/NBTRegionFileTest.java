@@ -53,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -713,9 +714,9 @@ public final class NBTRegionFileTest {
         }
     }
 
-    /// Treats a physically truncated inline frame as an empty repairable slot instead of publishing a guessed prefix.
+    /// Preserves a complete physical payload when only the inline frame length is damaged.
     @Test
-    void isolatesTruncatedInlineFrameAndClearsItOnSave() throws Exception {
+    void preservesRecoverablePrefixFromTruncatedInlineFrame() throws Exception {
         Path file = initialTwoChunkRegion();
         byte[] bytes = Files.readAllBytes(file);
         int slotOffset = sectorOffset(bytes, 0);
@@ -725,7 +726,8 @@ public final class NBTRegionFileTest {
 
         try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
             NBTReadResult<Chunk> result = region.readChunkTolerant(0);
-            assertNull(result.root().getRootTag());
+            assertNotNull(result.root().getRootTag(), result.report().toString());
+            assertEquals(1, result.root().getRootTag().getInt("value"));
             assertTrue(result.report().issues().stream()
                     .anyMatch(issue -> "REGION_FRAME_LENGTH_CLAMPED".equals(issue.code())
                             || "REGION_FRAME_INVALID".equals(issue.code())
@@ -734,15 +736,15 @@ public final class NBTRegionFileTest {
 
             ChunkRegion snapshot = new ChunkRegion();
             ChunkRegion baseline = new ChunkRegion();
-            snapshot.setChunk(0, result.root());
-            baseline.setChunk(0, result.root());
+            snapshot.setChunk(0, result.root().clone());
+            baseline.setChunk(0, result.root().clone());
             region.synchronizePendingChanges(snapshot, baseline);
             assertTrue(region.isDirty());
             region.flush();
         }
 
         try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
-            assertNull(reopened.readChunk(0).getRootTag());
+            assertEquals(1, reopened.readChunk(0).getRootTag().getInt("value"));
             assertEquals(1, reopened.readChunk(1).getRootTag().getInt("value"));
         }
     }

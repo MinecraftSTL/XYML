@@ -545,12 +545,7 @@ public final class NBTRegionFile implements AutoCloseable {
                     for (NBTReadIssue issue : recovered.report().issues()) {
                         issues.add(withSlotPath(localIndex, issue));
                     }
-                    boolean structurallyTruncated = issues.stream().anyMatch(issue ->
-                            "REGION_FRAME_LENGTH_CLAMPED".equals(issue.code())
-                                    || "REGION_INLINE_TRUNCATED".equals(issue.code())
-                                    || "REGION_FRAME_TRUNCATED".equals(issue.code()));
-                    Chunk result = structurallyTruncated ? new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex))
-                            : new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), recovered.root());
+                    Chunk result = new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), recovered.root());
                     NBTReadReport report = slotReport(localIndex, issues);
                     rememberIssues(report.issues());
                     return new NBTReadResult<>(result, report);
@@ -1668,7 +1663,7 @@ public final class NBTRegionFile implements AutoCloseable {
             }
             frame.flip();
             long length = Integer.toUnsignedLong(frame.getInt());
-            if (length < 1L || length > (long) lengths[i] * ChunkUtils.SECTOR_BYTES - 4L) {
+            if (length < 1L) {
                 if (!tolerant) {
                     throw new IOException("Invalid chunk frame length at local index " + i);
                 }
@@ -1679,6 +1674,11 @@ public final class NBTRegionFile implements AutoCloseable {
                 external[i] = false;
                 isolatedSlots[i] = true;
                 continue;
+            }
+            if (length > (long) lengths[i] * ChunkUtils.SECTOR_BYTES - 4L) {
+                if (!tolerant) throw new IOException("Invalid chunk frame length at local index " + i);
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "REGION_FRAME_LENGTH_CLAMPED",
+                        slotPath(i), "槽位帧长度超过已分配扇区，已按物理边界尝试恢复"));
             }
             int marker = Byte.toUnsignedInt(frame.get());
             int compressionId = marker & 0x7F;

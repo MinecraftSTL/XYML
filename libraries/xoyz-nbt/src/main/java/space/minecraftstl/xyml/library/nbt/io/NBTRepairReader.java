@@ -442,7 +442,7 @@ final class NBTRepairReader {
     /// node/depth limits. Recovery candidates therefore pass through this small structural scanner
     /// first. It consumes exactly one named root, validates list homogeneity and all signed lengths,
     /// and rejects trailing bytes without allocating arrays or strings.
-    private static void validateStrictStructure(byte[] raw, ByteOrder order, NBTReadLimits limits)
+    static void validateStrictStructure(byte[] raw, ByteOrder order, NBTReadLimits limits)
             throws IOException {
         StrictStructureScanner scanner = new StrictStructureScanner(raw, order, limits);
         try {

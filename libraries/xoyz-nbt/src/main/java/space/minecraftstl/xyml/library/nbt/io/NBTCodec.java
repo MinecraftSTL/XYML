@@ -355,6 +355,7 @@ public final class NBTCodec {
         if (raw.length > MAX_DECOMPRESSED_BYTES) {
             throw new IOException("Decompressed NBT input exceeds the read limit");
         }
+        NBTRepairReader.validateStrictStructure(raw, getEdition().byteOrder(), NBTReadLimits.defaults());
         try (var reader = new RawDataReader(new InputSource.OfByteBuffer(raw), getEdition())) {
             Tag tag = check(NBTInput.readTag(reader));
             reader.requireExhausted();
