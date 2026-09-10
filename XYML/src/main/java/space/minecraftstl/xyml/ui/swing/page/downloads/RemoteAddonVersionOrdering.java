@@ -75,15 +75,22 @@ final class RemoteAddonVersionOrdering {
 
     /// Chooses the newest stable release matching the requested game version when possible.
     ///
-    /// @param orderedVersions versions already returned by {@link #order(List, String)}
+    /// The recommendation always uses the dedicated recommended ordering, regardless of the
+    /// browsing order currently selected by the caller.
+    ///
+    /// @param versions provider-returned or otherwise unordered installable versions
     /// @param requestedGameVersion optional exact game-version filter
     /// @return recommended release, or the first available version, or null for an empty list
     static @Nullable RemoteAddon.Version recommended(
-            @Unmodifiable List<RemoteAddon.Version> orderedVersions,
+            @Unmodifiable List<RemoteAddon.Version> versions,
             String requestedGameVersion) {
         String requested = Objects.requireNonNull(requestedGameVersion, "requestedGameVersion").trim();
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = order(
+                Objects.requireNonNull(versions, "versions"),
+                requested,
+                RemoteAddonVersionSortMode.RECOMMENDED);
         @Nullable RemoteAddon.Version first = null;
-        for (RemoteAddon.Version version : Objects.requireNonNull(orderedVersions, "orderedVersions")) {
+        for (RemoteAddon.Version version : orderedVersions) {
             if (first == null) {
                 first = version;
             }

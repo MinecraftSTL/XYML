@@ -224,6 +224,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Provider versions retained for local reordering after the user changes version sort mode.
     private @Unmodifiable List<RemoteAddon.Version> loadedVersions = List.of();
 
+    /// Stable recommendation retained independently from the selected browsing order.
+    private @Nullable RemoteAddon.Version recommendedVersion;
+
     /// Suppresses version-combo callbacks while a new local order is being published.
     private boolean applyingVersionSort;
 
@@ -940,6 +943,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         selectedItem = item;
         versionLoading = true;
         loadedVersions = List.of();
+        recommendedVersion = null;
         versionBox.removeAllItems();
         suggestInstanceName(item);
         setStatus(strings.loadingVersionsStatus());
@@ -971,6 +975,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         long requestRevision = selectionRequestRevision.incrementAndGet();
         versionLoading = true;
         loadedVersions = List.of();
+        recommendedVersion = null;
         versionBox.removeAllItems();
         setStatus(strings.loadingVersionsStatus());
         updateControls();
@@ -1020,10 +1025,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         @Nullable RemoteAddon.Version previousSelection =
                 (RemoteAddon.Version) versionBox.getSelectedItem();
         @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
-        @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
-                orderedVersions,
-                SwingTextFields.comboText(gameVersionField));
-        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
+        versionRenderer.setSelectionContext(this.recommendedVersion, SwingTextFields.comboText(gameVersionField));
         applyingVersionSort = true;
         try {
             versionBox.removeAllItems();
@@ -1032,8 +1034,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             }
             if (previousSelection != null && orderedVersions.contains(previousSelection)) {
                 versionBox.setSelectedItem(previousSelection);
-            } else if (recommendedVersion != null) {
-                versionBox.setSelectedItem(recommendedVersion);
+            } else if (this.recommendedVersion != null) {
+                versionBox.setSelectedItem(this.recommendedVersion);
             }
         } finally {
             applyingVersionSort = false;
@@ -1083,10 +1085,11 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         versionLoading = false;
         loadedVersions = List.copyOf(Objects.requireNonNull(versions, "versions"));
         @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
-        @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
-                orderedVersions,
-                SwingTextFields.comboText(gameVersionField));
-        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
+        String requestedGameVersion = SwingTextFields.comboText(gameVersionField);
+        recommendedVersion = RemoteAddonVersionOrdering.recommended(
+                loadedVersions,
+                requestedGameVersion);
+        versionRenderer.setSelectionContext(recommendedVersion, requestedGameVersion);
         for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
@@ -1114,6 +1117,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             }
             versionLoading = false;
             loadedVersions = List.of();
+            recommendedVersion = null;
             versionBox.removeAllItems();
             setStatus(strings.versionLoadFailedStatus(), this::retrySelectedVersions);
             updateControls();
@@ -1250,6 +1254,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         selectedItem = null;
         versionLoading = false;
         loadedVersions = List.of();
+        recommendedVersion = null;
         versionBox.removeAllItems();
         versionRenderer.setSelectionContext(null, "");
         suggestedInstanceName = null;

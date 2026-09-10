@@ -115,6 +115,27 @@ final class RemoteAddonVersionOrderingTest {
                         RemoteAddonVersionSortMode.GAME_VERSION));
     }
 
+    /// Keeps the recommendation stable when a caller has selected a different browsing order.
+    @Test
+    void recommendationIgnoresBrowsingOrder() {
+        RemoteAddon.Version newerGamePreview = version(
+                "newer-game-preview",
+                "9.0.0",
+                "1.21",
+                RemoteAddon.VersionType.Beta);
+        RemoteAddon.Version olderGameRelease = version(
+                "older-game-release",
+                "1.0.0",
+                "1.20.1",
+                RemoteAddon.VersionType.Release);
+        @Unmodifiable List<RemoteAddon.Version> gameOrdered = RemoteAddonVersionOrdering.order(
+                List.of(olderGameRelease, newerGamePreview),
+                "",
+                RemoteAddonVersionSortMode.GAME_VERSION);
+
+        assertSame(olderGameRelease, RemoteAddonVersionOrdering.recommended(gameOrdered, ""));
+    }
+
     /// Creates one minimal provider version for ordering assertions.
     private static RemoteAddon.Version version(
             String id,
