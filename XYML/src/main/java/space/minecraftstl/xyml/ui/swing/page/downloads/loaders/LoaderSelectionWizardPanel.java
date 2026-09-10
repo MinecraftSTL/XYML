@@ -37,7 +37,10 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.ListSelectionModel;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumMap;
@@ -119,6 +122,17 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
 
     /// User-visible progress, validation, and failure feedback.
     private final JLabel statusLabel = new JLabel();
+
+    /// Action exposed by the current retryable or returnable status, or null for ordinary feedback.
+    private @Nullable Runnable statusAction;
+
+    /// Handles primary clicks on the status text without changing the label-based panel API.
+    private final MouseAdapter statusMouseListener = new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            activateStatusAction(event);
+        }
+    };
 
     /// Monotonic explicit-refresh identity used to discard stale worker completions.
     private final AtomicLong refreshRevision = new AtomicLong();
@@ -319,6 +333,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
 
         JPanel gameVersionBand = new JPanel(new MigLayout("insets 0, fillx", "[][grow,fill]", "[32!]") );
         gameVersionBand.setOpaque(false);
+        gameVersionBand.setMinimumSize(new java.awt.Dimension(0, 0));
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionValue);
         gameVersionBand.add(gameVersionLabel);
@@ -331,11 +346,12 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         add(kindHeading, "growx");
 
         JPanel kindGrid = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3",
-                "[grow,fill][grow,fill][grow,fill]",
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
                 "[36!]8[36!]8[36!]8[36!]") );
         kindGrid.setName("loaderKinds");
         kindGrid.setOpaque(false);
+        kindGrid.setMinimumSize(new java.awt.Dimension(0, 0));
         for (GameLoaderKind kind : GameLoaderKind.values()) {
             JButton kindButton = new JButton(strings.loaderName(kind));
             kindButton.setName("loaderKind_" + kind.name());
@@ -346,18 +362,20 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         add(kindGrid, "growx");
 
         JPanel catalogBand = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[][grow,fill][180!]",
-                "[40!]") );
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]") );
         catalogBand.setOpaque(false);
+        catalogBand.setMinimumSize(new java.awt.Dimension(0, 0));
         JLabel selectedKindLabel = new JLabel(strings.selectedKindLabel());
         selectedKindLabel.setLabelFor(selectedKindValue);
         catalogBand.add(selectedKindLabel);
         selectedKindValue.setName("loaderSelectedKind");
-        catalogBand.add(selectedKindValue, "growx");
+        catalogBand.add(selectedKindValue, "growx, wmin 0");
         loadVersionsButton.setName("loaderLoadVersions");
         loadVersionsButton.addActionListener(event -> loadSelectedLoaderVersions());
-        catalogBand.add(loadVersionsButton, "growx, h 40!");
+        loadVersionsButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        catalogBand.add(loadVersionsButton, "span 2, growx, wmin 0, h 40!");
         add(catalogBand, "growx");
 
         JLabel versionsLabel = new JLabel(strings.versionListLabel());
@@ -377,18 +395,21 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         add(versionChoiceList, "grow, h 180:320:");
 
         JPanel selectionBand = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[grow,fill][180!]",
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
                 "[40!]") );
         selectionBand.setOpaque(false);
+        selectionBand.setMinimumSize(new java.awt.Dimension(0, 0));
         addSelectionButton.setName("loaderAddSelection");
         addSelectionButton.setText(strings.addAction());
         addSelectionButton.addActionListener(event -> addSelectedCatalogItem());
-        selectionBand.add(addSelectionButton, "growx, h 40!");
+        addSelectionButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        selectionBand.add(addSelectionButton, "growx, wmin 0, h 40!");
         removeSelectionButton.setName("loaderRemoveSelection");
         removeSelectionButton.setText(strings.removeAction());
         removeSelectionButton.addActionListener(event -> removeSelectedLoader());
-        selectionBand.add(removeSelectionButton, "growx, h 40!");
+        removeSelectionButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        selectionBand.add(removeSelectionButton, "growx, wmin 0, h 40!");
         add(selectionBand, "growx");
 
         JLabel selectedLoadersLabel = new JLabel(strings.selectedLoadersLabel());
@@ -408,6 +429,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         selectionSummaryLabel.setName("loaderSelectionSummary");
         add(selectionSummaryLabel, "growx, h 24!");
         statusLabel.setName("loaderSelectionStatus");
+        statusLabel.addMouseListener(statusMouseListener);
         add(statusLabel, "growx, h 24!");
     }
 
@@ -464,6 +486,39 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         }
     }
 
+    /// Retries the latest failed loader-version request from the same selected loader kind.
+    private void retryFailedLoad() {
+        EdtDispatcher.requireEventDispatchThread();
+        loadSelectedLoaderVersions();
+    }
+
+    /// Returns from an empty loader-version result to the selected loader catalog state.
+    private void returnFromEmptyLoad() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || catalogLoading) {
+            return;
+        }
+        clearCatalogRows();
+        setStatus(strings.awaitingLoaderStatus());
+        refreshView();
+    }
+
+    /// Dispatches one primary status-label click to its current retry or return action.
+    ///
+    /// @param event mouse event delivered by the status label
+    private void activateStatusAction(MouseEvent event) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (event.getClickCount() != 1 || event.getButton() != MouseEvent.BUTTON1) {
+            return;
+        }
+        @Nullable Runnable action = statusAction;
+        if (action == null || closed) {
+            return;
+        }
+        statusAction = null;
+        action.run();
+    }
+
     /// Starts one model refresh from the configured worker executor.
     ///
     /// @param requestIdentity panel request identity captured before worker submission
@@ -510,14 +565,18 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         catalogLoading = false;
         if (failure != null || snapshot == null || snapshot.status() == GameLoaderCatalogStatus.FAILED) {
             clearCatalogRows();
-            setStatus(strings.loadFailedStatus());
+            setStatus(strings.loadFailedStatus(), this::retryFailedLoad);
         } else if (snapshot.status() == GameLoaderCatalogStatus.READY) {
             versionDataSource.replaceItems(snapshot.items());
             versionChoiceList.reloadData();
-            setStatus(snapshot.items().isEmpty() ? strings.noVersionsStatus() : strings.selectVersionStatus());
+            if (snapshot.items().isEmpty()) {
+                setStatus(strings.noVersionsStatus(), this::returnFromEmptyLoad);
+            } else {
+                setStatus(strings.selectVersionStatus());
+            }
         } else {
             clearCatalogRows();
-            setStatus(strings.loadFailedStatus());
+            setStatus(strings.loadFailedStatus(), this::retryFailedLoad);
         }
         refreshView();
     }
@@ -775,7 +834,28 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     ///
     /// @param status non-null status text
     private void setStatus(String status) {
-        statusLabel.setText(Objects.requireNonNull(status, "status"));
+        setStatus(status, null);
+    }
+
+    /// Updates status text and installs the optional primary-click action for that state.
+    ///
+    /// @param status non-null status text
+    /// @param action retry or return action, or null for ordinary feedback
+    private void setStatus(String status, @Nullable Runnable action) {
+        EdtDispatcher.requireEventDispatchThread();
+        String text = Objects.requireNonNull(status, "status");
+        statusAction = action;
+        statusLabel.setCursor(action == null
+                ? Cursor.getDefaultCursor()
+                : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        statusLabel.setText(text);
+    }
+
+    /// Clears status interaction when the wizard releases its Swing resources.
+    private void clearStatusAction() {
+        statusAction = null;
+        statusLabel.removeMouseListener(statusMouseListener);
+        statusLabel.setCursor(Cursor.getDefaultCursor());
     }
 
     /// Publishes the current immutable selection to a stable listener snapshot.
@@ -789,6 +869,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     /// Closes model and viewport resources on the event dispatch thread.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        clearStatusAction();
         versionChoiceList.close();
         catalogModel.close();
         selectionListeners.clear();

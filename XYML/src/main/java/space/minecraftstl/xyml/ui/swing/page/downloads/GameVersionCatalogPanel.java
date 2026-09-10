@@ -74,6 +74,7 @@ import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Font;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
@@ -221,6 +222,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Status text displayed inside the exact empty card.
     private final JLabel emptyLabel = stateLabel("gameVersionsEmpty");
+
+    /// Handles primary clicks on retryable and returnable catalog state text.
+    private final MouseAdapter stateMouseListener = new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            activateStateAction(event);
+        }
+    };
 
     /// Listener that propagates user query edits to the model.
     private final DocumentListener searchListener = new DocumentListener() {
@@ -569,10 +578,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel selectionWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill",
-                "[grow,fill]12[300:340:420,fill]",
+                "[grow,fill]12[grow,fill]",
                 "[grow,fill]"));
         selectionWorkspace.setOpaque(false);
         selectionWorkspace.setName("gameVersionsSelectionWorkspace");
+        selectionWorkspace.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JPanel versionListPanel = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -608,6 +618,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(failedLabel, FAILED_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
+        failedLabel.addMouseListener(stateMouseListener);
+        emptyLabel.addMouseListener(stateMouseListener);
+        statusLabel.addMouseListener(stateMouseListener);
         contentCards.add(choiceList, LIST_CARD);
         contentCards.setName("gameVersionsContentCards");
         contentCards.setOpaque(false);
@@ -680,7 +693,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel loaderActions = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][220!]",
+                "[grow,fill][grow,fill]",
                 "[40!]"));
         loaderActions.setOpaque(false);
         loaderSummaryLabel.setToolTipText(loaderSelectionPanel.selectionSummary());
@@ -688,7 +701,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         backFromLoadersButton.setName("gameVersionsBackFromLoaders");
         backFromLoadersButton.setText(installStrings.backToCatalogAction());
         backFromLoadersButton.addActionListener(event -> showCatalogAfterLoaderSelection());
-        loaderActions.add(backFromLoadersButton, "grow, h 40!");
+        backFromLoadersButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        loaderActions.add(backFromLoadersButton, "grow, wmin 0, h 40!");
         loaderWorkspace.add(loaderActions, "growx");
 
         JScrollPane loaderScroll = new JScrollPane(loaderWorkspace);
@@ -711,7 +725,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel taskActions = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][220!]",
+                "[grow,fill][grow,fill]",
                 "[40!]"));
         taskActions.setOpaque(false);
         taskStatusLabel.setName("gameVersionsInstallTaskStatus");
@@ -719,7 +733,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         backToCatalogButton.setName("gameVersionsBackToCatalog");
         backToCatalogButton.setText(installStrings.backToCatalogAction());
         backToCatalogButton.addActionListener(event -> showCatalogAfterTerminalTask());
-        taskActions.add(backToCatalogButton, "grow, h 40!");
+        backToCatalogButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        taskActions.add(backToCatalogButton, "grow, wmin 0, h 40!");
         taskWorkspace.add(taskActions, "growx");
 
         workflowCards.setOpaque(false);
@@ -807,6 +822,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         failedLabel.setText(snapshot.statusText());
         emptyLabel.setText(snapshot.statusText());
         ((CardLayout) contentCards.getLayout()).show(contentCards, contentCard);
+        boolean failedState = snapshot.status() == GameVersionCatalogStatus.FAILED;
+        boolean emptyState = EMPTY_CARD.equals(contentCard);
+        Cursor stateCursor = failedState || emptyState
+                ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                : Cursor.getDefaultCursor();
+        failedLabel.setCursor(failedState ? stateCursor : Cursor.getDefaultCursor());
+        emptyLabel.setCursor(emptyState ? stateCursor : Cursor.getDefaultCursor());
+        statusLabel.setCursor(stateCursor);
 
         choiceList.setEnabled(snapshot.listEnabled());
         choiceList.getList().setEnabled(snapshot.listEnabled());
@@ -818,6 +841,43 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         statusLabel.setToolTipText(snapshot.statusText());
         synchronizeLoadedSelection();
         updateInstallAction();
+    }
+
+    /// Retries the current catalog load when the failure state text is activated.
+    ///
+    /// @param event mouse event delivered by a catalog state label
+    private void activateStateAction(MouseEvent event) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (event.getClickCount() != 1 || event.getButton() != MouseEvent.BUTTON1
+                || !isOpen() || workflowView != WorkflowView.CATALOG) {
+            return;
+        }
+        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
+        if (snapshot == null) {
+            return;
+        }
+        String contentCard = selectContentCard(snapshot);
+        if (snapshot.status() == GameVersionCatalogStatus.FAILED && snapshot.refreshEnabled()) {
+            model.refresh();
+        } else if (EMPTY_CARD.equals(contentCard)) {
+            returnFromEmptyCatalog();
+        }
+    }
+
+    /// Returns from an empty query result by clearing the query or restoring the default filter.
+    private void returnFromEmptyCatalog() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
+        if (snapshot == null || !isOpen()) {
+            return;
+        }
+        if (!snapshot.query().isBlank()) {
+            model.setQuery("");
+        } else if (snapshot.filter() != GameVersionFilter.RELEASE) {
+            model.setFilter(GameVersionFilter.RELEASE);
+        } else {
+            model.refresh();
+        }
     }
 
     /// Restores the model-selected row without delegating it back as a user command.
@@ -1423,6 +1483,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(
                     cleanupFailure,
                     () -> choiceList.getList().removeMouseListener(versionActivationMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> failedLabel.removeMouseListener(stateMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> emptyLabel.removeMouseListener(stateMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> statusLabel.removeMouseListener(stateMouseListener));
             cleanupFailure = attemptCleanup(
                     cleanupFailure,
                     () -> choiceList.getList().getInputMap(JComponent.WHEN_FOCUSED).remove(

@@ -191,10 +191,10 @@ public record RemoteAddonCatalogStrings(
                 i18n("wizard.prev"),
                 i18n("wizard.next"),
                 i18n("button.install"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
@@ -203,7 +203,7 @@ public record RemoteAddonCatalogStrings(
                 i18n("message.doing"),
                 i18n("message.success"),
                 i18n("message.failed"),
-                i18n("download.failed.refresh"),
-                i18n("download.failed.refresh"));
+                i18n("swing.download.retry"),
+                i18n("swing.download.retry"));
     }
 }

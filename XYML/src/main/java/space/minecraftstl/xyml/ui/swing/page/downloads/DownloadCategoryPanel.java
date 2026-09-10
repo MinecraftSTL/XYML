@@ -401,7 +401,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         MODPACK("modpack", "folder.game", false, "https://modrinth.com/modpacks"),
 
         /// Instance mod archives and their managed mods directory.
-        MODS("mods.manage", "folder.mod", true, "https://modrinth.com/mods"),
+        MODS("mods", "folder.mod", true, "https://modrinth.com/mods"),
 
         /// Instance resource packs and their managed resource-pack directory.
         RESOURCE_PACKS("resourcepack", "folder.resourcepacks", true, "https://modrinth.com/resourcepacks"),

@@ -164,7 +164,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.choose.repository"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
@@ -173,8 +173,8 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.installing"),
                 i18n("message.success"),
                 i18n("message.failed"),
-                i18n("download.failed.refresh"),
-                i18n("download.failed.refresh"));
+                i18n("swing.download.retry"),
+                i18n("swing.download.retry"));
     }
 
     /// Returns catalog text for updating one fixed existing instance from a repository version.
