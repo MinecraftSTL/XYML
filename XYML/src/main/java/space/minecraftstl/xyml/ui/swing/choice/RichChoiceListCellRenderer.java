@@ -76,6 +76,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
     /// Compact horizontal gap used when the list cannot fit the normal row geometry.
     private static final int COMPACT_HORIZONTAL_GAP = 6;
 
+    /// Semi-transparent neutral wash used to distinguish disabled local rows.
+    private static final Color DISABLED_ROW_BACKGROUND = new Color(128, 128, 128, 64);
+
     /// Placeholder occupying the loaded-row icon slot during asynchronous loading.
     private static final Icon LOADING_ICON = new StatePlaceholderIcon(false);
 
@@ -347,7 +350,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         Color listBackground = list.getBackground();
         Color background = isSelected ? list.getSelectionBackground() : listBackground;
         if (muted && !isSelected) {
-            background = blendWithGray(listBackground);
+            background = DISABLED_ROW_BACKGROUND;
         }
         Color foreground = isSelected ? list.getSelectionForeground() : list.getForeground();
         setOpaque(muted && !isSelected);
@@ -370,26 +373,6 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         setBorder(BorderFactory.createCompoundBorder(
                 cellInsetsBorder,
                 BorderFactory.createEmptyBorder(6, horizontalPadding, 6, horizontalPadding)));
-    }
-
-    /// Blends a neutral gray wash into the list background for disabled local rows.
-    ///
-    /// @param background list background
-    /// @return muted background color with the source alpha preserved
-    private static Color blendWithGray(Color background) {
-        int red = blendChannel(background.getRed(), 128);
-        int green = blendChannel(background.getGreen(), 128);
-        int blue = blendChannel(background.getBlue(), 128);
-        return new Color(red, green, blue, background.getAlpha());
-    }
-
-    /// Applies a restrained 18 percent gray overlay to one color channel.
-    ///
-    /// @param source source channel
-    /// @param overlay neutral gray channel
-    /// @return blended channel
-    private static int blendChannel(int source, int overlay) {
-        return Math.round(source * 0.82F + overlay * 0.18F);
     }
 
     /// Computes the center-label width from the list's current allocated width.
