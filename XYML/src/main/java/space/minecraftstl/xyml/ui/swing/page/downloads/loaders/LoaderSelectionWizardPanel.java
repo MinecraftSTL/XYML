@@ -322,9 +322,11 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private void configureComponents() {
         setName("loaderSelectionWizard");
         setOpaque(false);
+        setMinimumSize(new java.awt.Dimension(0, 0));
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
+        headingBand.setMinimumSize(new java.awt.Dimension(0, 0));
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("loaderSelectionTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
@@ -338,6 +340,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         gameVersionLabel.setLabelFor(gameVersionValue);
         gameVersionBand.add(gameVersionLabel);
         gameVersionValue.setName("loaderBaseGameVersion");
+        gameVersionValue.setMinimumSize(new java.awt.Dimension(0, 0));
         gameVersionBand.add(gameVersionValue, "growx");
         add(gameVersionBand, "growx");
 
@@ -356,8 +359,9 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
             JButton kindButton = new JButton(strings.loaderName(kind));
             kindButton.setName("loaderKind_" + kind.name());
             kindButton.addActionListener(event -> selectLoaderCatalog(kind));
+            kindButton.setMinimumSize(new java.awt.Dimension(0, 0));
             kindButtons.put(kind, kindButton);
-            kindGrid.add(kindButton, "growx, h 36!");
+            kindGrid.add(kindButton, "growx, wmin 0, h 36!");
         }
         add(kindGrid, "growx");
 
@@ -382,6 +386,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         versionsLabel.setLabelFor(versionChoiceList.getList());
         add(versionsLabel, "growx");
         versionChoiceList.setName("loaderVersionList");
+        versionChoiceList.setMinimumSize(new java.awt.Dimension(0, 0));
         versionChoiceList.setOpaque(false);
         versionChoiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<GameLoaderCatalogItem>> versionList = versionChoiceList.getList();
@@ -416,6 +421,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         selectedLoadersLabel.setLabelFor(selectedLoaderList);
         add(selectedLoadersLabel, "growx");
         selectedLoaderList.setName("loaderSelectedList");
+        selectedLoaderList.setMinimumSize(new java.awt.Dimension(0, 0));
         selectedLoaderList.setOpaque(false);
         selectedLoaderList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         selectedLoaderList.setCellRenderer(new SelectedLoaderRenderer(strings));

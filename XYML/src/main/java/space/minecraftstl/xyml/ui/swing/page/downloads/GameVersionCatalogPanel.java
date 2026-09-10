@@ -508,10 +508,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]",
                 "[]12[grow,fill]"));
         gameVersionsPanel.setOpaque(false);
+        gameVersionsPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         gameVersionsPanel.setName("gameVersionsDownloadCenter");
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[]"));
         headingBand.setOpaque(false);
+        headingBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("gameVersionsPageTitle");
@@ -532,6 +534,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]",
                 "[]8[]12[grow,fill]"));
         catalogWorkspace.setOpaque(false);
+        catalogWorkspace.setMinimumSize(new java.awt.Dimension(0, 0));
         catalogWorkspace.setName("gameVersionsCatalogWorkspace");
 
         JPanel searchBand = new JPanel(new MigLayout(
@@ -539,6 +542,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[40!]"));
         searchBand.setOpaque(false);
+        searchBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
@@ -546,7 +550,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         searchField.setName("gameVersionsSearch");
         SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(searchListener);
-        searchBand.add(searchField, "growx, h 40!");
+        searchField.setMinimumSize(new java.awt.Dimension(0, 0));
+        searchBand.add(searchField, "growx, wmin 0, h 40!");
         catalogWorkspace.add(searchBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
@@ -554,6 +559,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[36!]"));
         filterBand.setOpaque(false);
+        filterBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel filterLabel = new JLabel(strings.filterLabel());
         filterBand.add(filterLabel);
@@ -562,6 +568,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill][grow,fill][grow,fill][grow,fill][grow,fill]",
                 "[36!]"));
         filterOptionsPanel.setOpaque(false);
+        filterOptionsPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         filterOptionsPanel.setName("gameVersionsFilterOptions");
         for (GameVersionFilter filter : GameVersionFilter.values()) {
             JToggleButton button = new JToggleButton(strings.filterText(filter));
@@ -570,7 +577,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             button.addActionListener(event -> filterChanged(filter));
             filterButtonGroup.add(button);
             filterButtons.put(filter, button);
-            filterOptionsPanel.add(button, "grow");
+            button.setMinimumSize(new java.awt.Dimension(0, 0));
+            filterOptionsPanel.add(button, "grow, wmin 0");
         }
         filterLabel.setLabelFor(filterButton(GameVersionFilter.RELEASE));
         filterBand.add(filterOptionsPanel, "growx");
@@ -636,6 +644,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[40!]8[40!]6[]4[]"));
         installConfigurationPanel.setOpaque(false);
+        installConfigurationPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         installConfigurationPanel.setName("gameVersionsInstallConfiguration");
         installConfigurationPanel.setBorder(BorderFactory.createTitledBorder(installStrings.taskTitle()));
 
@@ -650,13 +659,16 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]6[40!]",
                 "[40!]"));
         instanceNameRow.setOpaque(false);
-        instanceNameRow.add(instanceNameField, "grow, h 40!");
+        instanceNameRow.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameField.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameRow.add(instanceNameField, "grow, wmin 0, h 40!");
         resetInstanceNameButton.setName("gameVersionsResetInstanceName");
         resetInstanceNameButton.setIcon(new FlatSVGIcon("assets/swing/icons/restore.svg", 18, 18));
         resetInstanceNameButton.setToolTipText(i18n("button.reset"));
         resetInstanceNameButton.getAccessibleContext().setAccessibleName(i18n("button.reset"));
         resetInstanceNameButton.addActionListener(event -> resetInstanceName());
-        instanceNameRow.add(resetInstanceNameButton, "grow");
+        resetInstanceNameButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameRow.add(resetInstanceNameButton, "grow, wmin 0");
         installConfigurationPanel.add(instanceNameRow, "growx, h 40!");
 
         JPanel installActions = new JPanel(new MigLayout(
@@ -664,14 +676,17 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]8[grow,fill]",
                 "[40!]"));
         installActions.setOpaque(false);
+        installActions.setMinimumSize(new java.awt.Dimension(0, 0));
         selectLoadersButton.setName("gameVersionsLoaders");
         selectLoadersButton.setText(i18n("settings.tabs.installers"));
         selectLoadersButton.addActionListener(event -> showLoaderSelection());
-        installActions.add(selectLoadersButton, "grow, h 40!");
+        selectLoadersButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        installActions.add(selectLoadersButton, "grow, wmin 0, h 40!");
         installButton.setName("gameVersionsInstall");
         installButton.setText(installStrings.installAction());
         installButton.addActionListener(event -> startInstallation());
-        installActions.add(installButton, "grow, h 40!");
+        installButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        installActions.add(installButton, "grow, wmin 0, h 40!");
         installConfigurationPanel.add(installActions, "span 2, growx");
 
         installStatusLabel.setName("gameVersionsInstallStatus");

@@ -39,6 +39,7 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import java.awt.Desktop;
+import java.awt.Dimension;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -96,11 +97,13 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[grow,fill]8[]"));
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         categoryTabs = new AnimatedTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
         SwingTransparency.revealBackgroundThroughTabs(categoryTabs);
         categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        categoryTabs.setMinimumSize(new Dimension(0, 0));
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
@@ -233,6 +236,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
                 "[grow,fill]",
                 "[]12[grow,fill]"));
         panel.setOpaque(false);
+        panel.setMinimumSize(new Dimension(0, 0));
         panel.setName("downloadsCategory" + category.name());
         panel.add(createCategoryActions(category), "growx");
         localModpackImporter.setName("downloadsLocalModpackImporter");
@@ -247,18 +251,21 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     private JPanel createCategoryActions(DownloadCategory category) {
         JPanel actions = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][grow,fill]", "[40!]"));
         actions.setOpaque(false);
+        actions.setMinimumSize(new Dimension(0, 0));
 
         JButton browseButton = new JButton("Modrinth");
         browseButton.setName("downloadsBrowse" + category.name());
         browseButton.setToolTipText(i18n("download.external_link"));
         browseButton.addActionListener(event -> browseCategory(category));
-        actions.add(browseButton, "grow, h 40!");
+        browseButton.setMinimumSize(new Dimension(0, 0));
+        actions.add(browseButton, "grow, wmin 0, h 40!");
 
         JButton revealButton = new JButton(i18n("button.reveal_dir"));
         revealButton.setName("downloadsReveal" + category.name());
         revealButton.setToolTipText(i18n(category.directoryKey()));
         revealButton.addActionListener(event -> revealCategoryDirectory(category));
-        actions.add(revealButton, "grow, h 40!");
+        revealButton.setMinimumSize(new Dimension(0, 0));
+        actions.add(revealButton, "grow, wmin 0, h 40!");
         return actions;
     }
 
