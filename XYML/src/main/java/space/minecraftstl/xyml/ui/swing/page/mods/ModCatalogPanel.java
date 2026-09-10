@@ -81,6 +81,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// interaction contracts. No JavaFX type or network-capable service is referenced.
 @NotNullByDefault
 public final class ModCatalogPanel extends JPanel implements AutoCloseable {
+    /// Minimum page width for keeping the list and details surfaces side by side.
+    private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
+
     /// Shared row icon that remains available in headless and high-DPI Swing sessions.
     private static final Icon MOD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/format-list-bulleted.svg",
@@ -104,6 +107,9 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Viewport-driven multi-choice list.
     private final ViewportChoiceList<ModCatalogItem> choiceList;
+
+    /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
+    private final ResponsiveCatalogSplitPane catalogSplit;
 
     /// Search field applied to the in-memory index.
     private final JTextField searchField = new JTextField();
@@ -265,7 +271,8 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
-        add(createCatalogSplit(), BorderLayout.CENTER);
+        catalogSplit = createCatalogSplit();
+        add(catalogSplit, BorderLayout.CENTER);
         add(createStatusBand(), BorderLayout.SOUTH);
         configureList();
         configureControls();
@@ -290,6 +297,13 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @return owned viewport list
     public ViewportChoiceList<ModCatalogItem> choiceList() {
         return choiceList;
+    }
+
+    /// Selects the list/details orientation from the width allocated by the instance shell.
+    @Override
+    public void doLayout() {
+        catalogSplit.updateForAvailableWidth(getWidth());
+        super.doLayout();
     }
 
     /// Returns the latest snapshot rendered by the panel.
@@ -402,7 +416,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Creates list controls and single-selection details in one stable split.
     ///
     /// @return borderless split pane
-    private JComponent createCatalogSplit() {
+    private ResponsiveCatalogSplitPane createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout(0, 8));
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
@@ -435,18 +449,9 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.getList().setOpaque(false);
         listSurface.add(choiceList, BorderLayout.CENTER);
 
-        JSplitPane split = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
+        return new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
-        split.setName("modsCatalogSplit");
-        split.setOpaque(false);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        split.setContinuousLayout(true);
-        split.setResizeWeight(0.44D);
-        split.setDividerLocation(0.44D);
-        split.setMinimumSize(new Dimension(0, 0));
-        return split;
     }
 
     /// Creates compact logical-selection commands without materializing off-screen rows.
@@ -1176,6 +1181,60 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         modelSubscription.unsubscribe();
         choiceList.close();
         model.close();
+    }
+
+    /// Switches the Mod catalog between side-by-side and stacked layouts from actual host width.
+    @NotNullByDefault
+    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
+        /// Whether the divider ratio has been initialized for the current orientation.
+        private boolean orientationInitialized;
+
+        /// Creates a borderless split whose children may shrink to the allocated host width.
+        ///
+        /// @param list list and filter surface
+        /// @param details selected-Mod details surface
+        private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
+            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            setName("modsCatalogSplit");
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder());
+            setContinuousLayout(true);
+            setResizeWeight(0.44D);
+        }
+
+        /// Selects side-by-side or stacked presentation before child layout occurs.
+        ///
+        /// @param availableWidth width allocated by the owning page
+        private void updateForAvailableWidth(int availableWidth) {
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desiredOrientation) {
+                setOrientation(desiredOrientation);
+                orientationInitialized = false;
+            }
+            setResizeWeight(horizontal ? 0.44D : 0.48D);
+        }
+
+        /// Initializes the divider only after the split has a real extent.
+        @Override
+        public void doLayout() {
+            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
+            if (!orientationInitialized) {
+                int extent = horizontal ? getWidth() : getHeight();
+                int usableExtent = extent - getDividerSize();
+                if (usableExtent > 1) {
+                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.44D : 0.48D)));
+                    orientationInitialized = true;
+                }
+            }
+            super.doLayout();
+        }
+
+        /// Allows the shell to constrain both children without honoring their preferred widths.
+        @Override
+        public Dimension getMinimumSize() {
+            return new Dimension(0, 0);
+        }
     }
 
     /// Localizes enabled-state enum values without changing model identity.

@@ -91,6 +91,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Minimum page width for keeping the world list and details surfaces side by side.
+    private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
+
     /// Fallback icon used when a world has no readable embedded PNG.
     private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/image.svg",
@@ -111,6 +114,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Viewport-driven sparse list backed by the shallow source index.
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
+
+    /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
+    private final ResponsiveCatalogSplitPane catalogSplit;
 
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
@@ -327,7 +333,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
-        add(createCatalogSplit(), BorderLayout.CENTER);
+        catalogSplit = createCatalogSplit();
+        add(catalogSplit, BorderLayout.CENTER);
         add(createStatusBand(), BorderLayout.SOUTH);
         configureList();
         configureDetailsControls();
@@ -357,6 +364,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @return owned viewport-driven list
     public ViewportChoiceList<WorldCatalogItem> choiceList() {
         return choiceList;
+    }
+
+    /// Selects the list/details orientation from the width allocated by the instance shell.
+    @Override
+    public void doLayout() {
+        catalogSplit.updateForAvailableWidth(getWidth());
+        super.doLayout();
     }
 
     /// Returns the latest snapshot rendered by this panel.
@@ -435,7 +449,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Creates a stable split between the viewport list and the selected-world details.
     ///
     /// @return unframed catalog split component
-    private JComponent createCatalogSplit() {
+    private ResponsiveCatalogSplitPane createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout());
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
@@ -448,18 +462,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         listSurface.add(choiceList, BorderLayout.CENTER);
 
-        JSplitPane split = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
+        return new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
-        split.setName("worldsCatalogSplit");
-        split.setOpaque(false);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        split.setContinuousLayout(true);
-        split.setResizeWeight(0.46D);
-        split.setDividerLocation(0.46D);
-        split.setMinimumSize(new Dimension(0, 0));
-        return split;
     }
 
     /// Creates editable selected-world metadata and icon-only row actions.
@@ -1674,6 +1679,60 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         editLevelDataButton.setEnabled(false);
         interactions.close();
         removeAll();
+    }
+
+    /// Switches the world catalog between side-by-side and stacked layouts from actual host width.
+    @NotNullByDefault
+    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
+        /// Whether the divider ratio has been initialized for the current orientation.
+        private boolean orientationInitialized;
+
+        /// Creates a borderless split whose children may shrink to the allocated host width.
+        ///
+        /// @param list list and filter surface
+        /// @param details selected-world details surface
+        private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
+            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            setName("worldsCatalogSplit");
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder());
+            setContinuousLayout(true);
+            setResizeWeight(0.46D);
+        }
+
+        /// Selects side-by-side or stacked presentation before child layout occurs.
+        ///
+        /// @param availableWidth width allocated by the owning page
+        private void updateForAvailableWidth(int availableWidth) {
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desiredOrientation) {
+                setOrientation(desiredOrientation);
+                orientationInitialized = false;
+            }
+            setResizeWeight(horizontal ? 0.46D : 0.48D);
+        }
+
+        /// Initializes the divider only after the split has a real extent.
+        @Override
+        public void doLayout() {
+            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
+            if (!orientationInitialized) {
+                int extent = horizontal ? getWidth() : getHeight();
+                int usableExtent = extent - getDividerSize();
+                if (usableExtent > 1) {
+                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.46D : 0.48D)));
+                    orientationInitialized = true;
+                }
+            }
+            super.doLayout();
+        }
+
+        /// Allows the shell to constrain both children without honoring their preferred widths.
+        @Override
+        public Dimension getMinimumSize() {
+            return new Dimension(0, 0);
+        }
     }
 
     /// Removes asynchronous wrapper exceptions and returns concise failure detail.

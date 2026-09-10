@@ -39,6 +39,7 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
@@ -461,6 +462,32 @@ public final class ModCatalogPanelTest {
             assertTrue(
                     detailsScroll.getVerticalScrollBar().getMaximum()
                             <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
+    /// Switches the first layout to a stacked catalog when the instance shell is narrow.
+    @Test
+    public void switchesResponsiveOrientationAtNarrowWidth() throws Exception {
+        RecordingModel model = new RecordingModel(items(4));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
+
+            panel.setSize(new Dimension(960, 620));
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+
+            panel.setSize(new Dimension(600, 420));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertTrue(split.getTopComponent().getWidth() <= split.getWidth());
+            assertTrue(split.getBottomComponent().getWidth() <= split.getWidth());
             panel.close();
         });
 
