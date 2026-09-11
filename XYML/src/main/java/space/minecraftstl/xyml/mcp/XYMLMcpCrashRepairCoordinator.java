@@ -1553,8 +1553,8 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         /// Task-owned resource cleanup is blocked and must be retried before a new task.
         BLOCKED_RESIDUAL(true),
 
-        /// Attempt was explicitly cancelled and may be retried after review.
-        CANCELLED(true);
+        /// Attempt was explicitly cancelled and cannot be executed again.
+        CANCELLED(false);
 
         /// Whether another fresh attempt may be claimed.
         private final boolean retryable;

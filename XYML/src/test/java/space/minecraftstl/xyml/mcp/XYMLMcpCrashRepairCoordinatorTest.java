@@ -776,12 +776,18 @@ final class XYMLMcpCrashRepairCoordinatorTest {
             Map<String, Object> plan = coordinator.plan(
                     String.valueOf(analysis.get("analysis_id")),
                     String.valueOf(solution.get("solution_id")));
-            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+            Map<String, Object> operation = coordinator.execute(planId);
             String operationId = String.valueOf(operation.get("operation_id"));
 
             Map<String, Object> cancellation = coordinator.cancel(operationId);
             assertEquals(true, cancellation.get("cancellation_accepted"));
-            assertEquals("CANCELLED", awaitTerminal(coordinator, operationId).get("status"));
+            Map<String, Object> cancelled = awaitTerminal(coordinator, operationId);
+            assertEquals("CANCELLED", cancelled.get("status"));
+            assertEquals("CANCELLED", cancelled.get("plan_state"));
+            assertEquals(false, cancelled.get("retryable"));
+            assertThrows(IllegalStateException.class, () -> coordinator.retry(planId));
+            assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
             assertEquals(0, validations.get());
             assertEquals(0, taskCreations.get());
         } finally {
