@@ -49,6 +49,11 @@ public final class NBTInput {
     private static final long MAX_EXTERNAL_UNCOMPRESSED_BYTES = Math.min(
             ReadLimits.defaults().maxEncodedBytes(), ReadLimits.defaults().maxDecompressedBytes());
 
+    /// Reads one named tag while charging its complete payload to the reader's structure budget.
+    ///
+    /// @param reader source reader
+    /// @return decoded tag, or `null` for TAG_End
+    /// @throws IOException if the payload is malformed or exceeds a structural limit
     public static @Nullable Tag readTag(DataReader reader) throws IOException {
         byte tagByte = reader.readByte();
         if (tagByte == 0) {
@@ -61,8 +66,13 @@ public final class NBTInput {
         }
 
         Tag tag = type.createTag(reader.readString());
-        Access.TAG.readContent(tag, reader);
-        return tag;
+        reader.enterTag();
+        try {
+            Access.TAG.readContent(tag, reader);
+            return tag;
+        } finally {
+            reader.leaveTag();
+        }
     }
 
     public static @Nullable Tag readTagAutoDecompress(RawDataReader reader) throws IOException {
@@ -196,9 +206,8 @@ public final class NBTInput {
                 if (externalChunkInputStream == null) {
                     throw new IOException("Failed to open external chunk file for chunk (%d, %d)".formatted(ChunkUtils.getLocalX(localIndex), ChunkUtils.getLocalZ(localIndex)));
                 }
-                externalReader = new RawDataReader(new InputSource.OfInputStream(
-                        new BoundedInputStream(externalChunkInputStream, externalInputLimit), true),
-                        MinecraftEdition.JAVA_EDITION);
+                externalReader = rawReader.newSharedStructureReader(new InputSource.OfInputStream(
+                        new BoundedInputStream(externalChunkInputStream, externalInputLimit), true));
             } else {
                 externalReader = null;
             }

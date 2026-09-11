@@ -36,6 +36,35 @@ public sealed abstract class DataReader implements Closeable
 
     /// Default upper bound for one encoded NBT array.
     private static final long MAX_ARRAY_BYTES = ReadLimits.defaults().maxArrayBytes();
+
+    /// Enters one logical tag while enforcing the region-wide node and nesting limits.
+    ///
+    /// @throws IOException if the node or depth budget is exhausted
+    public final void enterTag() throws IOException {
+        getRawReader().enterStructureTag();
+    }
+
+    /// Leaves the current logical tag after its payload has been parsed.
+    public final void leaveTag() {
+        getRawReader().leaveStructureTag();
+    }
+
+    /// Validates a list or primitive-array element count before allocation or iteration.
+    ///
+    /// @param length declared element count
+    /// @throws IOException if the count is negative or exceeds the configured limit
+    public final void requireCollectionLength(int length) throws IOException {
+        getRawReader().requireStructureCollectionLength(length);
+    }
+
+    /// Reserves a complete run of non-container list elements before any element is allocated.
+    ///
+    /// @param count number of leaf tags declared by the list
+    /// @throws IOException if the document node or depth budget would be exceeded
+    public final void reserveLeafTags(int count) throws IOException {
+        getRawReader().reserveStructureLeafTags(count);
+    }
+
     protected abstract RawDataReader getRawReader();
 
     protected abstract InputBuffer getBuffer();
@@ -46,7 +75,8 @@ public sealed abstract class DataReader implements Closeable
     public abstract void close() throws IOException;
 
     public byte[] readByteArray(int len) throws IOException {
-        if (len < 0 || (long) len > MAX_ARRAY_BYTES || len >= Integer.MAX_VALUE - 8) {
+        requireCollectionLength(len);
+        if ((long) len > MAX_ARRAY_BYTES || len >= Integer.MAX_VALUE - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -55,7 +85,8 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public int[] readIntArray(int len) throws IOException {
-        if (len < 0 || (long) len * Integer.BYTES > MAX_ARRAY_BYTES
+        requireCollectionLength(len);
+        if ((long) len * Integer.BYTES > MAX_ARRAY_BYTES
                 || len > Integer.MAX_VALUE / Integer.BYTES - 8) {
             throw new IOException("Array length too large");
         }
@@ -65,7 +96,8 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public long[] readLongArray(int len) throws IOException {
-        if (len < 0 || (long) len * Long.BYTES > MAX_ARRAY_BYTES
+        requireCollectionLength(len);
+        if ((long) len * Long.BYTES > MAX_ARRAY_BYTES
                 || len > Integer.MAX_VALUE / Long.BYTES - 8) {
             throw new IOException("Array length too large");
         }

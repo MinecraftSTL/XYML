@@ -207,6 +207,13 @@ public final class ReadLimits {
         return new Budget(maxDocumentDecompressedBytes);
     }
 
+    /// Creates a fresh cumulative node budget for one logical document read.
+    ///
+    /// @return mutable budget scoped to one read operation
+    NodeBudget newNodeBudget() {
+        return new NodeBudget(maxNodes);
+    }
+
     /// Validates one inclusive non-negative limit.
     ///
     /// @param value configured limit
@@ -250,6 +257,69 @@ public final class ReadLimits {
         /// Returns bytes still available to this document.
         long remaining() {
             return remaining;
+        }
+    }
+
+    /// Mutable cumulative node budget shared by one read operation.
+    @NotNullByDefault
+    static final class NodeBudget {
+        /// Unreserved logical-node allowance.
+        private long remaining;
+
+        /// Creates one operation-scoped node budget.
+        ///
+        /// @param maximum initial node allowance
+        private NodeBudget(long maximum) {
+            remaining = maximum;
+        }
+
+        /// Reserves logical nodes before a recovered tree is exposed.
+        ///
+        /// @param nodes number of nodes to reserve
+        /// @throws java.io.IOException when the document budget is exhausted
+        void consume(long nodes) throws java.io.IOException {
+            if (nodes < 0L) {
+                throw new IllegalArgumentException("nodes must not be negative");
+            }
+            if (nodes > remaining) {
+                throw new java.io.IOException("Cumulative NBT node count exceeds the read limit");
+            }
+            remaining -= nodes;
+        }
+
+        /// Tries to reserve one node without throwing a checked exception.
+        ///
+        /// @return `true` when one node was reserved
+        boolean tryConsumeOne() {
+            if (remaining == 0L) {
+                return false;
+            }
+            remaining--;
+            return true;
+        }
+
+        /// Returns nodes still available to this document.
+        ///
+        /// @return remaining logical-node allowance
+        long remaining() {
+            return remaining;
+        }
+
+        /// Captures the current allowance before a speculative parse.
+        ///
+        /// @return restorable remaining-node checkpoint
+        long checkpoint() {
+            return remaining;
+        }
+
+        /// Restores a checkpoint after a speculative parse is discarded.
+        ///
+        /// @param checkpoint allowance returned by [#checkpoint()]
+        void restore(long checkpoint) {
+            if (checkpoint < remaining) {
+                throw new IllegalArgumentException("checkpoint must not be below the current allowance");
+            }
+            remaining = checkpoint;
         }
     }
 }

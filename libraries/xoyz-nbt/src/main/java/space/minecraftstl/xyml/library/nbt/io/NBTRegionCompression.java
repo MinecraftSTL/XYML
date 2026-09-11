@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.zip.DataFormatException;
 import java.util.zip.DeflaterOutputStream;
@@ -87,7 +88,12 @@ final class NBTRegionCompression {
         try (compressor) {
             compressor.write(input);
         }
-        return output.toByteArray();
+        byte[] encoded = output.toByteArray();
+        byte[] verified = decompress(compression, encoded, input.length);
+        if (!Arrays.equals(input, verified)) {
+            throw new IOException("Compressed NBT payload does not reproduce its strict input");
+        }
+        return encoded;
     }
 
     /// Strictly expands one LZ4 block-stream payload.

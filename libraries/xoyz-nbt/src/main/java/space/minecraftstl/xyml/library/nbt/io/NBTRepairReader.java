@@ -36,6 +36,8 @@ import space.minecraftstl.xyml.library.nbt.tag.ShortTag;
 import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
+import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -311,7 +313,8 @@ final class NBTRepairReader {
                                                          NBTRegionFile.CompressionType compression,
                                                          ReadLimits limits) throws IOException {
         ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
-        return readRegionPayload(compressed, compression, selectedLimits, selectedLimits.newDocumentBudget());
+        return readRegionPayload(compressed, compression, selectedLimits,
+                selectedLimits.newDocumentBudget(), selectedLimits.newNodeBudget());
     }
 
     /// Recovers a region payload using a caller-owned cumulative document budget.
@@ -320,16 +323,19 @@ final class NBTRepairReader {
     /// @param compression marker-derived compression type
     /// @param limits defensive allocation limits
     /// @param budget cumulative decompressed budget shared by the containing document
+    /// @param nodeBudget cumulative logical-node budget shared by the containing document
     /// @return recovered compound root and diagnostics
     /// @throws IOException if decompression yields no recoverable root or a limit is exceeded
     static NBTReadResult<CompoundTag> readRegionPayload(byte[] compressed,
                                                          NBTRegionFile.CompressionType compression,
                                                          ReadLimits limits,
-                                                         ReadLimits.Budget budget) throws IOException {
+                                                         ReadLimits.Budget budget,
+                                                         ReadLimits.NodeBudget nodeBudget) throws IOException {
         byte[] source = Objects.requireNonNull(compressed, "compressed");
         NBTRegionFile.CompressionType selectedCompression = Objects.requireNonNull(compression, "compression");
         ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits.NodeBudget selectedNodeBudget = Objects.requireNonNull(nodeBudget, "nodeBudget");
         if ((long) source.length > selectedLimits.maxEncodedBytes()) {
             throw new IOException("Region chunk payload exceeds the encoded read limit");
         }
@@ -337,19 +343,22 @@ final class NBTRepairReader {
         List<NBTReadIssue> issues = new ArrayList<>();
         byte[] raw = decodeRegion(source, selectedCompression, selectedLimits, selectedBudget, issues);
         NBTCodec codec = NBTCodec.of();
+        long nodeCheckpoint = selectedNodeBudget.checkpoint();
         try {
-            CompoundTag strictRoot = parseStrict(raw, codec, CompoundTag.class, selectedLimits);
+            CompoundTag strictRoot = parseStrict(raw, codec, CompoundTag.class,
+                    selectedLimits, selectedNodeBudget);
             NBTReadReport report = issues.isEmpty()
                     ? NBTReadReport.clean(NBTFileEncoding.REGION)
                     : new NBTReadReport(NBTFileEncoding.REGION, false, issues);
             return new NBTReadResult<>(strictRoot, report);
         } catch (IOException | RuntimeException strictFailure) {
+            selectedNodeBudget.restore(nodeCheckpoint);
             issues.add(issue(NBTReadIssue.Severity.RECOVERED, "STRICT_SLOT_PARSE_FAILED", "",
                     "槽位严格读取失败，已尝试有限度恢复：" + message(strictFailure)));
         }
 
         Cursor cursor = new Cursor(raw, codec.getEdition().byteOrder());
-        ParseContext context = new ParseContext(selectedLimits, issues);
+        ParseContext context = new ParseContext(selectedLimits, issues, selectedNodeBudget);
         @Nullable Tag recovered;
         try {
             recovered = readNamedTag(cursor, "", context, codec.getEdition());
@@ -359,6 +368,7 @@ final class NBTRepairReader {
             recovered = null;
         }
         if (!(recovered instanceof CompoundTag compound)) {
+            selectedNodeBudget.restore(nodeCheckpoint);
             throw new IOException("Tolerant region read could not recover a compound root");
         }
         if (cursor.remaining() > 0) {
@@ -421,6 +431,63 @@ final class NBTRepairReader {
     private static <T extends Tag> T parseStrict(byte[] raw, NBTCodec codec, Class<T> expectedClass,
                                                   ReadLimits limits) throws IOException {
         validateStrictStructure(raw, codec.getEdition().byteOrder(), limits);
+        return parseStrictObject(raw, codec, expectedClass);
+    }
+
+    /// Parses already-decoded bytes after reserving their nodes from a shared region budget.
+    ///
+    /// @param raw complete uncompressed NBT payload
+    /// @param codec edition-aware strict codec
+    /// @param expectedClass expected root type
+    /// @param limits structural limits
+    /// @param nodeBudget region-wide logical-node budget
+    /// @param <T> expected root type
+    /// @return detached strict root
+    /// @throws IOException if validation or object parsing fails
+    private static <T extends Tag> T parseStrict(byte[] raw, NBTCodec codec, Class<T> expectedClass,
+                                                  ReadLimits limits,
+                                                  ReadLimits.NodeBudget nodeBudget) throws IOException {
+        validateStrictStructure(raw, codec.getEdition().byteOrder(), limits, nodeBudget);
+        return parseStrictObject(raw, codec, expectedClass);
+    }
+
+    /// Parses one strict Java Edition region payload after charging its nodes to the document budget.
+    ///
+    /// @param raw complete uncompressed chunk payload
+    /// @param localIndex local region slot used for diagnostics
+    /// @param limits structural limits applied before object construction
+    /// @param nodeBudget region-wide logical-node budget
+    /// @return validated detached compound root
+    /// @throws IOException if parsing, full consumption, root type, or validation fails
+    static CompoundTag parseStrictRegionPayload(
+            byte[] raw,
+            int localIndex,
+            ReadLimits limits,
+            ReadLimits.NodeBudget nodeBudget) throws IOException {
+        CompoundTag compound = parseStrict(
+                raw,
+                NBTCodec.of(),
+                CompoundTag.class,
+                Objects.requireNonNull(limits, "limits"),
+                Objects.requireNonNull(nodeBudget, "nodeBudget"));
+        try {
+            NBTStructureValidator.validate(compound);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Invalid NBT tree for region chunk " + localIndex, exception);
+        }
+        return compound;
+    }
+
+    /// Constructs a strict tag object after the allocation-free structural scan succeeds.
+    ///
+    /// @param raw complete uncompressed NBT payload
+    /// @param codec edition-aware strict codec
+    /// @param expectedClass expected root type
+    /// @param <T> expected root type
+    /// @return detached strict root
+    /// @throws IOException if object parsing, full consumption, or the root type fails
+    private static <T extends Tag> T parseStrictObject(byte[] raw, NBTCodec codec,
+                                                        Class<T> expectedClass) throws IOException {
         try (RawDataReader reader = new RawDataReader(
                 new InputSource.OfByteBuffer(raw), codec.getEdition())) {
             @Nullable Tag tag = NBTInput.readTag(reader);
@@ -442,9 +509,34 @@ final class NBTRepairReader {
     /// node/depth limits. Recovery candidates therefore pass through this small structural scanner
     /// first. It consumes exactly one named root, validates list homogeneity and all signed lengths,
     /// and rejects trailing bytes without allocating arrays or strings.
-    static void validateStrictStructure(byte[] raw, ByteOrder order, ReadLimits limits)
+    ///
+    /// @return number of validated logical tags
+    static long validateStrictStructure(byte[] raw, ByteOrder order, ReadLimits limits)
             throws IOException {
         StrictStructureScanner scanner = new StrictStructureScanner(raw, order, limits);
+        try {
+            scanner.readRoot();
+            if (scanner.remaining() != 0) {
+                throw new ParseFailure("Trailing data after NBT tag");
+            }
+            return scanner.nodeCount();
+        } catch (ParseFailure failure) {
+            throw new IOException(failure.getMessage(), failure);
+        }
+    }
+
+    /// Checks a complete payload and charges its nodes to a shared region budget.
+    ///
+    /// @param raw complete uncompressed NBT payload
+    /// @param order payload byte order
+    /// @param limits structural limits
+    /// @param nodeBudget region-wide logical-node budget
+    /// @throws IOException if the payload is invalid or the budget is exhausted
+    static void validateStrictStructure(byte[] raw, ByteOrder order, ReadLimits limits,
+                                        ReadLimits.NodeBudget nodeBudget) throws IOException {
+        ReadLimits.NodeBudget selectedBudget = Objects.requireNonNull(nodeBudget, "nodeBudget");
+        long maximumNodes = Math.min(limits.maxNodes(), selectedBudget.remaining());
+        StrictStructureScanner scanner = new StrictStructureScanner(raw, order, limits, maximumNodes);
         try {
             scanner.readRoot();
             if (scanner.remaining() != 0) {
@@ -453,6 +545,7 @@ final class NBTRepairReader {
         } catch (ParseFailure failure) {
             throw new IOException(failure.getMessage(), failure);
         }
+        selectedBudget.consume(scanner.nodeCount());
     }
 
     /// Decodes a damaged outer envelope while enforcing the decompressed-byte limit.
@@ -836,8 +929,9 @@ final class NBTRepairReader {
         int declared = cursor.readInt();
         if (declared < 0) {
             context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "NEGATIVE_LIST_LENGTH", path,
-                    "列表长度为负，按空列表恢复");
-            declared = 0;
+                    "列表长度为负，无法可靠确定字段边界");
+            context.markBoundaryUncertain();
+            throw new ParseFailure("列表长度为负，无法可靠恢复", path);
         }
         long bounded = Math.min((long) declared, context.limits().maxArrayLength());
         if (bounded < declared) {
@@ -922,8 +1016,9 @@ final class NBTRepairReader {
         int length = cursor.readInt();
         if (length < 0) {
             context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "NEGATIVE_ARRAY_LENGTH", path,
-                    "数组长度为负，按空数组恢复");
-            return 0;
+                    "数组长度为负，无法可靠确定字段边界");
+            context.markBoundaryUncertain();
+            throw new ParseFailure("数组长度为负，无法可靠恢复", path);
         }
         return length;
     }
@@ -1102,14 +1197,25 @@ final class NBTRepairReader {
     private static final class ParseContext {
         private final ReadLimits limits;
         private final List<NBTReadIssue> issues;
-        private long nodes;
+        private final ReadLimits.NodeBudget nodeBudget;
         private long depth;
         /// Whether a recovered child no longer has a trustworthy byte boundary.
         private boolean boundaryUncertain;
 
         private ParseContext(ReadLimits limits, List<NBTReadIssue> issues) {
+            this(limits, issues, limits.newNodeBudget());
+        }
+
+        /// Creates a parser context backed by a caller-owned document node budget.
+        ///
+        /// @param limits structural and allocation limits
+        /// @param issues mutable issue destination
+        /// @param nodeBudget document-wide logical-node budget
+        private ParseContext(ReadLimits limits, List<NBTReadIssue> issues,
+                             ReadLimits.NodeBudget nodeBudget) {
             this.limits = limits;
             this.issues = issues;
+            this.nodeBudget = nodeBudget;
         }
 
         private ReadLimits limits() {
@@ -1127,13 +1233,12 @@ final class NBTRepairReader {
         }
 
         private void enter(String path) throws ParseFailure {
-            if (nodes >= limits.maxNodes()) {
-                throw new ParseFailure("标签数量超过读取限额");
-            }
             if (depth >= limits.maxDepth()) {
-                throw new ParseFailure("标签嵌套深度超过读取限额");
+                throw new ParseFailure("标签嵌套深度超过读取限额", path);
             }
-            nodes++;
+            if (!nodeBudget.tryConsumeOne()) {
+                throw new ParseFailure("标签数量超过读取限额", path);
+            }
             depth++;
         }
 
@@ -1151,15 +1256,32 @@ final class NBTRepairReader {
     private static final class StrictStructureScanner {
         private final Cursor cursor;
         private final ReadLimits limits;
+        private final long maxNodes;
         private long nodes;
 
         private StrictStructureScanner(byte[] bytes, ByteOrder order, ReadLimits limits) {
+            this(bytes, order, limits, limits.maxNodes());
+        }
+
+        /// Creates a scanner with a document-scoped remaining-node allowance.
+        ///
+        /// @param bytes complete uncompressed NBT payload
+        /// @param order payload byte order
+        /// @param limits structural limits other than the effective node allowance
+        /// @param maxNodes maximum nodes available to this payload
+        private StrictStructureScanner(byte[] bytes, ByteOrder order, ReadLimits limits, long maxNodes) {
             this.cursor = new Cursor(bytes, order);
             this.limits = Objects.requireNonNull(limits, "limits");
+            this.maxNodes = maxNodes;
         }
 
         private int remaining() {
             return cursor.remaining();
+        }
+
+        /// Returns the number of structurally validated logical tags.
+        private long nodeCount() {
+            return nodes;
         }
 
         private void readRoot() throws ParseFailure {
@@ -1176,7 +1298,7 @@ final class NBTRepairReader {
             if (type == null) {
                 throw new ParseFailure("Invalid tag type: " + typeId);
             }
-            if (nodes >= limits.maxNodes()) {
+            if (nodes >= maxNodes) {
                 throw new ParseFailure("Tag count exceeds the read limit");
             }
             if (depth > limits.maxDepth()) {

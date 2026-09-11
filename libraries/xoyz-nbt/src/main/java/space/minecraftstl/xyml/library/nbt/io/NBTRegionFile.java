@@ -25,11 +25,7 @@ import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.internal.ExternalChunkAccessors;
-import space.minecraftstl.xyml.library.nbt.internal.input.InputSource;
-import space.minecraftstl.xyml.library.nbt.internal.input.NBTInput;
-import space.minecraftstl.xyml.library.nbt.internal.input.RawDataReader;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
-import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
 import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 
@@ -423,7 +419,8 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed or cannot be decoded
     public Chunk readChunk(int localIndex) throws IOException {
-        return readChunk(localIndex, ReadLimits.defaults().newDocumentBudget());
+        ReadLimits limits = ReadLimits.defaults();
+        return readChunk(localIndex, limits.newDocumentBudget(), limits.newNodeBudget());
     }
 
     /// Reads a chunk while charging decompressed bytes to a caller-owned region budget.
@@ -435,10 +432,23 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed, cannot be decoded, or exceeds the budget
     Chunk readChunk(int localIndex, ReadLimits.Budget budget) throws IOException {
+        return readChunk(localIndex, budget, ReadLimits.defaults().newNodeBudget());
+    }
+
+    /// Reads a chunk while charging bytes and nodes to caller-owned region budgets.
+    ///
+    /// @param localIndex local slot from 0 through 1023
+    /// @param budget cumulative decompressed-byte budget for the containing read
+    /// @param nodeBudget cumulative logical-node budget for the containing read
+    /// @return detached chunk copy
+    /// @throws IOException if the chunk is malformed or either budget is exhausted
+    Chunk readChunk(int localIndex, ReadLimits.Budget budget,
+                    ReadLimits.NodeBudget nodeBudget) throws IOException {
         checkIndex(localIndex);
         ensureOpen();
         NBTRegionFileIO.requireRegularFile(path);
         ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits.NodeBudget selectedNodeBudget = Objects.requireNonNull(nodeBudget, "nodeBudget");
         @Nullable PendingChunk changed = pending.get(localIndex);
         if (changed != null) {
             return changed.chunk == null
@@ -459,7 +469,8 @@ public final class NBTRegionFile implements AutoCloseable {
                 (long) MAX_DECOMPRESSED_BYTES, selectedBudget.remaining()));
         byte[] decompressed = decompress(payload.compression, payload.compressed, remainingLimit);
         selectedBudget.consume(decompressed.length);
-        CompoundTag root = parseCompound(decompressed, localIndex);
+        CompoundTag root = NBTRepairReader.parseStrictRegionPayload(
+                decompressed, localIndex, ReadLimits.defaults(), selectedNodeBudget);
         if (payload.compression == CompressionType.LZ4) {
             rememberIssues(List.of(readIssue(NBTReadIssue.Severity.INFORMATIONAL,
                     "REGION_LZ4_EXTENSION", slotPath(localIndex),
@@ -496,7 +507,8 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @throws IOException if the session itself is closed or the read policy is invalid
     public NBTReadResult<Chunk> readChunkTolerant(int localIndex, ReadLimits limits) throws IOException {
         ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
-        return readChunkTolerant(localIndex, selectedLimits, selectedLimits.newDocumentBudget());
+        return readChunkTolerant(localIndex, selectedLimits,
+                selectedLimits.newDocumentBudget(), selectedLimits.newNodeBudget());
     }
 
     /// Reads one chunk with a caller-owned cumulative document budget.
@@ -505,14 +517,17 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param localIndex local slot from 0 through 1023
     /// @param limits defensive decompression and parser limits
     /// @param budget cumulative document budget
+    /// @param nodeBudget cumulative logical-node budget
     /// @return detached chunk and slot diagnostics
     /// @throws IOException if the session is closed or the policy is invalid
     NBTReadResult<Chunk> readChunkTolerant(int localIndex, ReadLimits limits,
-                                           ReadLimits.Budget budget) throws IOException {
+                                           ReadLimits.Budget budget,
+                                           ReadLimits.NodeBudget nodeBudget) throws IOException {
         checkIndex(localIndex);
         ensureOpen();
         ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits.NodeBudget selectedNodeBudget = Objects.requireNonNull(nodeBudget, "nodeBudget");
         @Nullable PendingChunk changed = pending.get(localIndex);
         if (changed != null) {
             Chunk result = changed.chunk == null
@@ -551,7 +566,8 @@ public final class NBTRegionFile implements AutoCloseable {
             if (payload != null) {
                 try {
                     NBTReadResult<CompoundTag> recovered = NBTRepairReader.readRegionPayload(
-                            payload.compressed, payload.compression, selectedLimits, selectedBudget);
+                            payload.compressed, payload.compression, selectedLimits,
+                            selectedBudget, selectedNodeBudget);
                     if (payload.compression == CompressionType.LZ4) {
                         issues.add(readIssue(NBTReadIssue.Severity.INFORMATIONAL,
                                 "REGION_LZ4_EXTENSION", slotPath(localIndex),
@@ -1387,37 +1403,15 @@ public final class NBTRegionFile implements AutoCloseable {
         return NBTRegionCompression.decompress(compression, payload, maximumBytes);
     }
 
-    /// Parses exactly one detached compound root and validates its complete NBT structure.
-    /// @param bytes complete uncompressed NBT payload
-    /// @param localIndex local chunk slot used for diagnostics
-    /// @return validated detached compound root
-    /// @throws IOException if parsing, full consumption, root type, or validation fails
-    private CompoundTag parseCompound(byte[] bytes, int localIndex) throws IOException {
-        try (RawDataReader reader = new RawDataReader(new InputSource.OfByteBuffer(bytes),
-                MinecraftEdition.JAVA_EDITION)) {
-            Tag tag = NBTInput.readTag(reader);
-            if (!(tag instanceof CompoundTag compound)) {
-                throw new IOException("Region chunk " + localIndex + " does not contain a compound root");
-            }
-            if (reader.position() != bytes.length) {
-                throw new IOException("Trailing bytes after NBT payload for region chunk " + localIndex);
-            }
-            try {
-                NBTStructureValidator.validate(compound);
-            } catch (NBTValidationException exception) {
-                throw new IOException("Invalid NBT tree for region chunk " + localIndex, exception);
-            }
-            return compound;
-        }
-    }
-
     /// Reads every occupied slot once so open fails before exposing malformed payloads.
     /// @throws IOException if any existing chunk cannot be read and validated
     private void validateExistingPayloads() throws IOException {
-        ReadLimits.Budget budget = ReadLimits.defaults().newDocumentBudget();
+        ReadLimits limits = ReadLimits.defaults();
+        ReadLimits.Budget budget = limits.newDocumentBudget();
+        ReadLimits.NodeBudget nodeBudget = limits.newNodeBudget();
         for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
             if (sectorLengths[localIndex] != 0) {
-                readChunk(localIndex, budget);
+                readChunk(localIndex, budget, nodeBudget);
             }
         }
     }

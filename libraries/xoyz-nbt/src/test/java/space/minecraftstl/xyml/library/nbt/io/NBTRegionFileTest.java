@@ -114,6 +114,54 @@ public final class NBTRegionFileTest {
         }
     }
 
+    /// Charges tolerant slot trees to one region-wide logical-node budget.
+    @Test
+    void tolerantRegionSharesNodeBudgetAcrossSlots() throws Exception {
+        Path file = temporaryDirectory.resolve("node-budget.0.0.mca");
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.writeChunk(1, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+
+        ReadLimits defaults = ReadLimits.defaults();
+        ReadLimits limits = new ReadLimits(
+                defaults.maxEncodedBytes(), defaults.maxDecompressedBytes(),
+                defaults.maxDocumentDecompressedBytes(), 2L, defaults.maxDepth(),
+                defaults.maxStringBytes(), defaults.maxArrayLength(), defaults.maxArrayBytes());
+        try (NBTFile<ChunkRegion> fileSession = NBTFile.openRegionTolerant(file, limits)) {
+            ChunkRegion opened = fileSession.getEditor().snapshot();
+            assertEquals(1, opened.getChunk(0).getRootTag().getInt("value"));
+            assertNull(opened.getChunk(1).getRootTag());
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, fileSession.readReport().severity());
+        }
+    }
+
+    /// Charges strict slot trees to one caller-owned logical-node budget.
+    @Test
+    void strictRegionSharesNodeBudgetAcrossSlots() throws Exception {
+        Path file = temporaryDirectory.resolve("strict-node-budget.0.0.mca");
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.writeChunk(1, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+
+        ReadLimits defaults = ReadLimits.defaults();
+        ReadLimits limits = new ReadLimits(
+                defaults.maxEncodedBytes(), defaults.maxDecompressedBytes(),
+                defaults.maxDocumentDecompressedBytes(), 2L, defaults.maxDepth(),
+                defaults.maxStringBytes(), defaults.maxArrayLength(), defaults.maxArrayBytes());
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            ReadLimits.Budget byteBudget = limits.newDocumentBudget();
+            ReadLimits.NodeBudget nodeBudget = limits.newNodeBudget();
+            assertDoesNotThrow(() -> region.readChunk(0, byteBudget, nodeBudget));
+            assertThrows(IOException.class, () -> region.readChunk(1, byteBudget, nodeBudget));
+        }
+    }
+
     /// Refuses to open the deterministic staging namespace as an editable region target.
     @Test
     void rejectsDeterministicNewRegionTarget() throws Exception {

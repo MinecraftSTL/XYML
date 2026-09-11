@@ -16,7 +16,6 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.io;
 
-import net.jpountz.lz4.LZ4BlockOutputStream;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
@@ -32,7 +31,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -48,8 +46,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.GZIPOutputStream;
 
 /// A synchronous editable session for one NBT file.
 ///
@@ -416,9 +412,10 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
             List<NBTReadIssue> issues = new java.util.ArrayList<>(selectedStorage.readReport().issues());
             ChunkRegion root = new ChunkRegion();
             ReadLimits.Budget budget = selectedLimits.newDocumentBudget();
+            ReadLimits.NodeBudget nodeBudget = selectedLimits.newNodeBudget();
             for (int localIndex = 0; localIndex < root.size(); localIndex++) {
                 NBTReadResult<space.minecraftstl.xyml.library.nbt.chunk.Chunk> result =
-                        selectedStorage.readChunkTolerant(localIndex, selectedLimits, budget);
+                        selectedStorage.readChunkTolerant(localIndex, selectedLimits, budget, nodeBudget);
                 root.setChunk(localIndex, result.root());
                 for (NBTReadIssue issue : result.report().issues()) {
                     if (!issues.contains(issue)) {
@@ -669,16 +666,13 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         if (encoding == NBTFileEncoding.RAW) {
             return raw;
         }
-        ByteArrayOutputStream encodedOutput = new ByteArrayOutputStream(Math.max(128, raw.length / 2));
-        try (OutputStream compressor = switch (encoding) {
-                case GZIP -> new GZIPOutputStream(encodedOutput);
-                case ZLIB -> new DeflaterOutputStream(encodedOutput);
-                case LZ4 -> new LZ4BlockOutputStream(encodedOutput);
-                case RAW, REGION -> throw new IOException("Invalid standalone NBT encoding: " + encoding);
-            }) {
-            compressor.write(raw);
-        }
-        byte[] encoded = encodedOutput.toByteArray();
+        NBTRegionFile.CompressionType compression = switch (encoding) {
+            case GZIP -> NBTRegionFile.CompressionType.GZIP;
+            case ZLIB -> NBTRegionFile.CompressionType.ZLIB;
+            case LZ4 -> NBTRegionFile.CompressionType.LZ4;
+            case RAW, REGION -> throw new IOException("Invalid standalone NBT encoding: " + encoding);
+        };
+        byte[] encoded = NBTRegionCompression.compress(compression, raw);
         if (encoded.length > MAX_STANDALONE_ENCODED_BYTES) {
             throw new IOException("Encoded NBT payload exceeds the write limit: " + encoded.length);
         }
@@ -776,9 +770,11 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if any chunk cannot be decoded
     private static ChunkRegion readRegion(NBTRegionFile storage) throws IOException {
         ChunkRegion region = new ChunkRegion();
-        ReadLimits.Budget budget = ReadLimits.defaults().newDocumentBudget();
+        ReadLimits limits = ReadLimits.defaults();
+        ReadLimits.Budget budget = limits.newDocumentBudget();
+        ReadLimits.NodeBudget nodeBudget = limits.newNodeBudget();
         for (int localIndex = 0; localIndex < region.size(); localIndex++) {
-            region.setChunk(localIndex, storage.readChunk(localIndex, budget));
+            region.setChunk(localIndex, storage.readChunk(localIndex, budget, nodeBudget));
         }
         return region;
     }

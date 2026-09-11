@@ -453,6 +453,37 @@ public final class NBTFileTest {
                 .anyMatch(issue -> "TRAILING_BYTES".equals(issue.code())));
     }
 
+    /// Rejects a negative root collection length because no enclosing boundary can be trusted.
+    ///
+    /// @param typeId list or primitive-array root tag identifier
+    @ParameterizedTest
+    @ValueSource(ints = {7, 9, 11, 12})
+    void rejectsNegativeRootCollectionLength(int typeId) {
+        assertThrows(IOException.class, () -> NBTRepairReader.read(
+                negativeRootCollection(typeId), Tag.class, NBTCodec.of(), ReadLimits.defaults()));
+    }
+
+    /// Stops a compound at a negative child collection length and preserves only its known prefix.
+    ///
+    /// @param typeId list or primitive-array child tag identifier
+    /// @throws Exception if tolerant parsing unexpectedly fails before the known prefix
+    @ParameterizedTest
+    @ValueSource(ints = {7, 9, 11, 12})
+    void stopsAtNegativeNestedCollectionLength(int typeId) throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                negativeNestedCollection(typeId), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        assertEquals(7, result.root().getInt("before"));
+        assertTrue(result.root().get("broken") == null);
+        assertTrue(result.root().get("after") == null);
+        String expectedCode = typeId == 9 ? "NEGATIVE_LIST_LENGTH" : "NEGATIVE_ARRAY_LENGTH";
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> expectedCode.equals(issue.code()) && "broken".equals(issue.path())));
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "COMPOUND_CHILD_TRUNCATED".equals(issue.code())
+                        && "broken".equals(issue.path())));
+    }
+
     /// Rejects a valid document at the public tolerant-open entry when its node budget is zero.
     @Test
     void enforcesCustomNodeLimitAtOpenEntry() throws Exception {
@@ -712,6 +743,53 @@ public final class NBTFileTest {
         output.write("after".getBytes(StandardCharsets.UTF_8));
         output.write(new byte[]{0, 0, 0, 7});
         output.write(0); // root TAG_End (must remain unconsumed after uncertainty)
+        return output.toByteArray();
+    }
+
+    /// Builds a root list or primitive array with a negative declared length.
+    ///
+    /// @param typeId list or primitive-array tag identifier
+    /// @return malformed raw Java Edition NBT bytes
+    private static byte[] negativeRootCollection(int typeId) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(typeId);
+        output.write(0);
+        output.write(0); // root name
+        if (typeId == 9) {
+            output.write(1); // byte list element type
+        }
+        output.writeBytes(new byte[]{-1, -1, -1, -1});
+        return output.toByteArray();
+    }
+
+    /// Builds a compound with a known prefix, a negative collection length, and residual sibling bytes.
+    ///
+    /// @param typeId list or primitive-array child tag identifier
+    /// @return malformed raw Java Edition NBT bytes
+    private static byte[] negativeNestedCollection(int typeId) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(3); // known integer prefix
+        output.write(0);
+        output.write(6);
+        output.writeBytes("before".getBytes(StandardCharsets.UTF_8));
+        output.writeBytes(new byte[]{0, 0, 0, 7});
+        output.write(typeId);
+        output.write(0);
+        output.write(6);
+        output.writeBytes("broken".getBytes(StandardCharsets.UTF_8));
+        if (typeId == 9) {
+            output.write(1); // byte list element type
+        }
+        output.writeBytes(new byte[]{-1, -1, -1, -1});
+        output.write(3); // plausible sibling which must not be scanned
+        output.write(0);
+        output.write(5);
+        output.writeBytes("after".getBytes(StandardCharsets.UTF_8));
+        output.writeBytes(new byte[]{0, 0, 0, 9});
+        output.write(0);
         return output.toByteArray();
     }
 

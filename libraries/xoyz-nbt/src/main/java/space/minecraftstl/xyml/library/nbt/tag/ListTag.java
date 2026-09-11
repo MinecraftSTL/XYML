@@ -266,6 +266,10 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
         return tag;
     }
 
+    /// Reads a homogeneous list while enforcing the owning document's structural limits.
+    ///
+    /// @param reader bounded payload source
+    /// @throws IOException if the list is malformed or exceeds a read limit
     @Override
     @SuppressWarnings("unchecked")
     void readContent(DataReader reader) throws IOException {
@@ -287,6 +291,7 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
         if (count < 0) {
             throw new IOException("Invalid list length: " + Integer.toUnsignedLong(count));
         }
+        reader.requireCollectionLength(count);
 
         if (elementType == null && count != 0) {
             throw new IOException("Cannot create a non-empty list with element type END");
@@ -294,10 +299,23 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
 
         @SuppressWarnings("unchecked")
         var uncheckedListTag = (ListTag<Tag>) this;
+        boolean leafElements = elementType != TagType.LIST && elementType != TagType.COMPOUND;
+        if (leafElements) {
+            reader.reserveLeafTags(count);
+        }
         for (int i = 0; i < count; i++) {
             Tag subTag = elementType.createTag();
-            subTag.readContent(reader);
-            uncheckedListTag.addTag(subTag);
+            if (!leafElements) {
+                reader.enterTag();
+            }
+            try {
+                subTag.readContent(reader);
+                uncheckedListTag.addTag(subTag);
+            } finally {
+                if (!leafElements) {
+                    reader.leaveTag();
+                }
+            }
         }
     }
 
