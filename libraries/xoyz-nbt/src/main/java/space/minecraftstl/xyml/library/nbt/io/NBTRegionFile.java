@@ -142,11 +142,8 @@ public final class NBTRegionFile implements AutoCloseable {
     private final BitSet usedSectors;
     /// Detached edits waiting to be published, keyed by local chunk index.
     private final Map<Integer, PendingChunk> pending = new HashMap<>();
-    /// Storage-profile changes emitted by the most recent flush attempt.
-    ///
-    /// The list is retained after a partial save so callers can explain which slots became visible
-    /// before the first failed slot. It is cleared when the next flush starts.
-    private final List<StorageProfileChange> storageProfileChanges = new ArrayList<>();
+    /// Storage-profile derivation and changes for the current Region session.
+    private final NBTRegionStorageProfileState storageProfileState;
     /// Owned publication sidecars which could not be removed after a committed write.
     private final NBTRegionFileIO.PendingCleanup pendingCleanup =
             new NBTRegionFileIO.PendingCleanup("Owned region sidecar");
@@ -231,6 +228,7 @@ public final class NBTRegionFile implements AutoCloseable {
         this.timestamps = timestamps;
         this.compressionTypes = compressionTypes;
         this.external = external;
+        this.storageProfileState = new NBTRegionStorageProfileState(compressionTypes, external, sectorLengths);
         this.isolatedSlots = isolatedSlots;
         this.usedSectors = usedSectors;
         this.trailingTailNeedsRepair = trailingTailNeedsRepair;
@@ -349,13 +347,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// until [#flush()] publishes their headers.
     /// @return immutable 1024-slot region storage profile
     public synchronized StorageProfile storageProfile() {
-        byte[] markers = compressionTypes.clone();
-        boolean[] externalFlags = external.clone();
-        boolean[] occupied = new boolean[ChunkUtils.CHUNKS_PRE_REGION];
-        for (int localIndex = 0; localIndex < occupied.length; localIndex++) {
-            occupied[localIndex] = sectorLengths[localIndex] != 0;
-        }
-        return StorageProfile.region(markers, externalFlags, occupied);
+        return storageProfileState.snapshot();
     }
 
     /// Bean-style alias for [#storageProfile()].
@@ -372,7 +364,7 @@ public final class NBTRegionFile implements AutoCloseable {
     ///
     /// @return immutable profile-change snapshot in publication order
     public synchronized @Unmodifiable List<StorageProfileChange> storageProfileChanges() {
-        return List.copyOf(storageProfileChanges);
+        return storageProfileState.changes();
     }
 
     /// Bean-style alias for [#storageProfileChanges()].
@@ -701,7 +693,7 @@ public final class NBTRegionFile implements AutoCloseable {
     public void flush() throws IOException {
         ensureOpen();
         pendingCleanup.retry();
-        storageProfileChanges.clear();
+        storageProfileState.clearChanges();
         boolean hadTrailingTail = trailingTailNeedsRepair;
         // Reject opaque extension markers before touching a repairable tail. A failed save must
         // leave the source bytes unchanged when no explicit replacement authorizes the marker.
@@ -938,15 +930,8 @@ public final class NBTRegionFile implements AutoCloseable {
         int oldOffset = sectorOffsets[localIndex];
         int oldLength = sectorLengths[localIndex];
         int oldTimestamp = timestamps[localIndex];
-        StorageProfile.RegionSlot beforeProfile = new StorageProfile.RegionSlot(
-                Byte.toUnsignedInt(compressionTypes[localIndex]),
-                external[localIndex],
-                oldLength != 0);
-        StorageProfile.RegionSlot afterProfile = new StorageProfile.RegionSlot(
-                Byte.toUnsignedInt(compression), isExternal, length != 0);
-        @Nullable StorageProfileChange profileChange = beforeProfile.equals(afterProfile)
-                ? null
-                : new StorageProfileChange(localIndex, beforeProfile, afterProfile);
+        @Nullable StorageProfileChange profileChange = storageProfileState.change(
+                localIndex, compression, isExternal, length != 0);
         ByteBuffer newTimestamp = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN)
                 .putInt(timestamp);
         newTimestamp.flip();
@@ -972,7 +957,7 @@ public final class NBTRegionFile implements AutoCloseable {
                 external[localIndex] = isExternal;
                 compressionTypes[localIndex] = compression;
                 isolatedSlots[localIndex] = false;
-                rememberStorageProfileChange(profileChange);
+                storageProfileState.remember(profileChange);
                 throw new ChunkCommittedException(localIndex, exception);
             }
             try {
@@ -999,16 +984,7 @@ public final class NBTRegionFile implements AutoCloseable {
         external[localIndex] = isExternal;
         compressionTypes[localIndex] = compression;
         isolatedSlots[localIndex] = false;
-        rememberStorageProfileChange(profileChange);
-    }
-
-    /// Appends a visible profile change while preserving the publication order.
-    ///
-    /// @param change profile delta, or null when marker, external bit, and occupancy are unchanged
-    private synchronized void rememberStorageProfileChange(@Nullable StorageProfileChange change) {
-        if (change != null) {
-            storageProfileChanges.add(change);
-        }
+        storageProfileState.remember(profileChange);
     }
 
     /// Reserves and zero-fills a contiguous free sector range without changing the header.
@@ -1450,19 +1426,10 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param localIndex local chunk slot
     /// @return compression to retain or use by default
     private CompressionType preferredCompression(int localIndex) {
-        PendingChunk changed = pending.get(localIndex);
-        if (changed != null) {
-            return changed.compression;
-        }
-        if (sectorLengths[localIndex] != 0) {
-            int id = Byte.toUnsignedInt(compressionTypes[localIndex]);
-            for (CompressionType type : CompressionType.values()) {
-                if (type.id == id) {
-                    return type;
-                }
-            }
-        }
-        return CompressionType.ZLIB;
+        @Nullable PendingChunk changed = pending.get(localIndex);
+        return storageProfileState.preferredCompression(
+                localIndex,
+                changed == null ? null : changed.compression);
     }
 
     /// Chooses the marker for a publication while preserving an existing slot's profile.
@@ -1473,13 +1440,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param requested caller-requested compression
     /// @return existing known compression, or the requested compression for a new/unknown slot
     private CompressionType compressionForPublication(int localIndex, CompressionType requested) {
-        if (sectorLengths[localIndex] != 0) {
-            @Nullable CompressionType existing = compressionType(Byte.toUnsignedInt(compressionTypes[localIndex]));
-            if (existing != null) {
-                return existing;
-            }
-        }
-        return requested;
+        return storageProfileState.compressionForPublication(localIndex, requested);
     }
 
     /// Rejects an untouched slot whose marker is outside the known compression set.
@@ -1495,23 +1456,12 @@ public final class NBTRegionFile implements AutoCloseable {
             }
             int marker = Byte.toUnsignedInt(compressionTypes[localIndex]);
             @Nullable PendingChunk change = pending.get(localIndex);
-            if (compressionType(marker) == null && (change == null || !change.explicitReplacement())) {
+            if (NBTRegionStorageProfileState.compressionType(marker) == null
+                    && (change == null || !change.explicitReplacement())) {
                 throw new IOException("Unknown region compression marker at local index " + localIndex
                         + "; replace or clear the slot explicitly before saving");
             }
         }
-    }
-
-    /// Resolves one stored compression identifier without silently selecting a replacement.
-    /// @param id low-seven-bit compression identifier
-    /// @return known compression type, or null for an extension marker
-    private static @Nullable CompressionType compressionType(int id) {
-        for (CompressionType type : CompressionType.values()) {
-            if (type.id == id) {
-                return type;
-            }
-        }
-        return null;
     }
 
     /// Compresses serialized NBT bytes with the selected region compression method.
