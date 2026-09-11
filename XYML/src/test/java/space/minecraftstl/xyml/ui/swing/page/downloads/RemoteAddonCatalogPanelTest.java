@@ -165,10 +165,10 @@ final class RemoteAddonCatalogPanelTest {
                 prepareViewport(panel.choiceList(), 160);
                 JComboBox<?> source = findNamed(panel, "remoteAddonSource", JComboBox.class);
                 JComboBox<?> sort = findNamed(panel, "remoteAddonSort", JComboBox.class);
-                JTextField version = findNamed(panel, "remoteAddonGameVersion", JTextField.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
                 source.setSelectedItem(RemoteAddonCatalogSource.CURSEFORGE);
                 sort.setSelectedItem(RemoteAddonRepository.SortType.LAST_UPDATED);
-                version.setText("1.19.4");
+                version.setSelectedItem("1.19.4");
                 panel.openMissingDependencySearch("fabric-api", "1.20.1");
             });
             awaitBackgroundWork(executor);

@@ -500,7 +500,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
         resetCategoryOptions();
         resetSortOptions();
-        gameVersionField.setText(Objects.requireNonNullElse(gameVersion, "").trim());
+        SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(gameVersion, "").trim());
         openSearch(searchText);
     }
 
