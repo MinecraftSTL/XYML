@@ -48,7 +48,9 @@ import java.util.concurrent.Executor;
 /// Java 17 does not expose a portable stable filesystem handle or file identifier through [Path]. Consequently, a
 /// path can still be replaced after the final check, and distinct hard-link names cannot be merged across independent
 /// acquisitions. Those residual TOCTOU and hard-link cases require native file handles or filesystem-specific file IDs
-/// to eliminate; this resolver deliberately does not claim a durable identity guarantee.
+/// to eliminate; this resolver deliberately does not claim a durable identity guarantee. A provider that reports an
+/// arithmetic overflow while normalizing or traversing a path is treated as equally uncertain and falls back to the
+/// global resource rather than allowing a partially resolved path to participate in arbitration.
 @NotNullByDefault
 final class TaskResourcePathIdentity {
     /// Maximum stable-snapshot attempts before path identity falls back to the global resource.
@@ -123,7 +125,7 @@ final class TaskResourcePathIdentity {
                 }
             }
             return null;
-        } catch (InvalidPathException | SecurityException | UnsupportedOperationException ignored) {
+        } catch (ArithmeticException | InvalidPathException | SecurityException | UnsupportedOperationException ignored) {
             return null;
         }
     }

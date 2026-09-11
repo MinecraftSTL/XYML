@@ -26,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -356,6 +357,29 @@ public final class TaskResourcePathIdentityTest {
                 List.of(TaskResource.global()),
                 TaskResourcePathIdentity.resolve(
                         List.of(TaskResource.downloadTarget(file.resolve("impossible-child.bin")))));
+    }
+
+    /// Verifies a provider arithmetic overflow cannot escape path identity resolution or create a narrow lock.
+    @Test
+    public void failsClosedWhenPathProviderReportsArithmeticOverflow() {
+        Path delegate = temporaryDirectory.resolve("provider-overflow-target.jar");
+        AtomicBoolean absolutePathAlreadyRequested = new AtomicBoolean();
+        Path overflowingPath = (Path) Proxy.newProxyInstance(
+                Path.class.getClassLoader(),
+                new Class<?>[]{Path.class},
+                (proxy, method, arguments) -> {
+                    if ("toAbsolutePath".equals(method.getName())
+                            && absolutePathAlreadyRequested.getAndSet(true)) {
+                        throw new ArithmeticException("simulated path length overflow");
+                    }
+                    Object result = method.invoke(delegate, arguments == null ? new Object[0] : arguments);
+                    return result instanceof Path ? proxy : result;
+                });
+
+        assertEquals(
+                List.of(TaskResource.global()),
+                TaskResourcePathIdentity.resolve(
+                        List.of(TaskResource.downloadTarget(overflowingPath))));
     }
 
     /// Asserts that a lexical alias retains the declaration of its real target alongside any alias entry.
