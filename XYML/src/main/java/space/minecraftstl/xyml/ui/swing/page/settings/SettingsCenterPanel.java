@@ -55,6 +55,7 @@ import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
@@ -1245,9 +1246,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             return;
         }
 
-        final boolean confirmed;
+        final McpEnablementResult decision;
         try {
-            confirmed = mcpEnablementConfirmation.confirm();
+            decision = Objects.requireNonNull(
+                    mcpEnablementConfirmation.confirm(),
+                    "MCP enablement decision returned null");
         } catch (AWTError | RuntimeException failure) {
             // A broken or unavailable dialog must not strand advanced/headless users with a half-selected control.
             LOG.warning("MCP enablement warning could not be shown; proceeding without changing warning preference",
@@ -1255,10 +1258,23 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             enableMcpAfterConfirmation();
             return;
         }
-        if (!confirmed) {
-            return;
+        applyMcpEnablementDecision(decision);
+    }
+
+    /// Applies a completed warning decision before enabling MCP.
+    ///
+    /// Warning suppression is persisted even when enablement was cancelled. The visible warning checkbox is updated
+    /// with the same helper used by the live dialog, keeping injected decisions and native interactions equivalent.
+    ///
+    /// @param decision immutable confirmation and warning-preference result
+    private void applyMcpEnablementDecision(McpEnablementResult decision) {
+        McpEnablementResult checkedDecision = Objects.requireNonNull(decision, "decision");
+        if (checkedDecision.suppressFutureWarnings() && mcpEnablementWarningBox.isSelected()) {
+            persistMcpEnablementWarningPreference(false);
         }
-        enableMcpAfterConfirmation();
+        if (checkedDecision.confirmed()) {
+            enableMcpAfterConfirmation();
+        }
     }
 
     /// Commits MCP enablement only after the warning decision has been made.
@@ -1278,27 +1294,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// advanced user and enablement proceeds without changing the warning preference.
     ///
     /// @return selected enablement decision
-    private boolean showMcpEnablementWarning() {
+    private McpEnablementResult showMcpEnablementWarning() {
         EdtDispatcher.requireEventDispatchThread();
         if (GraphicsEnvironment.isHeadless()) {
-            return true;
+            return new McpEnablementResult(true, false);
         }
         try {
             JCheckBox skipWarningBox = new JCheckBox(i18n("settings.mcp.enable_warning.skip"));
             skipWarningBox.setOpaque(false);
-            skipWarningBox.addActionListener(event -> {
-                boolean showWarning = !skipWarningBox.isSelected();
-                applyingSnapshot = true;
-                try {
-                    mcpEnablementWarningBox.setSelected(showWarning);
-                } finally {
-                    applyingSnapshot = false;
-                }
-                store.setShowMcpEnablementWarning(showWarning);
-            });
+            skipWarningBox.addActionListener(event ->
+                    persistMcpEnablementWarningPreference(!skipWarningBox.isSelected()));
             JPanel message = new JPanel(new BorderLayout(0, 8));
             message.setOpaque(false);
-            message.add(new JLabel(i18n("settings.mcp.enable_warning.message")), BorderLayout.CENTER);
+            message.add(createMcpEnablementWarningMessage(
+                    i18n("settings.mcp.enable_warning.message")), BorderLayout.CENTER);
             message.add(skipWarningBox, BorderLayout.SOUTH);
             Object[] options = {
                     i18n("settings.mcp.enable_warning.enable"),
@@ -1313,13 +1322,44 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                     null,
                     options,
                     options[1]);
-            return selection == 0;
+            return new McpEnablementResult(selection == 0, skipWarningBox.isSelected());
         } catch (AWTError | HeadlessException | IllegalComponentStateException | SecurityException exception) {
-            return true;
+            return new McpEnablementResult(true, false);
         } catch (RuntimeException exception) {
             LOG.warning("MCP enablement warning failed; proceeding without changing warning preference", exception);
-            return true;
+            return new McpEnablementResult(true, false);
         }
+    }
+
+    /// Applies one enablement-warning preference immediately from the settings checkbox or live warning dialog.
+    ///
+    /// @param show whether future MCP enablement attempts should show the warning
+    private void persistMcpEnablementWarningPreference(boolean show) {
+        applyingSnapshot = true;
+        try {
+            mcpEnablementWarningBox.setSelected(show);
+        } finally {
+            applyingSnapshot = false;
+        }
+        store.setShowMcpEnablementWarning(show);
+    }
+
+    /// Creates a bounded, wrapping risk message for the native MCP confirmation dialog.
+    ///
+    /// @param text localized warning text
+    /// @return transparent label-like text area with a stable readable width
+    static JTextArea createMcpEnablementWarningMessage(String text) {
+        JTextArea message = new JTextArea(Objects.requireNonNull(text, "text"), 4, 48);
+        message.setEditable(false);
+        message.setFocusable(false);
+        message.setLineWrap(true);
+        message.setWrapStyleWord(true);
+        message.setOpaque(false);
+        message.setBorder(null);
+        JLabel labelReference = new JLabel();
+        message.setFont(labelReference.getFont());
+        message.setForeground(labelReference.getForeground());
+        return message;
     }
 
     /// Parses a legal local MCP listener port.

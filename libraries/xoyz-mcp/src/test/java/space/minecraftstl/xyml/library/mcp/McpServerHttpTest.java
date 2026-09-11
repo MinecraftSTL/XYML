@@ -23,6 +23,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.Socket;
@@ -36,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1007,6 +1012,93 @@ public final class McpServerHttpTest {
         }
     }
 
+    /// Rejects every missing, incorrect, duplicate, or malformed credential before each MCP request path.
+    ///
+    /// A valid request follows every rejection. This proves an unauthorized initialize did not allocate conflicting
+    /// state and an unauthorized session request did not consume or delete the existing session.
+    ///
+    /// @param requestKind initialize, session POST, GET, DELETE, or method-not-allowed request
+    /// @param credentialKind missing, incorrect, duplicate, or malformed Authorization fields
+    @ParameterizedTest(name = "{0} rejects {1} Authorization")
+    @MethodSource("authenticationFailureMatrix")
+    public void authenticatesEveryMcpRequestPathBeforeDispatch(
+            String requestKind,
+            String credentialKind) throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            @Nullable String sessionId = requiresInitializedSession(requestKind)
+                    ? initializeAuthenticatedSession(client, endpoint)
+                    : null;
+
+            HttpResponse<String> rejected = client.send(
+                    authenticationRequest(
+                            endpoint,
+                            requestKind,
+                            sessionId,
+                            authorizationValues(credentialKind)),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertUnauthorizedResponse(rejected, sessionId);
+
+            HttpResponse<String> accepted = client.send(
+                    authenticationRequest(
+                            endpoint,
+                            requestKind,
+                            sessionId,
+                            List.of("Bearer " + AUTH_TOKEN)),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(expectedAuthenticatedStatus(requestKind), accepted.statusCode());
+        }
+    }
+
+    /// Rejects printable credentials outside the Bearer token68 grammar even when they exactly match configuration.
+    ///
+    /// @param invalidToken configured and supplied non-token68 credential
+    @ParameterizedTest(name = "rejects non-token68 credential {0}")
+    @ValueSource(strings = {
+            "invalid@token",
+            "invalid=padding",
+            "quoted\"token",
+            "invalid%token",
+            "invalid\\token"
+    })
+    public void rejectsCredentialsOutsideToken68Grammar(String invalidToken) throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, invalidToken)) {
+            server.startListener();
+            HttpResponse<String> response = postWithAuthorization(
+                    HttpClient.newHttpClient(),
+                    endpoint(server),
+                    initializeBody(61),
+                    "Bearer " + invalidToken,
+                    null,
+                    null);
+
+            assertEquals(401, response.statusCode());
+            assertEquals("Bearer", requireHeader(response, "WWW-Authenticate"));
+            assertFalse(response.body().contains(invalidToken));
+        }
+    }
+
+    /// Accepts every token68 data-character family and trailing equals padding.
+    @Test
+    public void acceptsCompleteToken68Grammar() throws Exception {
+        String token = "AZaz09-._~+/==";
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, token)) {
+            server.startListener();
+            HttpResponse<String> response = postWithAuthorization(
+                    HttpClient.newHttpClient(),
+                    endpoint(server),
+                    initializeBody(62),
+                    "bEaReR " + token,
+                    null,
+                    null);
+
+            assertEquals(200, response.statusCode());
+        }
+    }
+
     /// Ensures provider-returned values cannot accidentally expose the transport credential.
     @Test
     public void redactsBearerTokenFromStructuredProviderResponses() throws Exception {
@@ -1311,6 +1403,126 @@ public final class McpServerHttpTest {
         }
         HttpRequest request = builder.POST(HttpRequest.BodyPublishers.ofString(body)).build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /// Supplies the cross-product of MCP request paths and rejected credential shapes.
+    ///
+    /// @return parameterized authentication cases
+    private static Stream<Arguments> authenticationFailureMatrix() {
+        return Stream.of("INITIALIZE", "POST", "GET", "DELETE", "METHOD_NOT_ALLOWED")
+                .flatMap(requestKind -> Stream.of("MISSING", "WRONG", "DUPLICATE", "ILLEGAL")
+                        .map(credentialKind -> Arguments.of(requestKind, credentialKind)));
+    }
+
+    /// Returns whether a request path requires a previously initialized session.
+    ///
+    /// @param requestKind request-path identifier
+    /// @return whether the request includes session and protocol headers
+    private static boolean requiresInitializedSession(String requestKind) {
+        return switch (requestKind) {
+            case "POST", "GET", "DELETE" -> true;
+            case "INITIALIZE", "METHOD_NOT_ALLOWED" -> false;
+            default -> throw new IllegalArgumentException("Unknown request kind: " + requestKind);
+        };
+    }
+
+    /// Initializes one authenticated session for a later request-path test.
+    ///
+    /// @param client HTTP client
+    /// @param endpoint MCP endpoint
+    /// @return issued session identifier
+    private static String initializeAuthenticatedSession(HttpClient client, URI endpoint) throws Exception {
+        HttpResponse<String> response = postWithAuthorization(
+                client,
+                endpoint,
+                initializeBody(70),
+                "Bearer " + AUTH_TOKEN,
+                null,
+                null);
+        assertEquals(200, response.statusCode());
+        return requireHeader(response, "Mcp-Session-Id");
+    }
+
+    /// Builds one MCP request with exact Authorization field occurrences.
+    ///
+    /// @param endpoint MCP endpoint
+    /// @param requestKind request-path identifier
+    /// @param sessionId initialized session identifier, or null before initialization and for 405 requests
+    /// @param authorizationValues exact Authorization field values in wire order
+    /// @return immutable HTTP request
+    private static HttpRequest authenticationRequest(
+            URI endpoint,
+            String requestKind,
+            @Nullable String sessionId,
+            @Unmodifiable List<String> authorizationValues) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint);
+        for (String value : authorizationValues) {
+            builder.header("Authorization", value);
+        }
+        if (sessionId != null) {
+            builder.header("Mcp-Session-Id", sessionId)
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION);
+        }
+        switch (requestKind) {
+            case "INITIALIZE" -> builder
+                    .header("Accept", ACCEPT_BOTH)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(initializeBody(71)));
+            case "POST" -> builder
+                    .header("Accept", ACCEPT_BOTH)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"tools/list\"}"));
+            case "GET" -> builder
+                    .header("Accept", "text/event-stream")
+                    .GET();
+            case "DELETE" -> builder.DELETE();
+            case "METHOD_NOT_ALLOWED" -> builder.PUT(HttpRequest.BodyPublishers.noBody());
+            default -> throw new IllegalArgumentException("Unknown request kind: " + requestKind);
+        }
+        return builder.build();
+    }
+
+    /// Returns exact Authorization fields for one rejected credential shape.
+    ///
+    /// @param credentialKind credential-shape identifier
+    /// @return immutable Authorization field values
+    private static @Unmodifiable List<String> authorizationValues(String credentialKind) {
+        return switch (credentialKind) {
+            case "MISSING" -> List.of();
+            case "WRONG" -> List.of("Bearer wrong-token");
+            case "DUPLICATE" -> List.of("Bearer " + AUTH_TOKEN, "Bearer " + AUTH_TOKEN);
+            case "ILLEGAL" -> List.of("Bearer " + AUTH_TOKEN + " extra");
+            default -> throw new IllegalArgumentException("Unknown credential kind: " + credentialKind);
+        };
+    }
+
+    /// Returns the response expected after a valid credential reaches one request path.
+    ///
+    /// @param requestKind request-path identifier
+    /// @return expected HTTP status code
+    private static int expectedAuthenticatedStatus(String requestKind) {
+        return switch (requestKind) {
+            case "INITIALIZE", "POST", "DELETE" -> 200;
+            case "GET", "METHOD_NOT_ALLOWED" -> 405;
+            default -> throw new IllegalArgumentException("Unknown request kind: " + requestKind);
+        };
+    }
+
+    /// Verifies one structured unauthorized response does not disclose credential or session context.
+    ///
+    /// @param response unauthorized HTTP response
+    /// @param sessionId supplied session identifier, or null before initialization
+    private static void assertUnauthorizedResponse(
+            HttpResponse<String> response,
+            @Nullable String sessionId) {
+        assertEquals(401, response.statusCode());
+        assertEquals("Bearer", requireHeader(response, "WWW-Authenticate"));
+        assertTrue(response.headers().firstValue("Mcp-Session-Id").isEmpty());
+        assertFalse(response.body().contains(AUTH_TOKEN));
+        if (sessionId != null) {
+            assertFalse(response.body().contains(sessionId));
+        }
     }
 
     /// Parses a JSON response body.

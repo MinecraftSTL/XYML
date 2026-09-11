@@ -1042,7 +1042,7 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
             throw unauthorized();
         }
         String token = raw.substring(separator + 1);
-        if (!isValidBearerToken(token)) {
+        if (!BearerCredentialSyntax.isValid(token)) {
             throw unauthorized();
         }
         return token;
@@ -1107,20 +1107,6 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         // Configuration is persisted verbatim. Wire-level syntax is validated only for the
         // incoming Authorization field; an unsupported configured value simply cannot match it.
         return sha256(checkedToken);
-    }
-
-    /// Checks the opaque token subset that can be carried unambiguously in an Authorization header.
-    ///
-    /// @param token token text
-    /// @return whether the token contains only printable non-whitespace, non-comma ASCII characters
-    private static boolean isValidBearerToken(String token) {
-        for (int index = 0; index < token.length(); index++) {
-            char character = token.charAt(index);
-            if (character < 0x21 || character > 0x7E || character == ',') {
-                return false;
-            }
-        }
-        return !token.isEmpty();
     }
 
     /// Validates an optional Origin header against the loopback listener.

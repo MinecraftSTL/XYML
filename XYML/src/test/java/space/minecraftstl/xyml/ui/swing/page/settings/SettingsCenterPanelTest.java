@@ -40,8 +40,11 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import javax.swing.JCheckBox;
+import javax.swing.JPasswordField;
+import javax.swing.JTextArea;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.GraphicsEnvironment;
 import java.lang.reflect.Field;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -53,7 +56,9 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /// Verifies the MCP enablement gate through the real settings-center Swing controls.
 @Isolated
@@ -102,7 +107,7 @@ public final class SettingsCenterPanelTest {
             SettingsCenterPanel panel = createPanel(store, () -> {
                 assertFalse(store.mcpEnabled(), "the store must remain disabled while the warning is pending");
                 decisions.incrementAndGet();
-                return true;
+                return new McpEnablementResult(true, false);
             });
             try {
                 onEventDispatchThread(() -> {
@@ -125,7 +130,7 @@ public final class SettingsCenterPanelTest {
     public void cancellationKeepsMcpDisabled() throws Exception {
         try (SettingsFixture ignored = SettingsFixture.install()) {
             FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
-            SettingsCenterPanel panel = createPanel(store, () -> false);
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
             try {
                 onEventDispatchThread(() -> {
                     JCheckBox enabled = findComponent(panel, "settingsMcpEnabled", JCheckBox.class);
@@ -141,6 +146,52 @@ public final class SettingsCenterPanelTest {
         }
     }
 
+    /// Keeps the permanent warning opt-out when the same decision cancels MCP enablement.
+    @Test
+    public void permanentSkipPersistsWhenEnablementIsCancelled() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, true));
+            try {
+                onEventDispatchThread(() -> {
+                    JCheckBox enabled = findComponent(panel, "settingsMcpEnabled", JCheckBox.class);
+                    JCheckBox warning = findComponent(panel, "settingsMcpEnablementWarning", JCheckBox.class);
+                    enabled.doClick();
+                    assertAll(
+                            () -> assertFalse(store.mcpEnabled()),
+                            () -> assertFalse(store.showMcpEnablementWarning()),
+                            () -> assertFalse(enabled.isSelected()),
+                            () -> assertFalse(warning.isSelected()));
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
+    /// Applies the permanent warning opt-out before committing a confirmed MCP enablement.
+    @Test
+    public void permanentSkipPersistsWhenEnablementIsConfirmed() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(true, true));
+            try {
+                onEventDispatchThread(() -> {
+                    JCheckBox enabled = findComponent(panel, "settingsMcpEnabled", JCheckBox.class);
+                    JCheckBox warning = findComponent(panel, "settingsMcpEnablementWarning", JCheckBox.class);
+                    enabled.doClick();
+                    assertAll(
+                            () -> assertTrue(store.mcpEnabled()),
+                            () -> assertFalse(store.showMcpEnablementWarning()),
+                            () -> assertTrue(enabled.isSelected()),
+                            () -> assertFalse(warning.isSelected()));
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
     /// Disabling the warning preference bypasses the decision boundary and enables MCP immediately.
     @Test
     public void disabledWarningBypassesDecision() throws Exception {
@@ -149,7 +200,7 @@ public final class SettingsCenterPanelTest {
             AtomicInteger decisions = new AtomicInteger();
             SettingsCenterPanel panel = createPanel(store, () -> {
                 decisions.incrementAndGet();
-                return false;
+                return new McpEnablementResult(false, false);
             });
             try {
                 onEventDispatchThread(() -> {
@@ -199,7 +250,7 @@ public final class SettingsCenterPanelTest {
             AtomicInteger decisions = new AtomicInteger();
             SettingsCenterPanel panel = createPanel(store, () -> {
                 decisions.incrementAndGet();
-                return false;
+                return new McpEnablementResult(false, false);
             });
             try {
                 onEventDispatchThread(() -> {
@@ -224,6 +275,78 @@ public final class SettingsCenterPanelTest {
         }
     }
 
+    /// Uses the production decision in a truly headless test JVM without changing the warning preference.
+    @Test
+    public void headlessEnvironmentEnablesWithoutChangingWarningPreference() throws Exception {
+        assumeTrue(GraphicsEnvironment.isHeadless(), "run with java.awt.headless=true to exercise this branch");
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanelWithProductionDecision(store);
+            try {
+                onEventDispatchThread(() -> {
+                    JCheckBox enabled = findComponent(panel, "settingsMcpEnabled", JCheckBox.class);
+                    enabled.doClick();
+                    assertAll(
+                            () -> assertTrue(store.mcpEnabled()),
+                            () -> assertTrue(store.showMcpEnablementWarning()),
+                            () -> assertTrue(enabled.isSelected()));
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
+    /// Keeps the bearer token masked by default, persists exact text, and restores masking after visibility changes.
+    @Test
+    public void bearerTokenControlMasksAndPersistsExactText() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
+            try {
+                onEventDispatchThread(() -> {
+                    JPasswordField token = findComponent(panel, "settingsMcpBearerToken", JPasswordField.class);
+                    JCheckBox visibility = findComponent(
+                            panel, "settingsMcpBearerTokenVisibility", JCheckBox.class);
+                    char maskedEcho = token.getEchoChar();
+                    assertNotEquals((char) 0, maskedEcho);
+                    assertEquals(0, token.getPassword().length);
+
+                    token.setText("  exact token text  ");
+                    token.postActionEvent();
+                    assertEquals("  exact token text  ", store.mcpBearerToken());
+
+                    visibility.doClick();
+                    assertEquals((char) 0, token.getEchoChar());
+                    visibility.doClick();
+                    assertEquals(maskedEcho, token.getEchoChar());
+                    visibility.doClick();
+                    panel.close();
+                    assertFalse(visibility.isSelected());
+                    assertEquals(maskedEcho, token.getEchoChar());
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
+    /// Constrains the native warning copy to a wrapping, label-like text component.
+    @Test
+    public void riskMessageUsesBoundedWrappingText() {
+        onEventDispatchThread(() -> {
+            JTextArea message = SettingsCenterPanel.createMcpEnablementWarningMessage(
+                    "A deliberately long warning that must wrap instead of widening the native dialog forever.");
+            assertAll(
+                    () -> assertFalse(message.isEditable()),
+                    () -> assertFalse(message.isFocusable()),
+                    () -> assertTrue(message.getLineWrap()),
+                    () -> assertTrue(message.getWrapStyleWord()),
+                    () -> assertEquals(4, message.getRows()),
+                    () -> assertEquals(48, message.getColumns()));
+        });
+    }
+
     /// Creates a real settings-center panel with only the MCP decision boundary replaced.
     private static SettingsCenterPanel createPanel(FakeSettingsStore store, McpEnablementDecision decision) {
         return onEventDispatchThread(() -> {
@@ -236,6 +359,23 @@ public final class SettingsCenterPanelTest {
                     owner -> CompletableFuture.completedFuture(null),
                     NOOP_MAINTENANCE,
                     decision);
+        });
+    }
+
+    /// Creates a settings-center panel using the production MCP warning decision.
+    ///
+    /// @param store recording settings store
+    /// @return panel using the real headless or native-dialog branch
+    private static SettingsCenterPanel createPanelWithProductionDecision(FakeSettingsStore store) {
+        return onEventDispatchThread(() -> {
+            AppearanceSettingsPanel appearance = new AppearanceSettingsPanel(
+                    new FakeAppearanceSettingsModel(),
+                    APPEARANCE_STRINGS);
+            return new SettingsCenterPanel(
+                    store,
+                    appearance,
+                    owner -> CompletableFuture.completedFuture(null),
+                    NOOP_MAINTENANCE);
         });
     }
 
@@ -417,9 +557,14 @@ public final class SettingsCenterPanelTest {
         /// Initial immutable snapshot used during panel construction.
         private final SettingsCenterSnapshot initialSnapshot;
 
-        /// Current MCP enablement and warning values.
+        /// Current MCP enablement value.
         private boolean mcpEnabled;
+
+        /// Current MCP warning-preference value.
         private boolean showMcpEnablementWarning;
+
+        /// Exact bearer token most recently accepted by this fake.
+        private String mcpBearerToken;
 
         /// Number of MCP enablement writes accepted by this fake.
         private int mcpEnablementWrites;
@@ -429,6 +574,7 @@ public final class SettingsCenterPanelTest {
             this.initialSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
             mcpEnabled = initialSnapshot.mcpEnabled();
             showMcpEnablementWarning = initialSnapshot.showMcpEnablementWarning();
+            mcpBearerToken = initialSnapshot.mcpBearerToken();
         }
 
         /// Returns the initial snapshot; focused actions are inspected through explicit recording accessors.
@@ -450,9 +596,10 @@ public final class SettingsCenterPanelTest {
             mcpEnablementWrites++;
         }
 
-        /// Ignores an unrelated bearer-token write.
+        /// Records an exact bearer-token write.
         @Override
         public void setMcpBearerToken(String token) {
+            mcpBearerToken = Objects.requireNonNull(token, "token");
         }
 
         /// Records the warning preference written by the checkbox.
@@ -469,6 +616,11 @@ public final class SettingsCenterPanelTest {
         /// Returns the recorded warning preference.
         private boolean showMcpEnablementWarning() {
             return showMcpEnablementWarning;
+        }
+
+        /// Returns the exact bearer token most recently written by the panel.
+        private String mcpBearerToken() {
+            return mcpBearerToken;
         }
 
         /// Returns the number of enablement writes.
