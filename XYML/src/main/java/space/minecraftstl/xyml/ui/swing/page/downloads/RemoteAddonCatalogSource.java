@@ -72,6 +72,9 @@ public enum RemoteAddonCatalogSource {
 
     /// Returns every result ordering exposed by the shared catalog control.
     ///
+    /// Modrinth maps name and author to its relevance endpoint internally, but keeping those
+    /// choices visible preserves the complete catalog contract.
+    ///
     /// @return immutable provider-supported result orderings
     public @Unmodifiable List<RemoteAddonRepository.SortType> supportedSortTypes() {
         return List.of(RemoteAddonRepository.SortType.values());

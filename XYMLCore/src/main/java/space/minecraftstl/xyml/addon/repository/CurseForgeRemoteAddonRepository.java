@@ -112,16 +112,17 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         return BASE;
     }
 
-    /// Converts one provider-neutral ordering into CurseForge's distinct mod-search field.
+    /// Converts one provider-neutral ordering into CurseForge's mod-search field.
     ///
     /// @param sort requested result ordering
     /// @return CurseForge mod-search field identifier
     static int toModsSearchSortField(SortType sort) {
         return switch (sort) {
-            case RELEVANCY -> 1;
             case POPULARITY -> 2;
-            case DATE_CREATED -> 11;
+            case NAME -> 4;
+            case DATE_CREATED -> 1;
             case LAST_UPDATED -> 3;
+            case AUTHOR -> 5;
             case TOTAL_DOWNLOADS -> 6;
         };
     }

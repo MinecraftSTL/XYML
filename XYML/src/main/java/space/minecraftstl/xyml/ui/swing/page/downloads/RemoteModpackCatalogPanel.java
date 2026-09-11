@@ -805,7 +805,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         applyCategoryOptions(List.of(RemoteCatalogCategoryOption.all()));
     }
 
-    /// Publishes only the current provider's distinct server sort behaviors.
+    /// Publishes every ordering exposed by the current provider catalog control.
     private void resetSortOptions() {
         applyingSortOptions = true;
         try {
@@ -813,7 +813,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             for (RemoteAddonRepository.SortType sortType : selectedSource().supportedSortTypes()) {
                 sortBox.addItem(sortType);
             }
-            sortBox.setSelectedItem(RemoteAddonRepository.SortType.RELEVANCY);
+            sortBox.setSelectedItem(RemoteAddonRepository.SortType.POPULARITY);
         } finally {
             applyingSortOptions = false;
         }

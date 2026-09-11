@@ -27,17 +27,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @NotNullByDefault
 public final class ModrinthRemoteAddonRepositoryTest {
 
-    /// Verifies that every provider-neutral sort has its own Modrinth search index.
+    /// Verifies that every provider-neutral sort maps to a supported Modrinth search index.
     @Test
-    public void mapsSortTypesToDistinctModrinthIndexes() {
-        assertEquals("relevance", ModrinthRemoteAddonRepository.convertSortType(
-                RemoteAddonRepository.SortType.RELEVANCY));
+    public void mapsSortTypesToSupportedModrinthIndexes() {
         assertEquals("follows", ModrinthRemoteAddonRepository.convertSortType(
                 RemoteAddonRepository.SortType.POPULARITY));
+        assertEquals("relevance", ModrinthRemoteAddonRepository.convertSortType(
+                RemoteAddonRepository.SortType.NAME));
         assertEquals("newest", ModrinthRemoteAddonRepository.convertSortType(
                 RemoteAddonRepository.SortType.DATE_CREATED));
         assertEquals("updated", ModrinthRemoteAddonRepository.convertSortType(
                 RemoteAddonRepository.SortType.LAST_UPDATED));
+        assertEquals("relevance", ModrinthRemoteAddonRepository.convertSortType(
+                RemoteAddonRepository.SortType.AUTHOR));
         assertEquals("downloads", ModrinthRemoteAddonRepository.convertSortType(
                 RemoteAddonRepository.SortType.TOTAL_DOWNLOADS));
     }

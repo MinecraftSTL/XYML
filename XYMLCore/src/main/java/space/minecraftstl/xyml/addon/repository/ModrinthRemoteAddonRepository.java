@@ -148,14 +148,14 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
         return BASE;
     }
 
-    /// Converts one provider-neutral ordering into Modrinth's distinct search index.
+    /// Converts one provider-neutral ordering into Modrinth's supported search index.
     ///
     /// @param sortType requested result ordering
     /// @return Modrinth search index
     static String convertSortType(SortType sortType) {
         return switch (sortType) {
-            case RELEVANCY -> "relevance";
             case POPULARITY -> "follows";
+            case NAME, AUTHOR -> "relevance";
             case DATE_CREATED -> "newest";
             case LAST_UPDATED -> "updated";
             case TOTAL_DOWNLOADS -> "downloads";

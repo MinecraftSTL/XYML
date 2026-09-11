@@ -35,17 +35,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @NotNullByDefault
 public final class CurseForgeRemoteAddonRepositoryTest {
 
-    /// Verifies that every provider-neutral sort has its own CurseForge field.
+    /// Verifies that every provider-neutral sort maps to its CurseForge field.
     @Test
-    public void mapsSortTypesToDistinctCurseForgeFields() {
-        assertEquals(1, CurseForgeRemoteAddonRepository.toModsSearchSortField(
-                RemoteAddonRepository.SortType.RELEVANCY));
+    public void mapsSortTypesToCurseForgeFields() {
         assertEquals(2, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.POPULARITY));
-        assertEquals(11, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+        assertEquals(4, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.NAME));
+        assertEquals(1, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.DATE_CREATED));
         assertEquals(3, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.LAST_UPDATED));
+        assertEquals(5, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.AUTHOR));
         assertEquals(6, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.TOTAL_DOWNLOADS));
     }

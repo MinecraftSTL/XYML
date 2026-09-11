@@ -44,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -381,7 +382,39 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                LoaderSelectionWizardPanel.createForLauncher());
+                LoaderSelectionWizardPanel.createForLauncher(),
+                null);
+    }
+
+    /// Creates a production catalog whose direct-install download tabs use explicit instance selection.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs
+    public GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            InstancesModel instancesModel) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                LoaderSelectionWizardPanel.createForLauncher(),
+                instancesModel);
     }
 
     /// Creates a catalog panel with an explicit zero-I/O loader-selection control for focused integration tests.
@@ -403,6 +436,40 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             LoaderSelectionWizardPanel loaderSelectionPanel) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                loaderSelectionPanel,
+                null);
+    }
+
+    /// Creates a catalog with an explicit loader workflow and installed-instance source.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param loaderSelectionPanel embedded loader-selection workflow
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null for
+    /// legacy category-only construction
+    GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            LoaderSelectionWizardPanel loaderSelectionPanel,
+            @Nullable InstancesModel instancesModel) {
         super(new MigLayout(
                 "insets 0, fill",
                 "[grow,fill]",
@@ -423,7 +490,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadCategoryPanel = new DownloadCategoryPanel(
                 resolvedTaskProgressStrings,
                 animator,
-                resolvedProgressAnimationDuration);
+                resolvedProgressAnimationDuration,
+                instancesModel);
         remoteModpackCatalogPanel = new RemoteModpackCatalogPanel(
                 RemoteModpackCatalogStrings.launcherLocalized(),
                 resolvedTaskProgressStrings,
