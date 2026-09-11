@@ -59,11 +59,11 @@ public interface NBTEditorInteractions {
     /// @return whether unsaved edits may be discarded
     boolean confirmDiscardChanges(Path currentFile);
 
-    /// Confirms a save which will strictly rewrite a source opened through tolerant recovery.
+    /// Confirms a save which will strictly rewrite a source with confirmed partial data loss.
     ///
     /// Implementations must fail closed when no graphical confirmation is available. The default is deliberately
     /// `false`, so headless callers must opt into repair publication explicitly rather than accidentally replacing a
-    /// damaged source. A clean report is never passed by the panel.
+    /// damaged source. Clean and fully recovered reports are never passed by the panel.
     ///
     /// @param currentFile current source
     /// @param report immutable diagnostics captured during open
@@ -74,7 +74,7 @@ public interface NBTEditorInteractions {
         return false;
     }
 
-    /// Confirms a repair save while exposing the immutable storage profile for diagnostics.
+    /// Confirms a partial-data-loss repair save while exposing the immutable storage profile for diagnostics.
     ///
     /// The two-argument method remains the compatibility hook for existing non-Swing callers;
     /// implementations which do not need region metadata may continue overriding it.

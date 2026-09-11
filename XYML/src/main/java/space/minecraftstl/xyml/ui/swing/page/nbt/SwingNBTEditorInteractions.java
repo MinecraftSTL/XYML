@@ -153,7 +153,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
 
-    /// Shows a repair-save confirmation with a collapsed plain-text diagnostic view.
+    /// Shows a partial-data-loss save confirmation with a collapsed plain-text diagnostic view.
     ///
     /// @param currentFile source that will be rewritten
     /// @param report immutable tolerant-read diagnostics
@@ -168,7 +168,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
         return confirmRepairSave(currentFile, diagnostics, profile);
     }
 
-    /// Shows a repair-save confirmation with region marker metadata when available.
+    /// Shows a partial-data-loss save confirmation with region marker metadata when available.
     ///
     /// @param currentFile source that will be rewritten
     /// @param report immutable tolerant-read diagnostics
@@ -180,9 +180,10 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
         Path source = Objects.requireNonNull(currentFile, "currentFile");
         NBTReadReport diagnostics = Objects.requireNonNull(report, "report");
         StorageProfile profile = Objects.requireNonNull(storageProfile, "storageProfile");
-        String summary = diagnostics.hasPartialDataLoss()
-                ? strings.partialRepairSaveMessage(source)
-                : strings.repairSaveMessage(source);
+        if (!diagnostics.hasPartialDataLoss()) {
+            return true;
+        }
+        String summary = strings.partialRepairSaveMessage(source);
         JTextArea summaryArea = new JTextArea(summary);
         summaryArea.setEditable(false);
         summaryArea.setLineWrap(true);

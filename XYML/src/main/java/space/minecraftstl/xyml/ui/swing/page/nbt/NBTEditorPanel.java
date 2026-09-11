@@ -772,11 +772,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Routes every visible save command through the tolerant-read repair confirmation boundary.
+    /// Routes every visible save command through the partial-data-loss confirmation boundary.
     ///
-    /// A clean document delegates immediately. A recovered document is never silently rewritten: the interaction
-    /// policy must explicitly approve the strict repair save, and a headless/default policy therefore leaves the
-    /// source untouched.
+    /// Clean and fully recovered documents delegate immediately. A document with confirmed partial data loss is
+    /// never silently rewritten: the interaction policy must explicitly approve the strict repair save, and a
+    /// headless/default policy therefore leaves the source untouched.
     private void requestSave() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
@@ -792,7 +792,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
             return;
         }
         NBTReadReport report = document.readReport();
-        if (report.requiresRepair() && !interactions.confirmRepairSave(file, report, document.storageProfile())) {
+        if (report.hasPartialDataLoss()
+                && !interactions.confirmRepairSave(file, report, document.storageProfile())) {
             return;
         }
         controller.save();

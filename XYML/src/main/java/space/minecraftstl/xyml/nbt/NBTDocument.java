@@ -100,8 +100,8 @@ public final class NBTDocument implements AutoCloseable {
     /// Returns immutable diagnostics captured while opening this document.
     ///
     /// A clean report is returned for a source accepted by the strict reader. A recovered or partial report remains
-    /// attached to the document for its whole lifetime so the UI can require an explicit repair-save confirmation
-    /// instead of silently rewriting a damaged source.
+    /// attached to the document for its whole lifetime so the UI can keep the warning visible and require explicit
+    /// confirmation before saving a source with confirmed partial data loss.
     ///
     /// @return immutable tolerant-read report
     public NBTReadReport readReport() {

@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntTag;
@@ -155,9 +156,9 @@ final class NBTEditorPanelTest {
         }
     }
 
-    /// Keeps tolerant-read diagnostics visible and requires explicit approval before a repair-only save.
+    /// Keeps recovered diagnostics visible while allowing an immediate strict repair save.
     @Test
-    void requiresRepairConfirmationForRecoveredSource() throws Exception {
+    void savesRecoveredSourceWithoutRepairConfirmation() throws Exception {
         Path source = temporaryDirectory.resolve("recovered.dat");
         writeTag(source, new CompoundTag().addInt("value", 1));
         byte[] damaged = Files.readAllBytes(source);
@@ -183,23 +184,80 @@ final class NBTEditorPanelTest {
             flushEdt();
 
             assertTrue(controller.snapshot().document().requiresRepair());
+            assertEquals(NBTReadReport.Severity.RECOVERED,
+                    controller.snapshot().document().readReport().severity());
             assertTrue(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
             assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
 
             onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
-            assertEquals(1, interactions.repairConfirmations());
-            assertFalse(interactions.repairApproved());
-            assertEquals(0, ioExecutor.pendingCount());
-
-            interactions.setRepairApproved(true);
-            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
-            assertEquals(2, interactions.repairConfirmations());
+            assertEquals(0, interactions.repairConfirmations());
+            assertEquals(1, ioExecutor.pendingCount());
             ioExecutor.runNext();
             awaitControllerStatus(controller, NBTEditorStatus.READY);
             assertFalse(controller.snapshot().document().requiresRepair());
             assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
             assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
             assertEquals(1, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Requires confirmation for partial data loss and passes the complete diagnostics to the interaction boundary.
+    @Test
+    void confirmsPartialDataLossWithIssueDetailsBeforeSaving() throws Exception {
+        Path source = temporaryDirectory.resolve("r.0.0.mca");
+        byte[] damaged = new byte[8193];
+        damaged[damaged.length - 1] = 0x55;
+        Files.write(source, damaged);
+
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            iconExecutor.runAll();
+            flushEdt();
+
+            NBTReadReport report = controller.snapshot().document().readReport();
+            StorageProfile profile = controller.snapshot().document().storageProfile();
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, report.severity());
+            assertTrue(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(1, interactions.repairConfirmations());
+            assertEquals(source.toAbsolutePath().normalize(), interactions.repairSource());
+            assertEquals(report, interactions.repairReport());
+            assertEquals(profile, interactions.repairStorageProfile());
+            assertTrue(interactions.repairReport().issues().stream().anyMatch(issue ->
+                    "REGION_FILE_TRAILING_TRUNCATION".equals(issue.code())
+                            && "region".equals(issue.path())
+                            && !issue.message().isBlank()));
+            assertEquals(0, ioExecutor.pendingCount());
+
+            interactions.setRepairApproved(true);
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(2, interactions.repairConfirmations());
+            assertEquals(1, ioExecutor.pendingCount());
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
+            assertFalse(controller.snapshot().document().requiresRepair());
+            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            assertEquals(8192L, Files.size(source));
         } finally {
             panel.close();
             ioExecutor.runAll();
@@ -1591,6 +1649,15 @@ final class NBTEditorPanelTest {
         /// Number of repair-save confirmations requested.
         private int repairConfirmations;
 
+        /// Source supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable Path repairSource;
+
+        /// Read report supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable NBTReadReport repairReport;
+
+        /// Storage profile supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable StorageProfile repairStorageProfile;
+
         /// Creates interactions with one initial chooser result.
         ///
         /// @param chosenFile initial chooser result
@@ -1661,13 +1728,16 @@ final class NBTEditorPanelTest {
         ///
         /// @param source source to rewrite
         /// @param report tolerant-read report
+        /// @param storageProfile immutable source storage profile
         /// @return configured approval
         @Override
         public boolean confirmRepairSave(
                 Path source,
-                NBTReadReport report) {
-            Objects.requireNonNull(source, "source");
-            Objects.requireNonNull(report, "report");
+                NBTReadReport report,
+                StorageProfile storageProfile) {
+            repairSource = Objects.requireNonNull(source, "source");
+            repairReport = Objects.requireNonNull(report, "report");
+            repairStorageProfile = Objects.requireNonNull(storageProfile, "storageProfile");
             repairConfirmations++;
             return repairApproved;
         }
@@ -1686,11 +1756,25 @@ final class NBTEditorPanelTest {
             return repairConfirmations;
         }
 
-        /// Returns the current repair-save decision.
+        /// Returns the source supplied to the most recent repair-save prompt.
         ///
-        /// @return whether repair publication is approved
-        private boolean repairApproved() {
-            return repairApproved;
+        /// @return prompted source
+        private Path repairSource() {
+            return Objects.requireNonNull(repairSource, "repair source was not captured");
+        }
+
+        /// Returns the report supplied to the most recent repair-save prompt.
+        ///
+        /// @return prompted report
+        private NBTReadReport repairReport() {
+            return Objects.requireNonNull(repairReport, "repair report was not captured");
+        }
+
+        /// Returns the storage profile supplied to the most recent repair-save prompt.
+        ///
+        /// @return prompted storage profile
+        private StorageProfile repairStorageProfile() {
+            return Objects.requireNonNull(repairStorageProfile, "repair storage profile was not captured");
         }
     }
 }
