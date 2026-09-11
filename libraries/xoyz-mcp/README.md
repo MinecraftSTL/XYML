@@ -16,9 +16,12 @@ does not grant a client permission to invoke every exposed operation.
 ## Authentication
 
 The four transport entry points (`POST` initialization and messages, `GET`, `DELETE`, and transport errors) share one
-Bearer credential gate before session or provider dispatch. The token is never included in protocol responses or
-diagnostic text. Authorization header names are case-insensitive, but duplicate `Authorization` names are rejected as
-an invalid request. The server compares SHA-256 digests with a constant-time comparison; it does not log credentials.
+Bearer credential gate before session or provider dispatch. Free-form provider values and diagnostic text are redacted
+without echoing the configured credential. Protocol-defined literals remain unchanged, and provider identifiers are
+only replaced when they exactly equal the credential so short credentials do not corrupt tool names or resource URIs.
+Use a high-entropy token; a short token can naturally occur as characters in fixed protocol text. Authorization header
+names are case-insensitive, but duplicate `Authorization` names are rejected as an invalid request. The server
+compares SHA-256 digests with a constant-time comparison; it does not log credentials.
 
 ## Coordinates
 
