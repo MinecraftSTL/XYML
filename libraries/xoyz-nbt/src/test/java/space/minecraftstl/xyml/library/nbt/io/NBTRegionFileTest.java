@@ -256,14 +256,14 @@ public final class NBTRegionFileTest {
         }
     }
 
-    /// Repairs an external marker in an `.mcr` file by publishing a small replacement inline.
+    /// Rejects replacing an external marker in `.mcr` because its storage profile cannot be preserved.
     ///
     /// `.mcr` has no `.mcc` companion contract. A tolerant session may still encounter a stale
-    /// external bit, but it must not attempt to create an inaccessible companion during repair.
+    /// external bit, but it must neither create a companion nor silently convert that slot inline.
     ///
     /// @throws Exception if fixture preparation or the bounded repair publication fails
     @Test
-    void repairsMcrExternalMarkerWithInlineReplacement() throws Exception {
+    void rejectsReplacingMcrExternalMarkerWithoutChangingStorage() throws Exception {
         Path mca = initialTwoChunkRegion();
         Path file = temporaryDirectory.resolve("r.0.0.mcr");
         Files.copy(mca, file);
@@ -271,6 +271,7 @@ public final class NBTRegionFileTest {
         int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
         bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
         Files.write(file, bytes);
+        byte[] original = Files.readAllBytes(file);
 
         CompoundTag replacement = new CompoundTag().addInt("value", 42);
         try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
@@ -280,12 +281,14 @@ public final class NBTRegionFileTest {
                     .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_MISSING".equals(issue.code())));
 
             region.writeChunk(0, new Chunk(replacement));
-            region.flush();
-            assertEquals(0, compressionMarker(file, 0) & 0x80);
+            assertThrows(IOException.class, region::flush);
+            assertTrue(region.isDirty());
         }
 
-        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
-            assertEquals(replacement, reopened.readChunk(0).getRootTag());
+        assertArrayEquals(original, Files.readAllBytes(file));
+        try (var files = Files.list(temporaryDirectory)) {
+            assertFalse(files.anyMatch(path -> path.getFileName().toString()
+                    .toLowerCase(java.util.Locale.ROOT).endsWith(".mcc")));
         }
     }
 
@@ -300,6 +303,27 @@ public final class NBTRegionFileTest {
             region.flush();
         }
         assertTrue(Files.isRegularFile(companion));
+    }
+
+    /// Finds an existing external companion whose `.mcc` extension has different case.
+    @Test
+    void readsCaseInsensitiveExternalCompanionName() throws Exception {
+        Path file = temporaryDirectory.resolve("r.0.0.mca");
+        Path companion = temporaryDirectory.resolve("c.0.0.mcc");
+        Path renameStage = temporaryDirectory.resolve("companion-rename.tmp");
+        Path upperCompanion = temporaryDirectory.resolve("c.0.0.MCC");
+        CompoundTag expected = new CompoundTag()
+                .addTag("payload", new ByteArrayTag(randomPayload(1_100_000, 97L)));
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(expected), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+        Files.move(companion, renameStage);
+        Files.move(renameStage, upperCompanion);
+
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            assertEquals(expected, region.readChunk(0).getRootTag());
+        }
     }
 
     /// Reuses a sector only after its old header entry has been cleared and forced.
@@ -348,6 +372,72 @@ public final class NBTRegionFileTest {
         setLocation(half, 0, 0, 1);
         Files.write(halfEmpty, half);
         assertThrows(IOException.class, () -> NBTRegionFile.open(halfEmpty));
+    }
+
+    /// Isolates overlapping slots while leaving a disjoint valid slot readable.
+    @Test
+    void tolerantOpenIsolatesOverlappingSlotsOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        setLocation(bytes, 1, sectorOffset(bytes, 0), 1);
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> first = region.readChunkTolerant(0);
+            NBTReadResult<Chunk> second = region.readChunkTolerant(1);
+            assertNull(first.root().getRootTag());
+            assertNull(second.root().getRootTag());
+            assertTrue(first.report().issues().stream()
+                    .anyMatch(issue -> "REGION_HEADER_OVERLAP".equals(issue.code())));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Isolates a maximum 24-bit out-of-range offset without overflowing range arithmetic.
+    @Test
+    void tolerantOpenIsolatesMaximumSectorOffsetOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        setLocation(bytes, 0, 0xFF_FFFF, 0xFF);
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_HEADER_SLOT_OUT_OF_RANGE".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Rejects arithmetic ranges that cannot be represented as one addressable byte array.
+    @Test
+    void rejectsByteRangesWhoseLongEndWouldOverflow() throws Exception {
+        try (FileChannel channel = FileChannel.open(
+                threeChunkRegion(), StandardOpenOption.READ)) {
+            assertThrows(IOException.class, () -> NBTRegionFileIO.readBytes(
+                    channel, Long.MAX_VALUE - 1L, 4L));
+        }
+    }
+
+    /// Isolates a missing external companion while retaining another valid slot.
+    @Test
+    void tolerantOpenIsolatesMissingCompanionOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_MISSING".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
     }
 
     /// Rejects a new region path whose parent is a symbolic link.
@@ -1077,6 +1167,20 @@ public final class NBTRegionFileTest {
         try (NBTRegionFile region = NBTRegionFile.open(file)) {
             region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 1)));
             region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1)));
+            region.flush();
+        }
+        return file;
+    }
+
+    /// Creates three disjoint valid slots for tolerant-isolation tests.
+    ///
+    /// @return initialized region path
+    private Path threeChunkRegion() throws Exception {
+        Path file = temporaryDirectory.resolve("r.3.0.mca");
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 0)));
+            region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1)));
+            region.writeChunk(2, new Chunk(new CompoundTag().addInt("value", 9)));
             region.flush();
         }
         return file;

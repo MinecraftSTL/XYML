@@ -22,6 +22,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
@@ -30,6 +32,7 @@ import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
 import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntArrayTag;
@@ -140,6 +143,34 @@ final class NBTBackendTest {
         assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
 
         assertThrows(CompletionException.class, () -> service.create(source).join());
+    }
+
+    /// Creates an empty Java Edition region with exactly two zero-filled header sectors.
+    ///
+    /// @param extension Anvil or legacy Region extension
+    @ParameterizedTest
+    @ValueSource(strings = {"mca", "mcr"})
+    void createsStrictlyReadableZeroFilledRegion(String extension) throws Exception {
+        Path source = temporaryDirectory.resolve("r.0.0." + extension);
+        NBTDocumentService service = new NBTDocumentService(Runnable::run);
+
+        try (NBTDocument document = service.create(source).join()) {
+            assertEquals("mca".equals(extension) ? NBTFileType.ANVIL : NBTFileType.REGION,
+                    document.fileType());
+            assertEquals(NBTFileEncoding.REGION, document.encoding());
+            assertFalse(document.isDirty());
+            byte[] bytes = Files.readAllBytes(source);
+            assertEquals(8192, bytes.length);
+            assertArrayEquals(new byte[8192], bytes);
+        }
+
+        ChunkRegion region = NBTCodec.of().readRegion(source);
+        assertEquals(1024, region.size());
+        assertTrue(region.stream().allMatch(chunk -> chunk.getRootTag() == null));
+        try (NBTDocument reopened = service.open(source).join()) {
+            assertEquals(NBTReadReport.Severity.CLEAN, reopened.readReport().severity());
+            assertEquals(NBTFileEncoding.REGION, reopened.encoding());
+        }
     }
 
     /// Defers a save and leaves source bytes unchanged until the supplied executor runs it.

@@ -125,11 +125,8 @@ final class NBTRepairReader {
             }
         }
 
-        if (strictCandidates.size() > 1) {
-            throw new IOException("Ambiguous NBT compression envelope; refusing to guess");
-        }
-        if (strictCandidates.size() == 1) {
-            StrictCandidate<T> candidate = strictCandidates.get(0);
+        @Nullable StrictCandidate<T> candidate = selectUniqueCandidate(strictCandidates);
+        if (candidate != null) {
             selectedLimits.newDocumentBudget().consume(candidate.bytes().length);
             if (candidate.encoding() != declared) {
                 issues.add(issue(NBTReadIssue.Severity.RECOVERED, "ENCODING_RECOVERED", "",
@@ -149,6 +146,24 @@ final class NBTRepairReader {
         ReadLimits.Budget budget = selectedLimits.newDocumentBudget();
         DecodedPayload tolerant = decode(source, declared, selectedLimits, budget, issues);
         return recoverPayload(tolerant.bytes(), declared, selectedCodec, rootClass, selectedLimits, issues);
+    }
+
+    /// Selects the sole complete strict compression candidate without guessing between alternatives.
+    ///
+    /// Keeping this decision independent from envelope decoding makes the fail-closed ambiguity
+    /// rule directly testable without depending on an unstable byte sequence that is valid under
+    /// two unrelated compression formats.
+    ///
+    /// @param candidates complete strict candidates in deterministic probe order
+    /// @param <T> candidate value type
+    /// @return the sole candidate, or `null` when none qualified
+    /// @throws IOException when more than one complete candidate qualified
+    static <T> @Nullable T selectUniqueCandidate(List<T> candidates) throws IOException {
+        @Unmodifiable List<T> snapshot = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
+        if (snapshot.size() > 1) {
+            throw new IOException("Ambiguous NBT compression envelope; refusing to guess");
+        }
+        return snapshot.isEmpty() ? null : snapshot.get(0);
     }
 
     /// Recovers one already bounded payload after strict object parsing failed.
@@ -893,7 +908,8 @@ final class NBTRepairReader {
                 Tag child = readNamedTag(cursor, path, context, edition);
                 if (child != null) {
                     if (compound.get(child.getName()) != null) {
-                        context.issue(NBTReadIssue.Severity.RECOVERED, "DUPLICATE_NAME", path,
+                        context.issue(NBTReadIssue.Severity.RECOVERED, "DUPLICATE_NAME",
+                                pathName(path, child.getName()),
                                 "重复名称已按最后出现的值保留");
                     }
                     compound.addTag(child);

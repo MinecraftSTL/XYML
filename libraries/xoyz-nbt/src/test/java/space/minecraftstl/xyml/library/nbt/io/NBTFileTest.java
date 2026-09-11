@@ -290,6 +290,41 @@ public final class NBTFileTest {
         assertThrows(IOException.class, () -> NBTFile.openTag(source));
     }
 
+    /// Rejects multiple complete strict envelope candidates instead of selecting probe order.
+    @Test
+    void rejectsAmbiguousCompressionCandidateSelection() {
+        IOException failure = assertThrows(IOException.class, () -> NBTRepairReader.selectUniqueCandidate(
+                List.of(NBTFileEncoding.RAW, NBTFileEncoding.ZLIB)));
+
+        assertTrue(failure.getMessage().contains("Ambiguous NBT compression envelope"));
+    }
+
+    /// Keeps the last duplicate Compound value and reports the exact affected NBT path.
+    @Test
+    void tolerantCompoundKeepsLastDuplicateValue() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                compoundWithDuplicateInt(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        assertEquals(2, result.root().getInt("value"));
+        assertEquals(NBTReadReport.Severity.RECOVERED, result.report().severity());
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "DUPLICATE_NAME".equals(issue.code())
+                        && "value".equals(issue.path())));
+    }
+
+    /// Recovers a complete Compound prefix when only its closing TAG_End is absent.
+    @Test
+    void tolerantCompoundRecoversMissingEndMarker() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                compoundWithoutEndMarker(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        assertEquals(7, result.root().getInt("value"));
+        assertEquals(NBTReadReport.Severity.RECOVERED, result.report().severity());
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "COMPOUND_END_MISSING".equals(issue.code())
+                        && issue.path().isEmpty()));
+    }
+
     /// Recovers a complete GZIP payload when only its eight-byte footer is missing.
     ///
     /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
@@ -574,6 +609,27 @@ public final class NBTFileTest {
         }
     }
 
+    /// Leaves the source and a foreign deterministic stage unchanged when staging cannot start.
+    @Test
+    void occupiedStandaloneStageFailsWithoutChangingEitherFile() throws Exception {
+        Path source = temporaryDirectory.resolve("occupied-stage.dat");
+        Path stage = temporaryDirectory.resolve("occupied-stage.dat.xyml_new");
+        byte[] original = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW);
+        byte[] foreignStage = new byte[]{0x12, 0x34, 0x56};
+        Files.write(source, original);
+        Files.write(stage, foreignStage);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
+            NBTEditor<CompoundTag> editor = file.getEditor();
+            editor.setScalar(editor.resolve(NBTAddress.root().appendName("value")), "2");
+
+            assertThrows(IOException.class, file::save);
+            assertArrayEquals(original, Files.readAllBytes(source));
+            assertArrayEquals(foreignStage, Files.readAllBytes(stage));
+            assertTrue(editor.isDirty());
+        }
+    }
+
     /// Rejects an oversized source before allocating an input snapshot.
     @Test
     void rejectsOversizedStandaloneBeforeReading() throws Exception {
@@ -744,6 +800,49 @@ public final class NBTFileTest {
         output.write(new byte[]{0, 0, 0, 7});
         output.write(0); // root TAG_End (must remain unconsumed after uncertainty)
         return output.toByteArray();
+    }
+
+    /// Builds a raw Compound containing the same named integer twice.
+    ///
+    /// @return malformed Java Edition NBT whose second value must win during tolerant recovery
+    private static byte[] compoundWithDuplicateInt() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        writeNamedInt(output, "value", 1);
+        writeNamedInt(output, "value", 2);
+        output.write(0); // root TAG_End
+        return output.toByteArray();
+    }
+
+    /// Builds a raw Compound with a complete child but no closing TAG_End.
+    ///
+    /// @return repairable Java Edition NBT bytes
+    private static byte[] compoundWithoutEndMarker() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        writeNamedInt(output, "value", 7);
+        return output.toByteArray();
+    }
+
+    /// Appends one named big-endian integer tag to a raw Compound fixture.
+    ///
+    /// @param output fixture destination
+    /// @param name child name
+    /// @param value integer payload
+    private static void writeNamedInt(ByteArrayOutputStream output, String name, int value) {
+        byte[] encodedName = name.getBytes(StandardCharsets.UTF_8);
+        output.write(3);
+        output.write(encodedName.length >>> Byte.SIZE);
+        output.write(encodedName.length);
+        output.writeBytes(encodedName);
+        output.write(value >>> 24);
+        output.write(value >>> 16);
+        output.write(value >>> 8);
+        output.write(value);
     }
 
     /// Builds a root list or primitive array with a negative declared length.

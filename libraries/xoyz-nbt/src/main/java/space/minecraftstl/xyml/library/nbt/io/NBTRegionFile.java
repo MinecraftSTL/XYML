@@ -841,6 +841,9 @@ public final class NBTRegionFile implements AutoCloseable {
         } catch (NBTValidationException exception) {
             throw new IOException("Invalid NBT tree for region chunk " + localIndex, exception);
         }
+        if (oldExternal && previousCompanion == null) {
+            throw new IOException("Cannot preserve external chunk storage for region format: " + path);
+        }
         CompressionType compression = compressionForPublication(localIndex, change.compression);
         byte[] nbt = NBTCodec.of().writeTagToByteArray(root.clone());
         byte[] compressed = compress(compression, nbt);
@@ -849,8 +852,8 @@ public final class NBTRegionFile implements AutoCloseable {
                     + compressed.length);
         }
         long framedBytes = compressed.length + 5L;
-        // Keep external storage when a companion path exists. An `.mcr` repair may become inline;
-        // an oversized replacement fails before any visible mutation.
+        // Existing external slots keep external storage. Formats without a companion contract
+        // fail above instead of silently changing the persisted storage profile.
         @Nullable Path companionTarget = oldExternal ? previousCompanion : companionPath(localIndex);
         boolean keepExternal = (oldExternal && companionTarget != null) || framedBytes > MAX_INLINE_BYTES;
         if (keepExternal && companionTarget == null) {
