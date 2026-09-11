@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -611,6 +612,44 @@ final class XYMLMcpCrashRepairCoordinatorTest {
         }
     }
 
+    /// Confirms a lost residual-cleanup handle never masquerades as a current operation identifier.
+    @Test
+    void hidesUnavailableResidualOperationIdentifier() throws Exception {
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:residual-unavailable",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> Task.completed(null));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution(firstDiagnosis(analysis)).get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Object retainedPlan = reflectedPlan(coordinator, planId);
+            Field stateField = retainedPlan.getClass().getDeclaredField("state");
+            stateField.setAccessible(true);
+            @Nullable Object blockedState = null;
+            for (Object state : stateField.getType().getEnumConstants()) {
+                if (state instanceof Enum<?> enumState && "BLOCKED_RESIDUAL".equals(enumState.name())) {
+                    blockedState = state;
+                    break;
+                }
+            }
+            stateField.set(retainedPlan, java.util.Objects.requireNonNull(blockedState));
+            setPlanField(retainedPlan, "lastOperationId", "expired-operation");
+            setPlanField(retainedPlan, "residualCleanupOperationId", "expired-operation");
+
+            Map<String, Object> unavailable = coordinator.retry(planId);
+            assertEquals("BLOCKED_RESIDUAL", unavailable.get("plan_state"));
+            assertEquals(true, unavailable.get("cleanup_unavailable"));
+            assertEquals(true, unavailable.get("retryable"));
+            assertFalse(unavailable.containsKey("operation_id"));
+            assertFalse(unavailable.containsKey("current_operation_id"));
+        }
+    }
+
     /// Confirms Java selection is exposed as one confirmed, executable repair solution.
     @Test
     void plansAndExecutesNonDestructiveJavaRepair() throws Exception {
@@ -874,6 +913,27 @@ final class XYMLMcpCrashRepairCoordinatorTest {
         List<Map<String, Object>> diagnoses = (List<Map<String, Object>>) analysis.get("diagnoses");
         assertEquals(1, diagnoses.size());
         return diagnoses.get(0);
+    }
+
+    /// Reads one retained repair plan for a test that simulates an unavailable registry handle.
+    private static Object reflectedPlan(
+            XYMLMcpCrashRepairCoordinator coordinator,
+            String planId) throws ReflectiveOperationException {
+        Field plansField = XYMLMcpCrashRepairCoordinator.class.getDeclaredField("plans");
+        plansField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> plans = (Map<String, Object>) plansField.get(coordinator);
+        return java.util.Objects.requireNonNull(plans.get(planId));
+    }
+
+    /// Sets one private plan field for a narrowly scoped lifecycle-boundary fixture.
+    private static void setPlanField(
+            Object plan,
+            String fieldName,
+            @Nullable Object value) throws ReflectiveOperationException {
+        Field field = plan.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(plan, value);
     }
 
     /// Extracts the structured solution from one diagnosis.

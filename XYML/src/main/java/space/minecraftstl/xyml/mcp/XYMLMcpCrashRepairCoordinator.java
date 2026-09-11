@@ -201,13 +201,18 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 createdAt.plus(analysisLifetime),
                 sourceValidator,
                 solutions(results, input, source));
-        synchronized (stateLock) {
-            requireOpenLocked();
-            pruneLocked();
-            ensureAnalysisCapacityLocked();
-            analyses.put(session.id, session);
+        List<String> ownerRetentionsToRelease = new ArrayList<>();
+        try {
+            synchronized (stateLock) {
+                requireOpenLocked();
+                ownerRetentionsToRelease.addAll(pruneLocked());
+                ownerRetentionsToRelease.addAll(ensureAnalysisCapacityLocked());
+                analyses.put(session.id, session);
+            }
+            return analysisSnapshot(session);
+        } finally {
+            releaseOwnerRetentions(ownerRetentionsToRelease);
         }
-        return analysisSnapshot(session);
     }
 
     /// Creates a short-lived execution plan for one analyzed solution.
@@ -237,27 +242,32 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         AnalysisSession session;
         Solution solution;
         ExecutionDecision decision;
-        synchronized (stateLock) {
-            requireOpenLocked();
-            pruneLocked();
-            session = requireAnalysisLocked(analysisId);
-            solution = requireSolution(session, solutionId);
-            decision = executionDecision(session, solution);
-            if (!decision.executable()) {
-                return planSnapshot(session, solution, null, decision);
+        List<String> ownerRetentionsToRelease = new ArrayList<>();
+        try {
+            synchronized (stateLock) {
+                requireOpenLocked();
+                ownerRetentionsToRelease.addAll(pruneLocked());
+                session = requireAnalysisLocked(analysisId);
+                solution = requireSolution(session, solutionId);
+                decision = executionDecision(session, solution);
+                if (!decision.executable()) {
+                    return planSnapshot(session, solution, null, decision);
+                }
+                @Nullable String selectedCandidate = resolveCandidate(solution.candidates, candidateId, false);
+                ownerRetentionsToRelease.addAll(ensurePlanCapacityLocked());
+                Instant createdAt = clock.instant();
+                RepairPlan plan = new RepairPlan(
+                        UUID.randomUUID().toString(),
+                        session.id,
+                        solution.id,
+                        createdAt,
+                        createdAt.plus(planLifetime),
+                        selectedCandidate);
+                plans.put(plan.id, plan);
+                return planSnapshot(session, solution, plan, decision);
             }
-            @Nullable String selectedCandidate = resolveCandidate(solution.candidates, candidateId, false);
-            ensurePlanCapacityLocked();
-            Instant createdAt = clock.instant();
-            RepairPlan plan = new RepairPlan(
-                    UUID.randomUUID().toString(),
-                    session.id,
-                    solution.id,
-                    createdAt,
-                    createdAt.plus(planLifetime),
-                    selectedCandidate);
-            plans.put(plan.id, plan);
-            return planSnapshot(session, solution, plan, decision);
+        } finally {
+            releaseOwnerRetentions(ownerRetentionsToRelease);
         }
     }
 
@@ -303,10 +313,11 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         Solution solution;
         @Nullable RepairPlan claimedPlan = null;
         RepairCheckpoint checkpoint = RepairCheckpoint.initial();
+        List<String> ownerRetentionsToRelease = new ArrayList<>();
         try {
             synchronized (stateLock) {
                 requireOpenLocked();
-                pruneLocked();
+                ownerRetentionsToRelease.addAll(pruneLocked());
                 RepairPlan plan = requirePlanLocked(planId);
                 if (plan.retryInProgress != retryReservation) {
                     throw new IllegalStateException(
@@ -315,9 +326,6 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                                     : "Crash repair plan is being retried: " + planId);
                 }
                 if (plan.state != PlanState.AVAILABLE) {
-                    if (plan.state == PlanState.RUNNING) {
-                        refreshRunningPlanLocked(plan);
-                    }
                     throw new IllegalStateException(
                             "Crash repair plan is not available; use retry for a failed attempt: " + planId);
                 }
@@ -343,6 +351,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 // The previous operation must not be allowed to publish a late terminal state while this fresh
                 // attempt is being registered. The new operation ID is installed atomically below.
                 plan.lastOperationId = null;
+                plan.residualCleanupOperationId = null;
                 checkpoint = plan.checkpoint();
             }
         } catch (RuntimeException failure) {
@@ -361,6 +370,8 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 clearRetryReservation(planId);
             }
             throw failure;
+        } finally {
+            releaseOwnerRetentions(ownerRetentionsToRelease);
         }
         RepairPlan plan = Objects.requireNonNull(claimedPlan, "claimed crash repair plan");
         RepairCheckpoint executionCheckpoint = checkpoint;
@@ -442,21 +453,38 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     public @Unmodifiable Map<String, Object> retry(String planId) {
         RepairPlan plan;
         @Nullable String cleanupOperationId;
-        synchronized (stateLock) {
-            requireOpenLocked();
-            pruneLocked();
-            plan = requirePlanLocked(planId);
-            if (plan.state == PlanState.RUNNING) {
-                refreshRunningPlanLocked(plan);
+        List<String> ownerRetentionsToRelease = new ArrayList<>();
+        try {
+            synchronized (stateLock) {
+                requireOpenLocked();
+                ownerRetentionsToRelease.addAll(pruneLocked());
+                plan = requirePlanLocked(planId);
             }
-            if (plan.retryInProgress) {
-                throw new IllegalStateException("Crash repair plan retry is already in progress: " + planId);
+        } finally {
+            releaseOwnerRetentions(ownerRetentionsToRelease);
+        }
+        refreshRunningPlan(planId);
+
+        ownerRetentionsToRelease = new ArrayList<>();
+        try {
+            synchronized (stateLock) {
+                requireOpenLocked();
+                // Do not prune a plan again after refreshing a running operation: an expired operation may have just
+                // transitioned to FAILED_RETRYABLE and must remain reachable long enough for this retry reservation.
+                plan = requirePlanLocked(planId);
+                if (plan.retryInProgress) {
+                    throw new IllegalStateException("Crash repair plan retry is already in progress: " + planId);
+                }
+                if (!plan.state.retryable() || plan.state == PlanState.AVAILABLE) {
+                    throw new IllegalStateException("Crash repair plan is not retryable: " + planId);
+                }
+                plan.retryInProgress = true;
+                cleanupOperationId = plan.state == PlanState.BLOCKED_RESIDUAL
+                        ? plan.residualCleanupOperationId
+                        : null;
             }
-            if (!plan.state.retryable() || plan.state == PlanState.AVAILABLE) {
-                throw new IllegalStateException("Crash repair plan is not retryable: " + planId);
-            }
-            plan.retryInProgress = true;
-            cleanupOperationId = plan.state == PlanState.BLOCKED_RESIDUAL ? plan.lastOperationId : null;
+        } finally {
+            releaseOwnerRetentions(ownerRetentionsToRelease);
         }
         try {
             if (cleanupOperationId != null) {
@@ -473,10 +501,12 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                         plan.state = PlanState.BLOCKED_RESIDUAL;
                         plan.failureType = cleanupUnavailable.getClass().getName();
                         plan.failureMessage = cleanupMessage;
+                        // The cleanup handle is retained separately for a future bounded attempt. It is not a
+                        // current operation any more because the registry could not resolve it.
+                        plan.lastOperationId = null;
                         plan.retryInProgress = false;
                     }
                     Map<String, Object> unavailable = new LinkedHashMap<>();
-                    unavailable.put("operation_id", cleanupOperationId);
                     unavailable.put("status", "FAILED");
                     unavailable.put("retryable", true);
                     unavailable.put("cleanup_succeeded", false);
@@ -503,6 +533,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                         plan.failureMessage = null;
                         plan.failedSteps = List.of();
                         plan.resumeFromStep = null;
+                        plan.residualCleanupOperationId = null;
                         plan.retryInProgress = false;
                     }
                     return operationWithPlan(cleanup, plan);
@@ -703,19 +734,35 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         return normalized.length() <= 512 ? normalized : normalized.substring(0, 512);
     }
 
-    /// Refreshes a running plan from its operation snapshot before accepting a retry.
-    private void refreshRunningPlanLocked(RepairPlan plan) {
-        @Nullable String operationId = plan.lastOperationId;
+    /// Refreshes a running plan without holding the coordinator lock across a registry call.
+    ///
+    /// @param planId plan whose most recent operation may have reached a terminal state
+    private void refreshRunningPlan(String planId) {
+        @Nullable String operationId;
+        synchronized (stateLock) {
+            @Nullable RepairPlan plan = plans.get(Objects.requireNonNull(planId, "planId"));
+            operationId = plan != null && plan.state == PlanState.RUNNING && !plan.retryInProgress
+                    ? plan.lastOperationId
+                    : null;
+        }
         if (operationId == null) {
             return;
         }
         try {
-            updatePlanFromOperation(plan, operationId, operations.status(operationId));
+            Map<String, Object> operation = operations.status(operationId);
+            synchronized (stateLock) {
+                @Nullable RepairPlan plan = plans.get(planId);
+                if (plan != null) {
+                    updatePlanFromOperation(plan, operationId, operation);
+                }
+            }
         } catch (IllegalArgumentException ignored) {
             // A missing operation can no longer prove success or failure. Do not leave the plan permanently RUNNING:
             // make the uncertainty explicitly retryable and remove the stale owner link so a later retry can publish a
             // fresh operation without waiting for a callback that can never arrive.
-            markExpiredOperationLocked(plan.id, operationId);
+            synchronized (stateLock) {
+                markExpiredOperationLocked(planId, operationId);
+            }
         }
     }
 
@@ -738,6 +785,8 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         plan.state = PlanState.FAILED_RETRYABLE;
         plan.failureType = IllegalStateException.class.getName();
         plan.failureMessage = "Crash repair operation expired before terminal state was observed";
+        plan.lastOperationId = null;
+        plan.residualCleanupOperationId = null;
         operationPlans.remove(operationId, plan.id);
     }
 
@@ -748,6 +797,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 plan.state = PlanState.FAILED_RETRYABLE;
                 plan.failureType = failure.getClass().getName();
                 plan.failureMessage = boundedFailureMessage(failure);
+                plan.residualCleanupOperationId = null;
             }
         }
     }
@@ -800,6 +850,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     plan.state = PlanState.SUCCEEDED;
                     plan.failureType = null;
                     plan.failureMessage = null;
+                    plan.residualCleanupOperationId = null;
                 }
                 case "FAILED" -> {
                     plan.state = PlanState.FAILED_RETRYABLE;
@@ -807,6 +858,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     @Nullable Object failureMessage = operation.get("failure_message");
                     plan.failureType = failureType == null ? null : String.valueOf(failureType);
                     plan.failureMessage = failureMessage == null ? null : String.valueOf(failureMessage);
+                    plan.residualCleanupOperationId = null;
                 }
                 case "BLOCKED_RESIDUAL" -> {
                     plan.state = PlanState.BLOCKED_RESIDUAL;
@@ -814,11 +866,13 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     @Nullable Object failureMessage = operation.get("failure_message");
                     plan.failureType = failureType == null ? null : String.valueOf(failureType);
                     plan.failureMessage = failureMessage == null ? null : String.valueOf(failureMessage);
+                    plan.residualCleanupOperationId = operationId;
                 }
                 case "CANCELLED" -> {
                     plan.state = PlanState.CANCELLED;
                     plan.failureType = null;
                     plan.failureMessage = null;
+                    plan.residualCleanupOperationId = null;
                 }
                 default -> {
                     // Queued and running operations remain active until their operation reaches a terminal state.
@@ -1150,8 +1204,10 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         }
     }
 
-    /// Removes expired analyses and plans.
-    private void pruneLocked() {
+    /// Removes expired analyses and plans while collecting registry releases for after the lock is dropped.
+    ///
+    /// @return operation identifiers whose owner retention must be released outside [#stateLock]
+    private @Unmodifiable List<String> pruneLocked() {
         Instant now = clock.instant();
         analyses.values().removeIf(session -> !session.expiresAt.isAfter(now)
                 && plans.values().stream().noneMatch(plan ->
@@ -1169,9 +1225,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 .toList();
         operationPlans.entrySet().removeIf(entry -> !plans.containsKey(entry.getValue()));
         // Do not call the registry while holding the coordinator lock; release pins after the map mutation is visible.
-        for (String operationId : releasedOperations) {
-            operations.releaseOwnerRetention(operationId);
-        }
+        return List.copyOf(releasedOperations);
     }
 
     /// Keeps a plan reachable while an operation or cleanup reservation can still publish state.
@@ -1189,9 +1243,11 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     }
 
     /// Makes room for an analysis without invalidating an unconsumed plan.
-    private void ensureAnalysisCapacityLocked() {
+    ///
+    /// @return operation identifiers whose owner retention must be released outside [#stateLock]
+    private @Unmodifiable List<String> ensureAnalysisCapacityLocked() {
         if (analyses.size() < maximumAnalyses) {
-            return;
+            return List.of();
         }
         @Nullable String removableId = analyses.keySet().stream()
                 .filter(analysisId -> plans.values().stream()
@@ -1203,26 +1259,34 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             throw new IllegalStateException("Too many crash analyses with active repair plans");
         }
         analyses.remove(removableId);
-        List<String> removedOperationIds = plans.values().stream()
-                .filter(plan -> plan.analysisId.equals(removableId))
-                .map(plan -> plan.lastOperationId)
-                .filter(Objects::nonNull)
-                .toList();
+        List<String> removedOperationIds = new ArrayList<>();
+        for (RepairPlan plan : plans.values()) {
+            if (!plan.analysisId.equals(removableId)) {
+                continue;
+            }
+            if (plan.lastOperationId != null && !removedOperationIds.contains(plan.lastOperationId)) {
+                removedOperationIds.add(plan.lastOperationId);
+            }
+            if (plan.residualCleanupOperationId != null
+                    && !removedOperationIds.contains(plan.residualCleanupOperationId)) {
+                removedOperationIds.add(plan.residualCleanupOperationId);
+            }
+        }
         List<String> removedPlanIds = plans.values().stream()
                 .filter(plan -> plan.analysisId.equals(removableId))
                 .map(plan -> plan.id)
                 .toList();
         plans.values().removeIf(plan -> plan.analysisId.equals(removableId));
         operationPlans.entrySet().removeIf(entry -> removedPlanIds.contains(entry.getValue()));
-        for (String operationId : removedOperationIds) {
-            operations.releaseOwnerRetention(operationId);
-        }
+        return List.copyOf(removedOperationIds);
     }
 
     /// Makes room for a plan by evicting the oldest terminal plan.
-    private void ensurePlanCapacityLocked() {
+    ///
+    /// @return operation identifiers whose owner retention must be released outside [#stateLock]
+    private @Unmodifiable List<String> ensurePlanCapacityLocked() {
         if (plans.size() < maximumPlans) {
-            return;
+            return List.of();
         }
         @Nullable String consumedId = plans.entrySet().stream()
                 .filter(entry -> entry.getValue().state == PlanState.SUCCEEDED)
@@ -1233,9 +1297,28 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             throw new IllegalStateException("Too many unconsumed crash repair plans");
         }
         @Nullable RepairPlan removed = plans.remove(consumedId);
-        if (removed != null && removed.lastOperationId != null) {
+        if (removed == null) {
+            return List.of();
+        }
+        List<String> released = new ArrayList<>();
+        if (removed.lastOperationId != null) {
             operationPlans.remove(removed.lastOperationId);
-            operations.releaseOwnerRetention(removed.lastOperationId);
+            released.add(removed.lastOperationId);
+        }
+        if (removed.residualCleanupOperationId != null
+                && !released.contains(removed.residualCleanupOperationId)) {
+            operationPlans.remove(removed.residualCleanupOperationId);
+            released.add(removed.residualCleanupOperationId);
+        }
+        return List.copyOf(released);
+    }
+
+    /// Releases operation-owner pins after the coordinator state lock is no longer held.
+    ///
+    /// @param operationIds operation identifiers collected by pruning or capacity eviction
+    private void releaseOwnerRetentions(@Unmodifiable List<String> operationIds) {
+        for (String operationId : operationIds) {
+            operations.releaseOwnerRetention(operationId);
         }
     }
 
@@ -1405,6 +1488,10 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
 
         /// Most recent operation identifier, or null before the first attempt.
         private @Nullable String lastOperationId;
+
+        /// Operation identifier retained only for a blocked residual cleanup retry, or null when no cleanup handle is
+        /// needed.
+        private @Nullable String residualCleanupOperationId;
 
         /// Last retryable failure type, or null when none is recorded.
         private @Nullable String failureType;
