@@ -34,6 +34,7 @@ import javax.swing.ListSelectionModel;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.event.MouseEvent;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
@@ -44,6 +45,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -291,6 +293,61 @@ final class LoaderSelectionWizardPanelTest {
         }
     }
 
+    /// Retries a failed explicit loader-version request when the localized status text is clicked.
+    @Test
+    void retriesFailedLoaderLoadFromStatusLabel() throws Exception {
+        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        RecordingSource source = new RecordingSource();
+        source.put(GameLoaderKind.FABRIC, fabric);
+        source.failNextRequest();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable LoaderSelectionWizardPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new LoaderSelectionWizardPanel(
+                    new DefaultGameLoaderCatalogModel(source),
+                    executor,
+                    LoaderSelectionWizardStrings.english())));
+            LoaderSelectionWizardPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                panel.selectGameVersion("1.20.1");
+                JButton kindButton = findNamed(panel, "loaderKind_FABRIC", JButton.class);
+                JButton loadButton = findNamed(panel, "loaderLoadVersions", JButton.class);
+                assertNotNull(kindButton);
+                assertNotNull(loadButton);
+                kindButton.doClick();
+                loadButton.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JLabel status = findNamed(panel, "loaderSelectionStatus", JLabel.class);
+                assertNotNull(status);
+                assertEquals(LoaderSelectionWizardStrings.english().loadFailedStatus(), status.getText());
+                status.dispatchEvent(new MouseEvent(
+                        status,
+                        MouseEvent.MOUSE_CLICKED,
+                        System.currentTimeMillis(),
+                        0,
+                        1,
+                        1,
+                        1,
+                        false,
+                        MouseEvent.BUTTON1));
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                assertEquals(2, source.requestCount.get());
+                assertTrue(panel.versionChoiceList().getList().getModel().getSize() > 0);
+            });
+        } finally {
+            closePanel(panelReference.get());
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Selects a compatible loader card and explicitly refreshes its versions through the worker boundary.
     ///
     /// @param panel embedded Swing loader wizard
@@ -414,6 +471,14 @@ final class LoaderSelectionWizardPanelTest {
         /// Number of source refreshes initiated by an explicit version-list command.
         private final AtomicInteger requestCount = new AtomicInteger();
 
+        /// Causes exactly one subsequent source refresh to fail.
+        private final AtomicBoolean failNext = new AtomicBoolean();
+
+        /// Marks the next source refresh as a deterministic failure for retry tests.
+        private void failNextRequest() {
+            failNext.set(true);
+        }
+
         /// Configures one source result retaining the exact supplied remote object.
         ///
         /// @param kind selected loader catalog kind
@@ -434,6 +499,9 @@ final class LoaderSelectionWizardPanelTest {
                 GameLoaderCatalogRequest request) {
             GameLoaderCatalogRequest nonNullRequest = Objects.requireNonNull(request, "request");
             requestCount.incrementAndGet();
+            if (failNext.compareAndSet(true, false)) {
+                return CompletableFuture.failedFuture(new IllegalStateException("recorded loader failure"));
+            }
             @Unmodifiable List<GameLoaderCatalogItem> items = itemsByKind.getOrDefault(
                     nonNullRequest.kind(),
                     List.of());

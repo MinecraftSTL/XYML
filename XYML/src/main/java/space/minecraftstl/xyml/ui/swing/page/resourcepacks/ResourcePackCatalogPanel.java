@@ -29,11 +29,13 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -104,6 +106,12 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Minimum allocated width that presents list and details side by side.
     private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
+
+    /// Stable icon shown for every installed resource-pack row.
+    private static final Icon RESOURCE_PACK_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/folder-fill.svg",
+            32,
+            32);
 
     /// Lock guarding close state and coalesced model notification revisions.
     private final Object stateLock = new Object();
@@ -331,7 +339,15 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             searchListener = createSearchListener();
             showingListener = this::showingChanged;
             filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
-            acquiredChoiceList = new ViewportChoiceList<>(filteredDataSource, ResourcePackCatalogItem::displayText);
+            acquiredChoiceList = new ViewportChoiceList<>(
+                    filteredDataSource,
+                    new RichChoiceListCellRenderer<>(
+                            ResourcePackCatalogItem::displayText,
+                            item -> resourcePackRowDetail(item),
+                            item -> resourcePackRowBadge(item),
+                            item -> RESOURCE_PACK_ROW_ICON,
+                            ResourcePackCatalogItem::description,
+                            item -> !item.enabled()));
             choiceList = acquiredChoiceList;
             catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
             configureComponents();
@@ -667,6 +683,38 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             }
         });
         choiceList.getChoiceModel().addListDataListener(listDataListener);
+    }
+
+    /// Formats one installed resource pack's compact description and file identity.
+    ///
+    /// @param item loaded resource-pack row
+    /// @return one-line description and exact file name
+    private String resourcePackRowDetail(ResourcePackCatalogItem item) {
+        String description = firstNonBlankLine(item.description());
+        if (description.isBlank()) {
+            return item.fileName();
+        }
+        return description + " | " + item.fileName();
+    }
+
+    /// Formats the compatibility badge for one resource pack.
+    ///
+    /// @param item loaded resource-pack row
+    /// @return localized compatibility text
+    private String resourcePackRowBadge(ResourcePackCatalogItem item) {
+        return strings.compatibilityText(item.compatibility());
+    }
+
+    /// Returns the first meaningful line from a potentially multiline pack description.
+    ///
+    /// @param text complete pack description
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(String text) {
+        return text.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     /// Creates the unframed read-only details surface used by both responsive orientations.
@@ -1763,7 +1811,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         private ResponsiveCatalogSplitPane(
                 ViewportChoiceList<ResourcePackCatalogItem> list,
                 JComponent details) {
-            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("resourcePacksCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());

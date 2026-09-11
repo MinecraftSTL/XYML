@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.util.ArrayList;
@@ -128,6 +130,8 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
             InstanceManagementPage destinationPage = loadedPage;
             contentTransition.transitionFrom(outgoingComponent, direction, () -> {
                 cardLayout.show(this, destination.name());
+                cardLayout.layoutContainer(this);
+                layoutVisibleTree(destinationPage.component());
                 try {
                     destinationPage.activate();
                 } catch (RuntimeException | Error failure) {
@@ -253,6 +257,21 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         super.removeNotify();
     }
 
+    /// Lays out the selected page immediately after the card deck receives a new allocation.
+    ///
+    /// The outer shell uses a custom layered layout, so a card can receive its bounds before Swing's
+    /// normal validation walk reaches the newly mounted management tree. Recursing through visible
+    /// descendants keeps responsive list/details splits synchronized for the first paint as well as
+    /// for later resizes.
+    @Override
+    public void doLayout() {
+        super.doLayout();
+        @Nullable JComponent visiblePage = selectedComponent();
+        if (visiblePage != null) {
+            layoutVisibleTree(visiblePage);
+        }
+    }
+
     /// Derives vertical motion from canonical navigation order.
     ///
     /// @param previous currently selected destination, or null before initial display
@@ -282,6 +301,8 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
             add(createdPage.component(), destination.name());
             installed = true;
             cardLayout.show(this, destination.name());
+            cardLayout.layoutContainer(this);
+            layoutVisibleTree(createdPage.component());
             revalidate();
             createdPage.activate();
             loadedPages.put(destination, createdPage);
@@ -320,9 +341,26 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         @Nullable InstanceManagementPageId previousPage = selectedPage;
         if (previousPage != null) {
             cardLayout.show(this, previousPage.name());
+            cardLayout.layoutContainer(this);
+            @Nullable JComponent previousComponent = selectedComponent();
+            if (previousComponent != null) {
+                layoutVisibleTree(previousComponent);
+            }
         }
         revalidate();
         repaint();
+    }
+
+    /// Lays out one visible page branch without forcing hidden cards to perform work.
+    ///
+    /// @param container visible page root or nested visible container
+    private static void layoutVisibleTree(Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child.isVisible() && child instanceof Container nestedContainer) {
+                layoutVisibleTree(nestedContainer);
+            }
+        }
     }
 
     /// Releases loaded pages in reverse creation order and propagates the first cleanup failure.

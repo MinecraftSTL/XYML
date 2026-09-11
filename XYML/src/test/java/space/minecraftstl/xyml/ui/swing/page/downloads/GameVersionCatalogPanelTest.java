@@ -554,6 +554,24 @@ public final class GameVersionCatalogPanelTest {
         });
     }
 
+    /// Retries a failed game-version catalog load when the visible failure text is clicked.
+    @Test
+    public void retriesFailedCatalogFromStateLabel() {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                List.of(),
+                snapshot(-1, 0, 1L, GameVersionCatalogStatus.FAILED, "Failed", false, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+        try {
+            onEventDispatchThread(() -> {
+                JLabel failed = findComponent(panel, "gameVersionsFailed", JLabel.class);
+                failed.dispatchEvent(primaryClick(failed));
+                assertEquals(1, model.refreshes.get());
+            });
+        } finally {
+            onEventDispatchThread(panel::close);
+        }
+    }
+
     /// Installs the exact loaded choice, derives only from its version ID, and preserves a user name.
     @Test
     public void installsExactLoadedChoiceAndPreservesUserAuthoredName() throws Exception {
@@ -1070,6 +1088,23 @@ public final class GameVersionCatalogPanelTest {
     private static Rectangle boundsRelativeTo(Container root, Component component) {
         Container parent = Objects.requireNonNull(component.getParent(), "component parent");
         return SwingUtilities.convertRectangle(parent, component.getBounds(), root);
+    }
+
+    /// Creates a primary-button mouse event for state-label action tests.
+    ///
+    /// @param source state label receiving the event
+    /// @return deterministic single-click event
+    private static MouseEvent primaryClick(Component source) {
+        return new MouseEvent(
+                source,
+                MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false,
+                MouseEvent.BUTTON1);
     }
 
     /// Runs a value-producing operation synchronously on the EDT.

@@ -51,6 +51,7 @@ import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.Dimension;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -118,11 +119,12 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         super(new MigLayout(
-                "insets 0, fill, wrap 3",
-                "[][grow,fill][180!]",
-                "[40!]8[40!]8[]8[grow,fill]"));
+                "insets 0, fill, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]8[40!]8[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         progressHost = new TaskProgressHostPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
@@ -134,11 +136,13 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         add(archiveLabel);
         archiveField.setName("localModpackArchive");
         archiveField.setEditable(false);
-        add(archiveField, "growx, h 40!");
+        archiveField.setMinimumSize(new Dimension(0, 0));
+        add(archiveField, "growx, wmin 0, h 40!");
         chooseArchiveButton.setName("localModpackChooseArchive");
         chooseArchiveButton.setText(i18n("modpack.choose.local"));
         chooseArchiveButton.addActionListener(event -> chooseArchive());
-        add(chooseArchiveButton, "grow, h 40!");
+        chooseArchiveButton.setMinimumSize(new Dimension(0, 0));
+        add(chooseArchiveButton, "span 2, growx, wmin 0, h 40!");
 
         JLabel instanceNameLabel = new JLabel(i18n("modpack.enter_name"));
         instanceNameLabel.setLabelFor(instanceNameField);
@@ -146,16 +150,18 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         instanceNameField.setName("localModpackInstanceName");
         SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(inputListener);
-        add(instanceNameField, "growx, h 40!");
+        instanceNameField.setMinimumSize(new Dimension(0, 0));
+        add(instanceNameField, "growx, wmin 0, h 40!");
         importButton.setName("localModpackImport");
         importButton.setText(i18n("install.modpack"));
         importButton.addActionListener(event -> beginImport());
-        add(importButton, "grow, h 40!");
+        importButton.setMinimumSize(new Dimension(0, 0));
+        add(importButton, "span 2, growx, wmin 0, h 40!");
 
         statusLabel.setName("localModpackImportStatus");
-        add(statusLabel, "skip 1, span 2, growx, h 24!");
+        add(statusLabel, "span 2, growx, h 24!");
         progressHost.setName("localModpackImportProgress");
-        add(progressHost, "span 3, grow");
+        add(progressHost, "span 2, grow");
         updateImportButton();
     }
 

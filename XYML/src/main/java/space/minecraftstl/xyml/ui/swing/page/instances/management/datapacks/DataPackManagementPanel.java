@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
@@ -39,6 +40,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
@@ -74,6 +76,18 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// are created on the supplied executor only after the user selects a visible loaded world row.
 @NotNullByDefault
 public final class DataPackManagementPanel extends JPanel implements AutoCloseable {
+    /// Fallback icon for a world row in the two-pane data-pack manager.
+    private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
+    /// Bundled icon for one data-pack row.
+    private static final Icon DATA_PACK_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/folder-fill.svg",
+            32,
+            32);
+
     /// Background model that lazily indexes direct child world directories and owns its own work.
     private final WorldCatalogModel worlds;
 
@@ -253,8 +267,22 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.executor = Objects.requireNonNull(executor, "executor");
         displayedWorldSnapshot = this.worlds.snapshot();
-        worldChoiceList = new ViewportChoiceList<>(this.worlds, WorldCatalogItem::displayText);
-        dataPackChoiceList = new ViewportChoiceList<>(dataPackSource, this::dataPackText);
+        worldChoiceList = new ViewportChoiceList<>(
+                this.worlds,
+                new RichChoiceListCellRenderer<>(
+                        WorldCatalogItem::displayText,
+                        this::worldRowDetail,
+                        this::worldRowBadge,
+                        item -> WORLD_ROW_ICON,
+                        item -> item.path().toString()));
+        dataPackChoiceList = new ViewportChoiceList<>(
+                dataPackSource,
+                new RichChoiceListCellRenderer<>(
+                        DataPack.Pack::getId,
+                        this::dataPackDetail,
+                        this::dataPackBadge,
+                        item -> DATA_PACK_ROW_ICON,
+                        this::dataPackTooltip));
 
         configureComponents();
         worldChoiceList.getList().addListSelectionListener(worldSelectionListener);
@@ -481,13 +509,72 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         return label;
     }
 
-    /// Formats one loaded data-pack row without resolving more metadata on the EDT.
+    /// Formats compact world metadata for the world selector without opening its directory.
     ///
-    /// @param dataPack loaded Core data-pack value
-    /// @return concise stable identifier and requested active state
-    private String dataPackText(DataPack.Pack dataPack) {
-        DataPack.Pack pack = Objects.requireNonNull(dataPack, "dataPack");
-        return pack.getId() + " - " + (pack.isActive() ? strings.activeText() : strings.inactiveText());
+    /// @param world loaded world row
+    /// @return game-version or retained failure detail
+    private String worldRowDetail(WorldCatalogItem world) {
+        if (world.failureDetail() != null) {
+            return firstNonBlankLine(world.failureDetail());
+        }
+        return world.gameVersion() == null
+                ? world.path().toString()
+                : world.gameVersion() + " | " + world.path();
+    }
+
+    /// Formats a localized readability/lock badge for a world selector row.
+    ///
+    /// @param world loaded world row
+    /// @return localized world state
+    private String worldRowBadge(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return i18n("swing.world_catalog.unreadable");
+        }
+        return world.locked()
+                ? i18n("swing.world_catalog.locked_yes")
+                : i18n("swing.world_catalog.locked_no");
+    }
+
+    /// Formats one data pack's parsed description and storage shape.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return one-line description and directory/archive marker
+    private String dataPackDetail(DataPack.Pack dataPack) {
+        String description = dataPack.getDescription().toStringSingleLine();
+        return description.isBlank() ? dataPack.getPath().toString() : description;
+    }
+
+    /// Formats the explicit enabled-state badge for one data pack.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return localized active/inactive state
+    private String dataPackBadge(DataPack.Pack dataPack) {
+        return dataPack.isActive() ? strings.activeText() : strings.inactiveText();
+    }
+
+    /// Supplies a tooltip containing the durable data-pack path and full description.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return path and complete description
+    private String dataPackTooltip(DataPack.Pack dataPack) {
+        String description = dataPack.getDescription().toString();
+        return description.isBlank()
+                ? dataPack.getPath().toString()
+                : dataPack.getPath() + "\n" + description;
+    }
+
+    /// Returns the first meaningful line from a nullable world failure message.
+    ///
+    /// @param text nullable failure detail
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Restarts the non-repeating search timer after an editable document transition.

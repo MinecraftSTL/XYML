@@ -454,7 +454,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         presentation.gameInstall(),
                         presentation.taskProgress(),
                         animator,
-                        presentation.taskProgressAnimationDuration()));
+                        presentation.taskProgressAnimationDuration(),
+                        models.instances()));
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
