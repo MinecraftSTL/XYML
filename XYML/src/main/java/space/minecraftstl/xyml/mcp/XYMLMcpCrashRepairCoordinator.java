@@ -230,6 +230,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     ///
     /// Candidate selection is metadata only. No task is created and no launcher state is changed by this method.
     /// When more than one candidate is available, callers may supply an identifier here or later to [#execute].
+    /// Repeated calls for the same retained analysis and solution return the same plan identifier.
     ///
     /// @param analysisId opaque analysis identifier
     /// @param solutionId stable solution identifier from the diagnosis list
@@ -254,6 +255,18 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     return planSnapshot(session, solution, null, decision);
                 }
                 @Nullable String selectedCandidate = resolveCandidate(solution.candidates, candidateId, false);
+                @Nullable RepairPlan existingPlan = findPlanLocked(session.id, solution.id);
+                if (existingPlan != null) {
+                    if (selectedCandidate != null && !selectedCandidate.equals(existingPlan.candidateId)) {
+                        if (existingPlan.state != PlanState.AVAILABLE || existingPlan.candidateId != null) {
+                            throw new IllegalStateException(
+                                    "Crash repair plan already has a different candidate selection: "
+                                            + existingPlan.id);
+                        }
+                        existingPlan.candidateId = selectedCandidate;
+                    }
+                    return planSnapshot(session, solution, existingPlan, decision);
+                }
                 ownerRetentionsToRelease.addAll(ensurePlanCapacityLocked());
                 Instant createdAt = clock.instant();
                 RepairPlan plan = new RepairPlan(
@@ -273,7 +286,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
 
     /// Claims one repair plan, revalidates its launcher-owned source, and starts a fresh task.
     ///
-    /// A failed or cancelled attempt leaves the plan retryable; successful plans remain terminal.
+    /// A failed attempt leaves the plan retryable; successful and cancelled plans remain terminal.
     ///
     /// @param planId opaque repair-plan identifier
     /// @return immutable asynchronous operation status
@@ -446,7 +459,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         return operationWithPlan(operation, plan);
     }
 
-    /// Retries the latest failed or cancelled attempt using a fresh task instance.
+    /// Retries the latest failed attempt, or its retained residual cleanup, using a fresh task instance.
     ///
     /// @param planId retryable repair-plan identifier
     /// @return immutable new operation status
@@ -475,7 +488,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 if (plan.retryInProgress) {
                     throw new IllegalStateException("Crash repair plan retry is already in progress: " + planId);
                 }
-                if (!plan.state.retryable() || plan.state == PlanState.AVAILABLE) {
+                if (!plan.state.retryable()) {
                     throw new IllegalStateException("Crash repair plan is not retryable: " + planId);
                 }
                 plan.retryInProgress = true;
@@ -523,12 +536,24 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     }
                     return operationWithPlan(cleanup, plan);
                 }
-                // A successful task may be blocked only by its own lease cleanup. Once that cleanup succeeds, the
-                // original operation is complete and must not be replayed. Failed or cancelled operations continue
+                // A successful or cancelled task may be blocked only by its own lease cleanup. Once that cleanup
+                // succeeds, the original operation is terminal and must not be replayed. Failed operations continue
                 // into a fresh attempt below.
                 if ("SUCCEEDED".equals(String.valueOf(cleanup.get("status")))) {
                     synchronized (stateLock) {
                         plan.state = PlanState.SUCCEEDED;
+                        plan.failureType = null;
+                        plan.failureMessage = null;
+                        plan.failedSteps = List.of();
+                        plan.resumeFromStep = null;
+                        plan.residualCleanupOperationId = null;
+                        plan.retryInProgress = false;
+                    }
+                    return operationWithPlan(cleanup, plan);
+                }
+                if ("CANCELLED".equals(String.valueOf(cleanup.get("status")))) {
+                    synchronized (stateLock) {
+                        plan.state = PlanState.CANCELLED;
                         plan.failureType = null;
                         plan.failureMessage = null;
                         plan.failedSteps = List.of();
@@ -732,6 +757,24 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 .replaceAll("[\\r\\n\\t]+", " ")
                 .strip();
         return normalized.length() <= 512 ? normalized : normalized.substring(0, 512);
+    }
+
+    /// Freezes typed analyzer evidence as a stable, bounded, duplicate-free response list.
+    ///
+    /// Deduplication happens after normalization and bounding so two provider strings cannot publish indistinguishable
+    /// response fragments. Blank fragments carry no diagnostic value and are omitted.
+    ///
+    /// @param evidence exact analyzer evidence in encounter order
+    /// @return immutable bounded evidence snapshot
+    private static @Unmodifiable List<String> evidenceSnapshot(@Unmodifiable List<String> evidence) {
+        List<String> result = new ArrayList<>();
+        for (String fragment : Objects.requireNonNull(evidence, "evidence")) {
+            String bounded = boundedEvidence(fragment);
+            if (!bounded.isEmpty() && !result.contains(bounded)) {
+                result.add(bounded);
+            }
+        }
+        return List.copyOf(result);
     }
 
     /// Refreshes a running plan without holding the coordinator lock across a registry call.
@@ -972,6 +1015,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         result.put("fallback_message", solver.fallbackMessage());
         result.put("cause_snapshot", causeSnapshot);
         // Keep these fields at the diagnosis level for clients which do not understand the nested snapshot yet.
+        result.put("evidence", causeSnapshot.get("evidence"));
         result.put("evidence_sources", causeSnapshot.get("evidence_sources"));
         result.put("suppressed_evidence", causeSnapshot.get("suppressed_evidence"));
         result.put("repair_state", causeSnapshot.get("repair_state"));
@@ -1007,6 +1051,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         result.put("candidates", candidateSnapshots(solution.candidates));
         result.put("candidate_selection_required", requiresCandidateSelection(solution.candidates));
         result.put("repair_state", causeSnapshot.get("repair_state"));
+        result.put("evidence", causeSnapshot.get("evidence"));
         result.put("evidence_sources", causeSnapshot.get("evidence_sources"));
         result.put("suppressed_evidence", causeSnapshot.get("suppressed_evidence"));
         result.put("mcp_executable", decision.executable());
@@ -1033,6 +1078,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         result.put("result_id", solution.diagnosis.resultId().name());
         result.put("solution_id", solution.id);
         result.put("analyzer", solution.diagnosis.analyzer().getClass().getSimpleName());
+        result.put("evidence", solution.evidence);
         result.put("evidence_sources", solution.evidenceSources);
         result.put("suppressed_evidence", solution.suppressedEvidence);
         result.put("repair_state", repairState(session, solution, plan));
@@ -1072,7 +1118,9 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             ExecutionDecision decision) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("planned", plan != null);
-        result.put("executable", decision.executable());
+        result.put("executable", decision.executable()
+                && plan != null
+                && plan.state == PlanState.AVAILABLE);
         result.put("analysis_id", session.id);
         result.put("solution_id", solution.id);
         result.put("instance_id", session.instanceId);
@@ -1082,6 +1130,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         result.put("solution", solutionView);
         result.put("cause_snapshot", causeSnapshot(session, solution, plan));
         result.put("repair_state", solutionView.get("repair_state"));
+        result.put("evidence", solutionView.get("evidence"));
         result.put("evidence_sources", solutionView.get("evidence_sources"));
         result.put("suppressed_evidence", solutionView.get("suppressed_evidence"));
         if (plan == null) {
@@ -1195,6 +1244,20 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             throw new IllegalArgumentException("Unknown or expired crash repair plan: " + planId);
         }
         return plan;
+    }
+
+    /// Finds the single retained plan for one analyzed cause while the state lock is held.
+    ///
+    /// @param analysisId owning analysis identifier
+    /// @param solutionId stable cause solution identifier
+    /// @return retained plan, or null before planning
+    private @Nullable RepairPlan findPlanLocked(String analysisId, String solutionId) {
+        for (RepairPlan plan : plans.values()) {
+            if (plan.analysisId.equals(analysisId) && plan.solutionId.equals(solutionId)) {
+                return plan;
+            }
+        }
+        return null;
     }
 
     /// Rejects mutations after shutdown.
@@ -1438,6 +1501,9 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         /// Immutable runtime candidates captured with this diagnosis.
         private final @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates;
 
+        /// Immutable bounded typed evidence captured with this diagnosis.
+        private final @Unmodifiable List<String> evidence;
+
         /// Immutable physical evidence source identifiers captured with this diagnosis.
         private final @Unmodifiable List<String> evidenceSources;
 
@@ -1454,6 +1520,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             this.diagnosis = Objects.requireNonNull(diagnosis, "diagnosis");
             this.solver = diagnosis.solver();
             this.candidates = List.copyOf(solver.candidates());
+            this.evidence = evidenceSnapshot(diagnosis.evidence());
             this.evidenceSources = List.of(Objects.requireNonNull(source, "source").externalName);
             this.suppressedEvidence = suppressedEvidence(diagnosis.resultId(), source, legacyEvidence);
         }
@@ -1539,7 +1606,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     @NotNullByDefault
     private enum PlanState {
         /// Plan has not yet been claimed.
-        AVAILABLE(true),
+        AVAILABLE(false),
 
         /// One fresh task attempt is active.
         RUNNING(false),
@@ -1556,7 +1623,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         /// Attempt was explicitly cancelled and cannot be executed again.
         CANCELLED(false);
 
-        /// Whether another fresh attempt may be claimed.
+        /// Whether the retry endpoint may claim a fresh attempt from this state.
         private final boolean retryable;
 
         /// Creates one plan lifecycle state.
@@ -1564,7 +1631,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             this.retryable = retryable;
         }
 
-        /// Returns whether this state accepts a new attempt.
+        /// Returns whether the retry endpoint accepts this state.
         private boolean retryable() {
             return retryable;
         }

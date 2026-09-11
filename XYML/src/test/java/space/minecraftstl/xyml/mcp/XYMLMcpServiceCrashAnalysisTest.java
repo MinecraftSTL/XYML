@@ -180,6 +180,37 @@ final class XYMLMcpServiceCrashAnalysisTest {
                 Map<String, Object> plan = service.planCrashSolution(
                         String.valueOf(launcherAnalysis.get("analysis_id")),
                         String.valueOf(launcherSolution.get("solution_id")));
+
+                // Replacing the tracked LaunchState with an equivalent-content instance must still invalidate the
+                // plan.  Content equality is not sufficient because the plan is bound to one captured source owner.
+                Map<String, Object> replacementAnalysis = McpTaskExecution.execute(
+                        service.analyzeCrash(validId.id(), null, null));
+                Map<String, Object> replacementSolution = firstSolution(replacementAnalysis);
+                Map<String, Object> replacementPlan = service.planCrashSolution(
+                        String.valueOf(replacementAnalysis.get("analysis_id")),
+                        String.valueOf(replacementSolution.get("solution_id")));
+                Object replacementLaunchState = launchStateConstructor.newInstance();
+                onLog.invoke(
+                        replacementLaunchState,
+                        "captured-only diagnostic: " + FABRIC_MISSING_DEPENDENCY_LOG,
+                        false);
+                launchStates.put(launchKey, replacementLaunchState);
+                Map<String, Object> replacementOperation = service.executeCrashSolution(
+                        String.valueOf(replacementPlan.get("plan_id")));
+                Map<String, Object> replacementStatus = awaitTerminal(
+                        service,
+                        String.valueOf(replacementOperation.get("operation_id")));
+                assertEquals("FAILED", replacementStatus.get("status"));
+                assertEquals(IllegalStateException.class.getName(), replacementStatus.get("failure_type"));
+                assertEquals(
+                        "Crash analysis source could not be revalidated",
+                        replacementStatus.get("failure_message"));
+                assertEquals(0, searchTaskCreations.get());
+                assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(
+                        String.valueOf(replacementPlan.get("plan_id"))));
+
+                // Restore the original owner so the following log-mutation checks exercise the same source path.
+                launchStates.put(launchKey, launchState);
                 onLog.invoke(launchState, "captured output changed after analysis", false);
                 String capturedPlanId = String.valueOf(plan.get("plan_id"));
                 Map<String, Object> capturedStaleOperation = service.executeCrashSolution(capturedPlanId);

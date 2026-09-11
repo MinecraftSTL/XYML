@@ -142,7 +142,7 @@ public interface XYMLMcpOperations {
         return executeCrashSolution(planId);
     }
 
-    /// Retries a failed or cancelled crash-repair plan with a fresh task instance.
+    /// Retries a failed crash-repair plan, including retained residual cleanup, with a fresh task instance.
     ///
     /// @param planId retryable server-issued repair-plan identifier
     /// @return immutable new repair-operation status

@@ -124,7 +124,8 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                 arguments -> service().executeCrashSolution(
                         requiredString(arguments, "plan_id"), optionalString(arguments, "candidate_id")));
         register(definitions, handlers, "retry_crash_solution",
-                "Retries a failed or cancelled crash-repair plan with a fresh task and resource preflight.",
+                "Retries a failed crash-repair plan with a fresh task and resource preflight, including retained "
+                        + "resource cleanup when required.",
                 schema(Map.of("plan_id", stringSchema("Server-issued retryable repair-plan identifier")),
                         List.of("plan_id")),
                 arguments -> service().retryCrashSolution(requiredString(arguments, "plan_id")));

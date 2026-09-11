@@ -128,7 +128,7 @@ final class XYMLMcpCrashAnalysisSupport {
     /// @param rawLog immutable analyzed log text
     /// @param resolution resolved crash-report input
     /// @param contextWarnings warnings collected while resolving optional context
-    /// @param launcherOwnedLog whether the text came from the captured instance latest-log path
+    /// @param launcherOwnedLog whether the text combines captured process output with the instance latest log
     /// @param coordinator bounded XYAT analysis and repair coordinator
     /// @param missingDependencySearch optional application missing-dependency boundary
     /// @param javaRuntimeRepair optional application Java-repair boundary
@@ -287,7 +287,7 @@ final class XYMLMcpCrashAnalysisSupport {
     ///
     /// @param context immutable settings and repository snapshot
     /// @param rawLog immutable analyzed log text
-    /// @param launcherOwnedLog whether the text came from the captured instance latest-log path
+    /// @param launcherOwnedLog whether the text combines captured process output with the instance latest log
     /// @param missingDependencySearch optional application missing-dependency boundary
     /// @param javaRuntimeRepair optional application Java-repair boundary
     /// @return immutable analyzer input
