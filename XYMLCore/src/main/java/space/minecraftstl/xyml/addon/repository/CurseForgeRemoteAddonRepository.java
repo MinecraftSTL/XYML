@@ -112,16 +112,17 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         return BASE;
     }
 
-    private static int toModsSearchSortField(SortType sort) {
-        // https://docs.curseforge.com/rest-api/#tocS_ModsSearchSortField
+    /// Converts one provider-neutral ordering into CurseForge's distinct mod-search field.
+    ///
+    /// @param sort requested result ordering
+    /// @return CurseForge mod-search field identifier
+    static int toModsSearchSortField(SortType sort) {
         return switch (sort) {
-            case DATE_CREATED -> 1;
+            case RELEVANCY -> 1;
             case POPULARITY -> 2;
+            case DATE_CREATED -> 11;
             case LAST_UPDATED -> 3;
-            case NAME -> 4;
-            case AUTHOR -> 5;
             case TOTAL_DOWNLOADS -> 6;
-            default -> 8;
         };
     }
 

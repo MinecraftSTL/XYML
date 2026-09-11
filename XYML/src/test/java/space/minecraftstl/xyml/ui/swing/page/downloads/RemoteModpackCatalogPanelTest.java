@@ -46,9 +46,11 @@ import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -385,7 +387,8 @@ final class RemoteModpackCatalogPanelTest {
                 assertEquals(criteriaBand, sortBox.getParent());
                 assertEquals(pageBand, previous.getParent());
                 assertEquals(3, categoryBox.getItemCount());
-                assertEquals(6, sortBox.getItemCount());
+                assertEquals(5, sortBox.getItemCount());
+                assertEquals(RemoteAddonRepository.SortType.RELEVANCY, sortBox.getSelectedItem());
                 assertEquals(3, versionSortBox.getItemCount());
                 assertTrue(gameVersionBox.isEditable());
                 assertTrue(gameVersionBox.getItemCount() > 1);
@@ -411,7 +414,117 @@ final class RemoteModpackCatalogPanelTest {
         }
     }
 
-    /// Keeps every modpack filter row inside its allocated catalog band.
+    /// Retries a failed category request through the visible status action.
+    @Test
+    void retriesFailedCategoryLoadingFromStatus() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        backend.failNextCategoryRequest();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = new RemoteModpackCatalogPanel(
+                        backend,
+                        request -> Task.completed(null),
+                        executor,
+                        RemoteModpackCatalogStrings.english(),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> categoryBox = findNamed(panel, "remoteModpackCategory", JComboBox.class);
+                JLabel status = findNamed(panel, "remoteModpackStatus", JLabel.class);
+                JTextField search = findNamed(panel, "remoteModpackSearch", JTextField.class);
+                assertNotNull(categoryBox);
+                assertNotNull(status);
+                assertNotNull(search);
+                assertEquals(1, categoryBox.getItemCount());
+                assertEquals(RemoteModpackCatalogStrings.english().categoryLoadFailedStatus(), status.getText());
+                search.setText("keep retry visible");
+                assertEquals(RemoteModpackCatalogStrings.english().categoryLoadFailedStatus(), status.getText());
+                status.dispatchEvent(primaryClick(status));
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> categoryBox = findNamed(panel, "remoteModpackCategory", JComboBox.class);
+                JLabel status = findNamed(panel, "remoteModpackStatus", JLabel.class);
+                assertNotNull(categoryBox);
+                assertNotNull(status);
+                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(RemoteModpackCatalogStrings.english().initialStatus(), status.getText());
+            });
+            assertEquals(2, backend.categoryRequests.get());
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Keeps an earlier category completion from replacing a later search failure and its retry action.
+    @Test
+    void categoryCompletionDoesNotReplaceSearchFailure() {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        backend.failNextSearchRequest();
+        ArrayDeque<Runnable> queuedTasks = new ArrayDeque<>();
+        Executor executor = queuedTasks::addLast;
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = new RemoteModpackCatalogPanel(
+                        backend,
+                        request -> Task.completed(null),
+                        executor,
+                        RemoteModpackCatalogStrings.english(),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList());
+                panel.addNotify();
+                JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            assertEquals(2, queuedTasks.size());
+
+            queuedTasks.removeLast().run();
+            drainEdt();
+            EdtDispatcher.executeAndWait(() -> assertEquals(
+                    RemoteModpackCatalogStrings.english().searchFailedStatus(),
+                    Objects.requireNonNull(findNamed(
+                            Objects.requireNonNull(panelReference.get()),
+                            "remoteModpackStatus",
+                            JLabel.class)).getText()));
+
+            queuedTasks.removeFirst().run();
+            drainEdt();
+            EdtDispatcher.executeAndWait(() -> assertEquals(
+                    RemoteModpackCatalogStrings.english().searchFailedStatus(),
+                    Objects.requireNonNull(findNamed(
+                            Objects.requireNonNull(panelReference.get()),
+                            "remoteModpackStatus",
+                            JLabel.class)).getText()));
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+        }
+    }
+
+    /// Keeps every modpack filter row inside its allocated catalog band at common compact heights.
     @Test
     void laysOutAllFilterRowsWithoutClipping() throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -427,30 +540,38 @@ final class RemoteModpackCatalogPanelTest {
                         null,
                         Duration.ZERO);
                 panelReference.set(panel);
-                panel.setSize(960, 900);
-                panel.doLayout();
                 JComponent filterBand = findNamed(panel, "remoteModpackFilterBand", JComponent.class);
                 JComponent searchBand = findNamed(panel, "remoteModpackSearchBand", JComponent.class);
                 JComponent criteriaBand = findNamed(panel, "remoteModpackCriteriaBand", JComponent.class);
                 JComponent pageBand = findNamed(panel, "remoteModpackPageBand", JComponent.class);
+                JComponent results = findNamed(panel, "remoteModpackResults", JComponent.class);
                 assertNotNull(filterBand);
                 assertNotNull(searchBand);
                 assertNotNull(criteriaBand);
                 assertNotNull(pageBand);
-                filterBand.doLayout();
-                searchBand.doLayout();
-                criteriaBand.doLayout();
-                pageBand.doLayout();
+                assertNotNull(results);
 
-                assertTrue(searchBand.getHeight() > 40);
-                assertTrue(criteriaBand.getHeight() > 40);
-                assertTrue(pageBand.getHeight() >= 40,
-                        () -> "page=" + pageBand.getBounds() + ", preferred=" + pageBand.getPreferredSize());
-                assertComponentInside(searchBand, findNamed(panel, "remoteModpackSearchAction", JButton.class));
-                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackGameVersion", JComboBox.class));
-                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackCategory", JComboBox.class));
-                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackSort", JComboBox.class));
-                assertComponentInside(pageBand, findNamed(panel, "remoteModpackLastPage", JButton.class));
+                for (Dimension panelSize : List.of(
+                        new Dimension(640, 600),
+                        new Dimension(960, 600),
+                        new Dimension(960, 720),
+                        new Dimension(960, 900))) {
+                    panel.setSize(panelSize);
+                    layoutTree(panel);
+
+                    assertTrue(searchBand.getWidth() > 0 && searchBand.getHeight() > 40);
+                    assertTrue(criteriaBand.getWidth() > 0 && criteriaBand.getHeight() > 40);
+                    assertTrue(pageBand.getWidth() > 0 && pageBand.getHeight() >= 40);
+                    assertComponentInside(filterBand, searchBand);
+                    assertComponentInside(filterBand, criteriaBand);
+                    assertComponentInside(filterBand, pageBand);
+                    assertTrue(filterBand.getY() + filterBand.getHeight() <= results.getY(),
+                            () -> "size=" + panelSize + ", filter=" + filterBand.getBounds()
+                                    + ", results=" + results.getBounds());
+                    assertChildrenInside(searchBand);
+                    assertChildrenInside(criteriaBand);
+                    assertChildrenInside(pageBand);
+                }
             });
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
@@ -558,6 +679,28 @@ final class RemoteModpackCatalogPanelTest {
         choiceList.refreshLoadPlan();
     }
 
+    /// Recursively lays out a detached component tree just as an allocated window hierarchy would.
+    ///
+    /// @param container current layout root
+    private static void layoutTree(Container container) {
+        container.doLayout();
+        for (Component component : container.getComponents()) {
+            if (component instanceof Container child) {
+                layoutTree(child);
+            }
+        }
+    }
+
+    /// Verifies that every direct control remains visible inside its responsive parent band.
+    ///
+    /// @param parent layout band expected to contain all direct controls
+    private static void assertChildrenInside(JComponent parent) {
+        for (Component child : parent.getComponents()) {
+            assertTrue(child.getWidth() > 0 && child.getHeight() > 0);
+            assertComponentInside(parent, child);
+        }
+    }
+
     /// Verifies that a nested control remains fully contained by its responsive parent band.
     ///
     /// @param parent layout band expected to contain the control
@@ -613,6 +756,8 @@ final class RemoteModpackCatalogPanelTest {
                 MouseEvent.MOUSE_CLICKED,
                 System.currentTimeMillis(),
                 0,
+                1,
+                1,
                 1,
                 1,
                 1,
@@ -703,6 +848,9 @@ final class RemoteModpackCatalogPanelTest {
         /// Count of display-triggered provider category requests.
         private final AtomicInteger categoryRequests = new AtomicInteger();
 
+        /// Causes exactly one subsequent provider category request to fail.
+        private final AtomicBoolean failNextCategory = new AtomicBoolean();
+
         /// Last explicit search query, or null before the user invokes Search.
         private final AtomicReference<@Nullable RemoteModpackCatalogQuery> lastQuery = new AtomicReference<>();
 
@@ -720,6 +868,11 @@ final class RemoteModpackCatalogPanelTest {
             failNextSearch.set(true);
         }
 
+        /// Marks the next provider category request as a deterministic failure for retry tests.
+        private void failNextCategoryRequest() {
+            failNextCategory.set(true);
+        }
+
         /// Marks the next selected-version request as a deterministic failure for retry tests.
         private void failNextVersionRequest() {
             failNextVersion.set(true);
@@ -734,6 +887,9 @@ final class RemoteModpackCatalogPanelTest {
                 RemoteModpackCatalogSource source) {
             assertEquals(RemoteModpackCatalogSource.MODRINTH, source);
             categoryRequests.incrementAndGet();
+            if (failNextCategory.compareAndSet(true, false)) {
+                throw new IllegalStateException("recorded category failure");
+            }
             RemoteAddonRepository.Category child = new RemoteAddonRepository.Category(
                     new Object(),
                     "adventure-child",

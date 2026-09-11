@@ -206,6 +206,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Provider whose categories currently populate the selector, or null before a successful load.
     private @Nullable RemoteModpackCatalogSource loadedCategorySource;
 
+    /// Whether category discovery for the selected provider most recently failed.
+    private boolean categoryLoadFailed;
+
     /// Whether a catalog query is waiting for a background result.
     private boolean catalogLoading;
 
@@ -337,7 +340,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]8[]8[grow,fill]8[]8[]8[]"));
+                "[]8[pref!,shrink 0]8[grow,fill]8[]8[]8[]"));
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
@@ -427,9 +430,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 1",
-                "[grow,fill]",
-                "[pref!]8[pref!]8[pref!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[pref!]8[pref!]"));
         filterBand.setName("remoteModpackFilterBand");
         filterBand.setOpaque(false);
         filterBand.setMinimumSize(new Dimension(0, 0));
@@ -464,7 +467,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         searchButton.addActionListener(event -> submitFirstPageSearch());
         searchButton.setMinimumSize(new Dimension(0, 0));
         searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
-        filterBand.add(searchBand, "growx");
+        filterBand.add(searchBand, "growx, wmin 0");
 
         JPanel criteriaBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
@@ -504,7 +507,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         sortBox.addActionListener(event -> sortChanged());
         sortBox.setMinimumSize(new Dimension(0, 0));
         criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
-        filterBand.add(criteriaBand, "growx");
+        filterBand.add(criteriaBand, "growx, wmin 0");
 
         JPanel pageBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -534,7 +537,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
         lastPageButton.setMinimumSize(new Dimension(0, 0));
         pageBand.add(lastPageButton, "grow, wmin 0, h 40!");
-        filterBand.add(pageBand, "growx");
+        filterBand.add(pageBand, "span 2, growx, wmin 0");
         add(filterBand, "growx");
 
         choiceList.setName("remoteModpackResults");
@@ -658,6 +661,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         categoryRequestRevision.incrementAndGet();
         categoryLoading = false;
         loadedCategorySource = null;
+        categoryLoadFailed = false;
         resetCategoryOptions();
         resetSortOptions();
         criteriaChanged();
@@ -689,12 +693,18 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             return;
         }
         RemoteModpackCatalogSource source = selectedSource();
-        if (loadedCategorySource == source || !source.isAvailable()) {
+        if (!source.isAvailable()) {
+            setStatus(strings.sourceUnavailableStatus());
+            updateControls();
+            return;
+        }
+        if (loadedCategorySource == source) {
             updateControls();
             return;
         }
         long requestRevision = categoryRequestRevision.incrementAndGet();
         categoryLoading = true;
+        categoryLoadFailed = false;
         updateControls();
         try {
             workerExecutor.execute(() -> loadCategories(source, requestRevision));
@@ -732,9 +742,14 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
             return;
         }
+        boolean failureStatusVisible = strings.categoryLoadFailedStatus().equals(statusLabel.getText());
         categoryLoading = false;
         loadedCategorySource = source;
+        categoryLoadFailed = false;
         applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        if (failureStatusVisible) {
+            setStatus(catalogIdleStatus());
+        }
         updateControls();
     }
 
@@ -749,9 +764,22 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             }
             categoryLoading = false;
             loadedCategorySource = null;
+            categoryLoadFailed = true;
             resetCategoryOptions();
+            if (canShowCategoryFailure()) {
+                setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+            }
             updateControls();
         });
+    }
+
+    /// Retries loading category metadata for the still-selected provider.
+    private void retryCategories() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryLoading) {
+            return;
+        }
+        requestCategoriesForSelectedSource();
     }
 
     /// Replaces category options without interpreting combo-box events as user filter edits.
@@ -785,7 +813,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             for (RemoteAddonRepository.SortType sortType : selectedSource().supportedSortTypes()) {
                 sortBox.addItem(sortType);
             }
-            sortBox.setSelectedItem(RemoteAddonRepository.SortType.POPULARITY);
+            sortBox.setSelectedItem(RemoteAddonRepository.SortType.RELEVANCY);
         } finally {
             applyingSortOptions = false;
         }
@@ -912,7 +940,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         displayedPage = Objects.requireNonNull(page, "page");
         dataSource.replaceItems(page.items());
         choiceList.reloadData();
-        setStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
+        setCatalogIdleStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
         updateControls();
     }
 
@@ -996,7 +1024,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         }
         selectionRequestRevision.incrementAndGet();
         clearSelectedProject();
-        setStatus("");
+        setCatalogIdleStatus("");
         updateControls();
     }
 
@@ -1244,8 +1272,41 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         clearSelectedProject();
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
-        setStatus(strings.initialStatus());
+        setCatalogIdleStatus(strings.initialStatus());
         updateControls();
+    }
+
+    /// Shows category retry feedback whenever an otherwise passive catalog status is published.
+    ///
+    /// @param status ordinary passive catalog status
+    private void setCatalogIdleStatus(String status) {
+        if (categoryLoadFailed) {
+            setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+        } else {
+            setStatus(status);
+        }
+    }
+
+    /// Returns the ordinary passive status appropriate for the currently displayed result page.
+    ///
+    /// @return initial, empty-result, or blank loaded-result status
+    private String catalogIdleStatus() {
+        if (completedQuery == null || displayedPage == null) {
+            return strings.initialStatus();
+        }
+        return displayedPage.items().isEmpty() ? strings.noResultsStatus() : "";
+    }
+
+    /// Tests whether category feedback can replace the current status without hiding active work or recovery.
+    ///
+    /// @return true when the visible status is passive catalog feedback
+    private boolean canShowCategoryFailure() {
+        @Nullable String status = statusLabel.getText();
+        return status == null
+                || status.isBlank()
+                || status.equals(strings.initialStatus())
+                || status.equals(strings.noResultsStatus())
+                || status.equals(strings.categoryLoadFailedStatus());
     }
 
     /// Clears list selection, version state, and project-derived instance-name ownership.

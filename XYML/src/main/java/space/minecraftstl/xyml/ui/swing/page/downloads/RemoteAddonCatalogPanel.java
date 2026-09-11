@@ -235,6 +235,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Provider whose categories currently populate the selector, or null before a successful load.
     private @Nullable RemoteAddonCatalogSource loadedCategorySource;
 
+    /// Whether category discovery for the selected provider most recently failed.
+    private boolean categoryLoadFailed;
+
     /// Whether a background provider page request is currently outstanding.
     private boolean catalogLoading;
 
@@ -364,7 +367,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]8[]8[grow,fill]8[]8[]8[]"));
+                "[]8[pref!,shrink 0]8[grow,fill]8[]8[]8[]"));
         EdtDispatcher.requireEventDispatchThread();
         this.kind = Objects.requireNonNull(kind, "kind");
         this.backend = Objects.requireNonNull(backend, "backend");
@@ -386,7 +389,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 dataSource,
                 new RichChoiceListCellRenderer<>(
                         item -> item.addon().title().isBlank() ? item.addon().slug() : item.addon().title(),
-                        item -> remoteAddonRowDetail(item.addon()),
+                        RemoteAddonCatalogItem::rowDetail,
                         item -> item.source().displayName(),
                         item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
                         item -> item.addon().pageUrl()));
@@ -537,9 +540,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 1",
-                "[grow,fill]",
-                "[pref!]8[pref!]8[pref!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[pref!]8[pref!]"));
         filterBand.setName("remoteAddonFilterBand");
         filterBand.setOpaque(false);
         filterBand.setMinimumSize(new Dimension(0, 0));
@@ -573,7 +576,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         searchButton.addActionListener(event -> submitFirstPageSearch());
         searchButton.setMinimumSize(new Dimension(0, 0));
         searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
-        filterBand.add(searchBand, "growx");
+        filterBand.add(searchBand, "growx, wmin 0");
 
         JPanel criteriaBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
@@ -613,7 +616,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         sortBox.addActionListener(event -> sortChanged());
         sortBox.setMinimumSize(new Dimension(0, 0));
         criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
-        filterBand.add(criteriaBand, "growx");
+        filterBand.add(criteriaBand, "growx, wmin 0");
 
         JPanel pageBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -643,7 +646,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
         lastPageButton.setMinimumSize(new Dimension(0, 0));
         pageBand.add(lastPageButton, "grow, wmin 0, h 40!");
-        filterBand.add(pageBand, "growx");
+        filterBand.add(pageBand, "span 2, growx, wmin 0");
         add(filterBand, "growx");
 
         choiceList.setName("remoteAddonResults");
@@ -661,8 +664,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         choiceList.getChoiceModel().addListDataListener(listDataListener);
         add(choiceList, "grow");
 
-        configureProjectDetails();
-        add(createProjectDetailsBand(), "growx, wmin 0");
+        add(RemoteAddonProjectDetailsLayout.create(
+                projectSummaryLabel,
+                upstreamButton,
+                i18n("swing.download.upstream"),
+                this::openUpstreamPage,
+                prerequisitesLabel,
+                i18n("swing.download.prerequisites"),
+                prerequisiteButtons), "growx, wmin 0");
 
         JPanel installBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
@@ -726,78 +735,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         SwingTextFields.showClearButton(gameVersionField);
         SwingTextFields.textEditor(gameVersionField).getDocument().addDocumentListener(criteriaListener);
         gameVersionField.addActionListener(event -> criteriaChanged());
-    }
-
-    /// Formats the description, author, and provider tags already present in one remote result.
-    ///
-    /// @param addon loaded remote project metadata
-    /// @return compact metadata line suitable for a narrow result row
-    private static String remoteAddonRowDetail(RemoteAddon addon) {
-        RemoteAddon selected = Objects.requireNonNull(addon, "addon");
-        List<String> values = new ArrayList<>();
-        String description = selected.description().lines()
-                .map(String::trim)
-                .filter(line -> !line.isBlank())
-                .findFirst()
-                .orElse("");
-        if (!description.isBlank()) {
-            values.add(description);
-        }
-        if (!selected.author().isBlank()) {
-            values.add(selected.author());
-        }
-        if (!selected.categories().isEmpty()) {
-            values.add(String.join(", ", selected.categories()));
-        }
-        if (values.isEmpty()) {
-            values.add(selected.slug());
-        }
-        return String.join(" | ", values);
-    }
-
-    /// Configures the selected-project summary and prerequisite command surface.
-    private void configureProjectDetails() {
-        projectSummaryLabel.setName("remoteAddonProjectSummary");
-        projectSummaryLabel.setMinimumSize(new Dimension(0, 0));
-        projectSummaryLabel.setToolTipText(null);
-
-        upstreamButton.setName("remoteAddonUpstream");
-        upstreamButton.setText(i18n("swing.download.upstream"));
-        upstreamButton.setMinimumSize(new Dimension(0, 0));
-        upstreamButton.setVisible(false);
-        upstreamButton.addActionListener(event -> openUpstreamPage());
-
-        prerequisitesLabel.setName("remoteAddonPrerequisites");
-        prerequisitesLabel.setText(i18n("swing.download.prerequisites"));
-        prerequisitesLabel.setMinimumSize(new Dimension(0, 0));
-        prerequisitesLabel.setVisible(false);
-
-        prerequisiteButtons.setName("remoteAddonDependencyButtons");
-        prerequisiteButtons.setOpaque(false);
-        prerequisiteButtons.setMinimumSize(new Dimension(0, 0));
-        prerequisiteButtons.setVisible(false);
-        prerequisiteButtons.setLayout(new MigLayout(
-                "insets 0, fillx, wrap 1",
-                "[grow,fill]",
-                "[]"));
-    }
-
-    /// Creates the unframed project-details band shown between results and install controls.
-    ///
-    /// @return responsive project-details container
-    private JPanel createProjectDetailsBand() {
-        JPanel details = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
-                "[]6[]"));
-        details.setName("remoteAddonProjectDetails");
-        details.setOpaque(false);
-        details.setMinimumSize(new Dimension(0, 0));
-        details.add(projectSummaryLabel, "growx, wmin 0");
-        details.add(upstreamButton, "growx, wmin 0, h 32!");
-        details.add(prerequisitesLabel, "growx, wmin 0");
-        details.add(prerequisiteButtons, "growx, wmin 0");
-        return details;
     }
 
     /// Updates project metadata, upstream availability, and version-specific prerequisite buttons.
@@ -1020,6 +957,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryRequestRevision.incrementAndGet();
         categoryLoading = false;
         loadedCategorySource = null;
+        categoryLoadFailed = false;
         resetCategoryOptions();
         resetSortOptions();
         criteriaChanged();
@@ -1051,12 +989,18 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         RemoteAddonCatalogSource source = selectedSource();
-        if (loadedCategorySource == source || !source.isAvailable() || !source.supports(kind)) {
+        if (!source.isAvailable() || !source.supports(kind)) {
+            setStatus(strings.sourceUnavailableStatus());
+            updateControls();
+            return;
+        }
+        if (loadedCategorySource == source) {
             updateControls();
             return;
         }
         long requestRevision = categoryRequestRevision.incrementAndGet();
         categoryLoading = true;
+        categoryLoadFailed = false;
         updateControls();
         try {
             workerExecutor.execute(() -> loadCategories(source, requestRevision));
@@ -1094,9 +1038,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
             return;
         }
+        boolean failureStatusVisible = strings.categoryLoadFailedStatus().equals(statusLabel.getText());
         categoryLoading = false;
         loadedCategorySource = source;
+        categoryLoadFailed = false;
         applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        if (failureStatusVisible) {
+            setStatus(catalogIdleStatus());
+        }
         updateControls();
     }
 
@@ -1111,9 +1060,22 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             }
             categoryLoading = false;
             loadedCategorySource = null;
+            categoryLoadFailed = true;
             resetCategoryOptions();
+            if (canShowCategoryFailure()) {
+                setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+            }
             updateControls();
         });
+    }
+
+    /// Retries loading category metadata for the still-selected provider.
+    private void retryCategories() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryLoading) {
+            return;
+        }
+        requestCategoriesForSelectedSource();
     }
 
     /// Replaces category options without interpreting combo-box events as user filter edits.
@@ -1147,7 +1109,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             for (RemoteAddonRepository.SortType sortType : selectedSource().supportedSortTypes()) {
                 sortBox.addItem(sortType);
             }
-            sortBox.setSelectedItem(RemoteAddonRepository.SortType.POPULARITY);
+            sortBox.setSelectedItem(RemoteAddonRepository.SortType.RELEVANCY);
         } finally {
             applyingSortOptions = false;
         }
@@ -1282,7 +1244,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         pageCache.put(query, page);
         dataSource.replaceItems(page.items());
         choiceList.reloadData();
-        setStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
+        setCatalogIdleStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
         updateControls();
         schedulePendingSearchCheck();
     }
@@ -1368,7 +1330,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         selectionRequestRevision.incrementAndGet();
         clearSelectedProject();
-        setStatus("");
+        setCatalogIdleStatus("");
         updateControls();
     }
 
@@ -1641,8 +1603,41 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         clearSelectedProject();
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
-        setStatus(strings.initialStatus());
+        setCatalogIdleStatus(strings.initialStatus());
         updateControls();
+    }
+
+    /// Shows category retry feedback whenever an otherwise passive catalog status is published.
+    ///
+    /// @param status ordinary passive catalog status
+    private void setCatalogIdleStatus(String status) {
+        if (categoryLoadFailed) {
+            setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+        } else {
+            setStatus(status);
+        }
+    }
+
+    /// Returns the ordinary passive status appropriate for the currently displayed result page.
+    ///
+    /// @return initial, empty-result, or blank loaded-result status
+    private String catalogIdleStatus() {
+        if (completedQuery == null || displayedPage == null) {
+            return strings.initialStatus();
+        }
+        return displayedPage.items().isEmpty() ? strings.noResultsStatus() : "";
+    }
+
+    /// Tests whether category feedback can replace the current status without hiding active work or recovery.
+    ///
+    /// @return true when the visible status is passive catalog feedback
+    private boolean canShowCategoryFailure() {
+        @Nullable String status = statusLabel.getText();
+        return status == null
+                || status.isBlank()
+                || status.equals(strings.initialStatus())
+                || status.equals(strings.noResultsStatus())
+                || status.equals(strings.categoryLoadFailedStatus());
     }
 
     /// Clears selected sparse-row state and any provider versions belonging to the old selection.

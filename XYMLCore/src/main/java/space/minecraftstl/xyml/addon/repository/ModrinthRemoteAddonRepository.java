@@ -148,13 +148,17 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
         return BASE;
     }
 
-    private static String convertSortType(SortType sortType) {
+    /// Converts one provider-neutral ordering into Modrinth's distinct search index.
+    ///
+    /// @param sortType requested result ordering
+    /// @return Modrinth search index
+    static String convertSortType(SortType sortType) {
         return switch (sortType) {
+            case RELEVANCY -> "relevance";
+            case POPULARITY -> "follows";
             case DATE_CREATED -> "newest";
-            case POPULARITY, NAME, AUTHOR -> "relevance";
             case LAST_UPDATED -> "updated";
             case TOTAL_DOWNLOADS -> "downloads";
-            default -> throw new IllegalArgumentException("Unsupported sort type " + sortType);
         };
     }
 
