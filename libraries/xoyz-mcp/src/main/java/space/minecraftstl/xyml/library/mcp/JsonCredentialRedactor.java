@@ -45,6 +45,13 @@ final class JsonCredentialRedactor {
             "text", "mimeType", "uri", "arguments", "sessionId", "sessionTtl", "version", "listChanged",
             "subscribe");
 
+    /// Protocol values whose spelling is fixed by the transport and must never be rewritten.
+    private static final Set<String> PRESERVED_VALUE_MEMBERS = Set.of(
+            "jsonrpc", "method", "protocolVersion", "id", "code", "type", "mimeType", "version");
+
+    /// Protocol identifiers supplied by providers; only an exact credential value is replaced.
+    private static final Set<String> IDENTIFIER_VALUE_MEMBERS = Set.of("name", "uri", "sessionId");
+
     /// Prevents construction of this stateless helper.
     private JsonCredentialRedactor() {
     }
@@ -64,7 +71,7 @@ final class JsonCredentialRedactor {
         if (token == null || token.isEmpty()) {
             return checked.deepCopy();
         }
-        return redact(checked, token, redactionMarker(token));
+        return redact(checked, token, redactionMarker(token), true, false);
     }
 
     /// Returns a detached JSON tree using a marker which cannot contain the configured credential.
@@ -72,8 +79,11 @@ final class JsonCredentialRedactor {
     /// @param source response tree to sanitize
     /// @param token configured credential
     /// @param marker collision-free replacement marker
+    /// @param redactStrings whether free-form string values should be sanitized
+    /// @param exactIdentifier whether only an exact string match should be sanitized
     /// @return detached sanitized response tree
-    private static JsonElement redact(JsonElement source, String token, String marker) {
+    private static JsonElement redact(JsonElement source, String token, String marker,
+                                      boolean redactStrings, boolean exactIdentifier) {
         if (source.isJsonObject()) {
             JsonObject redacted = new JsonObject();
             for (Map.Entry<String, JsonElement> entry : source.getAsJsonObject().entrySet()) {
@@ -86,21 +96,27 @@ final class JsonCredentialRedactor {
                     } while (redacted.has(candidate));
                     key = candidate;
                 }
-                redacted.add(key, redact(entry.getValue(), token, marker));
+                boolean preserveValue = PRESERVED_VALUE_MEMBERS.contains(entry.getKey());
+                boolean identifierValue = IDENTIFIER_VALUE_MEMBERS.contains(entry.getKey());
+                redacted.add(key, redact(entry.getValue(), token, marker,
+                        redactStrings && !preserveValue, exactIdentifier || identifierValue));
             }
             return redacted;
         }
         if (source.isJsonArray()) {
             JsonArray redacted = new JsonArray();
             for (JsonElement element : source.getAsJsonArray()) {
-                redacted.add(redact(element, token, marker));
+                redacted.add(redact(element, token, marker, redactStrings, exactIdentifier));
             }
             return redacted;
         }
         if (source.isJsonPrimitive()) {
             JsonPrimitive primitive = source.getAsJsonPrimitive();
-            if (primitive.isString()) {
-                return new JsonPrimitive(primitive.getAsString().replace(token, marker));
+            if (primitive.isString() && redactStrings) {
+                String value = primitive.getAsString();
+                return new JsonPrimitive(exactIdentifier
+                        ? value.equals(token) ? marker : value
+                        : value.replace(token, marker));
             }
         }
         return source.deepCopy();

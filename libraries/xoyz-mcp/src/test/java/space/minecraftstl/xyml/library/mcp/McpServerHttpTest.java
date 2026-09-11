@@ -1182,6 +1182,50 @@ public final class McpServerHttpTest {
         }
     }
 
+    /// Keeps provider protocol identifiers usable when a short credential is a substring of them.
+    @Test
+    public void shortBearerTokenPreservesToolIdentifiers() throws Exception {
+        String shortToken = "e";
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, shortToken)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> initialized = postWithAuthorization(
+                    client, endpoint, initializeBody(54), "Bearer " + shortToken, null, null);
+            String sessionId = requireHeader(initialized, "Mcp-Session-Id");
+
+            HttpResponse<String> listed = postWithAuthorization(
+                    client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":55,\"method\":\"tools/list\"}",
+                    "Bearer " + shortToken, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, listed.statusCode());
+            assertEquals("echo", jsonBody(listed).getAsJsonObject("result")
+                    .getAsJsonArray("tools").get(0).getAsJsonObject().get("name").getAsString());
+
+            HttpResponse<String> resources = postWithAuthorization(
+                    client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":57,\"method\":\"resources/list\"}",
+                    "Bearer " + shortToken, sessionId, PROTOCOL_VERSION);
+            assertEquals("mcp-test://status", jsonBody(resources).getAsJsonObject("result")
+                    .getAsJsonArray("resources").get(0).getAsJsonObject().get("uri").getAsString());
+
+            HttpResponse<String> prompts = postWithAuthorization(
+                    client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":58,\"method\":\"prompts/list\"}",
+                    "Bearer " + shortToken, sessionId, PROTOCOL_VERSION);
+            assertEquals("inspect", jsonBody(prompts).getAsJsonObject("result")
+                    .getAsJsonArray("prompts").get(0).getAsJsonObject().get("name").getAsString());
+
+            HttpResponse<String> called = postWithAuthorization(
+                    client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":56,\"method\":\"tools/call\","
+                            + "\"params\":{\"name\":\"echo\",\"arguments\":{\"secret\":\"e\"}}}",
+                    "Bearer " + shortToken, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, called.statusCode());
+            assertTrue(called.body().contains("[REDACTED]"));
+        }
+    }
+
     /// Rejects two physical Authorization fields before NanoHTTPD can collapse them into one map entry.
     @Test
     public void rejectsDuplicateAuthorizationHeaders() throws Exception {
