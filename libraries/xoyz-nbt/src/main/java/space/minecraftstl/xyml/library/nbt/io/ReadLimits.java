@@ -30,9 +30,9 @@ import java.util.Objects;
 /// independent so a small compressed input cannot allocate an unbounded object graph. A limit is
 /// inclusive; a zero limit rejects any positive input in that category.
 @NotNullByDefault
-public final class NBTReadLimits {
+public final class ReadLimits {
     /// Conservative defaults suitable for ordinary Java Edition saves.
-    private static final NBTReadLimits DEFAULTS = new NBTReadLimits(
+    private static final ReadLimits DEFAULTS = new ReadLimits(
             65L * 1024L * 1024L,
             64L * 1024L * 1024L,
             256L * 1024L * 1024L,
@@ -67,7 +67,7 @@ public final class NBTReadLimits {
     /// @param maxDepth largest nesting depth
     /// @param maxStringBytes largest encoded string payload
     /// @param maxArrayLength largest primitive-array or list element count
-    public NBTReadLimits(long maxEncodedBytes, long maxDecompressedBytes, long maxNodes,
+    public ReadLimits(long maxEncodedBytes, long maxDecompressedBytes, long maxNodes,
                          long maxDepth, long maxStringBytes, long maxArrayLength) {
         this(maxEncodedBytes, maxDecompressedBytes, maxDecompressedBytes, maxNodes, maxDepth,
                 maxStringBytes, maxArrayLength, maxArrayLength);
@@ -82,7 +82,7 @@ public final class NBTReadLimits {
     /// @param maxDepth largest nesting depth
     /// @param maxStringBytes largest encoded string payload
     /// @param maxArrayLength largest primitive-array or list element count
-    public NBTReadLimits(long maxEncodedBytes, long maxDecompressedBytes,
+    public ReadLimits(long maxEncodedBytes, long maxDecompressedBytes,
                          long maxDocumentDecompressedBytes, long maxNodes, long maxDepth,
                          long maxStringBytes, long maxArrayLength) {
         this(maxEncodedBytes, maxDecompressedBytes, maxDocumentDecompressedBytes, maxNodes, maxDepth,
@@ -99,7 +99,7 @@ public final class NBTReadLimits {
     /// @param maxStringBytes largest encoded string payload
     /// @param maxArrayLength largest primitive-array or list element count
     /// @param maxArrayBytes largest encoded primitive-array payload
-    public NBTReadLimits(long maxEncodedBytes, long maxDecompressedBytes,
+    public ReadLimits(long maxEncodedBytes, long maxDecompressedBytes,
                          long maxDocumentDecompressedBytes, long maxNodes, long maxDepth,
                          long maxStringBytes, long maxArrayLength, long maxArrayBytes) {
         this.maxEncodedBytes = nonNegative(maxEncodedBytes, "maxEncodedBytes");
@@ -117,7 +117,7 @@ public final class NBTReadLimits {
     ///
     /// @return immutable defaults
     @Contract(pure = true)
-    public static NBTReadLimits defaults() {
+    public static ReadLimits defaults() {
         return DEFAULTS;
     }
 
@@ -169,7 +169,7 @@ public final class NBTReadLimits {
     /// Returns a diagnostic representation without exposing mutable state.
     @Override
     public String toString() {
-        return "NBTReadLimits[maxEncodedBytes=" + maxEncodedBytes
+        return "ReadLimits[maxEncodedBytes=" + maxEncodedBytes
                 + ", maxDecompressedBytes=" + maxDecompressedBytes
                 + ", maxDocumentDecompressedBytes=" + maxDocumentDecompressedBytes
                 + ", maxNodes=" + maxNodes
@@ -182,7 +182,7 @@ public final class NBTReadLimits {
     /// Compares all read bounds.
     @Override
     public boolean equals(Object object) {
-        return this == object || object instanceof NBTReadLimits other
+        return this == object || object instanceof ReadLimits other
                 && maxEncodedBytes == other.maxEncodedBytes
                 && maxDecompressedBytes == other.maxDecompressedBytes
                 && maxDocumentDecompressedBytes == other.maxDocumentDecompressedBytes

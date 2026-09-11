@@ -73,11 +73,11 @@ final class NBTRepairReader {
     /// @return detached recovered root and report
     /// @throws IOException when no trustworthy root can be recovered or a limit is exceeded
     static <T extends Tag> NBTReadResult<T> read(byte[] encoded, Class<T> expectedClass,
-                                                  NBTCodec codec, NBTReadLimits limits) throws IOException {
+                                                  NBTCodec codec, ReadLimits limits) throws IOException {
         byte[] source = Objects.requireNonNull(encoded, "encoded");
         Class<T> rootClass = Objects.requireNonNull(expectedClass, "expectedClass");
         NBTCodec selectedCodec = Objects.requireNonNull(codec, "codec");
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         if ((long) source.length > selectedLimits.maxEncodedBytes()) {
             throw new IOException("NBT input exceeds the encoded read limit");
         }
@@ -144,7 +144,7 @@ final class NBTRepairReader {
             selectedLimits.newDocumentBudget().consume(declaredPayload.length);
             return recoverPayload(declaredPayload, declared, selectedCodec, rootClass, selectedLimits, issues);
         }
-        NBTReadLimits.Budget budget = selectedLimits.newDocumentBudget();
+        ReadLimits.Budget budget = selectedLimits.newDocumentBudget();
         DecodedPayload tolerant = decode(source, declared, selectedLimits, budget, issues);
         return recoverPayload(tolerant.bytes(), declared, selectedCodec, rootClass, selectedLimits, issues);
     }
@@ -152,7 +152,7 @@ final class NBTRepairReader {
     /// Recovers one already bounded payload after strict object parsing failed.
     private static <T extends Tag> NBTReadResult<T> recoverPayload(byte[] payload, NBTFileEncoding encoding,
                                                                     NBTCodec codec, Class<T> rootClass,
-                                                                    NBTReadLimits limits,
+                                                                    ReadLimits limits,
                                                                     List<NBTReadIssue> issues) throws IOException {
         Cursor cursor = new Cursor(payload, codec.getEdition().byteOrder());
         ParseContext context = new ParseContext(limits, issues);
@@ -200,7 +200,7 @@ final class NBTRepairReader {
 
     /// Decodes one envelope completely and verifies its compression trailer where applicable.
     private static byte[] decodeStrictEnvelope(byte[] encoded, NBTFileEncoding encoding,
-                                               NBTReadLimits limits) throws IOException {
+                                               ReadLimits limits) throws IOException {
         if (encoding == NBTFileEncoding.RAW) {
             if ((long) encoded.length > limits.maxDecompressedBytes()) {
                 throw new IOException("Uncompressed NBT payload exceeds the read limit");
@@ -217,7 +217,7 @@ final class NBTRepairReader {
     }
 
     /// Strictly decodes a zlib stream under the configured payload limit.
-    private static byte[] decodeZlibStrict(byte[] encoded, NBTReadLimits limits) throws IOException {
+    private static byte[] decodeZlibStrict(byte[] encoded, ReadLimits limits) throws IOException {
         if (encoded.length < 2 || !isZlibHeader(encoded[0], encoded[1])) {
             throw new IOException("Invalid ZLIB header");
         }
@@ -258,7 +258,7 @@ final class NBTRepairReader {
     }
 
     /// Strictly decodes an LZ4 block stream under the configured payload limit.
-    private static byte[] decodeLz4Strict(byte[] encoded, NBTReadLimits limits) throws IOException {
+    private static byte[] decodeLz4Strict(byte[] encoded, ReadLimits limits) throws IOException {
         long maximum = Math.min(limits.maxDecompressedBytes(), Integer.MAX_VALUE);
         ByteArrayInputStream source = new ByteArrayInputStream(encoded);
         ByteArrayOutputStream output = new ByteArrayOutputStream(initialCapacity(encoded.length));
@@ -309,8 +309,8 @@ final class NBTRepairReader {
     /// @throws IOException if decompression yields no recoverable root or a limit is exceeded
     static NBTReadResult<CompoundTag> readRegionPayload(byte[] compressed,
                                                          NBTRegionFile.CompressionType compression,
-                                                         NBTReadLimits limits) throws IOException {
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+                                                         ReadLimits limits) throws IOException {
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         return readRegionPayload(compressed, compression, selectedLimits, selectedLimits.newDocumentBudget());
     }
 
@@ -324,12 +324,12 @@ final class NBTRepairReader {
     /// @throws IOException if decompression yields no recoverable root or a limit is exceeded
     static NBTReadResult<CompoundTag> readRegionPayload(byte[] compressed,
                                                          NBTRegionFile.CompressionType compression,
-                                                         NBTReadLimits limits,
-                                                         NBTReadLimits.Budget budget) throws IOException {
+                                                         ReadLimits limits,
+                                                         ReadLimits.Budget budget) throws IOException {
         byte[] source = Objects.requireNonNull(compressed, "compressed");
         NBTRegionFile.CompressionType selectedCompression = Objects.requireNonNull(compression, "compression");
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
-        NBTReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
         if ((long) source.length > selectedLimits.maxEncodedBytes()) {
             throw new IOException("Region chunk payload exceeds the encoded read limit");
         }
@@ -377,7 +377,7 @@ final class NBTRepairReader {
 
     /// Decodes one region payload while retaining partial output on a damaged stream.
     private static byte[] decodeRegion(byte[] encoded, NBTRegionFile.CompressionType compression,
-                                       NBTReadLimits limits, NBTReadLimits.Budget budget,
+                                       ReadLimits limits, ReadLimits.Budget budget,
                                        List<NBTReadIssue> issues) throws IOException {
         return switch (compression) {
             case UNCOMPRESSED -> {
@@ -419,7 +419,7 @@ final class NBTRepairReader {
     /// Keeping this path separate from the outer-envelope detector prevents a raw payload whose
     /// first two bytes happen to resemble zlib from being decompressed a second time.
     private static <T extends Tag> T parseStrict(byte[] raw, NBTCodec codec, Class<T> expectedClass,
-                                                  NBTReadLimits limits) throws IOException {
+                                                  ReadLimits limits) throws IOException {
         validateStrictStructure(raw, codec.getEdition().byteOrder(), limits);
         try (RawDataReader reader = new RawDataReader(
                 new InputSource.OfByteBuffer(raw), codec.getEdition())) {
@@ -442,7 +442,7 @@ final class NBTRepairReader {
     /// node/depth limits. Recovery candidates therefore pass through this small structural scanner
     /// first. It consumes exactly one named root, validates list homogeneity and all signed lengths,
     /// and rejects trailing bytes without allocating arrays or strings.
-    static void validateStrictStructure(byte[] raw, ByteOrder order, NBTReadLimits limits)
+    static void validateStrictStructure(byte[] raw, ByteOrder order, ReadLimits limits)
             throws IOException {
         StrictStructureScanner scanner = new StrictStructureScanner(raw, order, limits);
         try {
@@ -457,7 +457,7 @@ final class NBTRepairReader {
 
     /// Decodes a damaged outer envelope while enforcing the decompressed-byte limit.
     private static DecodedPayload decode(byte[] encoded, NBTFileEncoding encoding,
-                                         NBTReadLimits limits, NBTReadLimits.Budget budget,
+                                         ReadLimits limits, ReadLimits.Budget budget,
                                          List<NBTReadIssue> issues) throws IOException {
         return switch (encoding) {
             case RAW, REGION -> {
@@ -474,8 +474,8 @@ final class NBTRepairReader {
     }
 
     /// Recovers bytes from a GZIP member without requiring its footer checksum.
-    private static byte[] inflateGzip(byte[] encoded, NBTReadLimits limits,
-                                      NBTReadLimits.Budget budget,
+    private static byte[] inflateGzip(byte[] encoded, ReadLimits limits,
+                                      ReadLimits.Budget budget,
                                       List<NBTReadIssue> issues) throws IOException {
         int start = gzipPayloadStart(encoded, issues);
         InflatedPayload inflated = inflateWithMetadata(encoded, true, start, encoded.length - start,
@@ -514,8 +514,8 @@ final class NBTRepairReader {
     }
 
     /// Recovers bytes from a zlib stream and validates its Adler-32 trailer when present.
-    private static byte[] inflateZlib(byte[] encoded, NBTReadLimits limits,
-                                      NBTReadLimits.Budget budget,
+    private static byte[] inflateZlib(byte[] encoded, ReadLimits limits,
+                                      ReadLimits.Budget budget,
                                       List<NBTReadIssue> issues) throws IOException {
         if (encoded.length < 2 || !isZlibHeader(encoded[0], encoded[1])) {
             throw new IOException("Invalid ZLIB header");
@@ -554,7 +554,7 @@ final class NBTRepairReader {
 
     /// Inflates one bounded stream and retains the exact unconsumed suffix offset.
     private static InflatedPayload inflateWithMetadata(byte[] encoded, boolean nowrap, int offset, int length,
-                                                       NBTReadLimits limits, NBTReadLimits.Budget budget,
+                                                       ReadLimits limits, ReadLimits.Budget budget,
                                                        List<NBTReadIssue> issues) throws IOException {
         if (offset < 0 || length < 0 || offset > encoded.length - length) {
             throw new IOException("Compressed NBT payload boundary is invalid");
@@ -604,8 +604,8 @@ final class NBTRepairReader {
     }
 
     /// Recovers bytes from the optional lz4-java block stream.
-    private static byte[] inflateLz4(byte[] encoded, NBTReadLimits limits,
-                                     NBTReadLimits.Budget budget,
+    private static byte[] inflateLz4(byte[] encoded, ReadLimits limits,
+                                     ReadLimits.Budget budget,
                                      List<NBTReadIssue> issues) throws IOException {
         long maximum = Math.min(limits.maxDecompressedBytes(), Integer.MAX_VALUE);
         ByteArrayOutputStream output = new ByteArrayOutputStream(initialCapacity(encoded.length));
@@ -748,7 +748,12 @@ final class NBTRepairReader {
             throw new ParseFailure("未知的标签类型 " + typeId);
         }
         String name = readString(cursor, path, context, edition);
-        return readPayload(cursor, typeId, name, pathName(path, name), context, edition);
+        String childPath = pathName(path, name);
+        try {
+            return readPayload(cursor, typeId, name, childPath, context, edition);
+        } catch (ParseFailure failure) {
+            throw failure.atPath(childPath);
+        }
     }
 
     /// Reads one unnamed list element or named tag payload.
@@ -807,7 +812,8 @@ final class NBTRepairReader {
                 if (cursor.position() == before) {
                     throw failure;
                 }
-                context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "COMPOUND_CHILD_TRUNCATED", path,
+                context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "COMPOUND_CHILD_TRUNCATED",
+                        failure.pathOr(path),
                         "复合标签的后续子项无法读取，已保留前面的子项");
                 context.markBoundaryUncertain();
                 return compound;
@@ -853,7 +859,8 @@ final class NBTRepairReader {
                 Tag child = readPayload(cursor, elementTypeId, "", path + "[" + index + "]", context, edition);
                 list.addTag(child);
             } catch (ParseFailure failure) {
-                context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "LIST_TRUNCATED", path,
+                context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "LIST_TRUNCATED",
+                        path + "[" + index + "]",
                         "列表在第 " + index + " 项处截断，已保留前缀");
                 context.markBoundaryUncertain();
                 break;
@@ -936,7 +943,7 @@ final class NBTRepairReader {
         return (int) Math.min(count, Integer.MAX_VALUE);
     }
 
-    /// Reads a bounded NBT string with replacement fallback for malformed UTF-8.
+    /// Reads a bounded NBT string while reporting malformed encoding as irreversible data loss.
     private static String readString(Cursor cursor, String path, ParseContext context,
                                       MinecraftEdition edition) throws ParseFailure {
         int declared = cursor.readUnsignedShort();
@@ -957,9 +964,9 @@ final class NBTRepairReader {
                 ? decodeModifiedUtf8Lenient(bytes)
                 : decodeUtf8Lenient(bytes);
         if (decoded.indexOf('\uFFFD') >= 0) {
-            context.issue(NBTReadIssue.Severity.RECOVERED, "STRING_ENCODING_REPLACED", path,
+            context.issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "STRING_ENCODING_REPLACED", path,
                     "字符串包含非法 " + (edition == MinecraftEdition.JAVA_EDITION ? "modified UTF-8" : "UTF-8")
-                            + "，已使用替换字符");
+                            + "，原字符无法可靠恢复，已使用 U+FFFD 替换");
         }
         return decoded;
     }
@@ -1093,19 +1100,19 @@ final class NBTRepairReader {
     /// Mutable parser budget shared by one recursive recovery operation.
     @NotNullByDefault
     private static final class ParseContext {
-        private final NBTReadLimits limits;
+        private final ReadLimits limits;
         private final List<NBTReadIssue> issues;
         private long nodes;
         private long depth;
         /// Whether a recovered child no longer has a trustworthy byte boundary.
         private boolean boundaryUncertain;
 
-        private ParseContext(NBTReadLimits limits, List<NBTReadIssue> issues) {
+        private ParseContext(ReadLimits limits, List<NBTReadIssue> issues) {
             this.limits = limits;
             this.issues = issues;
         }
 
-        private NBTReadLimits limits() {
+        private ReadLimits limits() {
             return limits;
         }
 
@@ -1143,10 +1150,10 @@ final class NBTRepairReader {
     @NotNullByDefault
     private static final class StrictStructureScanner {
         private final Cursor cursor;
-        private final NBTReadLimits limits;
+        private final ReadLimits limits;
         private long nodes;
 
-        private StrictStructureScanner(byte[] bytes, ByteOrder order, NBTReadLimits limits) {
+        private StrictStructureScanner(byte[] bytes, ByteOrder order, ReadLimits limits) {
             this.cursor = new Cursor(bytes, order);
             this.limits = Objects.requireNonNull(limits, "limits");
         }
@@ -1373,8 +1380,39 @@ final class NBTRepairReader {
     /// Checked parser failure with a user-safe message.
     @NotNullByDefault
     private static final class ParseFailure extends Exception {
+        /// Precise logical path when the parser had already consumed a trustworthy name.
+        private final @Nullable String path;
+
+        /// Creates a failure before a precise logical path is known.
+        ///
+        /// @param message user-safe failure detail
         private ParseFailure(String message) {
+            this(message, null);
+        }
+
+        /// Creates a failure associated with a precise logical path.
+        ///
+        /// @param message user-safe failure detail
+        /// @param path precise logical path, or null while the name is still unknown
+        private ParseFailure(String message, @Nullable String path) {
             super(message);
+            this.path = path;
+        }
+
+        /// Associates the first trustworthy logical path with this failure.
+        ///
+        /// @param knownPath path established after reading a complete tag name
+        /// @return this failure or an immutable enriched replacement
+        private ParseFailure atPath(String knownPath) {
+            return path == null ? new ParseFailure(getMessage(), knownPath) : this;
+        }
+
+        /// Returns the precise path when known, otherwise the supplied enclosing path.
+        ///
+        /// @param fallback enclosing path
+        /// @return best available diagnostic path
+        private String pathOr(String fallback) {
+            return path == null ? fallback : path;
         }
     }
 

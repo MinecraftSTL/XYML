@@ -104,10 +104,10 @@ public final class NBTRegionFileTest {
         }
 
         int onePayloadBytes = NBTCodec.of().writeTagToByteArray(root).length;
-        NBTReadLimits limits = new NBTReadLimits(
+        ReadLimits limits = new ReadLimits(
                 1_000_000L, 1_000_000L, onePayloadBytes,
                 100L, 100L, 100L, 100L, 1_000L);
-        NBTReadLimits.Budget budget = limits.newDocumentBudget();
+        ReadLimits.Budget budget = limits.newDocumentBudget();
         try (NBTRegionFile region = NBTRegionFile.open(file)) {
             assertDoesNotThrow(() -> region.readChunk(0, budget));
             assertThrows(IOException.class, () -> region.readChunk(1, budget));

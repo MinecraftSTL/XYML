@@ -21,7 +21,7 @@ package space.minecraftstl.xyml.library.nbt.internal.input;
 import net.jpountz.lz4.LZ4BlockInputStream;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
-import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -34,14 +34,14 @@ import java.nio.ByteBuffer;
 @NotNullByDefault
 public abstract class DecompressStreamDataReader extends BoundedDataReader {
     /// Maximum encoded bytes accepted while eagerly validating a single GZIP member.
-    private static final long MAX_GZIP_ENCODED_BYTES = NBTReadLimits.defaults().maxEncodedBytes();
+    private static final long MAX_GZIP_ENCODED_BYTES = ReadLimits.defaults().maxEncodedBytes();
 
     public static DecompressStreamDataReader newGZipDataReader(RawDataReader rawReader, long limit) throws IOException {
-        return new GZipReader(rawReader, limit, NBTReadLimits.defaults().maxDecompressedBytes());
+        return new GZipReader(rawReader, limit, ReadLimits.defaults().maxDecompressedBytes());
     }
 
     public static DecompressStreamDataReader newLZ4DataReader(RawDataReader rawReader, long limit) throws IOException {
-        return newLZ4DataReader(rawReader, limit, NBTReadLimits.defaults().maxDecompressedBytes());
+        return newLZ4DataReader(rawReader, limit, ReadLimits.defaults().maxDecompressedBytes());
     }
 
     /// Creates a GZIP reader with independent compressed-input and decompressed-output limits.
@@ -67,7 +67,7 @@ public abstract class DecompressStreamDataReader extends BoundedDataReader {
 
     /// Creates a reader using the default decompressed-output limit.
     public DecompressStreamDataReader(RawDataReader rawReader, long limit) throws IOException {
-        this(rawReader, limit, NBTReadLimits.defaults().maxDecompressedBytes());
+        this(rawReader, limit, ReadLimits.defaults().maxDecompressedBytes());
     }
 
     /// Creates a reader with independent compressed-input and decompressed-output limits.

@@ -18,7 +18,7 @@ package space.minecraftstl.xyml.library.nbt.internal.input;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
-import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -32,10 +32,10 @@ import java.nio.charset.StandardCharsets;
 public sealed abstract class DataReader implements Closeable
         permits BoundedDataReader, RawDataReader {
     /// Default upper bound for one encoded NBT string.
-    private static final long MAX_STRING_BYTES = NBTReadLimits.defaults().maxStringBytes();
+    private static final long MAX_STRING_BYTES = ReadLimits.defaults().maxStringBytes();
 
     /// Default upper bound for one encoded NBT array.
-    private static final long MAX_ARRAY_BYTES = NBTReadLimits.defaults().maxArrayBytes();
+    private static final long MAX_ARRAY_BYTES = ReadLimits.defaults().maxArrayBytes();
     protected abstract RawDataReader getRawReader();
 
     protected abstract InputBuffer getBuffer();

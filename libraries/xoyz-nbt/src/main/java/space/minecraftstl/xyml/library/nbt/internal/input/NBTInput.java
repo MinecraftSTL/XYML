@@ -23,7 +23,7 @@ import space.minecraftstl.xyml.library.nbt.internal.ChunkRegionHeader;
 import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.io.ExternalChunkAccessor;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
-import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
@@ -44,10 +44,10 @@ public final class NBTInput {
     /// Inline region frames already carry a sector-bounded length. External companions have no
     /// length in the region header, so the stream itself must enforce the same encoded-input
     /// policy before any decompressor can consume it.
-    private static final long MAX_EXTERNAL_INPUT_BYTES = NBTReadLimits.defaults().maxEncodedBytes();
+    private static final long MAX_EXTERNAL_INPUT_BYTES = ReadLimits.defaults().maxEncodedBytes();
     /// Maximum bytes accepted for an external uncompressed payload (both encoded and decoded).
     private static final long MAX_EXTERNAL_UNCOMPRESSED_BYTES = Math.min(
-            NBTReadLimits.defaults().maxEncodedBytes(), NBTReadLimits.defaults().maxDecompressedBytes());
+            ReadLimits.defaults().maxEncodedBytes(), ReadLimits.defaults().maxDecompressedBytes());
 
     public static @Nullable Tag readTag(DataReader reader) throws IOException {
         byte tagByte = reader.readByte();
@@ -71,7 +71,7 @@ public final class NBTInput {
         // GZip Magic Number: 0x1F 0x8B 0x08
         if (tagByte == 0x1F) {
             try (var decompressReader = DecompressStreamDataReader.newGZipDataReader(
-                    reader, -1, space.minecraftstl.xyml.library.nbt.io.NBTReadLimits.defaults()
+                    reader, -1, space.minecraftstl.xyml.library.nbt.io.ReadLimits.defaults()
                             .maxDecompressedBytes())) {
                 Tag tag = readTag(decompressReader);
                 decompressReader.finish();
@@ -82,7 +82,7 @@ public final class NBTInput {
         // LZ4 Magic Number: "LZ4Block"
         if (tagByte == 'L') {
             try (var decompressReader = DecompressStreamDataReader.newLZ4DataReader(
-                    reader, -1, space.minecraftstl.xyml.library.nbt.io.NBTReadLimits.defaults()
+                    reader, -1, space.minecraftstl.xyml.library.nbt.io.ReadLimits.defaults()
                             .maxDecompressedBytes())) {
                 Tag tag = readTag(decompressReader);
                 decompressReader.finish();
@@ -99,7 +99,7 @@ public final class NBTInput {
                 throw new IOException("Preset-dictionary zlib streams are not supported");
             }
             try (var decompressReader = new ZlibDataReader(reader, -1,
-                    space.minecraftstl.xyml.library.nbt.io.NBTReadLimits.defaults().maxDecompressedBytes())) {
+                    space.minecraftstl.xyml.library.nbt.io.ReadLimits.defaults().maxDecompressedBytes())) {
                 Tag tag = readTag(decompressReader);
                 decompressReader.finish();
                 return tag;
@@ -128,7 +128,7 @@ public final class NBTInput {
         var header = ChunkRegionHeader.readHeader(rawReader);
         var region = new ChunkRegion();
         DocumentBudget documentBudget = new DocumentBudget(
-                NBTReadLimits.defaults().maxDocumentDecompressedBytes());
+                ReadLimits.defaults().maxDocumentDecompressedBytes());
         final long headerEnd;
         try {
             headerEnd = Math.addExact(fileStart, 2L * ChunkUtils.SECTOR_BYTES);

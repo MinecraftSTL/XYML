@@ -23,8 +23,10 @@ import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
+import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntTag;
+import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Assumptions;
@@ -388,11 +390,59 @@ public final class NBTFileTest {
         }
     }
 
+    /// Reports malformed Java modified UTF-8 and Bedrock UTF-8 strings as irreversible data loss.
+    ///
+    /// @param edition string encoding and byte order under test
+    /// @throws Exception if tolerant decoding unexpectedly rejects the recoverable document
+    @ParameterizedTest
+    @EnumSource(MinecraftEdition.class)
+    void classifiesMalformedStringEncodingAsPartialDataLoss(MinecraftEdition edition) throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                malformedStringEncoding(edition), CompoundTag.class, NBTCodec.of(edition), ReadLimits.defaults());
+
+        assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, result.report().severity());
+        NBTReadIssue encodingIssue = result.report().issues().stream()
+                .filter(issue -> "STRING_ENCODING_REPLACED".equals(issue.code()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, encodingIssue.severity());
+        assertTrue(encodingIssue.message().contains("原字符无法可靠恢复"));
+        assertTrue(result.root().getString("value").contains("\uFFFD"));
+    }
+
+    /// Records a named compound child's path after its complete name but truncated payload.
+    @Test
+    void reportsTruncatedNamedCompoundChildAtChildPath() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                truncatedNamedInt(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        NBTReadIssue issue = result.report().issues().stream()
+                .filter(candidate -> "COMPOUND_CHILD_TRUNCATED".equals(candidate.code()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, issue.severity());
+        assertEquals("broken", issue.path());
+    }
+
+    /// Records the exact failed index when a bounded list element is truncated.
+    @Test
+    void reportsTruncatedListElementAtIndexPath() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                truncatedNamedIntList(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        NBTReadIssue issue = result.report().issues().stream()
+                .filter(candidate -> "LIST_TRUNCATED".equals(candidate.code()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, issue.severity());
+        assertEquals("list[1]", issue.path());
+    }
+
     /// Stops tolerant recovery at a truncated list element instead of parsing a residual sibling tag.
     @Test
     void doesNotScanPastUncertainListBoundary() throws Exception {
         NBTReadResult<CompoundTag> result = NBTRepairReader.read(
-                truncatedListWithResidualSibling(), CompoundTag.class, NBTCodec.of(), NBTReadLimits.defaults());
+                truncatedListWithResidualSibling(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
 
         assertNotNull(result.root().get("list"));
         assertTrue(result.root().get("after") == null,
@@ -401,6 +451,56 @@ public final class NBTFileTest {
                 .anyMatch(issue -> "COMPOUND_CHILD_TRUNCATED".equals(issue.code())));
         assertTrue(result.report().issues().stream()
                 .anyMatch(issue -> "TRAILING_BYTES".equals(issue.code())));
+    }
+
+    /// Rejects a valid document at the public tolerant-open entry when its node budget is zero.
+    @Test
+    void enforcesCustomNodeLimitAtOpenEntry() throws Exception {
+        Path source = temporaryDirectory.resolve("node-limit.nbt");
+        Files.write(source, encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW));
+
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(
+                source, CompoundTag.class, NBTCodec.of(), limitsWith(64L * 1024L * 1024L, 0L,
+                        16L * 1024L * 1024L, 16L * 1024L * 1024L)));
+    }
+
+    /// Rejects a root name at the public tolerant-open entry when its encoded string exceeds the limit.
+    @Test
+    void enforcesCustomStringLimitAtOpenEntry() throws Exception {
+        Path source = temporaryDirectory.resolve("string-limit.nbt");
+        CompoundTag root = new CompoundTag().setName("root");
+        Files.write(source, encode(root, NBTFileEncoding.RAW));
+
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(
+                source, CompoundTag.class, NBTCodec.of(), limitsWith(64L * 1024L * 1024L,
+                        1_000_000L, 3L, 16L * 1024L * 1024L)));
+    }
+
+    /// Rejects a primitive-array root when its encoded payload exceeds the custom byte limit.
+    @Test
+    void enforcesCustomArrayByteLimitAtOpenEntry() throws Exception {
+        Path source = temporaryDirectory.resolve("array-limit.nbt");
+        Files.write(source, encode(new ByteArrayTag(new byte[]{1, 2}), NBTFileEncoding.RAW));
+
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(
+                source, ByteArrayTag.class, NBTCodec.of(), limitsWith(64L * 1024L * 1024L,
+                        1_000_000L, 16L * 1024L * 1024L, 1L)));
+    }
+
+    /// Rejects each compressed envelope when one payload exceeds the custom decompression limit.
+    ///
+    /// @param encoding compressed standalone envelope under test
+    /// @throws Exception if fixture creation unexpectedly fails
+    @ParameterizedTest
+    @EnumSource(value = NBTFileEncoding.class, names = {"GZIP", "ZLIB", "LZ4"})
+    void enforcesCustomPayloadDecompressionLimitAtOpenEntry(NBTFileEncoding encoding) throws Exception {
+        Path source = temporaryDirectory.resolve("payload-limit-"
+                + encoding.name().toLowerCase(Locale.ROOT) + ".nbt");
+        Files.write(source, encode(new CompoundTag().addString("payload", "decompressed"), encoding));
+
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(
+                source, CompoundTag.class, NBTCodec.of(), limitsWith(8L, 1_000_000L,
+                        16L * 1024L * 1024L, 16L * 1024L * 1024L)));
     }
 
     /// Rejects a backup destination equal to the source without publishing either state.
@@ -447,7 +547,7 @@ public final class NBTFileTest {
     @Test
     void rejectsOversizedStandaloneBeforeReading() throws Exception {
         Path source = temporaryDirectory.resolve("oversized.dat");
-        long oversizedPosition = NBTReadLimits.defaults().maxEncodedBytes();
+        long oversizedPosition = ReadLimits.defaults().maxEncodedBytes();
         try (FileChannel channel = FileChannel.open(source, StandardOpenOption.CREATE_NEW,
                 StandardOpenOption.WRITE)) {
             channel.position(oversizedPosition);
@@ -615,6 +715,97 @@ public final class NBTFileTest {
         return output.toByteArray();
     }
 
+    /// Builds a complete raw compound whose string payload contains an overlong slash encoding.
+    ///
+    /// The byte pair is invalid in both Java modified UTF-8 and standard UTF-8, while all tag
+    /// boundaries remain known so tolerant decoding can preserve the rest of the document.
+    ///
+    /// @param edition byte order used by the encoded NBT document
+    /// @return malformed but structurally bounded raw NBT bytes
+    private static byte[] malformedStringEncoding(MinecraftEdition edition) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        writeUnsignedShort(output, 0, edition); // root name
+        output.write(8); // string child
+        byte[] name = "value".getBytes(StandardCharsets.UTF_8);
+        writeUnsignedShort(output, name.length, edition);
+        output.write(name, 0, name.length);
+        writeUnsignedShort(output, 2, edition);
+        output.write(0xC0); // invalid overlong UTF-8 sequence
+        output.write(0xAF);
+        output.write(0); // root TAG_End
+        return output.toByteArray();
+    }
+
+    /// Builds a root compound whose named integer child ends halfway through its payload.
+    ///
+    /// @return structurally bounded name followed by a truncated integer value
+    private static byte[] truncatedNamedInt() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(3); // integer child
+        output.write(0);
+        output.write(6);
+        byte[] name = "broken".getBytes(StandardCharsets.UTF_8);
+        output.write(name, 0, name.length);
+        output.write(0x12);
+        output.write(0x34); // only half of the integer payload
+        return output.toByteArray();
+    }
+
+    /// Builds a named two-element integer list whose second payload is truncated.
+    ///
+    /// @return raw compound with one complete list element and one incomplete element
+    private static byte[] truncatedNamedIntList() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(9); // list child
+        output.write(0);
+        output.write(4);
+        byte[] name = "list".getBytes(StandardCharsets.UTF_8);
+        output.write(name, 0, name.length);
+        output.write(3); // integer element type
+        output.writeBytes(new byte[]{0, 0, 0, 2});
+        output.writeBytes(new byte[]{0, 0, 0, 1}); // complete first element
+        output.write(0x12);
+        output.write(0x34); // only half of the second integer
+        return output.toByteArray();
+    }
+
+    /// Creates a custom policy while retaining unrelated production defaults.
+    ///
+    /// @param maxDecompressedBytes single-payload decompression limit
+    /// @param maxNodes logical node limit
+    /// @param maxStringBytes encoded string limit
+    /// @param maxArrayBytes primitive-array byte limit
+    /// @return immutable custom read policy
+    private static ReadLimits limitsWith(long maxDecompressedBytes, long maxNodes,
+                                         long maxStringBytes, long maxArrayBytes) {
+        ReadLimits defaults = ReadLimits.defaults();
+        return new ReadLimits(defaults.maxEncodedBytes(), maxDecompressedBytes,
+                defaults.maxDocumentDecompressedBytes(), maxNodes, defaults.maxDepth(),
+                maxStringBytes, defaults.maxArrayLength(), maxArrayBytes);
+    }
+
+    /// Writes one unsigned-short field in the selected edition's byte order.
+    ///
+    /// @param output fixture destination
+    /// @param value unsigned-short value
+    /// @param edition byte order selector
+    private static void writeUnsignedShort(ByteArrayOutputStream output, int value, MinecraftEdition edition) {
+        if (edition == MinecraftEdition.JAVA_EDITION) {
+            output.write(value >>> Byte.SIZE);
+            output.write(value);
+        } else {
+            output.write(value);
+            output.write(value >>> Byte.SIZE);
+        }
+    }
+
     /// Simulates a valid external timestamp-header change.
     ///
     /// @param file region path
@@ -634,7 +825,7 @@ public final class NBTFileTest {
     /// @param encoding standalone envelope
     /// @return complete encoded bytes
     /// @throws IOException if serialization or compression fails
-    private static byte[] encode(CompoundTag root, NBTFileEncoding encoding) throws IOException {
+    private static byte[] encode(Tag root, NBTFileEncoding encoding) throws IOException {
         ByteArrayOutputStream rawOutput = new ByteArrayOutputStream();
         NBTCodec.of().writeTag(rawOutput, root);
         byte[] raw = rawOutput.toByteArray();

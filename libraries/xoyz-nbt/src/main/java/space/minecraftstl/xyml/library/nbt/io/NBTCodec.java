@@ -150,10 +150,10 @@ public final class NBTCodec {
     private static final NBTCodec BE = new NBTCodec(MinecraftEdition.BEDROCK_EDITION, ExternalChunkAccessor.defaultFactory());
     /// Maximum encoded input accepted by the legacy stateless codec entry points.
     private static final int MAX_ENCODED_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxEncodedBytes());
+            ReadLimits.defaults().maxEncodedBytes());
     /// Maximum decompressed standalone payload accepted by the legacy stateless codec entry points.
     private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxDecompressedBytes());
+            ReadLimits.defaults().maxDecompressedBytes());
 
     /// Returns the default [NBTCodec].
     ///
@@ -355,7 +355,7 @@ public final class NBTCodec {
         if (raw.length > MAX_DECOMPRESSED_BYTES) {
             throw new IOException("Decompressed NBT input exceeds the read limit");
         }
-        NBTRepairReader.validateStrictStructure(raw, getEdition().byteOrder(), NBTReadLimits.defaults());
+        NBTRepairReader.validateStrictStructure(raw, getEdition().byteOrder(), ReadLimits.defaults());
         try (var reader = new RawDataReader(new InputSource.OfByteBuffer(raw), getEdition())) {
             Tag tag = check(NBTInput.readTag(reader));
             reader.requireExhausted();
@@ -977,7 +977,7 @@ public final class NBTCodec {
             throw new IOException("Cannot write an invalid chunk region", exception);
         }
         try (NBTRegionFile storage = NBTRegionFile.open(file, accessor)) {
-            NBTReadLimits.Budget budget = NBTReadLimits.defaults().newDocumentBudget();
+            ReadLimits.Budget budget = ReadLimits.defaults().newDocumentBudget();
             for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
                 Chunk desired = region.getChunk(localIndex);
                 if (!desired.equals(storage.readChunk(localIndex, budget))) {

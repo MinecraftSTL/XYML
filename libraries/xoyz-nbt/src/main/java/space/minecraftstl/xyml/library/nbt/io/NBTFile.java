@@ -63,11 +63,11 @@ import java.util.zip.GZIPOutputStream;
 public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// Maximum strict standalone payload accepted for one save, matching the bounded read policy.
     private static final int MAX_STANDALONE_RAW_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxDecompressedBytes());
+            ReadLimits.defaults().maxDecompressedBytes());
 
     /// Maximum strict standalone envelope accepted for one save, matching the bounded read policy.
     private static final int MAX_STANDALONE_ENCODED_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxEncodedBytes());
+            ReadLimits.defaults().maxEncodedBytes());
 
     /// Absolute normalized source path.
     private final Path path;
@@ -255,7 +255,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if no root can be recovered or a limit is exceeded
     @Contract("_ -> new")
     public static NBTFile<Tag> openTagTolerant(Path path) throws IOException {
-        return openTagTolerant(path, Tag.class, NBTCodec.of(), NBTReadLimits.defaults());
+        return openTagTolerant(path, Tag.class, NBTCodec.of(), ReadLimits.defaults());
     }
 
     /// Opens a typed standalone tag with bounded tolerant recovery.
@@ -268,7 +268,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if no root can be recovered or a limit is exceeded
     @Contract("_, _, _ -> new")
     public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, TagType<T> tagType,
-                                                               NBTReadLimits limits) throws IOException {
+                                                               ReadLimits limits) throws IOException {
         Objects.requireNonNull(tagType, "tagType");
         return openTagTolerant(path, tagType.tagClass(), NBTCodec.of(), limits);
     }
@@ -282,7 +282,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if no root can be recovered or a limit is exceeded
     @Contract("_, _ -> new")
     public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, TagType<T> tagType) throws IOException {
-        return openTagTolerant(path, tagType, NBTReadLimits.defaults());
+        return openTagTolerant(path, tagType, ReadLimits.defaults());
     }
 
     /// Opens a standalone tag with a supplied codec and bounded tolerant recovery.
@@ -296,12 +296,12 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if no root can be recovered or a limit is exceeded
     @Contract("_, _, _, _ -> new")
     public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, Class<T> tagClass,
-                                                               NBTCodec codec, NBTReadLimits limits)
+                                                               NBTCodec codec, ReadLimits limits)
             throws IOException {
         Path absolute = normalizeExistingPath(path);
         Class<T> expectedClass = Objects.requireNonNull(tagClass, "tagClass");
         NBTCodec selectedCodec = Objects.requireNonNull(codec, "codec");
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         SourceSnapshot source = SourceSnapshot.read(absolute, selectedLimits.maxEncodedBytes());
         NBTReadResult<T> result = NBTRepairReader.read(source.bytes(), expectedClass, selectedCodec, selectedLimits);
         NBTReadReport report = standaloneReadReport(result.report().encoding(), result.report().strictValid(),
@@ -334,7 +334,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if the region envelope cannot be opened or the default limits reject it
     @Contract("_ -> new")
     public static NBTFile<ChunkRegion> openRegionTolerant(Path path) throws IOException {
-        return openRegionTolerant(Objects.requireNonNull(path, "path"), NBTReadLimits.defaults());
+        return openRegionTolerant(Objects.requireNonNull(path, "path"), ReadLimits.defaults());
     }
 
     /// Opens a Java Edition region with explicit bounded tolerant recovery.
@@ -344,7 +344,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @return editable tolerant region session
     /// @throws IOException if the region envelope cannot be opened or the limits are invalid
     @Contract("_, _ -> new")
-    public static NBTFile<ChunkRegion> openRegionTolerant(Path path, NBTReadLimits limits) throws IOException {
+    public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ReadLimits limits) throws IOException {
         return openRegionTolerant(NBTRegionFile.openTolerant(Objects.requireNonNull(path, "path")), limits);
     }
 
@@ -357,7 +357,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     @Contract("_, _ -> new")
     public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ExternalChunkAccessor accessor)
             throws IOException {
-        return openRegionTolerant(path, accessor, NBTReadLimits.defaults());
+        return openRegionTolerant(path, accessor, ReadLimits.defaults());
     }
 
     /// Opens a Java Edition region with an explicit companion accessor and read policy.
@@ -369,7 +369,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if the region envelope cannot be opened or the limits are invalid
     @Contract("_, _, _ -> new")
     public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ExternalChunkAccessor accessor,
-                                                           NBTReadLimits limits) throws IOException {
+                                                           ReadLimits limits) throws IOException {
         return openRegionTolerant(NBTRegionFile.openTolerant(
                 Objects.requireNonNull(path, "path"), Objects.requireNonNull(accessor, "accessor")), limits);
     }
@@ -408,14 +408,14 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @param limits defensive decompression and parser limits
     /// @return editable tolerant region session
     /// @throws IOException if a session slot cannot be materialized
-    static NBTFile<ChunkRegion> openRegionTolerant(NBTRegionFile storage, NBTReadLimits limits) throws IOException {
+    static NBTFile<ChunkRegion> openRegionTolerant(NBTRegionFile storage, ReadLimits limits) throws IOException {
         NBTRegionFile selectedStorage = Objects.requireNonNull(storage, "storage");
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         boolean success = false;
         try {
             List<NBTReadIssue> issues = new java.util.ArrayList<>(selectedStorage.readReport().issues());
             ChunkRegion root = new ChunkRegion();
-            NBTReadLimits.Budget budget = selectedLimits.newDocumentBudget();
+            ReadLimits.Budget budget = selectedLimits.newDocumentBudget();
             for (int localIndex = 0; localIndex < root.size(); localIndex++) {
                 NBTReadResult<space.minecraftstl.xyml.library.nbt.chunk.Chunk> result =
                         selectedStorage.readChunkTolerant(localIndex, selectedLimits, budget);
@@ -776,7 +776,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if any chunk cannot be decoded
     private static ChunkRegion readRegion(NBTRegionFile storage) throws IOException {
         ChunkRegion region = new ChunkRegion();
-        NBTReadLimits.Budget budget = NBTReadLimits.defaults().newDocumentBudget();
+        ReadLimits.Budget budget = ReadLimits.defaults().newDocumentBudget();
         for (int localIndex = 0; localIndex < region.size(); localIndex++) {
             region.setChunk(localIndex, storage.readChunk(localIndex, budget));
         }
@@ -909,7 +909,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     private void copyStage(Path source, Path target) throws IOException {
         boolean absentBefore = !Files.exists(target, LinkOption.NOFOLLOW_LINKS);
         try {
-            NBTRegionFileIO.copyFileBounded(source, target, NBTReadLimits.defaults().maxEncodedBytes());
+            NBTRegionFileIO.copyFileBounded(source, target, ReadLimits.defaults().maxEncodedBytes());
         } catch (IOException | RuntimeException failure) {
             if (absentBefore) {
                 try {
@@ -1092,7 +1092,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         /// @return complete bounded source snapshot
         /// @throws IOException if the source exceeds the bound or is not a regular file
         private static SourceSnapshot read(Path path) throws IOException {
-            return read(path, NBTReadLimits.defaults().maxEncodedBytes());
+            return read(path, ReadLimits.defaults().maxEncodedBytes());
         }
 
         /// Reads a source with an explicit encoded-input bound.

@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
 import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
-import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
 import space.minecraftstl.xyml.task.CompletableFutureTask;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -311,13 +311,13 @@ public final class NBTDocumentService {
             validateNewSource(file);
             session = switch (fileType) {
                 case TAG -> NBTFile.createTag(file, defaultStandaloneEncoding(file));
-                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
+                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, ReadLimits.defaults());
             };
         } else {
             validateExistingSource(file);
             session = switch (fileType) {
                 case TAG -> NBTFile.openTagTolerant(file);
-                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
+                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, ReadLimits.defaults());
             };
         }
         return new NBTDocument(fileType, session);

@@ -32,11 +32,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the fixed read limits and the distinction between warnings and repairs.
 @NotNullByDefault
-public final class NBTReadLimitsTest {
+public final class ReadLimitsTest {
     /// Confirms the documented default values are binary MiB and cumulative per-document.
     @Test
     void defaultsMatchSafetyContract() {
-        NBTReadLimits limits = NBTReadLimits.defaults();
+        ReadLimits limits = ReadLimits.defaults();
         assertEquals(65L * 1024L * 1024L, limits.maxEncodedBytes());
         assertEquals(64L * 1024L * 1024L, limits.maxDecompressedBytes());
         assertEquals(256L * 1024L * 1024L, limits.maxDocumentDecompressedBytes());
@@ -62,8 +62,8 @@ public final class NBTReadLimitsTest {
     /// Confirms that a cumulative budget rejects output before it can be materialized.
     @Test
     void cumulativeBudgetIsStrict() throws IOException {
-        NBTReadLimits limits = new NBTReadLimits(10L, 10L, 12L, 10L, 10L, 10L, 10L, 10L);
-        NBTReadLimits.Budget budget = limits.newDocumentBudget();
+        ReadLimits limits = new ReadLimits(10L, 10L, 12L, 10L, 10L, 10L, 10L, 10L);
+        ReadLimits.Budget budget = limits.newDocumentBudget();
         budget.consume(12L);
         assertEquals(0L, budget.remaining());
         assertThrows(IOException.class, () -> budget.consume(1L));

@@ -111,9 +111,9 @@ public final class NBTRegionFile implements AutoCloseable {
     /// Largest complete chunk frame which can be stored inside the region file.
     private static final int MAX_INLINE_BYTES = MAX_SECTOR_COUNT * ChunkUtils.SECTOR_BYTES;
     /// Shared default limit for one decompressed chunk payload.
-    private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(NBTReadLimits.defaults().maxDecompressedBytes());
+    private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(ReadLimits.defaults().maxDecompressedBytes());
     /// Shared default limit for one encoded chunk payload, including external companions.
-    private static final int MAX_COMPRESSED_BYTES = Math.toIntExact(NBTReadLimits.defaults().maxEncodedBytes());
+    private static final int MAX_COMPRESSED_BYTES = Math.toIntExact(ReadLimits.defaults().maxEncodedBytes());
     /// Normalized path of the open region file.
     private final Path path;
     /// Channel owning all reads, copy-on-write payload writes, and header publication.
@@ -262,7 +262,7 @@ public final class NBTRegionFile implements AutoCloseable {
 
     /// Opens a region while isolating payload and slot errors for later tolerant reads.
     /// Header bytes remain structurally bounded. Invalid payloads are reported by
-    /// [#readChunkTolerant(int, NBTReadLimits)] instead of preventing the other slots from opening.
+    /// [#readChunkTolerant(int, ReadLimits)] instead of preventing the other slots from opening.
     /// @param path region file path
     /// @return an open tolerant region session
     /// @throws IOException if the file cannot be opened or its length/header envelope is unusable
@@ -423,7 +423,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed or cannot be decoded
     public Chunk readChunk(int localIndex) throws IOException {
-        return readChunk(localIndex, NBTReadLimits.defaults().newDocumentBudget());
+        return readChunk(localIndex, ReadLimits.defaults().newDocumentBudget());
     }
 
     /// Reads a chunk while charging decompressed bytes to a caller-owned region budget.
@@ -434,11 +434,11 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param budget cumulative decompressed-byte budget for the containing read
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed, cannot be decoded, or exceeds the budget
-    Chunk readChunk(int localIndex, NBTReadLimits.Budget budget) throws IOException {
+    Chunk readChunk(int localIndex, ReadLimits.Budget budget) throws IOException {
         checkIndex(localIndex);
         ensureOpen();
         NBTRegionFileIO.requireRegularFile(path);
-        NBTReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
         @Nullable PendingChunk changed = pending.get(localIndex);
         if (changed != null) {
             return changed.chunk == null
@@ -486,7 +486,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @return detached chunk and slot diagnostics
     /// @throws IOException if the session itself is closed or the read policy is invalid
     public NBTReadResult<Chunk> readChunkTolerant(int localIndex) throws IOException {
-        return readChunkTolerant(localIndex, NBTReadLimits.defaults());
+        return readChunkTolerant(localIndex, ReadLimits.defaults());
     }
 
     /// Reads one chunk with an explicit bounded tolerant-read policy.
@@ -494,8 +494,8 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param limits defensive decompression and parser limits
     /// @return detached chunk and slot diagnostics
     /// @throws IOException if the session itself is closed or the read policy is invalid
-    public NBTReadResult<Chunk> readChunkTolerant(int localIndex, NBTReadLimits limits) throws IOException {
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+    public NBTReadResult<Chunk> readChunkTolerant(int localIndex, ReadLimits limits) throws IOException {
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
         return readChunkTolerant(localIndex, selectedLimits, selectedLimits.newDocumentBudget());
     }
 
@@ -507,12 +507,12 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param budget cumulative document budget
     /// @return detached chunk and slot diagnostics
     /// @throws IOException if the session is closed or the policy is invalid
-    NBTReadResult<Chunk> readChunkTolerant(int localIndex, NBTReadLimits limits,
-                                           NBTReadLimits.Budget budget) throws IOException {
+    NBTReadResult<Chunk> readChunkTolerant(int localIndex, ReadLimits limits,
+                                           ReadLimits.Budget budget) throws IOException {
         checkIndex(localIndex);
         ensureOpen();
-        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
-        NBTReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        ReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
         @Nullable PendingChunk changed = pending.get(localIndex);
         if (changed != null) {
             Chunk result = changed.chunk == null
@@ -588,7 +588,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param limits defensive decompression and parser limits
     /// @return detached chunk and slot diagnostics
     /// @throws IOException if the session itself is closed or the read policy is invalid
-    public NBTReadResult<Chunk> readChunkTolerant(int localX, int localZ, NBTReadLimits limits)
+    public NBTReadResult<Chunk> readChunkTolerant(int localX, int localZ, ReadLimits limits)
             throws IOException {
         return readChunkTolerant(ChunkUtils.toLocalIndex(
                 NBTRegionFileIO.checkedCoordinate(localX), NBTRegionFileIO.checkedCoordinate(localZ)), limits);
@@ -1311,7 +1311,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param issues diagnostic sink
     /// @return recoverable payload, or `null` when its marker cannot be interpreted
     private @Nullable ChunkPayload readPayloadTolerant(int localIndex, byte[] sector, int sectorLength,
-                                                        NBTReadLimits limits,
+                                                        ReadLimits limits,
                                                         List<NBTReadIssue> issues) {
         if (sector.length < Integer.BYTES + 1) {
             issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
@@ -1414,7 +1414,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// Reads every occupied slot once so open fails before exposing malformed payloads.
     /// @throws IOException if any existing chunk cannot be read and validated
     private void validateExistingPayloads() throws IOException {
-        NBTReadLimits.Budget budget = NBTReadLimits.defaults().newDocumentBudget();
+        ReadLimits.Budget budget = ReadLimits.defaults().newDocumentBudget();
         for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
             if (sectorLengths[localIndex] != 0) {
                 readChunk(localIndex, budget);
@@ -1764,7 +1764,7 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param limits bounded input policy
     /// @param issues diagnostic sink
     /// @return bounded companion bytes, possibly empty when unavailable
-    private byte[] readCompanionTolerant(int localIndex, NBTReadLimits limits,
+    private byte[] readCompanionTolerant(int localIndex, ReadLimits limits,
                                          List<NBTReadIssue> issues) throws IOException {
         long configuredMaximum = Math.min(limits.maxEncodedBytes(), MAX_COMPRESSED_BYTES);
         int maximum = Math.toIntExact(Math.min(configuredMaximum, Integer.MAX_VALUE));

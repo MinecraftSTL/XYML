@@ -17,7 +17,7 @@
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -46,7 +46,7 @@ public final class ZlibDataReader extends BoundedDataReader {
     private boolean finished;
 
     public ZlibDataReader(RawDataReader rawReader, long limit) {
-        this(rawReader, limit, NBTReadLimits.defaults().maxDecompressedBytes());
+        this(rawReader, limit, ReadLimits.defaults().maxDecompressedBytes());
     }
 
     /// Creates a zlib reader with independent compressed-input and decompressed-output limits.
