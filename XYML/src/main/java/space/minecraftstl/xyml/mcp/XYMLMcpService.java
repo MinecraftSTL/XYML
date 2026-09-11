@@ -1796,10 +1796,20 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 instanceSettingsFile(context.repositoryDirectory(), context.instanceId()));
     }
 
-    /// Releases retained analysis plans and requests cancellation of active repair tasks.
+    /// Releases retained analysis plans, active repair tasks, and the optional dependency-search cache.
     @Override
     public void close() {
-        crashRepairCoordinator.close();
+        try {
+            crashRepairCoordinator.close();
+        } finally {
+            if (missingDependencySearch instanceof AutoCloseable closeable) {
+                try {
+                    closeable.close();
+                } catch (Exception exception) {
+                    LOG.warning("Unable to close missing-dependency search", exception);
+                }
+            }
+        }
     }
 
     /// Parses a positive integer argument.

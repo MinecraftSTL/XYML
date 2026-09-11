@@ -160,6 +160,19 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         modsCatalog.openSearch(searchText);
     }
 
+    /// Selects the Mods category and starts one version-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openMissingDependencySearch(searchText, gameVersion);
+    }
+
     /// Selects the local-modpack category and displays a dropped archive.
     ///
     /// @param archive local modpack archive

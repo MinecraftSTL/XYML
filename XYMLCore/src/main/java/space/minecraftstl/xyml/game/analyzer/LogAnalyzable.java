@@ -324,6 +324,21 @@ public record LogAnalyzable(
         /// @return task that opens or prepares the corresponding search
         Task<?> createTask(@Unmodifiable List<String> dependencyIds);
 
+        /// Creates a fresh stopped search task with the exact analyzed game-version context.
+        ///
+        /// Existing application boundaries remain source-compatible through the default delegation. Implementations
+        /// that cache provider candidates may use the version to consume the same exact query when the user searches.
+        ///
+        /// @param dependencyIds validated missing mod identifiers
+        /// @param gameVersion detected Minecraft version, or null when unavailable
+        /// @return task that opens or prepares the corresponding search
+        default Task<?> createTask(
+                @Unmodifiable List<String> dependencyIds,
+                @Nullable String gameVersion) {
+            Objects.requireNonNull(dependencyIds, "dependencyIds");
+            return createTask(dependencyIds);
+        }
+
         /// Starts an optional read-only lookup for the supplied dependency identifiers.
         ///
         /// Implementations may schedule provider discovery and cache immutable candidates before the user invokes

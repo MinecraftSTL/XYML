@@ -173,29 +173,40 @@ public interface Solver {
                 Objects.requireNonNull(messageArguments, "messageArguments"));
         String checkedFallbackMessage = Objects.requireNonNull(fallbackMessage, "fallbackMessage");
         LogAnalyzable.@Nullable MissingDependencySearch search = checkedInput.missingDependencySearch();
-        RepairActionDescriptor repairAction = RepairActionDescriptor.openModSearch(
-                checkedDependencyIds,
-                search != null);
-        if (search == null) {
-            return new TextSolver(
-                    checkedMessageKey,
-                    checkedMessageArguments,
-                    checkedFallbackMessage,
-                    repairAction);
+        if (search != null) {
+            try {
+                search.prefetch(checkedDependencyIds, checkedInput.gameVersion());
+            } catch (RuntimeException prefetchFailure) {
+                // Prefetch is an opportunistic read-only optimization. A provider or scheduler failure must not hide a
+                // valid diagnosis; the explicit search task remains available for a later retry.
+                LOG.warning("Unable to prefetch missing-dependency catalog candidates", prefetchFailure);
+            }
         }
-        try {
-            search.prefetch(checkedDependencyIds, checkedInput.gameVersion());
-        } catch (RuntimeException prefetchFailure) {
-            // Prefetch is an opportunistic read-only optimization. A provider or scheduler failure must not hide a
-            // valid diagnosis; the explicit search task remains available for a later retry.
-            LOG.warning("Unable to prefetch missing-dependency catalog candidates", prefetchFailure);
-        }
-        return new TaskSolver(
+        return new MissingDependencySolver(
                 checkedMessageKey,
                 checkedMessageArguments,
                 checkedFallbackMessage,
-                repairAction,
-                () -> search.createTask(checkedDependencyIds));
+                checkedDependencyIds,
+                search,
+                checkedInput.gameVersion());
+    }
+
+    /// Merges two source-local missing-dependency solvers into one complete executable snapshot.
+    ///
+    /// Non-standard solver implementations retain the later-source compatibility behavior because their search
+    /// boundary cannot be reconstructed from public presentation metadata alone.
+    ///
+    /// @param earlier solver produced from the earlier physical source
+    /// @param later solver produced from the later physical source
+    /// @return merged solver when both use the standard search implementation, otherwise the later solver
+    static Solver mergeMissingDependencySearch(Solver earlier, Solver later) {
+        Solver checkedEarlier = Objects.requireNonNull(earlier, "earlier");
+        Solver checkedLater = Objects.requireNonNull(later, "later");
+        if (checkedEarlier instanceof MissingDependencySolver earlierSearch
+                && checkedLater instanceof MissingDependencySolver laterSearch) {
+            return earlierSearch.merge(laterSearch);
+        }
+        return checkedLater;
     }
 
     /// Creates the Java-runtime selection solver for one analyzable launch.

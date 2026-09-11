@@ -41,6 +41,7 @@ import space.minecraftstl.xyml.ui.launch.LaunchInteraction;
 import space.minecraftstl.xyml.ui.launch.LaunchInteractionPrompt;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.crash.SwingGameCrashWindow;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchAction;
 import space.minecraftstl.xyml.ui.swing.log.SwingGameLogWindow;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.*;
@@ -133,7 +134,7 @@ public final class LauncherHelper {
     private final ProductionInteractions productionInteractions;
 
     /// Application-level action that opens the Mods search for a missing dependency.
-    private final @Nullable Consumer<String> openMissingModSearch;
+    private final @Nullable MissingDependencySearchAction openMissingModSearch;
 
     /// Records that the automatic missing-mod action successfully made the launcher visible.
     private final AtomicBoolean missingModSearchOpened = new AtomicBoolean();
@@ -157,7 +158,7 @@ public final class LauncherHelper {
                 selectedInstanceId,
                 launchInteraction,
                 accountReauthentication,
-                null);
+                (@Nullable MissingDependencySearchAction) null);
     }
 
     /// Creates a production helper with an explicit missing-mod search boundary.
@@ -175,6 +176,32 @@ public final class LauncherHelper {
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication,
             @Nullable Consumer<String> openMissingModSearch) {
+        this(
+                repository,
+                account,
+                selectedInstanceId,
+                launchInteraction,
+                accountReauthentication,
+                openMissingModSearch == null
+                        ? null
+                        : (dependencyId, ignoredGameVersion) -> openMissingModSearch.accept(dependencyId));
+    }
+
+    /// Creates a production helper with an explicit version-aware missing-dependency search boundary.
+    ///
+    /// @param repository repository containing the selected instance
+    /// @param account account used for launch authentication
+    /// @param selectedInstanceId stable selected instance identifier
+    /// @param launchInteraction production launch-decision presenter
+    /// @param accountReauthentication production credential-expiry recovery service
+    /// @param openMissingModSearch action opening a dependency search with its analyzed version, or null
+    public LauncherHelper(
+            XYMLGameRepository repository,
+            Account account,
+            GameInstanceID selectedInstanceId,
+            LaunchInteraction launchInteraction,
+            AccountReauthentication accountReauthentication,
+            @Nullable MissingDependencySearchAction openMissingModSearch) {
         this.repository = Objects.requireNonNull(repository);
         this.account = Objects.requireNonNull(account);
         this.selectedInstanceId = Objects.requireNonNull(selectedInstanceId);
@@ -214,11 +241,12 @@ public final class LauncherHelper {
     /// Opens the application search boundary and records the successful handoff.
     ///
     /// @param dependencyId missing mod identifier selected by the analyzer
-    private void openMissingModSearch(String dependencyId) {
-        Consumer<String> action = Objects.requireNonNull(
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    private void openMissingModSearch(String dependencyId, @Nullable String gameVersion) {
+        MissingDependencySearchAction action = Objects.requireNonNull(
                 openMissingModSearch,
                 "missing-mod search action");
-        action.accept(Objects.requireNonNull(dependencyId, "dependencyId"));
+        action.open(Objects.requireNonNull(dependencyId, "dependencyId"), gameVersion);
         missingModSearchOpened.set(true);
     }
 
@@ -1476,7 +1504,7 @@ public final class LauncherHelper {
 
             if (exitType != ExitType.NORMAL) {
                 repository.markInstanceLaunchedAbnormally(manifest.id());
-                SwingGameCrashWindow crashWindow = SwingGameCrashWindow.open(
+                SwingGameCrashWindow crashWindow = SwingGameCrashWindow.openWithMissingDependencySearch(
                         Objects.requireNonNull(process, "managed process"),
                         exitType,
                         repository,

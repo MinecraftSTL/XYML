@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.game.analyzer.Solver;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
@@ -268,18 +269,33 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
 
     /// Adds one limited log diagnosis while retaining all physical source names.
     ///
-    /// The later source replaces the diagnostic object so its evidence and solver snapshot remain authoritative, while
-    /// the linked map keeps the result at the position where it was first observed.
+    /// The later source replaces ordinary diagnostic objects while matching dependency searches merge every stable ID.
+    /// The linked map keeps the result at the position where it was first observed.
     private static void addLogResult(
             Map<ResultID, AnalyzeResult<LogAnalyzable>> logResults,
             Map<ResultID, List<String>> logEvidenceSources,
             AnalyzeResult<LogAnalyzable> result,
             String source) {
-        logResults.put(result.resultId(), result);
+        AnalyzeResult<LogAnalyzable> mergedResult = result;
+        @Nullable AnalyzeResult<LogAnalyzable> earlier = logResults.get(result.resultId());
+        if (earlier != null && isMissingDependencyResult(result.resultId())) {
+            Solver mergedSolver = Solver.mergeMissingDependencySearch(earlier.solver(), result.solver());
+            mergedResult = new AnalyzeResult<>(result.analyzer(), result.resultId(), mergedSolver);
+        }
+        logResults.put(result.resultId(), mergedResult);
         List<String> sources = logEvidenceSources.computeIfAbsent(result.resultId(), ignored -> new ArrayList<>());
         if (!sources.contains(source)) {
             sources.add(source);
         }
+    }
+
+    /// Returns whether one stable diagnosis carries a list of missing mod identifiers.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return true for Forge or Fabric dependency failures
+    private static boolean isMissingDependencyResult(ResultID resultId) {
+        return resultId == ResultID.FORGE_MISSING_DEPENDENCY
+                || resultId == ResultID.FABRIC_MISSING_DEPENDENCY;
     }
 
     /// Removes legacy results whose evidence and repair are represented by one limited log diagnosis.

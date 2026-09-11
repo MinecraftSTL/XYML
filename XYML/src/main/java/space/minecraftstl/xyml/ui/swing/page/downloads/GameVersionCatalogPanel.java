@@ -458,6 +458,19 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadCategoryPanel.openModSearch(searchText);
     }
 
+    /// Selects the download-content tab and opens one version-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
+        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion);
+    }
+
     /// Starts the lazy source load after this page first becomes displayable.
     @Override
     public void addNotify() {

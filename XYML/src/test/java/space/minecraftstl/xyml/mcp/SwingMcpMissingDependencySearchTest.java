@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.mcp;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.task.Task;
@@ -26,6 +27,7 @@ import space.minecraftstl.xyml.task.TaskResource;
 import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -37,9 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies delayed and fail-closed missing-dependency search task creation for MCP repair actions.
 @NotNullByDefault
 final class SwingMcpMissingDependencySearchTest {
-    /// Resolves the runtime only during execution and opens one read-only search for every dependency identifier.
+    /// Resolves the runtime only during execution and avoids overwriting one shared page for multiple dependencies.
     @Test
-    void resolvesAtExecutionAndSearchesForEveryDependency() throws Exception {
+    void resolvesAtExecutionAndOpensOnlyFirstDependencyWithoutSelector() throws Exception {
         AtomicInteger resolutions = new AtomicInteger();
         RecordingSearchRuntime runtime = new RecordingSearchRuntime(false);
         SwingMcpMissingDependencySearch search = SwingMcpMissingDependencySearch.forRuntimeResolver(
@@ -63,7 +65,7 @@ final class SwingMcpMissingDependencySearchTest {
         firstTask.execute();
 
         assertEquals(1, resolutions.get());
-        assertEquals(List.of("fabric-api", "cloth-config"), runtime.searches());
+        assertEquals(List.of("fabric-api"), runtime.searches());
     }
 
     /// Fails the task explicitly when no Swing runtime exists at execution time.
@@ -119,6 +121,33 @@ final class SwingMcpMissingDependencySearchTest {
         assertEquals(List.of("fabric-api"), runtime.searches());
     }
 
+    /// Carries the analyzed game version through the execution-time runtime boundary.
+    @Test
+    void opensSearchWithAnalyzedGameVersion() throws Exception {
+        RecordingSearchRuntime runtime = new RecordingSearchRuntime(false);
+        SwingMcpMissingDependencySearch search =
+                SwingMcpMissingDependencySearch.forRuntimeResolver(() -> runtime, () -> true);
+
+        search.createTask(List.of("fabric-api"), "1.20.1").execute();
+
+        assertEquals(List.of("fabric-api"), runtime.searches());
+        assertEquals(List.of("1.20.1"), runtime.gameVersions());
+    }
+
+    /// Rejects a task retained past the owning crash-window or MCP-service lifetime.
+    @Test
+    void closedAdapterRejectsRetainedSearchTask() {
+        List<String> searches = new ArrayList<>();
+        SwingMcpMissingDependencySearch search = new SwingMcpMissingDependencySearch(searches::add);
+        Task<?> task = search.createTask(List.of("fabric-api"));
+
+        search.close();
+        IllegalStateException failure = assertThrows(IllegalStateException.class, task::execute);
+
+        assertEquals("Missing-dependency search is closed", failure.getMessage());
+        assertTrue(searches.isEmpty());
+    }
+
     /// Rejects absent and blank dependency identifiers before returning a task.
     @Test
     void rejectsInvalidDependencyIdentifiers() {
@@ -145,6 +174,9 @@ final class SwingMcpMissingDependencySearchTest {
         /// Dependency identifiers passed to the search boundary.
         private final List<String> searches = new ArrayList<>();
 
+        /// Analyzed versions passed beside each version-aware search, using an empty string for unknown.
+        private final List<String> gameVersions = new ArrayList<>();
+
         /// Creates a recording runtime with the selected lifecycle state.
         ///
         /// @param closed whether this runtime is already closed
@@ -169,11 +201,28 @@ final class SwingMcpMissingDependencySearchTest {
             searches.add(dependencyId);
         }
 
+        /// Records one version-aware dependency search.
+        ///
+        /// @param dependencyId dependency identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            openModSearch(dependencyId);
+            gameVersions.add(Objects.requireNonNullElse(gameVersion, ""));
+        }
+
         /// Returns an immutable search snapshot.
         ///
         /// @return requested dependency identifiers
         private @Unmodifiable List<String> searches() {
             return List.copyOf(searches);
+        }
+
+        /// Returns the immutable analyzed-version snapshot.
+        ///
+        /// @return requested analyzed versions in search order
+        private @Unmodifiable List<String> gameVersions() {
+            return List.copyOf(gameVersions);
         }
     }
 }

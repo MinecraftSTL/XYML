@@ -371,6 +371,30 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
     }
 
+    /// Opens a read-only missing-dependency query using the same fixed scope as candidate discovery.
+    ///
+    /// Programmatic diagnosis navigation always uses Modrinth, all categories, popularity ordering, and the
+    /// analyzer's captured Minecraft version. An older read-only request is made stale before these criteria are
+    /// applied, while an active installation remains owned by its existing task and merely delays the new search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        if (catalogLoading) {
+            catalogRequestRevision.incrementAndGet();
+            catalogLoading = false;
+        }
+        sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
+        resetCategoryOptions();
+        resetSortOptions();
+        gameVersionField.setText(Objects.requireNonNullElse(gameVersion, "").trim());
+        openSearch(searchText);
+    }
+
     /// Queues one pending-search check after the current EDT event completes.
     private void schedulePendingSearchCheck() {
         EdtDispatcher.requireEventDispatchThread();

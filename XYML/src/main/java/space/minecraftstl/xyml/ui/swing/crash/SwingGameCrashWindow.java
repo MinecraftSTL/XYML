@@ -28,12 +28,14 @@ import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.RepairActionDescriptor;
+import space.minecraftstl.xyml.game.analyzer.RepairTaskPhase;
 import space.minecraftstl.xyml.game.analyzer.Solver;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchAction;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
@@ -65,12 +67,14 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -79,6 +83,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -116,10 +121,13 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Whether this instance may create a native frame after composing its testable content.
     private final boolean nativePresentationEnabled;
 
+    /// Per-window confirmation and runtime-selection boundary.
+    private final RepairInteraction repairInteraction;
+
     /// Prevents frame recreation and all late asynchronous UI updates after close.
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    /// Completes once crash analysis has been rendered; optional searches must not hold the launch lifecycle open.
+    /// Completes after analysis has no pending search, one search opens successfully, or the user closes the window.
     private final CompletableFuture<@Nullable Void> followUpCompletion = new CompletableFuture<>();
 
     /// Ensures analysis starts only once even when repeated calls raise the same window.
@@ -205,6 +213,40 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             List<Log> logs,
             Runnable showGameLogs,
             @Nullable java.util.function.Consumer<String> openMissingModSearch) {
+        @Nullable MissingDependencySearchAction searchAction = openMissingModSearch == null
+                ? null
+                : (dependencyId, ignoredGameVersion) -> openMissingModSearch.accept(dependencyId);
+        return openWithMissingDependencySearch(
+                process,
+                exitType,
+                repository,
+                manifest,
+                launchOptions,
+                logs,
+                showGameLogs,
+                searchAction);
+    }
+
+    /// Creates, opens, and returns a production crash window with a version-aware dependency-search action.
+    ///
+    /// @param process completed managed game process
+    /// @param exitType classified abnormal exit type
+    /// @param repository repository owning the launched instance
+    /// @param manifest launched game-instance manifest
+    /// @param launchOptions resolved launch configuration
+    /// @param logs current captured process-output history, copied before asynchronous work starts
+    /// @param showGameLogs action opening or raising the Swing game-log window
+    /// @param openMissingModSearch action opening a dependency search with its analyzed version, or null
+    /// @return closeable crash-window handle
+    public static SwingGameCrashWindow openWithMissingDependencySearch(
+            ManagedProcess process,
+            ProcessListener.ExitType exitType,
+            DefaultGameRepository repository,
+            GameInstanceManifest manifest,
+            LaunchOptions launchOptions,
+            List<Log> logs,
+            Runnable showGameLogs,
+            @Nullable MissingDependencySearchAction openMissingModSearch) {
         @Unmodifiable List<Log> copiedLogs = List.copyOf(Objects.requireNonNull(logs, "logs"));
         GameCrashWindowModel model = GameCrashWindowModel.fromLaunch(
                 exitType,
@@ -247,12 +289,40 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             GameCrashWindowActions actions,
             ExecutorService worker,
             boolean nativePresentationEnabled) {
+        this(
+                model,
+                analysisService,
+                reasonFormatter,
+                actions,
+                worker,
+                nativePresentationEnabled,
+                NativeRepairInteraction.INSTANCE);
+    }
+
+    /// Creates a window with an explicit repair-interaction boundary for deterministic UI tests.
+    ///
+    /// @param model immutable display and analysis inputs
+    /// @param analysisService asynchronous diagnosis service
+    /// @param reasonFormatter analyzer-result localizer
+    /// @param actions export and desktop side effects
+    /// @param worker window-owned executor
+    /// @param nativePresentationEnabled whether this instance may create a native frame
+    /// @param repairInteraction confirmation and runtime-selection boundary
+    SwingGameCrashWindow(
+            GameCrashWindowModel model,
+            GameCrashAnalysisService analysisService,
+            GameCrashReasonFormatter reasonFormatter,
+            GameCrashWindowActions actions,
+            ExecutorService worker,
+            boolean nativePresentationEnabled,
+            RepairInteraction repairInteraction) {
         this.model = Objects.requireNonNull(model, "model");
         this.analysisService = Objects.requireNonNull(analysisService, "analysisService");
         this.reasonFormatter = Objects.requireNonNull(reasonFormatter, "reasonFormatter");
         this.actions = Objects.requireNonNull(actions, "actions");
         this.worker = Objects.requireNonNull(worker, "worker");
         this.nativePresentationEnabled = nativePresentationEnabled;
+        this.repairInteraction = Objects.requireNonNull(repairInteraction, "repairInteraction");
     }
 
     /// Opens or raises this non-modal crash window on the EDT.
@@ -276,14 +346,16 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (currentExport != null) {
             currentExport.cancel(true);
         }
+        model.close();
         worker.shutdownNow();
         EdtDispatcher.execute(this::disposeOnEdt);
     }
 
-    /// Returns a stage completed when crash analysis has been rendered.
+    /// Returns the lifecycle boundary required by hidden-launcher missing-dependency follow-up.
     ///
-    /// Missing-dependency searches are explicit, optional row actions. They must not keep a hidden launcher process
-    /// lifecycle alive indefinitely while the user decides whether to search.
+    /// Analysis without an executable missing-dependency search completes immediately after rendering. When such a
+    /// search is available, the launcher runtime remains alive until one search opens successfully or this crash window
+    /// closes, so the user can decide whether and in which order to invoke the independent action.
     ///
     /// @return follow-up completion stage
     public CompletionStage<@Nullable Void> followUpCompletion() {
@@ -319,6 +391,71 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     boolean hasReportQrCodeOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
         return reportQrCodeMarker != null;
+    }
+
+    /// Clicks one independent repair action for deterministic headless tests.
+    ///
+    /// @param resultId stable diagnosis identifier
+    void clickRepairOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        requireRepairRow(resultId).button.doClick();
+    }
+
+    /// Returns the current independent repair-row state for deterministic headless tests.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return current lifecycle-state name
+    String repairStateOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).state.name();
+    }
+
+    /// Returns the immutable lifecycle history for one independent repair row.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return state names in transition order, including the initial available state
+    @Unmodifiable List<String> repairStateHistoryOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).stateHistory.stream().map(Enum::name).toList();
+    }
+
+    /// Returns one repair action's visible command text for deterministic headless tests.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return current localized button text
+    String repairActionTextOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).button.getText();
+    }
+
+    /// Returns one repair action's visible status text for deterministic headless tests.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return current localized status text
+    String repairStatusTextOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).status.getText();
+    }
+
+    /// Reports whether one repair action is currently enabled.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return true when the action accepts another click
+    boolean isRepairActionEnabledOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).button.isEnabled();
+    }
+
+    /// Resolves one rendered repair row or fails the caller's invalid test request.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return rendered repair row
+    private RepairRow requireRepairRow(String resultId) {
+        @Nullable RepairRow row = repairRows.get(Objects.requireNonNull(resultId, "resultId"));
+        if (row == null) {
+            throw new IllegalArgumentException("Unknown repair row: " + resultId);
+        }
+        return row;
     }
 
     /// Creates or raises the native frame and starts diagnosis once.
@@ -549,7 +686,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             displayedReason = reasonFormatter.format(result);
             renderDiagnosisRowsOnEdt(result);
         }
-        followUpCompletion.complete(null);
+        if (!hasPendingMissingDependencySearchOnEdt()) {
+            followUpCompletion.complete(null);
+        }
         @Nullable JEditorPane reason = reasonPane;
         if (reason != null) {
             reason.setText(htmlDocument(displayedReason));
@@ -625,6 +764,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         rows.repaint();
     }
 
+    /// Reports whether the rendered diagnosis keeps one executable missing-dependency search available.
+    ///
+    /// @return true while at least one read-only search row needs an explicit user decision
+    private boolean hasPendingMissingDependencySearchOnEdt() {
+        EdtDispatcher.requireEventDispatchThread();
+        return repairRows.values().stream().anyMatch(row -> isRepeatableSearch(row.solver));
+    }
+
     /// Creates one compact reason row with an independent repair action when a safe solver exists.
     ///
     /// @param resultId stable cause identifier
@@ -660,11 +807,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         details.add(evidenceLabel);
         row.add(details, BorderLayout.CENTER);
 
-        JLabel status = new JLabel(solver == null
-                ? i18n("game.crash.repair.manual")
-                : i18n("game.crash.repair.available"));
+        boolean executable = solver != null && solver.repairAction().executable();
+        JLabel status = new JLabel(executable
+                ? actionStatus(solver, "game.crash.repair.available", "game.crash.search_missing_dependency.available")
+                : i18n("game.crash.repair.manual"));
         @Nullable JButton action = null;
-        if (solver != null && solver.repairAction().executable()) {
+        if (executable) {
             action = new JButton(actionLabel(solver));
             action.setName("gameCrashRepair-" + resultId);
         }
@@ -700,25 +848,42 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @param row mutable row state
     private void executeRepairRowOnEdt(RepairRow row) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || row.state == RepairState.RUNNING || row.state == RepairState.SUCCEEDED) {
+        if (closed.get()
+                || row.state == RepairState.PREPARING
+                || row.state == RepairState.AWAITING_SELECTION
+                || row.state == RepairState.RUNNING
+                || (row.state == RepairState.SUCCEEDED && !isRepeatableSearch(row.solver))) {
             return;
         }
         if (row.state == RepairState.BLOCKED_RESIDUAL) {
             @Nullable TaskExecutor residualExecutor = row.executor;
             if (residualExecutor != null) {
-                row.state = RepairState.PREPARING;
+                row.transitionTo(RepairState.PREPARING);
                 row.button.setEnabled(false);
-                row.status.setText(i18n("game.crash.repair.preparing"));
+                row.status.setText(actionStatus(
+                        row.solver,
+                        "game.crash.repair.preparing",
+                        "game.crash.search_missing_dependency.preparing"));
                 scheduleResidualCleanupOnWorker(row, residualExecutor);
                 return;
             }
-            row.state = RepairState.AVAILABLE;
+            row.transitionTo(RepairState.AVAILABLE);
         }
+        row.transitionTo(RepairState.PREPARING);
+        row.button.setEnabled(false);
+        row.button.setText(actionLabel(row.solver));
+        row.status.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.preparing",
+                "game.crash.search_missing_dependency.preparing"));
         if (row.solver.repairAction().confirmationRequirement()
                 == RepairActionDescriptor.ConfirmationRequirement.REQUIRED
                 && !confirmRepairOnEdt(row)) {
-            row.state = RepairState.AVAILABLE;
-            row.status.setText(i18n("game.crash.repair.available"));
+            row.transitionTo(RepairState.AVAILABLE);
+            row.status.setText(actionStatus(
+                    row.solver,
+                    "game.crash.repair.available",
+                    "game.crash.search_missing_dependency.available"));
             row.button.setEnabled(true);
             return;
         }
@@ -730,15 +895,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             return;
         }
         if (candidateChoice.cancelled()) {
-            row.state = RepairState.AVAILABLE;
-            row.status.setText(i18n("game.crash.repair.available"));
+            row.transitionTo(RepairState.AVAILABLE);
+            row.status.setText(actionStatus(
+                    row.solver,
+                    "game.crash.repair.available",
+                    "game.crash.search_missing_dependency.available"));
             row.button.setEnabled(true);
             return;
         }
-        row.state = RepairState.PREPARING;
-        row.button.setEnabled(false);
-        row.button.setText(actionLabel(row.solver));
-        row.status.setText(i18n("game.crash.repair.preparing"));
         scheduleRepairPreparationOnWorker(row, candidateChoice.candidateId());
     }
 
@@ -814,17 +978,25 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         row.executor = null;
         if (row.residualOriginalSuccess) {
             row.residualOriginalSuccess = false;
-            row.state = RepairState.SUCCEEDED;
-            row.status.setText(i18n("game.crash.repair.succeeded"));
-            row.button.setEnabled(false);
-            if (isMissingDependencyResult(row.resultId)) {
+            row.transitionTo(RepairState.SUCCEEDED);
+            if (isRepeatableSearch(row.solver)) {
+                row.status.setText(i18n("game.crash.search_missing_dependency.done"));
+                row.button.setText(actionLabel(row.solver));
+                row.button.setEnabled(true);
                 setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
+                followUpCompletion.complete(null);
+            } else {
+                row.status.setText(i18n("game.crash.repair.succeeded"));
+                row.button.setEnabled(false);
             }
             return;
         }
         row.residualOriginalSuccess = false;
-        row.state = RepairState.AVAILABLE;
-        row.status.setText(i18n("game.crash.repair.available"));
+        row.transitionTo(RepairState.AVAILABLE);
+        row.status.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.available",
+                "game.crash.search_missing_dependency.available"));
         row.button.setText(actionLabel(row.solver));
         row.button.setEnabled(true);
         executeRepairRowOnEdt(row);
@@ -861,71 +1033,157 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             Task<?> task = Objects.requireNonNull(
                     row.solver.createTask(candidateId),
                     "repair solver returned no task");
+            boolean taskPublishesPhases = repairTaskPhase(task) == RepairTaskPhase.PREPARING;
+            AtomicReference<TaskExecutor> executorReference = new AtomicReference<>();
             executor = task.executor(new TaskListener() {
+                /// Publishes executor ownership after cancellation becomes legal but before task work begins.
+                @Override
+                public void onStart() {
+                    TaskExecutor startingExecutor = Objects.requireNonNull(
+                            executorReference.get(),
+                            "repair executor");
+                    AtomicBoolean published = new AtomicBoolean();
+                    try {
+                        EdtDispatcher.executeAndWait(() -> published.set(
+                                publishRepairStartedOnEdt(
+                                        row,
+                                        startingExecutor,
+                                        taskPublishesPhases)));
+                    } finally {
+                        if (!published.get() && !startingExecutor.isCancelled()) {
+                            startingExecutor.cancel();
+                        }
+                    }
+                }
+
+                /// Publishes a task-owned selection or execution phase without treating preparation as running.
+                ///
+                /// @param updatedTask task whose property changed
+                @Override
+                public void onPropertiesUpdate(Task<?> updatedTask) {
+                    if (updatedTask != task) {
+                        return;
+                    }
+                    @Nullable RepairTaskPhase phase = repairTaskPhase(updatedTask);
+                    if (phase == null || phase == RepairTaskPhase.PREPARING) {
+                        return;
+                    }
+                    TaskExecutor currentExecutor = Objects.requireNonNull(
+                            executorReference.get(),
+                            "repair executor");
+                    AtomicBoolean published = new AtomicBoolean();
+                    try {
+                        EdtDispatcher.executeAndWait(() -> published.set(
+                                publishRepairTaskPhaseOnEdt(row, currentExecutor, phase)));
+                    } finally {
+                        if (!published.get() && !currentExecutor.isCancelled()) {
+                            currentExecutor.cancel();
+                        }
+                    }
+                }
+
                 /// {@inheritDoc}
                 @Override
                 public void onStop(boolean success, TaskExecutor stoppedExecutor) {
-                    EdtDispatcher.execute(() -> finishRepairRowOnEdt(row, success, stoppedExecutor, null));
+                    @Nullable Throwable taskFailure = success ? null : stoppedExecutor.getFailure();
+                    EdtDispatcher.execute(() -> finishRepairRowOnEdt(
+                            row,
+                            success,
+                            stoppedExecutor,
+                            taskFailure));
                 }
             });
+            TaskExecutor createdExecutor = executor;
+            executorReference.set(createdExecutor);
             if (closed.get()) {
-                executor.cancel();
                 return;
             }
-            executor.start();
+            createdExecutor.start();
         } catch (RuntimeException | Error lifecycleFailure) {
             failure = lifecycleFailure;
         }
-        @Nullable TaskExecutor startedExecutor = executor;
-        @Nullable Throwable lifecycleFailure = failure;
-        EdtDispatcher.execute(() -> finishRepairPreparationOnEdt(row, startedExecutor, lifecycleFailure));
+        if (failure != null) {
+            @Nullable TaskExecutor failedExecutor = executor;
+            Throwable lifecycleFailure = failure;
+            EdtDispatcher.execute(() -> finishRepairRowOnEdt(row, false, failedExecutor, lifecycleFailure));
+        }
     }
 
-    /// Publishes the worker preparation result without overwriting an already terminal row state.
+    /// Publishes a started executor before any task body can run.
+    ///
+    /// The executor sets its started flag before invoking its start listener, so a concurrent close may cancel it
+    /// safely. Returning false makes the listener abort the execution chain before the task body begins.
     ///
     /// @param row mutable row state
-    /// @param executor created executor, or null when creation failed
-    /// @param failure creation/start failure, or null after a successful start
-    private void finishRepairPreparationOnEdt(
+    /// @param executor started executor whose task body has not begun
+    /// @param taskPublishesPhases whether the task reports its real internal selection lifecycle
+    /// @return true when the row accepted this execution chain
+    private boolean publishRepairStartedOnEdt(
             RepairRow row,
-            @Nullable TaskExecutor executor,
-            @Nullable Throwable failure) {
+            TaskExecutor executor,
+            boolean taskPublishesPhases) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
-            if (executor != null && !executor.isCancelled()) {
-                try {
-                    executor.cancel();
-                } catch (RuntimeException | Error cancellationFailure) {
-                    LOG.warning("Failed to cancel a crash repair after window close", cancellationFailure);
-                }
-            }
-            return;
+            return false;
         }
-        if (failure != null) {
-            finishRepairRowOnEdt(row, false, executor, failure);
-            return;
-        }
-        if (executor == null) {
-            finishRepairRowOnEdt(row, false, null,
-                    new IllegalStateException("repair task executor was not created"));
-            return;
-        }
-        if (row.state == RepairState.PREPARING) {
+        if (row.state == RepairState.PREPARING || row.state == RepairState.AWAITING_SELECTION) {
             row.executor = executor;
-            row.state = RepairState.RUNNING;
-            row.status.setText(i18n("game.crash.repair.running"));
-        } else if (row.state != RepairState.RUNNING && row.state != RepairState.BLOCKED_RESIDUAL) {
-            // A synchronous onStop callback may have completed the row before this publication arrived.
-            if (!executor.isCancelled()) {
-                try {
-                    executor.cancel();
-                } catch (RuntimeException | Error cancellationFailure) {
-                    LOG.warning("Failed to cancel a completed crash repair", cancellationFailure);
-                }
+            if (taskPublishesPhases) {
+                return true;
             }
-        } else if (row.executor == null) {
-            row.executor = executor;
+            if (isRepeatableSearch(row.solver) && row.state == RepairState.PREPARING) {
+                row.transitionTo(RepairState.AWAITING_SELECTION);
+            }
+            row.transitionTo(RepairState.RUNNING);
+            row.status.setText(actionStatus(
+                    row.solver,
+                    "game.crash.repair.running",
+                    "game.crash.search_missing_dependency.running"));
+            return true;
         }
+        return false;
+    }
+
+    /// Publishes the exact internal phase of a selection-aware repair task.
+    ///
+    /// @param row mutable repair row
+    /// @param executor executor owning the current attempt
+    /// @param phase newly published task phase
+    /// @return true when the current row accepted the phase
+    private boolean publishRepairTaskPhaseOnEdt(
+            RepairRow row,
+            TaskExecutor executor,
+            RepairTaskPhase phase) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || row.executor != executor) {
+            return false;
+        }
+        if (phase == RepairTaskPhase.AWAITING_SELECTION && row.state == RepairState.PREPARING) {
+            row.transitionTo(RepairState.AWAITING_SELECTION);
+            row.status.setText(i18n("game.crash.search_missing_dependency.awaiting_selection"));
+            return true;
+        }
+        if (phase == RepairTaskPhase.RUNNING
+                && (row.state == RepairState.PREPARING || row.state == RepairState.AWAITING_SELECTION)) {
+            row.transitionTo(RepairState.RUNNING);
+            row.status.setText(actionStatus(
+                    row.solver,
+                    "game.crash.repair.running",
+                    "game.crash.search_missing_dependency.running"));
+            return true;
+        }
+        return false;
+    }
+
+    /// Reads one optional task-owned phase marker without trusting arbitrary task properties.
+    ///
+    /// @param task task whose immutable phase value is requested
+    /// @return recognized phase, or null for a conventional task lifecycle
+    private static @Nullable RepairTaskPhase repairTaskPhase(Task<?> task) {
+        Object value = Objects.requireNonNull(task, "task")
+                .getProperties()
+                .get(RepairTaskPhase.TASK_PROPERTY);
+        return value instanceof RepairTaskPhase phase ? phase : null;
     }
 
     /// Publishes a candidate-enumeration failure while the row is still awaiting the internal selection step.
@@ -934,7 +1192,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @param failure candidate discovery or dialog failure
     private void failCandidateSelectionOnEdt(RepairRow row, RuntimeException failure) {
         EdtDispatcher.requireEventDispatchThread();
-        row.state = RepairState.FAILED_RETRYABLE;
+        row.transitionTo(RepairState.FAILED_RETRYABLE);
         row.status.setText(i18n("game.crash.repair.failed"));
         row.button.setText(i18n("game.crash.repair.retry"));
         row.button.setEnabled(true);
@@ -953,7 +1211,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             @Nullable TaskExecutor stoppedExecutor,
             @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || (row.state != RepairState.PREPARING && row.state != RepairState.RUNNING)) {
+        if (closed.get() || (row.state != RepairState.PREPARING
+                && row.state != RepairState.AWAITING_SELECTION
+                && row.state != RepairState.RUNNING)) {
             return;
         }
         @Nullable TaskExecutor completedExecutor = stoppedExecutor == null ? row.executor : stoppedExecutor;
@@ -977,19 +1237,41 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         row.executor = null;
         if (success) {
-            row.state = RepairState.SUCCEEDED;
-            row.status.setText(i18n("game.crash.repair.succeeded"));
-            row.button.setEnabled(false);
-            if (isMissingDependencyResult(row.resultId)) {
+            row.transitionTo(RepairState.SUCCEEDED);
+            if (isRepeatableSearch(row.solver)) {
+                row.status.setText(i18n("game.crash.search_missing_dependency.done"));
+                row.button.setText(actionLabel(row.solver));
+                row.button.setEnabled(true);
                 setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
+                followUpCompletion.complete(null);
+            } else {
+                row.status.setText(i18n("game.crash.repair.succeeded"));
+                row.button.setEnabled(false);
             }
             return;
         }
-        row.state = RepairState.FAILED_RETRYABLE;
-        row.status.setText(i18n("game.crash.repair.failed"));
-        row.button.setText(i18n("game.crash.repair.retry"));
+        if (unwrapFailure(failure) instanceof CancellationException) {
+            row.transitionTo(RepairState.AVAILABLE);
+            row.status.setText(actionStatus(
+                    row.solver,
+                    "game.crash.repair.available",
+                    "game.crash.search_missing_dependency.available"));
+            row.button.setText(actionLabel(row.solver));
+            row.button.setEnabled(true);
+            return;
+        }
+        row.transitionTo(RepairState.FAILED_RETRYABLE);
+        row.status.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.failed",
+                "game.crash.search_missing_dependency.failed"));
+        row.button.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.retry",
+                "game.crash.search_missing_dependency.retry"));
         row.button.setEnabled(true);
-        LOG.warning("Automatic crash repair failed for " + row.resultId, unwrapFailure(failure));
+        String actionName = isRepeatableSearch(row.solver) ? "Missing-dependency search" : "Automatic crash repair";
+        LOG.warning(actionName + " failed for " + row.resultId, unwrapFailure(failure));
     }
 
     /// Keeps a repair row retryable while task-owned resource cleanup remains blocked.
@@ -998,9 +1280,15 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @param residual resource descriptions, used only for diagnostics
     private void markBlockedResidualOnEdt(RepairRow row, @Unmodifiable List<String> residual) {
         EdtDispatcher.requireEventDispatchThread();
-        row.state = RepairState.BLOCKED_RESIDUAL;
-        row.status.setText(i18n("game.crash.repair.failed"));
-        row.button.setText(i18n("game.crash.repair.retry"));
+        row.transitionTo(RepairState.BLOCKED_RESIDUAL);
+        row.status.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.failed",
+                "game.crash.search_missing_dependency.failed"));
+        row.button.setText(actionStatus(
+                row.solver,
+                "game.crash.repair.retry",
+                "game.crash.search_missing_dependency.retry"));
         row.button.setEnabled(true);
         LOG.warning("Crash repair retains task resources for " + row.resultId + ": " + residual);
     }
@@ -1012,17 +1300,8 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// user confirms.
     private boolean confirmRepairOnEdt(RepairRow row) {
         EdtDispatcher.requireEventDispatchThread();
-        row.state = RepairState.AWAITING_SELECTION;
-        if (GraphicsEnvironment.isHeadless()) {
-            return true;
-        }
-        int option = JOptionPane.showConfirmDialog(
-                content,
-                i18n("game.crash.solver.automatic"),
-                i18n("message.warning"),
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        return option == JOptionPane.YES_OPTION;
+        row.transitionTo(RepairState.AWAITING_SELECTION);
+        return repairInteraction.confirm(Objects.requireNonNull(content, "content"));
     }
 
     /// Presents the internal Java-runtime choice after repair confirmation.
@@ -1039,25 +1318,19 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (candidates.isEmpty()) {
             return CandidateChoice.automatic();
         }
+        row.transitionTo(RepairState.AWAITING_SELECTION);
         LogAnalyzable.JavaRuntimeCandidate recommended = candidates.stream()
                 .filter(LogAnalyzable.JavaRuntimeCandidate::recommended)
                 .findFirst()
                 .orElse(candidates.get(0));
-        if (candidates.size() == 1 || GraphicsEnvironment.isHeadless()) {
-            return CandidateChoice.selected(recommended.id());
-        }
-        Object selected = JOptionPane.showInputDialog(
-                content,
-                i18n("game.crash.solver.replace_java"),
-                i18n("message.warning"),
-                JOptionPane.QUESTION_MESSAGE,
-                null,
-                candidates.toArray(),
+        @Nullable LogAnalyzable.JavaRuntimeCandidate selected = repairInteraction.selectJavaRuntime(
+                Objects.requireNonNull(content, "content"),
+                candidates,
                 recommended);
-        if (!(selected instanceof LogAnalyzable.JavaRuntimeCandidate candidate)) {
+        if (selected == null) {
             return CandidateChoice.cancelledChoice();
         }
-        return CandidateChoice.selected(candidate.id());
+        return CandidateChoice.selected(selected.id());
     }
 
     /// Returns the command label for one structured solver action.
@@ -1073,10 +1346,22 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 : i18n("game.crash.repair.execute");
     }
 
-    /// Recognizes the two dependency-search result identifiers without exposing a second priority system.
-    private static boolean isMissingDependencyResult(String resultId) {
-        return "FORGE_MISSING_DEPENDENCY".equals(resultId)
-                || "FABRIC_MISSING_DEPENDENCY".equals(resultId);
+    /// Selects localized state text from the solver's read-only or persistent action class.
+    ///
+    /// @param solver structured solver whose state is being rendered
+    /// @param repairKey localization key for persistent repair actions
+    /// @param searchKey localization key for read-only missing-dependency search
+    /// @return localized action-specific state text
+    private static String actionStatus(Solver solver, String repairKey, String searchKey) {
+        return i18n(isRepeatableSearch(solver) ? searchKey : repairKey);
+    }
+
+    /// Returns whether a successful read-only action remains useful for another explicit selection.
+    ///
+    /// @param solver structured solver whose action has completed
+    /// @return true only for the read-only missing-dependency search action
+    private static boolean isRepeatableSearch(Solver solver) {
+        return solver.repairAction().actionType() == RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH;
     }
 
     /// Starts one asynchronous crash-bundle export and disables duplicate requests until completion.
@@ -1235,6 +1520,81 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         followUpCompletion.complete(null);
     }
 
+    /// Abstracts the two modal choices in one repair attempt so headless tests can exercise cancellation safely.
+    @NotNullByDefault
+    interface RepairInteraction {
+        /// Obtains confirmation before a repair that can modify persistent state.
+        ///
+        /// @param parent crash-window content used as the modal parent
+        /// @return true when repair preparation may continue
+        boolean confirm(JPanel parent);
+
+        /// Selects one Java runtime candidate after the repair has been confirmed.
+        ///
+        /// @param parent crash-window content used as the modal parent
+        /// @param candidates immutable candidate snapshot in display order
+        /// @param recommended candidate preselected by the launcher
+        /// @return selected candidate, or null when the user cancels
+        @Nullable LogAnalyzable.JavaRuntimeCandidate selectJavaRuntime(
+                JPanel parent,
+                @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates,
+                LogAnalyzable.JavaRuntimeCandidate recommended);
+    }
+
+    /// Production repair interaction backed by native Swing dialogs when a graphics environment is available.
+    @NotNullByDefault
+    private static final class NativeRepairInteraction implements RepairInteraction {
+        /// Shared stateless interaction instance.
+        private static final NativeRepairInteraction INSTANCE = new NativeRepairInteraction();
+
+        /// Prevents redundant stateless interaction instances.
+        private NativeRepairInteraction() {
+        }
+
+        /// Confirms a persistent repair, treating headless callers as explicit advanced invocations.
+        ///
+        /// @param parent crash-window content used as the modal parent
+        /// @return true when execution may continue
+        @Override
+        public boolean confirm(JPanel parent) {
+            if (GraphicsEnvironment.isHeadless()) {
+                return true;
+            }
+            int option = JOptionPane.showConfirmDialog(
+                    parent,
+                    i18n("game.crash.solver.automatic"),
+                    i18n("message.warning"),
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            return option == JOptionPane.YES_OPTION;
+        }
+
+        /// Presents the runtime chooser with the recommended candidate preselected.
+        ///
+        /// @param parent crash-window content used as the modal parent
+        /// @param candidates immutable candidate snapshot in display order
+        /// @param recommended candidate preselected by the launcher
+        /// @return selected candidate, or null when the user cancels
+        @Override
+        public @Nullable LogAnalyzable.JavaRuntimeCandidate selectJavaRuntime(
+                JPanel parent,
+                @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates,
+                LogAnalyzable.JavaRuntimeCandidate recommended) {
+            if (candidates.size() == 1 || GraphicsEnvironment.isHeadless()) {
+                return recommended;
+            }
+            Object selected = JOptionPane.showInputDialog(
+                    parent,
+                    i18n("game.crash.solver.replace_java"),
+                    i18n("message.warning"),
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    candidates.toArray(),
+                    recommended);
+            return selected instanceof LogAnalyzable.JavaRuntimeCandidate candidate ? candidate : null;
+        }
+    }
+
     /// Mutable state for one independent repair row.
     @NotNullByDefault
     private static final class RepairRow {
@@ -1256,6 +1616,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         /// Current row state.
         private RepairState state = RepairState.AVAILABLE;
 
+        /// Ordered lifecycle history retained for deterministic state-machine verification.
+        private final List<RepairState> stateHistory = new ArrayList<>(List.of(RepairState.AVAILABLE));
+
         /// Real task executor for the current attempt, or null before a click.
         private @Nullable TaskExecutor executor;
 
@@ -1274,6 +1637,18 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             this.candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
             this.button = Objects.requireNonNull(button, "button");
             this.status = Objects.requireNonNull(status, "status");
+        }
+
+        /// Records one real lifecycle transition without duplicating an unchanged state.
+        ///
+        /// @param nextState next independent repair state
+        private void transitionTo(RepairState nextState) {
+            RepairState checkedState = Objects.requireNonNull(nextState, "nextState");
+            if (state == checkedState) {
+                return;
+            }
+            state = checkedState;
+            stateHistory.add(checkedState);
         }
 
         /// Requests cancellation of the currently running task during window disposal.

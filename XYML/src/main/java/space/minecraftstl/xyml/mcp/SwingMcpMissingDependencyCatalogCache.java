@@ -33,6 +33,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /// Bounded, read-only cache for dependency catalog pages requested ahead of the repair button.
 ///
@@ -53,7 +54,7 @@ public final class SwingMcpMissingDependencyCatalogCache implements AutoCloseabl
     /// Caller-owned executor used for blocking provider requests.
     private final Executor executor;
 
-    /// Maximum completed entries retained at once. In-flight entries are short-lived and are removed on completion.
+    /// Maximum combined number of completed and in-flight entries retained at once.
     private final int maximumEntries;
 
     /// Serializes cache state and keeps insertion order deterministic.
@@ -121,8 +122,12 @@ public final class SwingMcpMissingDependencyCatalogCache implements AutoCloseabl
             if (existing != null) {
                 return existing;
             }
-            if (entries.size() >= maximumEntries) {
+            while (entries.size() + inFlight.size() >= maximumEntries && !entries.isEmpty()) {
                 entries.remove(entries.keySet().iterator().next());
+            }
+            if (entries.size() + inFlight.size() >= maximumEntries) {
+                return failedStage(new RejectedExecutionException(
+                        "Dependency catalog cache capacity reached"));
             }
             future = new CompletableFuture<>();
             inFlight.put(request, future);

@@ -60,6 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies explicit direct-install remote catalog search, viewport sizing, cache reuse, and task handoff.
@@ -105,6 +106,55 @@ final class RemoteAddonCatalogPanelTest {
                 Insets listInsets = list.getBorder().getBorderInsets(list);
                 assertEquals(9, listInsets.bottom);
             });
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Pins programmatic missing-dependency navigation to the candidate-discovery query scope.
+    @Test
+    void missingDependencySearchUsesAnalyzedVersionAndFixedReadOnlyScope() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                JComboBox<?> source = findNamed(panel, "remoteAddonSource", JComboBox.class);
+                JComboBox<?> sort = findNamed(panel, "remoteAddonSort", JComboBox.class);
+                JTextField version = findNamed(panel, "remoteAddonGameVersion", JTextField.class);
+                source.setSelectedItem(RemoteAddonCatalogSource.CURSEFORGE);
+                sort.setSelectedItem(RemoteAddonRepository.SortType.LAST_UPDATED);
+                version.setText("1.19.4");
+                panel.openMissingDependencySearch("fabric-api", "1.20.1");
+            });
+            awaitBackgroundWork(executor);
+
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertAll(
+                    () -> assertEquals(RemoteAddonCatalogSource.MODRINTH, query.source()),
+                    () -> assertEquals("fabric-api", query.searchText()),
+                    () -> assertEquals("1.20.1", query.gameVersion()),
+                    () -> assertNull(query.category()),
+                    () -> assertEquals(RemoteAddonRepository.SortType.POPULARITY, query.sortType()),
+                    () -> assertEquals(0, query.pageOffset()));
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {

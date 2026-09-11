@@ -104,7 +104,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 this::registerVisibility,
                 launchInteraction,
                 accountReauthentication,
-                this.visibilityActions.openModSearch());
+                this.visibilityActions.openMissingDependencySearch());
         this.launchScriptTaskBuilder = (request, scriptFile) -> createProductionLaunchScriptTask(
                 request,
                 scriptFile,
@@ -239,7 +239,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication,
-            Consumer<String> openMissingModSearch) {
+            MissingDependencySearchAction openMissingModSearch) {
         LauncherStateDispatcher.requireEventThread();
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(visibilityRegistrar, "visibilityRegistrar");
@@ -334,7 +334,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication,
-            Consumer<String> openMissingModSearch) {
+            MissingDependencySearchAction openMissingModSearch) {
         AtomicReference<@Nullable Task<ManagedProcess>> result = new AtomicReference<>();
         LauncherStateDispatcher.executeAndWait(() -> {
             AccountID accountId = AccountID.parse(request.accountId());
