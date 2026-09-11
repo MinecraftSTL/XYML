@@ -411,6 +411,57 @@ final class RemoteModpackCatalogPanelTest {
         }
     }
 
+    /// Keeps every modpack filter row inside its allocated catalog band.
+    @Test
+    void laysOutAllFilterRowsWithoutClipping() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = new RemoteModpackCatalogPanel(
+                        new RecordingBackend(fixtureAddon(), fixtureVersion()),
+                        request -> Task.completed(null),
+                        executor,
+                        RemoteModpackCatalogStrings.english(),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                panel.setSize(960, 900);
+                panel.doLayout();
+                JComponent filterBand = findNamed(panel, "remoteModpackFilterBand", JComponent.class);
+                JComponent searchBand = findNamed(panel, "remoteModpackSearchBand", JComponent.class);
+                JComponent criteriaBand = findNamed(panel, "remoteModpackCriteriaBand", JComponent.class);
+                JComponent pageBand = findNamed(panel, "remoteModpackPageBand", JComponent.class);
+                assertNotNull(filterBand);
+                assertNotNull(searchBand);
+                assertNotNull(criteriaBand);
+                assertNotNull(pageBand);
+                filterBand.doLayout();
+                searchBand.doLayout();
+                criteriaBand.doLayout();
+                pageBand.doLayout();
+
+                assertTrue(searchBand.getHeight() > 40);
+                assertTrue(criteriaBand.getHeight() > 40);
+                assertTrue(pageBand.getHeight() >= 40,
+                        () -> "page=" + pageBand.getBounds() + ", preferred=" + pageBand.getPreferredSize());
+                assertComponentInside(searchBand, findNamed(panel, "remoteModpackSearchAction", JButton.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackGameVersion", JComboBox.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackCategory", JComboBox.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteModpackSort", JComboBox.class));
+                assertComponentInside(pageBand, findNamed(panel, "remoteModpackLastPage", JButton.class));
+            });
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Jumps directly between the remote modpack result boundaries and synchronizes navigation state.
     @Test
     void jumpsDirectlyBetweenFirstAndLastProviderPages() throws Exception {
@@ -505,6 +556,18 @@ final class RemoteModpackCatalogPanelTest {
         choiceList.getViewport().setExtentSize(new Dimension(480, visibleHeight));
         choiceList.getList().setSize(480, visibleHeight);
         choiceList.refreshLoadPlan();
+    }
+
+    /// Verifies that a nested control remains fully contained by its responsive parent band.
+    ///
+    /// @param parent layout band expected to contain the control
+    /// @param child control whose bounds must remain visible
+    private static void assertComponentInside(JComponent parent, @Nullable Component child) {
+        Component resolvedChild = Objects.requireNonNull(child, "child");
+        assertTrue(resolvedChild.getX() >= 0);
+        assertTrue(resolvedChild.getY() >= 0);
+        assertTrue(resolvedChild.getX() + resolvedChild.getWidth() <= parent.getWidth());
+        assertTrue(resolvedChild.getY() + resolvedChild.getHeight() <= parent.getHeight());
     }
 
     /// Waits for queued worker work and the EDT callbacks it schedules.

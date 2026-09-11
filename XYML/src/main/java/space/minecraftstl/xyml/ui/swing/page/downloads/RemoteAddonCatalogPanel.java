@@ -539,9 +539,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         JPanel filterBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 1",
                 "[grow,fill]",
-                "[40!]8[40!]8[40!]"));
+                "[pref!]8[pref!]8[pref!]"));
         filterBand.setName("remoteAddonFilterBand");
         filterBand.setOpaque(false);
+        filterBand.setMinimumSize(new Dimension(0, 0));
         JPanel searchBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
                 "[grow,fill][grow,fill]",

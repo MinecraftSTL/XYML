@@ -840,6 +840,59 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Keeps every responsive filter row inside its allocated catalog band.
+    @Test
+    void laysOutAllFilterRowsWithoutClipping() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        new RecordingBackend(fixtureAddon(), fixtureVersion()),
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                panel.setSize(960, 900);
+                panel.doLayout();
+                JComponent filterBand = findNamed(panel, "remoteAddonFilterBand", JComponent.class);
+                JComponent searchBand = findNamed(panel, "remoteAddonSearchBand", JComponent.class);
+                JComponent criteriaBand = findNamed(panel, "remoteAddonCriteriaBand", JComponent.class);
+                JComponent pageBand = findNamed(panel, "remoteAddonPageBand", JComponent.class);
+                assertNotNull(filterBand);
+                assertNotNull(searchBand);
+                assertNotNull(criteriaBand);
+                assertNotNull(pageBand);
+                filterBand.doLayout();
+                searchBand.doLayout();
+                criteriaBand.doLayout();
+                pageBand.doLayout();
+
+                assertTrue(searchBand.getHeight() > 40);
+                assertTrue(criteriaBand.getHeight() > 40);
+                assertTrue(pageBand.getHeight() >= 40,
+                        () -> "page=" + pageBand.getBounds() + ", preferred=" + pageBand.getPreferredSize());
+                assertComponentInside(searchBand, findNamed(panel, "remoteAddonSearchAction", JButton.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonGameVersion", JComboBox.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonCategory", JComboBox.class));
+                assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonSort", JComboBox.class));
+                assertComponentInside(pageBand, findNamed(panel, "remoteAddonLastPage", JButton.class));
+            });
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Gives a detached sparse list measurable result geometry without invoking a source request.
     ///
     /// @param choiceList detached result list
@@ -849,6 +902,18 @@ final class RemoteAddonCatalogPanelTest {
         choiceList.getViewport().setExtentSize(new Dimension(480, extentHeight));
         choiceList.getList().setSize(480, extentHeight);
         choiceList.refreshLoadPlan();
+    }
+
+    /// Verifies that a nested control remains fully contained by its responsive parent band.
+    ///
+    /// @param parent layout band expected to contain the control
+    /// @param child control whose bounds must remain visible
+    private static void assertComponentInside(JComponent parent, @Nullable Component child) {
+        Component resolvedChild = Objects.requireNonNull(child, "child");
+        assertTrue(resolvedChild.getX() >= 0);
+        assertTrue(resolvedChild.getY() >= 0);
+        assertTrue(resolvedChild.getX() + resolvedChild.getWidth() <= parent.getWidth());
+        assertTrue(resolvedChild.getY() + resolvedChild.getHeight() <= parent.getHeight());
     }
 
     /// Waits for queued worker work and all currently queued EDT callbacks.
