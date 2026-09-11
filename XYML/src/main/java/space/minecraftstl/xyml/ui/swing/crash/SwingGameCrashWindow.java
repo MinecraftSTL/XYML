@@ -437,6 +437,15 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         return requireRepairRow(resultId).status.getText();
     }
 
+    /// Returns one repair row's visible bounded evidence for deterministic headless tests.
+    ///
+    /// @param resultId stable diagnosis identifier
+    /// @return localized evidence label text
+    String repairEvidenceTextOnEdt(String resultId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return requireRepairRow(resultId).evidence.getText();
+    }
+
     /// Reports whether one repair action is currently enabled.
     ///
     /// @param resultId stable diagnosis identifier
@@ -724,13 +733,17 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                     diagnosis.solver().messageArguments().stream()
                             .map(GameCrashReasonFormatter::escapeHtmlArgument)
                             .toArray());
-            String evidence = i18n(
-                    "game.crash.repair.evidence",
-                    boundedEvidence(String.join(
-                            ", ",
-                            analysis.logEvidenceSources().getOrDefault(
-                                    diagnosis.resultId(),
-                                    List.of(i18n("game.crash.repair.log_evidence"))))));
+            @Unmodifiable List<String> sources =
+                    analysis.logEvidenceSources().getOrDefault(diagnosis.resultId(), List.of());
+            String sourceText = String.join(", ", sources);
+            String matchText = String.join("; ", diagnosis.evidence());
+            String evidenceText;
+            if (matchText.isEmpty()) {
+                evidenceText = sourceText.isEmpty() ? i18n("game.crash.repair.log_evidence") : sourceText;
+            } else {
+                evidenceText = sourceText.isEmpty() ? matchText : sourceText + "; " + matchText;
+            }
+            String evidence = i18n("game.crash.repair.evidence", boundedEvidence(evidenceText));
             rows.add(createRepairRowOnEdt(
                     resultId,
                     reason,
@@ -803,7 +816,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         text.setBorder(BorderFactory.createEmptyBorder());
         details.add(text);
         JLabel evidenceLabel = new JLabel(evidence);
-        evidenceLabel.setFont(evidenceLabel.getFont().deriveFont(Font.PLAIN, evidenceLabel.getFont().getSize2D() - 1.0F));
+        evidenceLabel.setFont(evidenceLabel.getFont().deriveFont(
+                Font.PLAIN,
+                evidenceLabel.getFont().getSize2D() - 1.0F));
         details.add(evidenceLabel);
         row.add(details, BorderLayout.CENTER);
 
@@ -817,7 +832,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             action.setName("gameCrashRepair-" + resultId);
         }
         if (action != null) {
-            RepairRow repairRow = new RepairRow(resultId, solver, candidates, action, status);
+            RepairRow repairRow = new RepairRow(resultId, solver, candidates, action, evidenceLabel, status);
             repairRows.put(resultId, repairRow);
             action.addActionListener(event -> executeRepairRowOnEdt(repairRow));
             JPanel controls = new JPanel(new BorderLayout(4, 4));
@@ -1610,6 +1625,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         /// Row action button.
         private final JButton button;
 
+        /// Bounded evidence label shown for this cause.
+        private final JLabel evidence;
+
         /// Row status label.
         private final JLabel status;
 
@@ -1626,16 +1644,25 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         private boolean residualOriginalSuccess;
 
         /// Creates one executable repair row.
+        ///
+        /// @param resultId stable cause identifier
+        /// @param solver solver that creates fresh tasks
+        /// @param candidates immutable runtime candidates
+        /// @param button row action button
+        /// @param evidence bounded evidence label
+        /// @param status lifecycle status label
         private RepairRow(
                 String resultId,
                 Solver solver,
                 @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates,
                 JButton button,
+                JLabel evidence,
                 JLabel status) {
             this.resultId = Objects.requireNonNull(resultId, "resultId");
             this.solver = Objects.requireNonNull(solver, "solver");
             this.candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
             this.button = Objects.requireNonNull(button, "button");
+            this.evidence = Objects.requireNonNull(evidence, "evidence");
             this.status = Objects.requireNonNull(status, "status");
         }
 

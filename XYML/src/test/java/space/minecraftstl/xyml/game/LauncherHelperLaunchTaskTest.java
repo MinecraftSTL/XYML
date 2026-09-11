@@ -126,6 +126,22 @@ final class LauncherHelperLaunchTaskTest {
         }
     }
 
+    /// Keeps all crash-analysis lines after the independent presentation tail reaches its configured limit.
+    @Test
+    void crashAnalysisHistoryIsNotTrimmedWithPresentationHistory() {
+        LauncherHelper.ProcessLogCapture capture = new LauncherHelper.ProcessLogCapture(2);
+        Log first = new Log("first-cause", Log4jLevel.ERROR);
+        Log second = new Log("second", Log4jLevel.INFO);
+        Log third = new Log("third", Log4jLevel.INFO);
+
+        capture.capture(first, null);
+        capture.capture(second, null);
+        capture.capture(third, null);
+
+        assertEquals(List.of(first, second, third), capture.analysisSnapshot());
+        assertEquals(List.of(second, third), capture.presentationHistory());
+    }
+
     /// Passes the serialized stable account ID to reauthentication and preserves its exact AuthInfo result.
     @Test
     void reauthenticationUsesStableAccountIdAndExactResult() throws Exception {

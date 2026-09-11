@@ -26,10 +26,9 @@ import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
+import space.minecraftstl.xyml.util.function.ExceptionalSupplier;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.Callable;
@@ -51,6 +50,7 @@ final class XYMLMcpCrashSourceValidationTask {
     /// @param expectedFingerprint expected SHA-256 fingerprint of the analyzed log
     /// @param launchGuard rejects repair while the analyzed instance is still running
     /// @param currentRunDirectory resolves the current run directory under protected settings resources
+    /// @param currentAnalysisSource reconstructs the complete launcher-owned analysis source
     /// @param instanceSettingsFile captured instance-specific settings path
     /// @return fresh stopped validation task with concrete resources
     static Task<@Nullable Void> create(
@@ -59,18 +59,21 @@ final class XYMLMcpCrashSourceValidationTask {
             String expectedFingerprint,
             ExceptionalRunnable<?> launchGuard,
             Callable<Path> currentRunDirectory,
+            ExceptionalSupplier<String, IOException> currentAnalysisSource,
             Path instanceSettingsFile) {
         XYMLGameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
         XYMLMcpCrashAnalysisSupport.Context checkedContext = Objects.requireNonNull(context, "context");
         String checkedFingerprint = Objects.requireNonNull(expectedFingerprint, "expectedFingerprint");
         ExceptionalRunnable<?> checkedLaunchGuard = Objects.requireNonNull(launchGuard, "launchGuard");
         Callable<Path> checkedRunDirectory = Objects.requireNonNull(currentRunDirectory, "currentRunDirectory");
+        ExceptionalSupplier<String, IOException> checkedAnalysisSource =
+                Objects.requireNonNull(currentAnalysisSource, "currentAnalysisSource");
         Path checkedSettingsFile = Objects.requireNonNull(instanceSettingsFile, "instanceSettingsFile")
                 .toAbsolutePath().normalize();
         return Task.runAsync("Revalidate MCP crash source", Schedulers.io(), () ->
                 checkedRepository.callWithStableBaseDirectory(checkedContext.repositoryDirectory(), () -> {
                     validate(checkedRepository, checkedContext, checkedFingerprint,
-                            checkedLaunchGuard, checkedRunDirectory);
+                            checkedLaunchGuard, checkedRunDirectory, checkedAnalysisSource);
                     return null;
                 })).setResources(
                 TaskResource.repositoryOperation(checkedContext.repositoryDirectory()),
@@ -88,13 +91,15 @@ final class XYMLMcpCrashSourceValidationTask {
     /// @param expectedFingerprint expected SHA-256 fingerprint
     /// @param launchGuard rejects repair while the analyzed instance is still running
     /// @param currentRunDirectory resolves the current protected run directory
+    /// @param currentAnalysisSource reconstructs the complete current source
     /// @throws Exception when the source cannot be read or no longer matches
     private static void validate(
             XYMLGameRepository repository,
             XYMLMcpCrashAnalysisSupport.Context context,
             String expectedFingerprint,
             ExceptionalRunnable<?> launchGuard,
-            Callable<Path> currentRunDirectory) throws Exception {
+            Callable<Path> currentRunDirectory,
+            ExceptionalSupplier<String, IOException> currentAnalysisSource) throws Exception {
         requirePath(context.instanceDirectory(), repository.getInstanceRoot(context.instanceId()), "instance directory");
         if (!repository.hasInstance(context.instanceId())) {
             throw new IllegalArgumentException("Unknown instance: " + context.instanceId().id());
@@ -107,9 +112,9 @@ final class XYMLMcpCrashSourceValidationTask {
                     && !manifest.equals(repository.getResolvedInstanceManifest(context.instanceId()).launchManifest())) {
                 throw new IOException("The instance manifest changed after crash analysis");
             }
-            String actualFingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(readLog(context.runDirectory()));
+            String actualFingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(currentAnalysisSource.get());
             if (!actualFingerprint.equals(expectedFingerprint)) {
-                throw new IOException("The instance latest log changed after crash analysis");
+                throw new IOException("The instance crash source changed after crash analysis");
             }
         } catch (IOException validationFailure) {
             throw new IllegalStateException("Crash analysis source could not be revalidated", validationFailure);
@@ -127,14 +132,4 @@ final class XYMLMcpCrashSourceValidationTask {
         }
     }
 
-    /// Reads the preferred launcher log from one captured run directory.
-    ///
-    /// @param runDirectory captured run directory
-    /// @return UTF-8 log text, or an empty string when neither log path exists
-    /// @throws IOException if the selected log cannot be read
-    private static String readLog(Path runDirectory) throws IOException {
-        Path latest = runDirectory.resolve("logs/latest.log");
-        Path path = Files.exists(latest) ? latest : runDirectory.resolve("latest.log");
-        return Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-    }
 }

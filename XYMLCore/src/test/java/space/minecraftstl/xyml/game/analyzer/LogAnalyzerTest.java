@@ -90,6 +90,23 @@ class LogAnalyzerTest {
         assertTrue(followingAnalyzerInvoked.get());
     }
 
+    /// Defensively snapshots diagnosis evidence supplied by analyzer implementations.
+    @Test
+    void analyzeResultSnapshotsEvidence() {
+        Analyzer<String> analyzer = (input, results) -> Analyzer.ControlFlow.CONTINUE;
+        List<String> evidence = new ArrayList<>(List.of("matched fragment"));
+
+        AnalyzeResult<String> result = new AnalyzeResult<>(
+                analyzer,
+                ResultID.CODE_PAGE,
+                new TextSolver("test.reason", "A sufficiently descriptive fallback message."),
+                evidence);
+        evidence.clear();
+
+        assertEquals(List.of("matched fragment"), result.evidence());
+        assertThrows(UnsupportedOperationException.class, () -> result.evidence().add("unexpected"));
+    }
+
     /// Detects a Windows LWJGL native-loading failure only with a non-ASCII launch path and legacy code page.
     ///
     /// @throws IOException when the real regression log cannot be read
@@ -936,6 +953,12 @@ class LogAnalyzerTest {
         assertEquals(expectedId, result.resultId());
         assertEquals(expectedAnalyzer, result.analyzer().getClass());
         assertTrue(result.solver().fallbackMessage().length() > 20);
+        assertFalse(result.evidence().isEmpty());
+        for (String evidence : result.evidence()) {
+            assertFalse(evidence.isBlank());
+            assertTrue(input.logText().contains(evidence), evidence);
+        }
+        assertThrows(UnsupportedOperationException.class, () -> result.evidence().add("unexpected"));
         return result;
     }
 

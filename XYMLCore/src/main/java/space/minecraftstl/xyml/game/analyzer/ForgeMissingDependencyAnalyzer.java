@@ -61,10 +61,12 @@ public final class ForgeMissingDependencyAnalyzer implements Analyzer<LogAnalyza
 
         Set<String> dependencies = new LinkedHashSet<>();
         Set<String> dependencyIds = new LinkedHashSet<>();
+        Set<String> evidenceFragments = new LinkedHashSet<>();
         Matcher matcher = MISSING_DEPENDENCY.matcher(evidence.matcher().group("reason"));
         while (matcher.find()) {
             dependencyIds.add(matcher.group("dependency"));
             dependencies.add(formatDependency(matcher));
+            evidenceFragments.add(matcher.group());
         }
         if (dependencies.isEmpty()) {
             return ControlFlow.CONTINUE;
@@ -79,7 +81,8 @@ public final class ForgeMissingDependencyAnalyzer implements Analyzer<LogAnalyza
                         List.copyOf(dependencyIds),
                         "game.crash.reason.log.forge_missing_dependency",
                         List.of(summary),
-                        "Forge reported missing required mod dependencies: " + summary)));
+                        "Forge reported missing required mod dependencies: " + summary),
+                List.copyOf(evidenceFragments)));
         return ControlFlow.BREAK_OTHER;
     }
 

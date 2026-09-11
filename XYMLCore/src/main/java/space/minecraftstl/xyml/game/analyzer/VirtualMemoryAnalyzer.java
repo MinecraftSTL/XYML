@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.game.analyzer;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /// Identifies operating-system commit failures without treating Java heap exhaustion as virtual-memory failure.
@@ -39,7 +40,8 @@ public final class VirtualMemoryAnalyzer implements Analyzer<LogAnalyzable> {
     /// @return `BREAK_OTHER` after a verified match, otherwise `CONTINUE`
     @Override
     public ControlFlow analyze(LogAnalyzable input, List<AnalyzeResult<LogAnalyzable>> results) {
-        if (!JVM_NATIVE_MEMORY_FAILURE.matcher(input.logText()).find()) {
+        Matcher evidence = JVM_NATIVE_MEMORY_FAILURE.matcher(input.logText());
+        if (!evidence.find()) {
             return ControlFlow.CONTINUE;
         }
 
@@ -48,7 +50,8 @@ public final class VirtualMemoryAnalyzer implements Analyzer<LogAnalyzable> {
                 ResultID.VIRTUAL_MEMORY,
                 new TextSolver(
                         "game.crash.reason.log.virtual_memory",
-                        "Increase the system page file or free physical memory, then launch the game again.")));
+                        "Increase the system page file or free physical memory, then launch the game again."),
+                List.of(evidence.group())));
         return ControlFlow.BREAK_OTHER;
     }
 }

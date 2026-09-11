@@ -40,19 +40,19 @@ public final class JREVersionAnalyzer implements Analyzer<LogAnalyzable> {
         }
 
         String log = input.logText();
-        boolean verified;
+        @Nullable CrashReportAnalyzer.Result evidence;
         if (current < required) {
-            verified = CrashReportRuleEvidence.find(
+            evidence = CrashReportRuleEvidence.find(
                     log,
                     CrashReportAnalyzer.Rule.TOO_OLD_JAVA,
-                    CrashReportAnalyzer.Rule.NEED_JDK11) != null;
+                    CrashReportAnalyzer.Rule.NEED_JDK11);
         } else {
-            verified = CrashReportRuleEvidence.find(
+            evidence = CrashReportRuleEvidence.find(
                     log,
                     CrashReportAnalyzer.Rule.JAVA_VERSION_IS_TOO_HIGH,
-                    CrashReportAnalyzer.Rule.JDK_9) != null;
+                    CrashReportAnalyzer.Rule.JDK_9);
         }
-        if (!verified) {
+        if (evidence == null) {
             return ControlFlow.CONTINUE;
         }
 
@@ -70,7 +70,8 @@ public final class JREVersionAnalyzer implements Analyzer<LogAnalyzable> {
         results.add(new AnalyzeResult<>(
                 this,
                 ResultID.JRE_VERSION,
-                solver));
+                solver,
+                List.of(evidence.matcher().group())));
         return ControlFlow.BREAK_OTHER;
     }
 }

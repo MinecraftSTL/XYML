@@ -39,6 +39,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -126,6 +127,42 @@ class SwingGameCrashWindowTest {
 
             assertEquals(0, searchCalls.get());
             assertTrue(window.followUpCompletion().toCompletableFuture().isDone());
+        } finally {
+            window.close();
+            EdtDispatcher.executeAndWait(() -> { });
+        }
+    }
+
+    /// Renders exact typed evidence with source provenance and applies the existing display bound.
+    @Test
+    void rendersBoundedTypedEvidenceInsteadOfSourceNameOnly() {
+        ControlledAnalysisService service = new ControlledAnalysisService();
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        SwingGameCrashWindow window = window(service, worker);
+        String evidence = "matched-line-" + "x".repeat(300) + "-hidden-tail";
+        AnalyzeResult<LogAnalyzable> result = new AnalyzeResult<>(
+                new ForgeMissingDependencyAnalyzer(),
+                ResultID.FORGE_MISSING_DEPENDENCY,
+                Solver.ofTask(Task.completed(null)),
+                List.of(evidence));
+
+        try {
+            window.show();
+            EdtDispatcher.executeAndWait(() -> { });
+            service.result.complete(new GameCrashAnalysis(
+                    List.of(),
+                    List.of(result),
+                    Set.of(),
+                    List.of(),
+                    Map.of(),
+                    Map.of(ResultID.FORGE_MISSING_DEPENDENCY, List.of("captured"))));
+            EdtDispatcher.executeAndWait(() -> {
+                String visible = window.repairEvidenceTextOnEdt(ResultID.FORGE_MISSING_DEPENDENCY.name());
+                assertTrue(visible.contains("captured"));
+                assertTrue(visible.contains("matched-line-"));
+                assertTrue(visible.endsWith("..."));
+                assertFalse(visible.contains("hidden-tail"));
+            });
         } finally {
             window.close();
             EdtDispatcher.executeAndWait(() -> { });

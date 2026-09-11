@@ -574,9 +574,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                                 resolution,
                                 contextWarnings,
                                 logText == null,
-                                logText == null
-                                        ? XYMLMcpCrashAnalysisSupport.fingerprint(persistedLog)
-                                        : null);
+                                logText == null ? launchState : null);
                     },
                             TaskResource.repositoryOperation(repositoryDirectory),
                             TaskResource.gameInstance(instanceDirectory),
@@ -592,7 +590,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// Combines the complete process-capture snapshot with the persisted latest log for launcher-owned analysis.
     /// The persisted file remains the authoritative source when it is the only available input. When a launch state
     /// exists, captured lines are prepended with explicit source markers so analysis can see diagnostics which were
-    /// never flushed to disk without changing the source fingerprint contract used for later revalidation.
+    /// never flushed to disk. The exact merged text is fingerprinted and reconstructed before any repair executes.
     /// @param launchState tracked launch state, or null when no process capture exists
     /// @param latestLog persisted latest-log text
     /// @return combined immutable analysis text
@@ -1683,7 +1681,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param rawLog immutable analyzed log text
     /// @param resolution resolved crash-report input
     /// @param contextWarnings warnings collected while resolving optional context
-    /// @param launcherOwnedLog whether the text came from the captured instance latest-log path
+    /// @param launcherOwnedLog whether the text came from the captured launcher-owned source
+    /// @param analyzedLaunchState exact tracked launch state used for analysis, or null when none existed
     /// @return immutable combined analysis response
     private @Unmodifiable Map<String, Object> analyzeCrashResult(
             XYMLMcpCrashAnalysisSupport.Context context,
@@ -1691,13 +1690,11 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             XYMLMcpCrashReportResolver.Resolution resolution,
             List<String> contextWarnings,
             boolean launcherOwnedLog,
-            @Nullable String sourceFingerprint) {
-        String fingerprint = sourceFingerprint == null
-                ? XYMLMcpCrashAnalysisSupport.fingerprint(rawLog)
-                : sourceFingerprint;
+            @Nullable LaunchState analyzedLaunchState) {
+        String fingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(rawLog);
         GameInstanceManifest manifest = context.manifest();
         XYMLMcpCrashRepairCoordinator.@Nullable SourceValidator sourceValidator = launcherOwnedLog
-                ? () -> createLatestLogValidationTask(context, fingerprint)
+                ? () -> createCrashSourceValidationTask(context, fingerprint, analyzedLaunchState)
                 : null;
         @Nullable LogAnalyzable.JavaRuntimeRepair javaRepair = manifest == null ? null
                 : guardedJavaRuntimeRepair(manifest, sourceValidator, repairActionsAllowed);
@@ -1707,7 +1704,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 resolution,
                 List.copyOf(contextWarnings),
                 launcherOwnedLog,
-                sourceFingerprint,
                 crashRepairCoordinator,
                 missingDependencySearch,
                 javaRepair,
@@ -1780,20 +1776,41 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         };
     }
 
-    /// Creates a precise task that revalidates the instance and latest log used for a repair plan.
+    /// Creates a precise task that revalidates the instance and complete merged source used for a repair plan.
     /// @param context immutable source context captured during analysis
     /// @param expectedFingerprint expected SHA-256 fingerprint
+    /// @param analyzedLaunchState exact tracked launch state used for analysis, or null when none existed
     /// @return fresh stopped source-validation task
-    private Task<@Nullable Void> createLatestLogValidationTask(
+    private Task<@Nullable Void> createCrashSourceValidationTask(
             XYMLMcpCrashAnalysisSupport.Context context,
-            String expectedFingerprint) {
+            String expectedFingerprint,
+            @Nullable LaunchState analyzedLaunchState) {
         return XYMLMcpCrashSourceValidationTask.create(
                 repository,
                 context,
                 expectedFingerprint,
                 () -> requireTrackedLaunchStopped(context.repositoryDirectory(), context.instanceId(), "repair a crash"),
                 () -> resolvedRunDirectory(context.instanceId()),
+                () -> currentCrashAnalysisSource(context, analyzedLaunchState),
                 instanceSettingsFile(context.repositoryDirectory(), context.instanceId()));
+    }
+
+    /// Reconstructs the launcher-owned evidence only while its tracked launch identity remains unchanged.
+    ///
+    /// @param context immutable source context captured during analysis
+    /// @param analyzedLaunchState exact tracked state used for analysis, or null when none existed
+    /// @return current complete process-capture and latest-log text
+    /// @throws IOException when a later launch replaced the captured source or the latest log cannot be read
+    private String currentCrashAnalysisSource(
+            XYMLMcpCrashAnalysisSupport.Context context,
+            @Nullable LaunchState analyzedLaunchState) throws IOException {
+        @Nullable LaunchState current = launchStates.get(new LaunchKey(
+                context.repositoryDirectory(),
+                context.instanceId()));
+        if (current != analyzedLaunchState) {
+            throw new IOException("The tracked launch changed after crash analysis");
+        }
+        return mergeCapturedAndLatestLogs(current, XYMLMcpResourceReader.readLog(context.runDirectory()));
     }
 
     /// Releases retained analysis plans, active repair tasks, and the optional dependency-search cache.

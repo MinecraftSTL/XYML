@@ -144,43 +144,6 @@ final class XYMLMcpCrashAnalysisSupport {
             @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
             @Nullable LogAnalyzable.JavaRuntimeRepair javaRuntimeRepair,
             @Nullable XYMLMcpCrashRepairCoordinator.SourceValidator sourceValidator) {
-        return analyze(
-                context,
-                rawLog,
-                resolution,
-                contextWarnings,
-                launcherOwnedLog,
-                null,
-                coordinator,
-                missingDependencySearch,
-                javaRuntimeRepair,
-                sourceValidator);
-    }
-
-    /// Combines analysis while allowing the executable source fingerprint to differ from merged evidence text.
-    ///
-    /// @param context immutable settings and repository snapshot
-    /// @param rawLog complete evidence text
-    /// @param resolution resolved crash-report input
-    /// @param contextWarnings warnings collected while resolving optional context
-    /// @param launcherOwnedLog whether repair may be attached to this analysis
-    /// @param sourceFingerprint fingerprint of the source revalidation task, or null to fingerprint rawLog
-    /// @param coordinator bounded XYAT analysis and repair coordinator
-    /// @param missingDependencySearch optional application missing-dependency boundary
-    /// @param javaRuntimeRepair optional application Java-repair boundary
-    /// @param sourceValidator launcher-owned source validator, or null for supplied text
-    /// @return immutable combined analysis response
-    static @Unmodifiable Map<String, Object> analyze(
-            Context context,
-            String rawLog,
-            XYMLMcpCrashReportResolver.Resolution resolution,
-            @Unmodifiable List<String> contextWarnings,
-            boolean launcherOwnedLog,
-            @Nullable String sourceFingerprint,
-            XYMLMcpCrashRepairCoordinator coordinator,
-            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
-            @Nullable LogAnalyzable.JavaRuntimeRepair javaRuntimeRepair,
-            @Nullable XYMLMcpCrashRepairCoordinator.SourceValidator sourceValidator) {
         @Unmodifiable Map<String, Object> analysis = XYMLMcpCrashAnalyzer.analyze(rawLog, resolution.report());
         Map<String, Object> result = new LinkedHashMap<>(analysis);
         result.put("instance_id", context.instanceId().id());
@@ -188,7 +151,7 @@ final class XYMLMcpCrashAnalysisSupport {
         List<String> warnings = new ArrayList<>(contextWarnings);
         warnings.addAll(resolution.warnings());
         result.put("warnings", List.copyOf(warnings));
-        String fingerprint = sourceFingerprint == null ? fingerprint(rawLog) : sourceFingerprint;
+        String fingerprint = fingerprint(rawLog);
         result.putAll(coordinator.analyze(
                 context.instanceId().id(),
                 launcherOwnedLog

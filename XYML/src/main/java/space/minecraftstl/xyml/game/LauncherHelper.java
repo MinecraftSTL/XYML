@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.*;
 import space.minecraftstl.xyml.auth.offline.OfflineAccount;
@@ -698,6 +699,82 @@ public final class LauncherHelper {
         batch.clear();
     }
 
+    /// Owns complete crash-analysis history separately from the bounded Swing presentation history.
+    ///
+    /// Process output may arrive concurrently from standard output and standard error readers. One lock preserves the
+    /// observed order in the complete history and protects direct updates used when no live log window is present.
+    /// When a live window exists, its queue remains responsible for applying the presentation limit on the EDT.
+    @NotNullByDefault
+    static final class ProcessLogCapture {
+        /// Serializes complete-history snapshots and direct presentation-history updates.
+        private final ReentrantLock lock = new ReentrantLock();
+
+        /// Maximum number of lines retained for Swing presentation.
+        private final int presentationLimit;
+
+        /// Complete redacted process output retained for crash analysis.
+        private final List<Log> analysisHistory = new ArrayList<>();
+
+        /// Tail of the process output retained for log-window presentation.
+        private final CircularArrayList<Log> presentationHistory;
+
+        /// Creates independent complete and bounded process-log histories.
+        ///
+        /// @param presentationLimit maximum lines retained for presentation
+        /// @throws IllegalArgumentException if the limit is not positive
+        ProcessLogCapture(int presentationLimit) {
+            if (presentationLimit <= 0) {
+                throw new IllegalArgumentException("presentationLimit must be positive");
+            }
+            this.presentationLimit = presentationLimit;
+            presentationHistory = new CircularArrayList<>(presentationLimit + 1);
+        }
+
+        /// Retains one redacted line for analysis and routes it to the active presentation path.
+        ///
+        /// @param log redacted process log line
+        /// @param presentationQueue live-window queue, or null to update the bounded history directly
+        void capture(Log log, @Nullable Queue<Log> presentationQueue) {
+            Log checkedLog = Objects.requireNonNull(log, "log");
+            lock.lock();
+            try {
+                analysisHistory.add(checkedLog);
+                if (presentationQueue != null) {
+                    presentationQueue.add(checkedLog);
+                } else {
+                    presentationHistory.addLast(checkedLog);
+                    if (presentationHistory.size() > presentationLimit) {
+                        presentationHistory.removeFirst();
+                    }
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        /// Returns the mutable presentation history owned jointly with one Swing log window.
+        ///
+        /// The returned list is intentionally mutable because `SwingGameLogWindow` appends queued batches and applies
+        /// the same presentation limit on the EDT. It must never be used as crash-analysis input.
+        ///
+        /// @return bounded presentation history
+        CircularArrayList<Log> presentationHistory() {
+            return presentationHistory;
+        }
+
+        /// Copies every captured line for immutable crash-analysis input.
+        ///
+        /// @return complete redacted process output in observed order
+        @Unmodifiable List<Log> analysisSnapshot() {
+            lock.lock();
+            try {
+                return List.copyOf(analysisHistory);
+            } finally {
+                lock.unlock();
+            }
+        }
+    }
+
     /// Presents one production launch decision and adapts its completion to the existing task graph.
     ///
     /// @param prompt immutable localized launch prompt
@@ -1315,10 +1392,6 @@ public final class LauncherHelper {
     /// Observes one managed process, captures logs, and reports abnormal exits.
     @NotNullByDefault
     private final class XYMLProcessListener implements ProcessListener {
-
-        /// Serializes launch-detection and bounded-log updates.
-        private final ReentrantLock lock = new ReentrantLock();
-
         /// Repository owning the launched instance.
         private final XYMLGameRepository repository;
 
@@ -1334,8 +1407,8 @@ public final class LauncherHelper {
         /// Native Swing log window, or null when log display is disabled or not yet initialized.
         private @Nullable SwingGameLogWindow logWindow;
 
-        /// Mutable bounded log history retained for crash diagnostics.
-        private final CircularArrayList<Log> logs;
+        /// Complete analysis history and independently bounded Swing presentation history.
+        private final ProcessLogCapture logCapture;
 
         /// Access token removed from captured log lines, or null when authentication has no token.
         private final @Nullable String forbiddenAccessToken;
@@ -1364,7 +1437,7 @@ public final class LauncherHelper {
             this.manifest = manifest;
             this.launchOptions = launchOptions;
             this.forbiddenAccessToken = authInfo != null ? authInfo.getAccessToken() : null;
-            this.logs = new CircularArrayList<>(logLineLimit + 1);
+            this.logCapture = new ProcessLogCapture(logLineLimit);
         }
 
         /// Attaches the managed process and initializes the optional native log window.
@@ -1437,7 +1510,7 @@ public final class LauncherHelper {
         private SwingGameLogWindow createSwingLogWindow() {
             return new SwingGameLogWindow(
                     Objects.requireNonNull(process, "managed process"),
-                    logs,
+                    logCapture.presentationHistory(),
                     logLineLimit,
                     maxLines -> EdtDispatcher.execute(
                             () -> settings().logLinesProperty().set(maxLines)));
@@ -1466,20 +1539,12 @@ public final class LauncherHelper {
             @Nullable Log4jLevel level = isErrorStream && !log.startsWith("[authlib-injector]")
                     ? Log4jLevel.ERROR
                     : null;
-            if (showLogs) {
-                if (level == null)
-                    level = Objects.requireNonNullElse(Log4jLevel.guessLevel(log), Log4jLevel.INFO);
-                Objects.requireNonNull(logBuffer, "log buffer").add(new Log(log, level));
-            } else {
-                lock.lock();
-                try {
-                    logs.addLast(new Log(log, level));
-                    if (logs.size() > logLineLimit)
-                        logs.removeFirst();
-                } finally {
-                    lock.unlock();
-                }
+            if (showLogs && level == null) {
+                level = Objects.requireNonNullElse(Log4jLevel.guessLevel(log), Log4jLevel.INFO);
             }
+            logCapture.capture(
+                    new Log(log, level),
+                    showLogs ? Objects.requireNonNull(logBuffer, "log buffer") : null);
         }
 
         /// Flushes log capture, records abnormal exit state, and opens crash diagnostics.
@@ -1489,7 +1554,11 @@ public final class LauncherHelper {
         @Override
         public void onExit(int exitCode, ExitType exitType) {
             if (showLogs) {
-                Objects.requireNonNull(logBuffer, "log buffer").add(new Log(String.format("[%s] [XYML ProcessListener] Minecraft exit with code %d(0x%x), type is %s.", TIME_FORMATTER.format(Instant.now()), exitCode, exitCode, exitType), Log4jLevel.INFO));
+                logCapture.capture(
+                        new Log(String.format(
+                                "[%s] [XYML ProcessListener] Minecraft exit with code %d(0x%x), type is %s.",
+                                TIME_FORMATTER.format(Instant.now()), exitCode, exitCode, exitType), Log4jLevel.INFO),
+                        Objects.requireNonNull(logBuffer, "log buffer"));
                 Thread logThread = Objects.requireNonNull(submitLogThread, "log submitter");
                 logThread.interrupt();
                 try {
@@ -1510,7 +1579,7 @@ public final class LauncherHelper {
                         repository,
                         manifest,
                         launchOptions,
-                        logs,
+                        logCapture.analysisSnapshot(),
                         this::showCrashLogs,
                         openMissingModSearch == null ? null : LauncherHelper.this::openMissingModSearch);
                 if ((launcherVisibility == LauncherVisibility.HIDE

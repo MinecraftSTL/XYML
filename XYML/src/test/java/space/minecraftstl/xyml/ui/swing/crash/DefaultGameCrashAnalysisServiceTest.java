@@ -136,6 +136,8 @@ class DefaultGameCrashAnalysisServiceTest {
             assertEquals(List.of(ResultID.JRE_32BIT), analysis.logResults().stream()
                     .map(result -> result.resultId())
                     .toList());
+            assertEquals(1, analysis.logResults().get(0).evidence().size());
+            assertTrue(failure.contains(analysis.logResults().get(0).evidence().get(0)));
             assertEquals(
                     List.of("captured", "latest_log"),
                     analysis.logEvidenceSources().get(ResultID.JRE_32BIT));
@@ -203,6 +205,11 @@ class DefaultGameCrashAnalysisServiceTest {
         assertNull(solver.createTask());
         assertEquals(List.of("captured", "latest_log"),
                 analysis.logEvidenceSources().get(ResultID.FORGE_MISSING_DEPENDENCY));
+        assertEquals(4, analysis.logResults().get(0).evidence().size());
+        assertTrue(analysis.logResults().get(0).evidence().get(0).contains("captured_dep"));
+        assertTrue(analysis.logResults().get(0).evidence().get(1).contains("shared_dep"));
+        assertTrue(analysis.logResults().get(0).evidence().get(2).contains("shared_dep"));
+        assertTrue(analysis.logResults().get(0).evidence().get(3).contains("persisted_dep"));
     }
 
     /// Executes a fresh search task with the stable dependency union from captured and persisted logs.

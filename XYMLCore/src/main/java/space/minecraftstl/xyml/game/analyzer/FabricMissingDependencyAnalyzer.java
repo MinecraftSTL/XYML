@@ -88,12 +88,13 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
 
         Set<String> dependencies = new LinkedHashSet<>();
         Set<String> dependencyIds = new LinkedHashSet<>();
-        collect(LEGACY_SINGLE_DEPENDENCY.matcher(log), dependencies, dependencyIds);
-        collect(LEGACY_LIST_DEPENDENCY.matcher(log), dependencies, dependencyIds);
-        collect(MODERN_LIST_DEPENDENCY.matcher(log), dependencies, dependencyIds);
-        collect(HARD_DEPENDENCY.matcher(log), dependencies, dependencyIds);
+        Set<String> evidence = new LinkedHashSet<>();
+        collect(LEGACY_SINGLE_DEPENDENCY.matcher(log), dependencies, dependencyIds, evidence);
+        collect(LEGACY_LIST_DEPENDENCY.matcher(log), dependencies, dependencyIds, evidence);
+        collect(MODERN_LIST_DEPENDENCY.matcher(log), dependencies, dependencyIds, evidence);
+        collect(HARD_DEPENDENCY.matcher(log), dependencies, dependencyIds, evidence);
         if (dependencies.isEmpty() && log.contains("Fix: add")) {
-            collectFixedDependencies(log, dependencies, dependencyIds);
+            collectFixedDependencies(log, dependencies, dependencyIds, evidence);
         }
         if (dependencies.isEmpty()) {
             return ControlFlow.CONTINUE;
@@ -108,7 +109,8 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
                         List.copyOf(dependencyIds),
                         "game.crash.reason.log.fabric_missing_dependency",
                         List.of(summary),
-                        "Fabric reported missing required mod dependencies: " + summary)));
+                        "Fabric reported missing required mod dependencies: " + summary),
+                List.copyOf(evidence)));
         return ControlFlow.BREAK_OTHER;
     }
 
@@ -133,16 +135,20 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
     /// @param matcher structured dependency matcher
     /// @param dependencies mutable summary set
     /// @param dependencyIds mutable raw dependency-ID set
+    /// @param evidence mutable exact-evidence set
     private static void collect(
             Matcher matcher,
             Set<String> dependencies,
-            Set<String> dependencyIds) {
+            Set<String> dependencyIds,
+            Set<String> evidence) {
         while (matcher.find()) {
-            addDependency(
+            if (addDependency(
                     dependencies,
                     dependencyIds,
                     matcher.group("requester"),
-                    matcher.group("dependency"));
+                    matcher.group("dependency"))) {
+                evidence.add(matcher.group());
+            }
         }
     }
 
@@ -151,19 +157,27 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
     /// @param log complete launch log
     /// @param dependencies mutable summary set
     /// @param dependencyIds mutable raw dependency-ID set
+    /// @param evidence mutable exact-evidence set
     private static void collectFixedDependencies(
             String log,
             Set<String> dependencies,
-            Set<String> dependencyIds) {
+            Set<String> dependencyIds,
+            Set<String> evidence) {
         Matcher fixLine = FIX_LINE.matcher(log);
         while (fixLine.find()) {
             Matcher dependency = FIXED_DEPENDENCY.matcher(fixLine.group("dependencies"));
+            boolean retained = false;
             while (dependency.find()) {
-                addDependency(
+                if (addDependency(
                         dependencies,
                         dependencyIds,
                         null,
-                        dependency.group("dependency"));
+                        dependency.group("dependency"))) {
+                    retained = true;
+                }
+            }
+            if (retained) {
+                evidence.add(fixLine.group());
             }
         }
     }
@@ -174,13 +188,14 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
     /// @param dependencyIds mutable raw dependency-ID set
     /// @param requester requesting mod ID, or null when only a fix-list ID is available
     /// @param dependency required mod ID
-    private static void addDependency(
+    /// @return true when the dependency is a retained mod-package requirement
+    private static boolean addDependency(
             Set<String> dependencies,
             Set<String> dependencyIds,
             @Nullable String requester,
             String dependency) {
         if (NON_MOD_DEPENDENCIES.contains(dependency.toLowerCase(Locale.ROOT))) {
-            return;
+            return false;
         }
         dependencyIds.add(dependency);
         if (requester == null || requester.equals(dependency)) {
@@ -188,5 +203,6 @@ public final class FabricMissingDependencyAnalyzer implements Analyzer<LogAnalyz
         } else {
             dependencies.add(dependency + " (required by " + requester + ")");
         }
+        return true;
     }
 }

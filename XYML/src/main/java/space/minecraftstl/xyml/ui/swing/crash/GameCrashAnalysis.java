@@ -39,7 +39,7 @@ final class GameCrashAnalysis {
     /// Detected rules in declaration order with at most one result per rule.
     private final @Unmodifiable List<CrashReportAnalyzer.Result> results;
 
-    /// Detected limited log causes in analyzer order with at most one result per ID.
+    /// Detected limited log causes and their exact evidence fragments in analyzer order, with one result per ID.
     private final @Unmodifiable List<AnalyzeResult<LogAnalyzable>> logResults;
 
     /// Sorted immutable stack-trace keywords used when no rule matches.

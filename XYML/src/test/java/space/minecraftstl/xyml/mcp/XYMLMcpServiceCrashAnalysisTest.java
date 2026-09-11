@@ -180,16 +180,35 @@ final class XYMLMcpServiceCrashAnalysisTest {
                 Map<String, Object> plan = service.planCrashSolution(
                         String.valueOf(launcherAnalysis.get("analysis_id")),
                         String.valueOf(launcherSolution.get("solution_id")));
+                onLog.invoke(launchState, "captured output changed after analysis", false);
+                String capturedPlanId = String.valueOf(plan.get("plan_id"));
+                Map<String, Object> capturedStaleOperation = service.executeCrashSolution(capturedPlanId);
+                Map<String, Object> capturedStaleStatus = awaitTerminal(
+                        service,
+                        String.valueOf(capturedStaleOperation.get("operation_id")));
+                assertEquals("FAILED", capturedStaleStatus.get("status"));
+                assertEquals(IllegalStateException.class.getName(), capturedStaleStatus.get("failure_type"));
+                assertEquals(
+                        "Crash analysis source could not be revalidated",
+                        capturedStaleStatus.get("failure_message"));
+                assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(capturedPlanId));
+
+                Map<String, Object> latestAnalysis = McpTaskExecution.execute(
+                        service.analyzeCrash(validId.id(), null, null));
+                Map<String, Object> latestSolution = firstSolution(latestAnalysis);
+                Map<String, Object> latestPlan = service.planCrashSolution(
+                        String.valueOf(latestAnalysis.get("analysis_id")),
+                        String.valueOf(latestSolution.get("solution_id")));
                 Files.writeString(latestLog, "log changed", StandardCharsets.UTF_8);
-                String planId = String.valueOf(plan.get("plan_id"));
-                Map<String, Object> staleOperation = service.executeCrashSolution(planId);
+                String latestPlanId = String.valueOf(latestPlan.get("plan_id"));
+                Map<String, Object> staleOperation = service.executeCrashSolution(latestPlanId);
                 Map<String, Object> staleStatus = awaitTerminal(
                         service,
                         String.valueOf(staleOperation.get("operation_id")));
                 assertEquals("FAILED", staleStatus.get("status"));
                 assertEquals(IllegalStateException.class.getName(), staleStatus.get("failure_type"));
                 assertEquals("Crash analysis source could not be revalidated", staleStatus.get("failure_message"));
-                assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(planId));
+                assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(latestPlanId));
                 assertEquals(0, searchTaskCreations.get());
 
                 Files.writeString(latestLog, FABRIC_MISSING_DEPENDENCY_LOG, StandardCharsets.UTF_8);

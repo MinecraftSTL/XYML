@@ -267,7 +267,7 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
         }
     }
 
-    /// Adds one limited log diagnosis while retaining all physical source names.
+    /// Adds one limited log diagnosis while retaining all physical source names and matched evidence fragments.
     ///
     /// The later source replaces ordinary diagnostic objects while matching dependency searches merge every stable ID.
     /// The linked map keeps the result at the position where it was first observed.
@@ -278,15 +278,34 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
             String source) {
         AnalyzeResult<LogAnalyzable> mergedResult = result;
         @Nullable AnalyzeResult<LogAnalyzable> earlier = logResults.get(result.resultId());
-        if (earlier != null && isMissingDependencyResult(result.resultId())) {
-            Solver mergedSolver = Solver.mergeMissingDependencySearch(earlier.solver(), result.solver());
-            mergedResult = new AnalyzeResult<>(result.analyzer(), result.resultId(), mergedSolver);
+        if (earlier != null) {
+            Solver mergedSolver = isMissingDependencyResult(result.resultId())
+                    ? Solver.mergeMissingDependencySearch(earlier.solver(), result.solver())
+                    : result.solver();
+            mergedResult = new AnalyzeResult<>(
+                    result.analyzer(),
+                    result.resultId(),
+                    mergedSolver,
+                    mergeEvidence(earlier.evidence(), result.evidence()));
         }
         logResults.put(result.resultId(), mergedResult);
         List<String> sources = logEvidenceSources.computeIfAbsent(result.resultId(), ignored -> new ArrayList<>());
         if (!sources.contains(source)) {
             sources.add(source);
         }
+    }
+
+    /// Merges matched evidence in physical-source order without repeating an identical fragment.
+    ///
+    /// @param earlier fragments captured from the first physical source
+    /// @param later fragments captured from the later physical source
+    /// @return immutable stable fragment union
+    private static @Unmodifiable List<String> mergeEvidence(
+            @Unmodifiable List<String> earlier,
+            @Unmodifiable List<String> later) {
+        Set<String> merged = new LinkedHashSet<>(earlier);
+        merged.addAll(later);
+        return List.copyOf(merged);
     }
 
     /// Returns whether one stable diagnosis carries a list of missing mod identifiers.
