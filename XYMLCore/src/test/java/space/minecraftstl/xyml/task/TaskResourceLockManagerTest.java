@@ -1324,9 +1324,9 @@ public final class TaskResourceLockManagerTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
-    /// Verifies a failed lease release blocks a conflicting writer until bounded residual cleanup succeeds.
+    /// Verifies a failed release permits readers but blocks a conflicting writer until residual cleanup succeeds.
     @Test
-    public void failedReleaseRetainsWriteBlockUntilRetry() throws Exception {
+    public void failedReleaseAllowsReaderButBlocksWriterUntilRetry() throws Exception {
         TaskResourceLockManager manager = new TaskResourceLockManager();
         TaskResource resource = TaskResource.downloadTarget(temporaryDirectory.resolve("residual.jar"));
         TaskResourceLockManager.Execution execution = manager.createExecution();
@@ -1344,10 +1344,14 @@ public final class TaskResourceLockManagerTest {
         assertThrows(TaskResourceCleanupException.class, lease::close);
         assertEquals(List.of(resource.toString()), manager.residualResourceDescriptions(Set.of(execution)));
 
+        TaskResourceLockManager.Lease reader = manager.acquire(rootOwner(manager, resource.readOnly()))
+                .get(5, TimeUnit.SECONDS);
         CompletableFuture<TaskResourceLockManager.Lease> successor = manager.acquire(rootOwner(manager, resource));
         awaitCondition(() -> manager.pendingWaiterCount() == 1);
         assertFalse(successor.isDone());
 
+        reader.close();
+        assertFalse(successor.isDone());
         assertTrue(manager.retryResidualCleanup(Set.of(execution)).isEmpty());
         successor.get(5, TimeUnit.SECONDS).close();
         assertEquals(0, manager.pendingWaiterCount());
