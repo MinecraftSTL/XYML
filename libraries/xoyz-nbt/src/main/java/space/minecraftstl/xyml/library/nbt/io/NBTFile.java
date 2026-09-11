@@ -87,6 +87,9 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// Diagnostics captured while opening this session.
     private volatile NBTReadReport readReport;
 
+    /// Immutable storage-profile changes emitted by the most recent region save.
+    private @Unmodifiable List<StorageProfileChange> storageProfileChanges = List.of();
+
     /// Last fully or partially published region baseline, or `null` for standalone tags.
     private @Nullable ChunkRegion regionBaseline;
 
@@ -480,6 +483,24 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         return storageProfile();
     }
 
+    /// Returns storage-profile changes emitted by the most recent region save.
+    ///
+    /// Standalone sessions always return an empty list. Region sessions retain the immutable
+    /// before/after snapshots until the next save or until the session is reopened. This lets a
+    /// caller explicitly report an inline payload that was moved to an external companion.
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> storageProfileChanges() {
+        return storageProfileChanges;
+    }
+
+    /// Bean-style alias for [#storageProfileChanges()].
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> getStorageProfileChanges() {
+        return storageProfileChanges();
+    }
+
     /// Returns immutable diagnostics captured while opening this session.
     ///
     /// @return opening report
@@ -621,8 +642,10 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         storage.synchronizePendingChanges(current, baseline);
         try {
             storage.flush();
+            storageProfileChanges = storage.storageProfileChanges();
             readReport = storage.readReport();
         } catch (NBTPartialSaveException exception) {
+            storageProfileChanges = storage.storageProfileChanges();
             updateRegionBaseline(baseline, current, exception.committedIndexes());
             readReport = storage.readReport();
             throw exception;

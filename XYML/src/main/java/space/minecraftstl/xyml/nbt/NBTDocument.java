@@ -26,11 +26,14 @@ import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
 import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfileChange;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -113,6 +116,17 @@ public final class NBTDocument implements AutoCloseable {
     /// @return standalone encoding or complete region storage profile
     public StorageProfile storageProfile() {
         return fileSession.storageProfile();
+    }
+
+    /// Returns storage-profile changes emitted by the most recent region save.
+    ///
+    /// Standalone documents return an empty list. Region documents retain immutable before/after
+    /// slot snapshots so the Swing surface can explain an inline-to-external transition and its
+    /// companion-file consequence.
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public @Unmodifiable List<StorageProfileChange> storageProfileChanges() {
+        return fileSession.storageProfileChanges();
     }
 
     /// Returns whether the source needs an explicit strict repair save.

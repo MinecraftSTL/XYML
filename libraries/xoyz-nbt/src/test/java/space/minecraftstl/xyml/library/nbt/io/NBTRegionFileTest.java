@@ -179,6 +179,14 @@ public final class NBTRegionFileTest {
             region.flush();
             assertEquals(0x80, compressionMarker(file, 0) & 0x80);
             assertTrue(Files.isRegularFile(companion));
+            assertEquals(1, region.storageProfileChanges().size());
+            StorageProfileChange externalization = region.storageProfileChanges().get(0);
+            assertEquals(0, externalization.localIndex());
+            assertFalse(externalization.before().isExternal());
+            assertTrue(externalization.after().isExternal());
+            assertTrue(externalization.changedToExternal());
+            assertEquals(NBTRegionFile.CompressionType.UNCOMPRESSED.id(), externalization.before().marker());
+            assertEquals(NBTRegionFile.CompressionType.UNCOMPRESSED.id(), externalization.after().marker());
             CompoundTag externalRoot = new CompoundTag().addTag("payload", new ByteArrayTag(external));
             assertArrayEquals(NBTCodec.of().writeTagToByteArray(externalRoot), Files.readAllBytes(companion));
             assertEquals(chunkWithPayload(external).getRootTag(), region.readChunk(0).getRootTag());

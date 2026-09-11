@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadIssue;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfileChange;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import space.minecraftstl.xyml.nbt.NBTNodeType;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -217,6 +218,11 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.read_extension_warning");
     }
 
+    /// Returns the warning shown when a Region save changes a slot storage profile.
+    String storageProfileChangedWarning() {
+        return locale.i18n("swing.nbt_editor.storage_profile_changed_warning");
+    }
+
     /// Returns the command which expands diagnostic details.
     String showReadDetailsText() {
         return locale.i18n("swing.nbt_editor.read_show_details");
@@ -265,6 +271,30 @@ final class NBTEditorStrings {
     /// @return localized slot metadata
     String readDetailsRegionSlot(int x, int z, int marker, boolean external, boolean occupied) {
         return locale.i18n("swing.nbt_editor.read_details_region_slot", x, z, marker, external, occupied);
+    }
+
+    /// Formats one before/after Region storage-profile change.
+    ///
+    /// @param change immutable profile delta
+    /// @return localized profile-delta detail
+    String readDetailsStorageProfileChange(StorageProfileChange change) {
+        StorageProfileChange checked = Objects.requireNonNull(change, "change");
+        int localIndex = checked.localIndex();
+        return locale.i18n(
+                "swing.nbt_editor.read_details_storage_profile_change",
+                localIndex % 32,
+                localIndex / 32,
+                checked.before().marker(),
+                checked.before().external(),
+                checked.before().occupied(),
+                checked.after().marker(),
+                checked.after().external(),
+                checked.after().occupied(),
+                checked.changedToExternal()
+                        ? locale.i18n("swing.nbt_editor.read_details_storage_profile_externalized")
+                        : checked.changedFromExternal()
+                        ? locale.i18n("swing.nbt_editor.read_details_storage_profile_inlined")
+                        : locale.i18n("swing.nbt_editor.read_details_storage_profile_updated"));
     }
 
     /// Returns the repair-save confirmation title.

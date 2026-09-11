@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadIssue;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfileChange;
 import space.minecraftstl.xyml.nbt.NBTDocument;
 
 import javax.swing.BorderFactory;
@@ -35,6 +36,7 @@ import javax.swing.UIManager;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.util.List;
 import java.util.Objects;
 
 /// Persistent Swing warning band for tolerant NBT read diagnostics.
@@ -80,7 +82,7 @@ final class NBTReadWarningView {
     ///
     /// @param document current document, or null before a successful open
     void render(@Nullable NBTDocument document) {
-        if (document == null || (!document.requiresRepair() && !document.readReport().hasInformationalIssues())) {
+        if (document == null) {
             band.setVisible(false);
             detailsScroll.setVisible(false);
             detailsToggle.setSelected(false);
@@ -88,11 +90,21 @@ final class NBTReadWarningView {
             return;
         }
         NBTReadReport report = document.readReport();
+        List<StorageProfileChange> profileChanges = document.storageProfileChanges();
+        if (!document.requiresRepair() && !report.hasInformationalIssues() && profileChanges.isEmpty()) {
+            band.setVisible(false);
+            detailsScroll.setVisible(false);
+            detailsToggle.setSelected(false);
+            detailsToggle.setText(strings.showReadDetailsText());
+            return;
+        }
         boolean partial = report.hasPartialDataLoss();
         label.setText(partial
                 ? strings.partialReadWarning()
-                : report.requiresRepair() ? strings.recoveredReadWarning() : strings.extensionReadWarning());
-        detailsArea.setText(formatReadReport(report, document.storageProfile(), strings));
+                : report.requiresRepair() ? strings.recoveredReadWarning()
+                : !profileChanges.isEmpty() ? strings.storageProfileChangedWarning()
+                : strings.extensionReadWarning());
+        detailsArea.setText(formatReadReport(report, document.storageProfile(), profileChanges, strings));
         detailsArea.setCaretPosition(0);
         band.setBackground(partial
                 ? warningBackground(new Color(255, 224, 224))
@@ -158,7 +170,20 @@ final class NBTReadWarningView {
     /// @return plain-text diagnostics
     static String formatReadReport(NBTReadReport report, @Nullable StorageProfile profile,
                                    NBTEditorStrings strings) {
+        return formatReadReport(report, profile, List.of(), strings);
+    }
+
+    /// Formats read diagnostics and published storage-profile changes for the expandable details body.
+    ///
+    /// @param report immutable read report
+    /// @param profile immutable storage profile, or `null` when unavailable
+    /// @param profileChanges immutable changes from the most recent save
+    /// @param strings localized text provider
+    /// @return plain-text diagnostics
+    static String formatReadReport(NBTReadReport report, @Nullable StorageProfile profile,
+                                   List<StorageProfileChange> profileChanges, NBTEditorStrings strings) {
         Objects.requireNonNull(report, "report");
+        List<StorageProfileChange> changes = List.copyOf(Objects.requireNonNull(profileChanges, "profileChanges"));
         Objects.requireNonNull(strings, "strings");
         StringBuilder details = new StringBuilder(256);
         details.append(strings.readDetailsEncodingLabel()).append(": ").append(report.encoding()).append('\n');
@@ -183,6 +208,13 @@ final class NBTReadWarningView {
                             .append('\n');
                 }
             }
+            if (details.length() >= 65_536) {
+                details.append("...\n");
+                break;
+            }
+        }
+        for (StorageProfileChange change : changes) {
+            details.append(strings.readDetailsStorageProfileChange(change)).append('\n');
             if (details.length() >= 65_536) {
                 details.append("...\n");
                 break;

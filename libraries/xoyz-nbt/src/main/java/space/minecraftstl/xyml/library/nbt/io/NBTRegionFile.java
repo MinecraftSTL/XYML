@@ -142,6 +142,11 @@ public final class NBTRegionFile implements AutoCloseable {
     private final BitSet usedSectors;
     /// Detached edits waiting to be published, keyed by local chunk index.
     private final Map<Integer, PendingChunk> pending = new HashMap<>();
+    /// Storage-profile changes emitted by the most recent flush attempt.
+    ///
+    /// The list is retained after a partial save so callers can explain which slots became visible
+    /// before the first failed slot. It is cleared when the next flush starts.
+    private final List<StorageProfileChange> storageProfileChanges = new ArrayList<>();
     /// Owned publication sidecars which could not be removed after a committed write.
     private final NBTRegionFileIO.PendingCleanup pendingCleanup =
             new NBTRegionFileIO.PendingCleanup("Owned region sidecar");
@@ -357,6 +362,24 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @return immutable 1024-slot region storage profile
     public synchronized StorageProfile getStorageProfile() {
         return storageProfile();
+    }
+
+    /// Returns immutable storage-profile changes emitted by the most recent flush attempt.
+    ///
+    /// A change is recorded only after its replacement header is visible. In particular, an
+    /// inline-to-external transition includes the before/after marker and external bit required to
+    /// explain why a companion `.mcc` file was created. A no-op flush returns an empty list.
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> storageProfileChanges() {
+        return List.copyOf(storageProfileChanges);
+    }
+
+    /// Bean-style alias for [#storageProfileChanges()].
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> getStorageProfileChanges() {
+        return storageProfileChanges();
     }
 
     /// Returns whether this session has pending chunk changes.
@@ -678,6 +701,7 @@ public final class NBTRegionFile implements AutoCloseable {
     public void flush() throws IOException {
         ensureOpen();
         pendingCleanup.retry();
+        storageProfileChanges.clear();
         boolean hadTrailingTail = trailingTailNeedsRepair;
         // Reject opaque extension markers before touching a repairable tail. A failed save must
         // leave the source bytes unchanged when no explicit replacement authorizes the marker.
@@ -914,6 +938,15 @@ public final class NBTRegionFile implements AutoCloseable {
         int oldOffset = sectorOffsets[localIndex];
         int oldLength = sectorLengths[localIndex];
         int oldTimestamp = timestamps[localIndex];
+        StorageProfile.RegionSlot beforeProfile = new StorageProfile.RegionSlot(
+                Byte.toUnsignedInt(compressionTypes[localIndex]),
+                external[localIndex],
+                oldLength != 0);
+        StorageProfile.RegionSlot afterProfile = new StorageProfile.RegionSlot(
+                Byte.toUnsignedInt(compression), isExternal, length != 0);
+        @Nullable StorageProfileChange profileChange = beforeProfile.equals(afterProfile)
+                ? null
+                : new StorageProfileChange(localIndex, beforeProfile, afterProfile);
         ByteBuffer newTimestamp = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN)
                 .putInt(timestamp);
         newTimestamp.flip();
@@ -939,6 +972,7 @@ public final class NBTRegionFile implements AutoCloseable {
                 external[localIndex] = isExternal;
                 compressionTypes[localIndex] = compression;
                 isolatedSlots[localIndex] = false;
+                rememberStorageProfileChange(profileChange);
                 throw new ChunkCommittedException(localIndex, exception);
             }
             try {
@@ -965,6 +999,16 @@ public final class NBTRegionFile implements AutoCloseable {
         external[localIndex] = isExternal;
         compressionTypes[localIndex] = compression;
         isolatedSlots[localIndex] = false;
+        rememberStorageProfileChange(profileChange);
+    }
+
+    /// Appends a visible profile change while preserving the publication order.
+    ///
+    /// @param change profile delta, or null when marker, external bit, and occupancy are unchanged
+    private synchronized void rememberStorageProfileChange(@Nullable StorageProfileChange change) {
+        if (change != null) {
+            storageProfileChanges.add(change);
+        }
     }
 
     /// Reserves and zero-fills a contiguous free sector range without changing the header.
