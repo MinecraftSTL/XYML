@@ -1135,6 +1135,18 @@ public final class McpServerHttpTest {
         assertTrue(redacted.contains("[REDACTED]#1"));
     }
 
+    /// Changes the replacement marker when the configured credential collides with the default marker.
+    @ParameterizedTest
+    @ValueSource(strings = {"REDACTED", "[REDACTED]"})
+    void redactionMarkerNeverRevealsCollidingCredential(String token) {
+        JsonObject source = new JsonObject();
+        source.addProperty("secret", token);
+
+        String redacted = JsonCredentialRedactor.redact(source, token).toString();
+
+        assertFalse(redacted.contains(token));
+    }
+
     /// Leaves structured output untouched when transport authentication is disabled with an empty token.
     @Test
     public void doesNotRedactWithEmptyBearerToken() {

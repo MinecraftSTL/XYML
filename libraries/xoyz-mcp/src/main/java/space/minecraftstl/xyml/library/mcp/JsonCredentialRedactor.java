@@ -24,6 +24,7 @@ import com.google.gson.JsonPrimitive;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -31,6 +32,10 @@ import java.util.Set;
 /// Redacts a configured transport credential from JSON strings and object property names without changing JSON shape.
 @NotNullByDefault
 final class JsonCredentialRedactor {
+    /// Human-readable sentinels tried before falling back to an opaque character.
+    private static final List<String> REDACTION_MARKERS = List.of(
+            "[REDACTED]", "[MASKED]", "[HIDDEN]", "[REMOVED]", "[SANITIZED]", "[CREDENTIAL]");
+
     /// JSON-RPC and MCP member names whose spelling is part of the wire schema. They remain unchanged even when a
     /// deliberately short credential is a substring, because changing them would make the response unparsable.
     private static final Set<String> PROTOCOL_MEMBER_NAMES = Set.of(
@@ -59,10 +64,20 @@ final class JsonCredentialRedactor {
         if (token == null || token.isEmpty()) {
             return checked.deepCopy();
         }
-        if (checked.isJsonObject()) {
+        return redact(checked, token, redactionMarker(token));
+    }
+
+    /// Returns a detached JSON tree using a marker which cannot contain the configured credential.
+    ///
+    /// @param source response tree to sanitize
+    /// @param token configured credential
+    /// @param marker collision-free replacement marker
+    /// @return detached sanitized response tree
+    private static JsonElement redact(JsonElement source, String token, String marker) {
+        if (source.isJsonObject()) {
             JsonObject redacted = new JsonObject();
-            for (Map.Entry<String, JsonElement> entry : checked.getAsJsonObject().entrySet()) {
-                String key = redactPropertyName(entry.getKey(), token);
+            for (Map.Entry<String, JsonElement> entry : source.getAsJsonObject().entrySet()) {
+                String key = redactPropertyName(entry.getKey(), token, marker);
                 if (redacted.has(key)) {
                     int suffix = 1;
                     String candidate;
@@ -71,24 +86,24 @@ final class JsonCredentialRedactor {
                     } while (redacted.has(candidate));
                     key = candidate;
                 }
-                redacted.add(key, redact(entry.getValue(), token));
+                redacted.add(key, redact(entry.getValue(), token, marker));
             }
             return redacted;
         }
-        if (checked.isJsonArray()) {
+        if (source.isJsonArray()) {
             JsonArray redacted = new JsonArray();
-            for (JsonElement element : checked.getAsJsonArray()) {
-                redacted.add(redact(element, token));
+            for (JsonElement element : source.getAsJsonArray()) {
+                redacted.add(redact(element, token, marker));
             }
             return redacted;
         }
-        if (checked.isJsonPrimitive()) {
-            JsonPrimitive primitive = checked.getAsJsonPrimitive();
+        if (source.isJsonPrimitive()) {
+            JsonPrimitive primitive = source.getAsJsonPrimitive();
             if (primitive.isString()) {
-                return new JsonPrimitive(primitive.getAsString().replace(token, "[REDACTED]"));
+                return new JsonPrimitive(primitive.getAsString().replace(token, marker));
             }
         }
-        return checked.deepCopy();
+        return source.deepCopy();
     }
 
     /// Replaces credential text in one non-protocol property name.
@@ -96,10 +111,29 @@ final class JsonCredentialRedactor {
     /// @param key source property name
     /// @param token configured credential
     /// @return sanitized property name
-    private static String redactPropertyName(String key, String token) {
+    private static String redactPropertyName(String key, String token, String marker) {
         if (PROTOCOL_MEMBER_NAMES.contains(key)) {
             return key;
         }
-        return key.replace(token, "[REDACTED]");
+        return key.replace(token, marker);
+    }
+
+    /// Selects a readable marker which is neither contained in nor contains the credential.
+    ///
+    /// @param token configured credential
+    /// @return collision-free replacement marker
+    private static String redactionMarker(String token) {
+        for (String marker : REDACTION_MARKERS) {
+            if (!token.contains(marker) && !marker.contains(token)) {
+                return marker;
+            }
+        }
+        for (int codePoint = 0xE000; codePoint <= 0xF8FF; codePoint++) {
+            String marker = String.valueOf((char) codePoint);
+            if (!token.contains(marker)) {
+                return marker;
+            }
+        }
+        throw new IllegalArgumentException("Credential cannot be redacted safely");
     }
 }
