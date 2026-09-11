@@ -440,6 +440,40 @@ public final class NBTRegionFileTest {
         }
     }
 
+    /// Isolates an external slot when companion discovery itself fails without blocking other slots.
+    @Test
+    void tolerantOpenIsolatesUnavailableCompanionOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+        ExternalChunkAccessor failingAccessor = new ExternalChunkAccessor() {
+            /// Fails discovery for the damaged slot while leaving other slots unsupported.
+            ///
+            /// @param localX local chunk X coordinate
+            /// @param localZ local chunk Z coordinate
+            /// @return no stream for non-damaged slots
+            /// @throws IOException when the damaged slot is probed
+            @Override
+            public @Nullable InputStream openInputStream(int localX, int localZ) throws IOException {
+                if (localX == 0 && localZ == 0) {
+                    throw new IOException("injected companion discovery failure");
+                }
+                return null;
+            }
+        };
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file, failingAccessor)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_UNAVAILABLE".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
     /// Rejects a new region path whose parent is a symbolic link.
     @Test
     void rejectsRegionUnderSymbolicParent() throws Exception {

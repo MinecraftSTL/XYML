@@ -1700,13 +1700,21 @@ public final class NBTRegionFile implements AutoCloseable {
             compression[i] = (byte) compressionId;
             external[i] = isExternal;
             if (isExternal) {
-                if (!companionExists(path, accessor, i)) {
-                    if (!tolerant) {
-                        throw new IOException("Missing external chunk companion for local index " + i);
+                try {
+                    if (!companionExists(path, accessor, i)) {
+                        if (!tolerant) {
+                            throw new IOException("Missing external chunk companion for local index " + i);
+                        }
+                        issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                                "REGION_EXTERNAL_COMPANION_MISSING", slotPath(i),
+                                "外部槽位伴随文件缺失，已隔离该槽位"));
+                        isolatedSlots[i] = true;
                     }
+                } catch (IOException | RuntimeException failure) {
+                    if (!tolerant) throw failure;
                     issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
-                            "REGION_EXTERNAL_COMPANION_MISSING", slotPath(i),
-                            "外部槽位伴随文件缺失，已隔离该槽位"));
+                            "REGION_EXTERNAL_COMPANION_UNAVAILABLE", slotPath(i),
+                            "外部槽位伴随文件无法确认，已隔离该槽位"));
                     isolatedSlots[i] = true;
                 }
             }
