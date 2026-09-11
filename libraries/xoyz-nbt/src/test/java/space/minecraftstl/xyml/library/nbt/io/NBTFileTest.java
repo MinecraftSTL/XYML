@@ -325,6 +325,25 @@ public final class NBTFileTest {
                         && issue.path().isEmpty()));
     }
 
+    /// Rejects a nested Compound whose missing end marker could consume an outer sibling.
+    @Test
+    void rejectsAmbiguousNestedCompoundBoundary() {
+        assertThrows(IOException.class, () -> NBTRepairReader.read(
+                ambiguousNestedCompoundBoundary(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults()));
+    }
+
+    /// Preserves a strictly delimited nested Compound while reporting unrelated trailing bytes.
+    @Test
+    void nestedCompoundWithTrailingBytesRemainsReadable() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                nestedCompoundWithTrailingBytes(), CompoundTag.class, NBTCodec.of(), ReadLimits.defaults());
+
+        assertEquals(1, ((CompoundTag) result.root().get("nested")).getInt("inner"));
+        assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, result.report().severity());
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "TRAILING_BYTES".equals(issue.code())));
+    }
+
     /// Recovers a complete GZIP payload when only its eight-byte footer is missing.
     ///
     /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
@@ -825,6 +844,43 @@ public final class NBTFileTest {
         output.write(0);
         output.write(0); // root name
         writeNamedInt(output, "value", 7);
+        return output.toByteArray();
+    }
+
+    /// Builds a nested Compound without its end marker followed by a plausible outer sibling.
+    ///
+    /// @return ambiguous Java Edition NBT bytes that must be rejected by tolerant recovery
+    private static byte[] ambiguousNestedCompoundBoundary() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(10); // nested compound
+        output.write(0);
+        output.write(6);
+        output.writeBytes("nested".getBytes(StandardCharsets.UTF_8));
+        writeNamedInt(output, "inner", 1);
+        writeNamedInt(output, "after", 2); // may be nested or root-level
+        output.write(0); // only unambiguous-looking end marker
+        return output.toByteArray();
+    }
+
+    /// Builds a strict nested Compound and root followed by one unrelated trailing byte.
+    ///
+    /// @return Java Edition NBT bytes with complete hierarchy boundaries and trailing damage
+    private static byte[] nestedCompoundWithTrailingBytes() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(10); // nested compound
+        output.write(0);
+        output.write(6);
+        output.writeBytes("nested".getBytes(StandardCharsets.UTF_8));
+        writeNamedInt(output, "inner", 1);
+        output.write(0); // nested TAG_End
+        output.write(0); // root TAG_End
+        output.write(0x7F); // unrelated trailing damage
         return output.toByteArray();
     }
 

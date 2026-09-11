@@ -171,6 +171,12 @@ final class NBTRepairReader {
                                                                     NBTCodec codec, Class<T> rootClass,
                                                                     ReadLimits limits,
                                                                     List<NBTReadIssue> issues) throws IOException {
+        try {
+            T strictRoot = parseStrict(payload, codec, rootClass, limits);
+            return new NBTReadResult<>(strictRoot, new NBTReadReport(encoding, false, issues));
+        } catch (IOException | RuntimeException ignored) {
+            // The outer envelope may be damaged while its complete NBT payload remains strict.
+        }
         Cursor cursor = new Cursor(payload, codec.getEdition().byteOrder());
         ParseContext context = new ParseContext(limits, issues);
         @Nullable Tag recovered;
@@ -183,6 +189,9 @@ final class NBTRepairReader {
         }
         if (recovered == null) {
             throw new IOException("Tolerant NBT read could not recover a root tag");
+        }
+        if (context.hasAmbiguousCompoundBoundary()) {
+            throw new IOException("Tolerant NBT read refused an ambiguous Compound boundary");
         }
         if (cursor.remaining() > 0) {
             boolean zeroPadding = cursor.remainingAreZero();
@@ -385,6 +394,10 @@ final class NBTRepairReader {
         if (!(recovered instanceof CompoundTag compound)) {
             selectedNodeBudget.restore(nodeCheckpoint);
             throw new IOException("Tolerant region read could not recover a compound root");
+        }
+        if (context.hasAmbiguousCompoundBoundary()) {
+            selectedNodeBudget.restore(nodeCheckpoint);
+            throw new IOException("Tolerant region read refused an ambiguous Compound boundary");
         }
         if (cursor.remaining() > 0) {
             boolean zeroPadding = cursor.remainingAreZero();
@@ -894,8 +907,9 @@ final class NBTRepairReader {
     private static CompoundTag readCompound(Cursor cursor, String name, String path,
                                             ParseContext context, MinecraftEdition edition) throws ParseFailure {
         CompoundTag compound = new CompoundTag().setName(name);
+        boolean lastChildWasCompound = false;
         while (cursor.remaining() > 0) {
-            if (context.hasBoundaryUncertainty()) {
+            if (context.hasBoundaryUncertainty() || context.hasAmbiguousCompoundBoundary()) {
                 return compound;
             }
             int nextType = cursor.peekUnsignedByte();
@@ -907,6 +921,7 @@ final class NBTRepairReader {
             try {
                 Tag child = readNamedTag(cursor, path, context, edition);
                 if (child != null) {
+                    lastChildWasCompound = child instanceof CompoundTag;
                     if (compound.get(child.getName()) != null) {
                         context.issue(NBTReadIssue.Severity.RECOVERED, "DUPLICATE_NAME",
                                 pathName(path, child.getName()),
@@ -927,6 +942,10 @@ final class NBTRepairReader {
                 context.markBoundaryUncertain();
                 return compound;
             }
+        }
+        if (lastChildWasCompound) {
+            context.markAmbiguousCompoundBoundary(path);
+            return compound;
         }
         context.issue(NBTReadIssue.Severity.RECOVERED, "COMPOUND_END_MISSING", path,
                 "复合标签缺少结束标记");
@@ -1217,6 +1236,8 @@ final class NBTRepairReader {
         private long depth;
         /// Whether a recovered child no longer has a trustworthy byte boundary.
         private boolean boundaryUncertain;
+        /// Whether a compound boundary could belong to an enclosing compound instead.
+        private boolean ambiguousCompoundBoundary;
 
         private ParseContext(ReadLimits limits, List<NBTReadIssue> issues) {
             this(limits, issues, limits.newNodeBudget());
@@ -1246,6 +1267,22 @@ final class NBTRepairReader {
         /// Returns whether a child recovery consumed an uncertain prefix.
         private boolean hasBoundaryUncertainty() {
             return boundaryUncertain;
+        }
+
+        /// Records the first compound boundary that cannot be assigned without guessing.
+        ///
+        /// @param path logical path of the compound whose boundary is ambiguous
+        private void markAmbiguousCompoundBoundary(String path) {
+            if (!ambiguousCompoundBoundary) {
+                ambiguousCompoundBoundary = true;
+                issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "COMPOUND_BOUNDARY_AMBIGUOUS", path,
+                        "复合标签结束标记无法确认属于当前层级还是外层，已拒绝猜测性恢复");
+            }
+        }
+
+        /// Returns whether a compound boundary was rejected as ambiguous.
+        private boolean hasAmbiguousCompoundBoundary() {
+            return ambiguousCompoundBoundary;
         }
 
         private void enter(String path) throws ParseFailure {
