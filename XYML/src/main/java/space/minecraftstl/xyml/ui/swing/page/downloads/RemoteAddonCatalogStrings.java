@@ -209,7 +209,7 @@ public record RemoteAddonCatalogStrings(
                 i18n("message.success"),
                 i18n("message.failed"),
                 i18n("swing.download.category_failed"),
-                i18n("swing.download.retry"),
+                i18n("swing.download.search_failed"),
                 i18n("swing.download.retry"));
     }
 }

@@ -168,7 +168,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.choose.repository"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("swing.download.initial"),
+                i18n("swing.download.no_versions"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
@@ -178,7 +178,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("message.success"),
                 i18n("message.failed"),
                 i18n("swing.download.category_failed"),
-                i18n("swing.download.retry"),
+                i18n("swing.download.search_failed"),
                 i18n("swing.download.retry"));
     }
 

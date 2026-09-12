@@ -28,7 +28,6 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
-import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
@@ -1599,7 +1598,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 strings.installingStatus(),
                 strings.preparingInstallStatus());
         Subscription completionSubscription = executor.subscribeTaskListener(
-                new InstallCompletionListener(executor));
+                new RemoteAddonInstallCompletionListener(executor, this::installCompleted));
         activeExecutor = executor;
         activePresentation = presentation;
         activeCompletionSubscription = completionSubscription;
@@ -1997,28 +1996,4 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Routes one exact task executor's terminal state back to the Swing event dispatch thread.
-    @NotNullByDefault
-    private final class InstallCompletionListener extends TaskListener {
-        /// Executor represented by this listener.
-        private final TaskExecutor sourceExecutor;
-
-        /// Creates a terminal listener for exactly one active task executor.
-        ///
-        /// @param sourceExecutor task executor whose lifecycle should update this panel
-        private InstallCompletionListener(TaskExecutor sourceExecutor) {
-            this.sourceExecutor = Objects.requireNonNull(sourceExecutor, "sourceExecutor");
-        }
-
-        /// Publishes terminal status only for the exact retained executor.
-        ///
-        /// @param succeeded whether the full task graph completed successfully
-        /// @param executor executor reporting the terminal transition
-        @Override
-        public void onStop(boolean succeeded, TaskExecutor executor) {
-            if (executor == sourceExecutor) {
-                installCompleted(sourceExecutor, succeeded);
-            }
-        }
-    }
 }

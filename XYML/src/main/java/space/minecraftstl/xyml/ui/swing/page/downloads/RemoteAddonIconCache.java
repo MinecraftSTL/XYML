@@ -23,6 +23,8 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import javax.swing.Icon;
 import java.awt.Component;
 import java.awt.Graphics;
@@ -30,10 +32,12 @@ import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URLConnection;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,6 +51,15 @@ import java.util.concurrent.Executor;
 final class RemoteAddonIconCache implements AutoCloseable {
     /// Fixed logical edge used by every catalog row icon.
     private static final int ICON_SIZE = 40;
+
+    /// Maximum encoded response retained before image decoding.
+    private static final int MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+    /// Maximum decoded edge accepted before allocating the raster.
+    private static final int MAX_IMAGE_EDGE = 2048;
+
+    /// Maximum decoded pixels accepted before allocating the raster.
+    private static final long MAX_IMAGE_PIXELS = 4_000_000L;
 
     /// Bundled icon shown before a remote image is available or after a failed request.
     private static final Icon PLACEHOLDER = new FlatSVGIcon(
@@ -132,10 +145,18 @@ final class RemoteAddonIconCache implements AutoCloseable {
                 connection.setConnectTimeout(5_000);
                 connection.setReadTimeout(5_000);
                 connection.setUseCaches(true);
-                @Nullable BufferedImage source;
-                try (InputStream stream = connection.getInputStream()) {
-                    source = ImageIO.read(stream);
+                long contentLength = connection.getContentLengthLong();
+                if (contentLength > MAX_IMAGE_BYTES) {
+                    throw new IOException("Remote add-on icon exceeds the encoded size limit");
                 }
+                byte[] encoded;
+                try (InputStream stream = connection.getInputStream()) {
+                    encoded = stream.readNBytes(MAX_IMAGE_BYTES + 1);
+                }
+                if (encoded.length > MAX_IMAGE_BYTES) {
+                    throw new IOException("Remote add-on icon exceeds the encoded size limit");
+                }
+                @Nullable BufferedImage source = decode(encoded);
                 if (source != null && source.getWidth() > 0 && source.getHeight() > 0) {
                     loaded = scale(source);
                 }
@@ -152,6 +173,48 @@ final class RemoteAddonIconCache implements AutoCloseable {
             if (result != null && !closed) {
                 SwingUiDispatcher.INSTANCE.dispatchOrRun(repaint);
             }
+        }
+
+        /// Decodes one bounded image response after checking dimensions through the reader metadata.
+        ///
+        /// @param encoded bounded encoded response
+        /// @return decoded image, or null when no supported reader accepts it
+        private static @Nullable BufferedImage decode(byte[] encoded) throws IOException {
+            try (@Nullable ImageInputStream imageInput = ImageIO.createImageInputStream(
+                    new ByteArrayInputStream(encoded))) {
+                if (imageInput == null) {
+                    return null;
+                }
+                Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+                if (!readers.hasNext()) {
+                    return null;
+                }
+                ImageReader reader = readers.next();
+                try {
+                    reader.setInput(imageInput, true, true);
+                    int width = reader.getWidth(0);
+                    int height = reader.getHeight(0);
+                    if (!validDimensions(width, height)) {
+                        throw new IOException("Remote add-on icon dimensions exceed the limit");
+                    }
+                    return reader.read(0);
+                } finally {
+                    reader.dispose();
+                }
+            }
+        }
+
+        /// Checks dimensions before the image reader allocates a decoded raster.
+        ///
+        /// @param width encoded image width
+        /// @param height encoded image height
+        /// @return whether the dimensions fit the catalog icon budget
+        private static boolean validDimensions(int width, int height) {
+            return width > 0
+                    && height > 0
+                    && width <= MAX_IMAGE_EDGE
+                    && height <= MAX_IMAGE_EDGE
+                    && (long) width * height <= MAX_IMAGE_PIXELS;
         }
 
         /// Scales an arbitrary source image into the stable row slot while preserving aspect ratio.
