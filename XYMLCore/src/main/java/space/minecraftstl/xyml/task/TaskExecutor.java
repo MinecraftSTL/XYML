@@ -120,6 +120,23 @@ public abstract class TaskExecutor {
         return hints;
     }
 
+    /// Returns resources whose task lease cleanup failed and remains retryable in this process.
+    ///
+    /// Executors that do not use the built-in resource arbiter return an empty list. The returned descriptions are
+    /// diagnostics only; callers must not infer ownership from them or perform duplicate cleanup.
+    ///
+    /// @return immutable residual resource descriptions
+    public @Unmodifiable List<String> getResidualResources() {
+        return List.of();
+    }
+
+    /// Performs one bounded retry of residual resource cleanup.
+    ///
+    /// @return true when no residual resources remain after the retry
+    public boolean retryResourceCleanup() {
+        return getResidualResources().isEmpty();
+    }
+
     /// Stores independently cancellable listener registrations and isolates notification failures.
     @NotNullByDefault
     private static final class TaskListenerRegistry extends CopyOnWriteArrayList<TaskListener> {

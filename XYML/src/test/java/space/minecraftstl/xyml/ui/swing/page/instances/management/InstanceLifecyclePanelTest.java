@@ -30,6 +30,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +54,7 @@ final class InstanceLifecyclePanelTest {
         RecordingService service = new RecordingService();
         RecordingInteractions interactions = new RecordingInteractions();
         interactions.renameDestination.set("renamed");
-        AtomicInteger completed = new AtomicInteger();
+        CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
@@ -62,7 +63,7 @@ final class InstanceLifecyclePanelTest {
                     executor,
                     InstanceLifecycleStrings.english(),
                     interactions,
-                    completed::incrementAndGet)));
+                    completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -74,6 +75,8 @@ final class InstanceLifecyclePanelTest {
                 assertFalse(rename.isEnabled());
             });
             awaitBackgroundWork(executor);
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> { });
 
             assertEquals(
                     new RenameCall(new GameInstanceID("source"), new GameInstanceID("renamed")),
@@ -81,7 +84,7 @@ final class InstanceLifecyclePanelTest {
             assertFalse(service.mutationRanOnEdt.get());
             assertEquals(new GameInstanceID("renamed"), service.reconciledSelection.get());
             assertTrue(service.reconciledOnEdt.get());
-            assertEquals(1, completed.get());
+            assertEquals(0, completed.getCount());
             assertNull(interactions.failureDetail.get());
         } finally {
             closePanel(panelReference.get());
@@ -97,7 +100,7 @@ final class InstanceLifecyclePanelTest {
         RecordingService service = new RecordingService();
         RecordingInteractions interactions = new RecordingInteractions();
         interactions.duplicateRequest.set(new InstanceLifecycleDuplicateRequest("copy", true));
-        AtomicInteger completed = new AtomicInteger();
+        CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
@@ -106,7 +109,7 @@ final class InstanceLifecyclePanelTest {
                     executor,
                     InstanceLifecycleStrings.english(),
                     interactions,
-                    completed::incrementAndGet)));
+                    completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -117,13 +120,15 @@ final class InstanceLifecyclePanelTest {
                 duplicate.doClick();
             });
             awaitBackgroundWork(executor);
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> { });
 
             assertEquals(
                     new DuplicateCall(new GameInstanceID("source"), new GameInstanceID("copy"), true),
                     service.duplicateCall.get());
             assertFalse(service.mutationRanOnEdt.get());
             assertEquals(new GameInstanceID("copy"), service.reconciledSelection.get());
-            assertEquals(1, completed.get());
+            assertEquals(0, completed.getCount());
         } finally {
             closePanel(panelReference.get());
             executor.shutdownNow();
@@ -137,7 +142,7 @@ final class InstanceLifecyclePanelTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         RecordingService service = new RecordingService();
         RecordingInteractions interactions = new RecordingInteractions();
-        AtomicInteger completed = new AtomicInteger();
+        CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
@@ -146,7 +151,7 @@ final class InstanceLifecyclePanelTest {
                     executor,
                     InstanceLifecycleStrings.english(),
                     interactions,
-                    completed::incrementAndGet)));
+                    completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -158,7 +163,7 @@ final class InstanceLifecyclePanelTest {
             });
             awaitBackgroundWork(executor);
             assertEquals(0, service.deleteCount.get());
-            assertEquals(0, completed.get());
+            assertEquals(1, completed.getCount());
 
             interactions.deleteApproved.set(true);
             EdtDispatcher.executeAndWait(() -> {
@@ -169,11 +174,13 @@ final class InstanceLifecyclePanelTest {
                 delete.doClick();
             });
             awaitBackgroundWork(executor);
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> { });
 
             assertEquals(1, service.deleteCount.get());
             assertFalse(service.mutationRanOnEdt.get());
             assertNull(service.reconciledSelection.get());
-            assertEquals(1, completed.get());
+            assertEquals(0, completed.getCount());
         } finally {
             closePanel(panelReference.get());
             executor.shutdownNow();

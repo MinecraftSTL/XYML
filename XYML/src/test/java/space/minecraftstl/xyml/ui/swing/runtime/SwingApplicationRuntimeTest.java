@@ -95,6 +95,30 @@ final class SwingApplicationRuntimeTest {
         runtime.close();
     }
 
+    /// Preserves the analyzed version through the deferred visibility-action relay.
+    @Test
+    void relaysVersionAwareMissingDependencySearch() {
+        List<String> events = new ArrayList<>();
+        RecordingLifecycle composition = new RecordingLifecycle(events, "composition", null, null);
+        RecordingCloseable commandOwner = new RecordingCloseable(events, "commands", null);
+        AtomicReference<@Nullable LaunchVisibilityActions> actionsReference = new AtomicReference<>();
+        SwingApplicationRuntime runtime = SwingApplicationRuntime.createForCollaborators(
+                visibilityActions -> {
+                    actionsReference.set(visibilityActions);
+                    return new SwingApplicationRuntime.CommandOwnerHandle(commands(), commandOwner);
+                },
+                (applicationCommands, closeCommand) -> composition,
+                () -> events.add("exit"));
+
+        Objects.requireNonNull(actionsReference.get())
+                .openMissingDependencySearch()
+                .open("fabric-api", "1.20.1");
+
+        assertEquals("fabric-api", composition.missingDependencyId());
+        assertEquals("1.20.1", composition.missingDependencyGameVersion());
+        runtime.close();
+    }
+
     /// Confirms that process-exit show and hide callbacks cannot revive a closed runtime.
     @Test
     void lateVisibilityCallbacksDoNotReviveClosedRuntime() {
@@ -402,6 +426,12 @@ final class SwingApplicationRuntimeTest {
         /// Number of delegated close calls.
         private int closeCount;
 
+        /// Last version-aware missing-dependency identifier, or null before one is requested.
+        private @Nullable String missingDependencyId;
+
+        /// Last analyzed version carried beside the missing-dependency search, or null when unknown or absent.
+        private @Nullable String missingDependencyGameVersion;
+
         /// Creates a recording application lifecycle.
         ///
         /// @param events shared ordered event sink
@@ -447,6 +477,16 @@ final class SwingApplicationRuntimeTest {
             interactionEnabled = enabled;
         }
 
+        /// Records one version-aware missing-dependency search.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            missingDependencyId = Objects.requireNonNull(dependencyId, "dependencyId");
+            missingDependencyGameVersion = gameVersion;
+        }
+
         /// Records one delegated close call, notifies the relay, and reports configured failure.
         @Override
         public void close() {
@@ -486,6 +526,20 @@ final class SwingApplicationRuntimeTest {
         /// @return close-call count
         private int closeCount() {
             return closeCount;
+        }
+
+        /// Returns the last version-aware dependency identifier.
+        ///
+        /// @return dependency identifier, or null before a search
+        private @Nullable String missingDependencyId() {
+            return missingDependencyId;
+        }
+
+        /// Returns the last analyzed version carried beside a dependency search.
+        ///
+        /// @return analyzed version, or null when unavailable or before a search
+        private @Nullable String missingDependencyGameVersion() {
+            return missingDependencyGameVersion;
         }
     }
 

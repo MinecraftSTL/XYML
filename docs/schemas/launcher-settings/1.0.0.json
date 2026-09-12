@@ -178,7 +178,12 @@
       "type": "string"
     },
     "mcpEnabled": {
-      "type": "boolean"
+      "type": "boolean",
+      "default": false
+    },
+    "mcpBearerToken": {
+      "type": "string",
+      "default": ""
     },
     "mcpPort": {
       "type": "integer",
@@ -190,6 +195,10 @@
     },
     "mcpConfirmModDeletion": {
       "type": "boolean"
+    },
+    "showMcpEnablementWarning": {
+      "type": "boolean",
+      "default": true
     },
     "selectedGameDirectory": {
       "$ref": "#/$defs/gameDirectoryID"

@@ -96,7 +96,7 @@ public record RepairActionDescriptor(
                 dependencyIds);
     }
 
-    /// Creates a non-destructive Java-runtime selection descriptor.
+    /// Creates a Java-runtime selection descriptor for an operation that can change persistent launcher state.
     ///
     /// @param executable whether the application supplied a Java-runtime repair boundary
     /// @return structured Java-runtime selection proposal
@@ -105,7 +105,7 @@ public record RepairActionDescriptor(
                 ActionType.REPLACE_JAVA_RUNTIME,
                 executable ? Availability.EXECUTABLE : Availability.APPLICATION_BOUNDARY_UNAVAILABLE,
                 RiskLevel.SYSTEM_CONFIGURATION_CHANGE,
-                ConfirmationRequirement.NOT_REQUIRED,
+                ConfirmationRequirement.REQUIRED,
                 List.of());
     }
 
@@ -169,7 +169,7 @@ public record RepairActionDescriptor(
             case REPLACE_JAVA_RUNTIME -> requirePolicy(
                     availability != Availability.INFORMATION_ONLY
                             && riskLevel == RiskLevel.SYSTEM_CONFIGURATION_CHANGE
-                            && confirmationRequirement == ConfirmationRequirement.NOT_REQUIRED,
+                            && confirmationRequirement == ConfirmationRequirement.REQUIRED,
                     actionType);
             case AUTOMATIC_REPAIR -> requirePolicy(
                     availability == Availability.EXECUTABLE

@@ -41,6 +41,12 @@ interface DiscoJavaRuntimeAcquisitionBackend {
     /// @return current system platform
     Platform currentPlatform();
 
+    /// Returns the normalized local managed-runtime root for one platform.
+    ///
+    /// @param platform target platform
+    /// @return managed platform root
+    Path managedPlatformRoot(Platform platform);
+
     /// Creates the established Disco version-list task for one distribution and platform.
     ///
     /// @param distribution explicitly selected distribution

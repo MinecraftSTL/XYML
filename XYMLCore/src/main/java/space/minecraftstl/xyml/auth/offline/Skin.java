@@ -21,6 +21,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.task.GetTask;
@@ -142,7 +143,7 @@ public record Skin(
     public Task<@Nullable LoadedSkin> load(String username) {
         switch (type) {
             case DEFAULT:
-                return Task.supplyAsync(() -> null);
+                return Task.<@Nullable LoadedSkin>supplyAsync(() -> null).asOrchestration();
             case ALEX:
             case ARI:
             case EFE:
@@ -162,7 +163,7 @@ public record Skin(
                 return Task.supplyAsync(() -> new LoadedSkin(
                         model,
                         loadBuiltinTexture(resource),
-                        null));
+                        null)).asOrchestration();
             case LOCAL_FILE:
                 return Task.supplyAsync(() -> {
                     @Nullable Texture skin = null;
@@ -176,7 +177,7 @@ public record Skin(
                         cape = Texture.loadTexture(Files.newInputStream(capePath.get()));
                     }
                     return new LoadedSkin(textureModel(), skin, cape);
-                });
+                }).asOrchestration();
             case LITTLE_SKIN:
             case CUSTOM_SKIN_LOADER_API:
                 String realCslApi = type == Type.LITTLE_SKIN
@@ -184,26 +185,28 @@ public record Skin(
                         : NetworkUtils.addHttpsIfMissing(
                                 StringUtils.removeSuffix(Objects.requireNonNullElse(cslApi, ""), "/"));
                 return Task.composeAsync(() -> new GetTask(String.format("%s/%s.json", realCslApi, username)))
+                        .asOrchestration()
                         .thenComposeAsync(json -> {
                             @Nullable SkinJson result = JsonUtils.GSON.fromJson(json, SkinJson.class);
 
                             if (result == null || !result.hasSkin()) {
-                                return Task.supplyAsync(() -> null);
+                                return Task.<@Unmodifiable List<@Nullable Object>>supplyAsync(() -> null)
+                                        .asOrchestration();
                             }
 
                             @Nullable String skinHash = result.getHash();
                             @Nullable String capeHash = result.getCapeHash();
-                            return Task.allOf(
-                                    Task.supplyAsync(result::getModel),
+                            return Task.<Object>allOf(
+                                    Task.<Object>supplyAsync(result::getModel).asOrchestration(),
                                     skinHash == null
-                                            ? Task.supplyAsync(() -> null)
+                                            ? Task.supplyAsync(() -> null).asOrchestration()
                                             : new FetchBytesTask(String.format(
                                                     "%s/textures/%s", realCslApi, skinHash)),
                                     capeHash == null
-                                            ? Task.supplyAsync(() -> null)
+                                            ? Task.supplyAsync(() -> null).asOrchestration()
                                             : new FetchBytesTask(String.format(
                                                     "%s/textures/%s", realCslApi, capeHash)));
-                        }).thenApplyAsync(result -> {
+                        }).asOrchestration().thenApplyAsync(result -> {
                             if (result == null) {
                                 return null;
                             }
@@ -215,7 +218,7 @@ public record Skin(
                                     ? null
                                     : Texture.loadTexture((InputStream) result.get(2));
                             return new LoadedSkin((@Nullable TextureModel) result.get(0), skin, cape);
-                        });
+                        }).asOrchestration();
             default:
                 throw new UnsupportedOperationException("Unsupported skin type: " + type);
         }
@@ -284,6 +287,7 @@ public record Skin(
         /// @param uri absolute texture URI
         private FetchBytesTask(String uri) {
             super(List.of(NetworkUtils.toURI(uri)));
+            useCacheOperationResource();
         }
 
         /// Opens a cached response as the task result.

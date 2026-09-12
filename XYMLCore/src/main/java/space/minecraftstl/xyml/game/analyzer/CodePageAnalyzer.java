@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
@@ -75,18 +76,22 @@ public final class CodePageAnalyzer implements Analyzer<LogAnalyzable> {
         if (containsJavaVersionEvidence(log) || log.contains(LWJGL_ARCHITECTURE_MISMATCH)) {
             return ControlFlow.CONTINUE;
         }
-        boolean verified = containsMainClassFailure(log, input.mainClass())
-                || log.contains(LWJGL_LOAD_FAILURE) && log.contains(LWJGL_LIBRARY_NOT_FOUND);
-        if (!verified) {
+        @Nullable String mainClassEvidence = findMainClassFailure(log, input.mainClass());
+        boolean lwjglFailure = log.contains(LWJGL_LOAD_FAILURE) && log.contains(LWJGL_LIBRARY_NOT_FOUND);
+        if (mainClassEvidence == null && !lwjglFailure) {
             return ControlFlow.CONTINUE;
         }
+        @Unmodifiable List<String> evidence = mainClassEvidence == null
+                ? List.of(LWJGL_LOAD_FAILURE, LWJGL_LIBRARY_NOT_FOUND)
+                : List.of(mainClassEvidence);
 
         results.add(new AnalyzeResult<>(
                 this,
                 ResultID.CODE_PAGE,
                 new TextSolver(
                         "game.crash.reason.log.code_page",
-                        "Enable the Windows UTF-8 system locale, restart Windows, or move the game to an ASCII path.")));
+                        "Enable the Windows UTF-8 system locale, restart Windows, or move the game to an ASCII path."),
+                evidence));
         return ControlFlow.BREAK_OTHER;
     }
 
@@ -103,34 +108,36 @@ public final class CodePageAnalyzer implements Analyzer<LogAnalyzable> {
                 CrashReportAnalyzer.Rule.JDK_9) != null;
     }
 
-    /// Reports whether a class-not-found line names the resolved launch main class.
+    /// Finds a class-not-found line that names the resolved launch main class.
     ///
     /// @param log complete launch log
     /// @param mainClass resolved launch main class, or null when unavailable
-    /// @return true when a class-not-found line names the launch main class
-    private static boolean containsMainClassFailure(String log, @Nullable String mainClass) {
+    /// @return exact matched fragment, or null when no matching diagnostic exists
+    private static @Nullable String findMainClassFailure(String log, @Nullable String mainClass) {
         if (mainClass == null) {
-            return false;
+            return null;
         }
         String normalizedMainClass = mainClass.replace('/', '.');
-        return containsNamedClass(MAIN_CLASS_FAILURE, log, normalizedMainClass)
-                || containsNamedClass(CLASS_NOT_FOUND, log, normalizedMainClass);
+        @Nullable String launcherEvidence = findNamedClass(MAIN_CLASS_FAILURE, log, normalizedMainClass);
+        return launcherEvidence == null
+                ? findNamedClass(CLASS_NOT_FOUND, log, normalizedMainClass)
+                : launcherEvidence;
     }
 
-    /// Reports whether one diagnostic pattern names the normalized launch main class.
+    /// Finds one diagnostic whose named class equals the normalized launch main class.
     ///
     /// @param pattern diagnostic pattern exposing a `className` group
     /// @param log complete launch log
     /// @param normalizedMainClass dot-separated launch main class
-    /// @return true when the pattern names the launch main class
-    private static boolean containsNamedClass(Pattern pattern, String log, String normalizedMainClass) {
+    /// @return exact matched fragment, or null when this pattern has no matching diagnostic
+    private static @Nullable String findNamedClass(Pattern pattern, String log, String normalizedMainClass) {
         Matcher matcher = pattern.matcher(log);
         while (matcher.find()) {
             if (normalizedMainClass.equals(matcher.group("className").replace('/', '.'))) {
-                return true;
+                return matcher.group();
             }
         }
-        return false;
+        return null;
     }
 
     /// Reports whether either launch path cannot be represented by the verified Windows ANSI code page.

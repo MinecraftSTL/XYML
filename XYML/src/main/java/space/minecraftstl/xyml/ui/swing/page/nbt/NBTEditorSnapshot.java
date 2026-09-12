@@ -70,11 +70,15 @@ public record NBTEditorSnapshot(
 
     /// Returns whether the current document still requires a save attempt.
     ///
-    /// A partial Region save remains recoverable even when undo returns the editor to its original
-    /// savepoint, because already committed chunks may still differ from that in-memory state.
+    /// A recovered source remains saveable even when no in-memory edit has been made, because the
+    /// explicit repair save is what rewrites it into strict Java Edition NBT. A partial Region
+    /// save remains recoverable even when undo returns the editor to its original savepoint,
+    /// because already committed chunks may still differ from that in-memory state.
     ///
     /// @return whether save should remain available
     public boolean requiresSave() {
-        return dirty || status == NBTEditorStatus.PARTIAL_SAVE;
+        return dirty
+                || status == NBTEditorStatus.PARTIAL_SAVE
+                || document != null && document.requiresRepair();
     }
 }

@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.library.mcp.McpServer;
 import space.minecraftstl.xyml.library.mcp.McpServerInfo;
 
 import java.io.IOException;
+import java.util.Objects;
 
 /// Adapts the launcher MCP registries to the XoyzMCP Streamable HTTP server.
 @NotNullByDefault
@@ -45,6 +46,18 @@ public final class XYMLMcpServer implements AutoCloseable {
     /// @param port loopback TCP port, or zero to select an available port
     /// @param service initialized launcher operation service, or `null` for schema-only use
     public XYMLMcpServer(int port, @Nullable XYMLMcpOperations service) {
+        this(port, service, "");
+    }
+
+    /// Creates a launcher MCP server with an optional bearer token.
+    ///
+    /// An empty token leaves transport authentication disabled for local compatibility. A non-empty token is
+    /// required on every request before the application providers are reached.
+    ///
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param service initialized launcher operation service, or `null` for schema-only use
+    /// @param bearerToken bearer token, or an empty string to disable transport authentication
+    public XYMLMcpServer(int port, @Nullable XYMLMcpOperations service, String bearerToken) {
         this.service = service;
         delegate = new McpServer(
                 port,
@@ -52,7 +65,8 @@ public final class XYMLMcpServer implements AutoCloseable {
                 new McpFeatureSet(
                         new XYMLMcpToolRegistry(service),
                         new XYMLMcpResourceRegistry(service),
-                        new XYMLMcpPromptRegistry()));
+                        new XYMLMcpPromptRegistry()),
+                Objects.requireNonNull(bearerToken, "bearerToken"));
     }
 
     /// Starts the loopback HTTP listener.

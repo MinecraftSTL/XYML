@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.download.game.GameInstanceJsonDownloadTask;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.function.ExceptionalFunction;
@@ -38,6 +39,7 @@ import space.minecraftstl.xyml.util.platform.CommandBuilder;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.platform.SystemUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -193,6 +195,13 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
         this.installer = installer;
         this.selfVersion = selfVersion;
 
+        setResources(
+                TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(gameRepository.getBaseDirectory().resolve("lib")),
+                TaskResource.archive(installer));
+        releaseResourcesBeforeDependencies();
+
         setSignificance(TaskSignificance.MAJOR);
     }
 
@@ -323,12 +332,21 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
         return options;
     }
 
-    private Task<?> patchDownloadMojangMappingsTask(Processor processor, Map<String, String> vars) {
+    /// Creates the special Mojang mappings download branch for one patched installer processor.
+    ///
+    /// The returned composition only parses metadata and constructs a precisely resourced file-download task.
+    ///
+    /// @param processor installer processor being adapted
+    /// @param vars immutable-by-convention processor variable snapshot
+    /// @return orchestration task for a mappings download, or `null` for a regular processor
+    private @Nullable Task<?> patchDownloadMojangMappingsTask(
+            @NotNull Processor processor,
+            @NotNull Map<String, String> vars) {
         Map<String, String> options = parseOptions(processor.getArgs(), vars);
         if (!"DOWNLOAD_MOJMAPS".equals(options.get("task")) || !"client".equals(options.get("side")))
             return null;
-        String version = options.get("version");
-        String output = options.get("output");
+        @Nullable String version = options.get("version");
+        @Nullable String output = options.get("output");
         if (version == null || output == null)
             return null;
 
@@ -350,22 +368,45 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
                     mappingsTask.setCaching(true);
                     mappingsTask.setCacheRepository(dependencyManager.getCacheRepository());
                     return mappingsTask;
-                });
+                }).asOrchestration();
     }
 
-    private Task<?> createProcessorTask(Processor processor, Map<String, String> vars) {
-        Task<?> task = patchDownloadMojangMappingsTask(processor, vars);
+    /// Creates one processor branch without falling back to the process-wide conservative resource.
+    ///
+    /// @param processor installer processor to execute or adapt
+    /// @param vars immutable-by-convention processor variable snapshot
+    /// @return stopped processor task with an explicit resource declaration
+    private @NotNull Task<?> createProcessorTask(
+            @NotNull Processor processor,
+            @NotNull Map<String, String> vars) {
+        @Nullable Task<?> task = patchDownloadMojangMappingsTask(processor, vars);
         if (task == null) {
-            task = new ProcessorTask(processor, vars);
+            task = declareInstallationResources(new ProcessorTask(processor, vars));
         }
         task.onDone().register(
                 () -> updateProgress(processorDoneCount.incrementAndGet(), processors.size()));
         return task;
     }
 
+    /// Copies this installer's complete declaration to one child that may outlive the outer lease handoff.
+    ///
+    /// @param task child task receiving the captured declaration
+    /// @param <T> child result type
+    /// @return the supplied child task
+    private <T> @NotNull Task<T> declareInstallationResources(@NotNull Task<T> task) {
+        TaskResource[] declarations = getResourceDeclarations().toArray(TaskResource[]::new);
+        return task.setResources(
+                declarations[0],
+                Arrays.copyOfRange(declarations, 1, declarations.length));
+    }
+
     @Override
     public void execute() throws Exception {
-        tempDir = Files.createTempDirectory("neoforge_installer");
+        Path stagingDirectory = gameRepository.getInstanceRoot(manifest.id()).resolve(".xyml-installers");
+        Files.createDirectories(stagingDirectory);
+        tempDir = Files.createTempDirectory(stagingDirectory, "neoforge-installer-")
+                .toAbsolutePath()
+                .normalize();
 
         Map<String, String> vars = new HashMap<>();
 
@@ -400,9 +441,13 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
                         .map(processor -> createProcessorTask(processor, vars))
                         .toArray(Task<?>[]::new));
 
-        dependencies.add(
-                processorsTask.thenComposeAsync(
-                        dependencyManager.checkLibraryCompletionAsync(neoForgeVersion, true)));
+        Task<?> installation = processorsTask.thenComposeAsync(
+                dependencyManager.checkLibraryCompletionAsync(neoForgeVersion, true));
+        Path temporaryDirectory = Objects.requireNonNull(tempDir, "temporary installer directory");
+        dependencies.add(installation.whenCompleteWithResources(
+                getExecutor(),
+                failure -> FileUtils.deleteDirectory(temporaryDirectory),
+                TaskResource.gameDirectory(temporaryDirectory)).asOrchestration());
 
         setResult(GameInstancePatch.fromManifest(
                 neoForgeVersion,
@@ -418,6 +463,7 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void postExecute() throws Exception {
-        FileUtils.deleteDirectory(tempDir);
+        // Temporary-directory removal is a terminal cleanup dependency so it retains an exact directory lease after
+        // this task hands its shared library resources to the dynamically created installation branch.
     }
 }

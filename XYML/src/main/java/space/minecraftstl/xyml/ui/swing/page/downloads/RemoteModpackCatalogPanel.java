@@ -36,9 +36,11 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
@@ -52,8 +54,11 @@ import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -83,6 +88,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Caller-owned worker executor for search and selected-project version resolution.
     private final Executor workerExecutor;
 
+    /// Lazy provider-icon cache sharing the catalog worker boundary.
+    private final RemoteAddonIconCache iconCache;
+
     /// Injected visible text for this catalog surface.
     private final RemoteModpackCatalogStrings strings;
 
@@ -102,8 +110,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Optional project-name or keyword filter editor.
     private final JTextField searchField = new JTextField();
 
-    /// Optional exact Minecraft-version filter editor.
-    private final JTextField gameVersionField = new JTextField();
+    /// Editable Minecraft-version filter with common launcher versions as suggestions.
+    private final JComboBox<String> gameVersionField = new JComboBox<>();
 
     /// Provider category selector populated asynchronously after the panel becomes displayable.
     private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
@@ -116,6 +124,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Version selector populated only after a loaded project is selected.
     private final JComboBox<RemoteAddon.Version> versionBox = new JComboBox<>();
+
+    /// Explicit ordering selector for the selected project's installable versions.
+    private final JComboBox<RemoteAddonVersionSortMode> versionSortBox = new JComboBox<>(
+            RemoteAddonVersionSortMode.values());
+
+    /// Renderer that keeps the recommended version visible while the selector is open or closed.
+    private final RemoteModpackVersionRenderer versionRenderer = new RemoteModpackVersionRenderer();
 
     /// Explicit first-page source query command.
     private final JButton searchButton = new JButton();
@@ -137,6 +152,17 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// User-visible request, loading, validation, and terminal-task feedback.
     private final JLabel statusLabel = new JLabel();
+
+    /// Action exposed by the current retryable or returnable status, or null for ordinary feedback.
+    private @Nullable Runnable statusAction;
+
+    /// Handles primary clicks on the status text without changing the label-based panel API.
+    private final MouseAdapter statusMouseListener = new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            activateStatusAction(event);
+        }
+    };
 
     /// Latest background-search identity; newer criteria or page requests invalidate older callbacks.
     private final AtomicLong catalogRequestRevision = new AtomicLong();
@@ -180,6 +206,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Provider whose categories currently populate the selector, or null before a successful load.
     private @Nullable RemoteModpackCatalogSource loadedCategorySource;
 
+    /// Whether category discovery for the selected provider most recently failed.
+    private boolean categoryLoadFailed;
+
     /// Whether a catalog query is waiting for a background result.
     private boolean catalogLoading;
 
@@ -194,6 +223,15 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Whether sort combo-box changes are internal source publication rather than user edits.
     private boolean applyingSortOptions;
+
+    /// Provider versions retained for local reordering after the user changes version sort mode.
+    private @Unmodifiable List<RemoteAddon.Version> loadedVersions = List.of();
+
+    /// Stable recommendation retained independently from the selected browsing order.
+    private @Nullable RemoteAddon.Version recommendedVersion;
+
+    /// Suppresses version-combo callbacks while a new local order is being published.
+    private boolean applyingVersionSort;
 
     /// Whether programmatic destination suggestions should not be treated as user edits.
     private boolean applyingSuggestedInstanceName;
@@ -302,12 +340,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]8[]8[grow,fill]8[]8[]"));
+                "[]8[pref!,shrink 0]8[grow,fill]8[]8[]8[]"));
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.fixedInstanceId = fixedInstanceId;
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
+        iconCache = new RemoteAddonIconCache(this.workerExecutor);
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
                 taskProgressStrings, "taskProgressStrings");
@@ -316,7 +355,14 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         if (resolvedProgressAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
-        choiceList = new ViewportChoiceList<>(dataSource, RemoteModpackCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                dataSource,
+                new RichChoiceListCellRenderer<>(
+                        item -> item.addon().title().isBlank() ? item.addon().slug() : item.addon().title(),
+                        item -> remoteModpackRowDetail(item.addon()),
+                        item -> item.source().displayName(),
+                        item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
+                        item -> item.addon().pageUrl()));
         progressHost = new TaskProgressHostPanel(
                 resolvedTaskProgressStrings,
                 animator,
@@ -372,9 +418,11 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     private void configureComponents() {
         setName("remoteModpackCatalog");
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
+        headingBand.setMinimumSize(new Dimension(0, 0));
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("remoteModpackCatalogTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
@@ -382,25 +430,28 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 1",
-                "[grow,fill]",
-                "[40!]8[40!]8[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[pref!]8[pref!]"));
         filterBand.setName("remoteModpackFilterBand");
         filterBand.setOpaque(false);
+        filterBand.setMinimumSize(new Dimension(0, 0));
 
         JPanel searchBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[][160!]12[][grow,fill]8[110!]",
-                "[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]"));
         searchBand.setName("remoteModpackSearchBand");
         searchBand.setOpaque(false);
+        searchBand.setMinimumSize(new Dimension(0, 0));
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
         searchBand.add(sourceLabel);
         sourceBox.setName("remoteModpackSource");
         sourceBox.addActionListener(event -> sourceChanged());
-        searchBand.add(sourceBox, "growx, h 40!");
+        sourceBox.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(sourceBox, "growx, wmin 0, h 40!");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
@@ -408,28 +459,31 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         searchField.setName("remoteModpackSearch");
         SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(criteriaListener);
-        searchBand.add(searchField, "growx, h 40!");
+        searchField.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(searchField, "growx, wmin 0, h 40!");
 
         searchButton.setName("remoteModpackSearchAction");
         searchButton.setText(strings.searchAction());
         searchButton.addActionListener(event -> submitFirstPageSearch());
-        searchBand.add(searchButton, "grow, h 40!");
-        filterBand.add(searchBand, "growx");
+        searchButton.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
+        filterBand.add(searchBand, "growx, wmin 0");
 
         JPanel criteriaBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[][grow,fill]12[][grow,fill]12[][180!]",
-                "[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]"));
         criteriaBand.setName("remoteModpackCriteriaBand");
         criteriaBand.setOpaque(false);
+        criteriaBand.setMinimumSize(new Dimension(0, 0));
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
         criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteModpackGameVersion");
-        SwingTextFields.showClearButton(gameVersionField);
-        gameVersionField.getDocument().addDocumentListener(criteriaListener);
-        criteriaBand.add(gameVersionField, "growx, h 40!");
+        configureGameVersionSelector();
+        gameVersionField.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
 
         RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
         JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
@@ -441,7 +495,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 filterStrings));
         resetCategoryOptions();
         categoryBox.addActionListener(event -> categoryChanged());
-        criteriaBand.add(categoryBox, "growx, h 40!");
+        categoryBox.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(categoryBox, "growx, wmin 0, h 40!");
 
         JLabel sortLabel = new JLabel(filterStrings.sortLabel());
         sortLabel.setLabelFor(sortBox);
@@ -450,34 +505,39 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
         resetSortOptions();
         sortBox.addActionListener(event -> sortChanged());
-        criteriaBand.add(sortBox, "growx, h 40!");
-        filterBand.add(criteriaBand, "growx");
+        sortBox.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
+        filterBand.add(criteriaBand, "growx, wmin 0");
 
         JPanel pageBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[grow,fill][120!]8[120!]8[120!]8[120!]",
+                "insets 0, fillx",
+                "[grow,fill][120,shrink 100]8[120,shrink 100]8[120,shrink 100]8[120,shrink 100]",
                 "[40!]"));
         pageBand.setName("remoteModpackPageBand");
         pageBand.setOpaque(false);
-        pageBand.add(new JLabel(), "growx");
+        pageBand.setMinimumSize(new Dimension(0, 0));
 
         firstPageButton.setName("remoteModpackFirstPage");
         firstPageButton.setText(i18n("search.first_page"));
         firstPageButton.addActionListener(event -> submitBoundaryPage(false));
-        pageBand.add(firstPageButton, "grow, h 40!");
+        firstPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(firstPageButton, "grow, wmin 0, h 40!");
         previousPageButton.setName("remoteModpackPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
         previousPageButton.addActionListener(event -> submitRelativePage(-1));
-        pageBand.add(previousPageButton, "grow, h 40!");
+        previousPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(previousPageButton, "grow, wmin 0, h 40!");
         nextPageButton.setName("remoteModpackNextPage");
         nextPageButton.setText(strings.nextPageAction());
         nextPageButton.addActionListener(event -> submitRelativePage(1));
-        pageBand.add(nextPageButton, "grow, h 40!");
+        nextPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(nextPageButton, "grow, wmin 0, h 40!");
         lastPageButton.setName("remoteModpackLastPage");
         lastPageButton.setText(i18n("search.last_page"));
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
-        pageBand.add(lastPageButton, "grow, h 40!");
-        filterBand.add(pageBand, "growx");
+        lastPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(lastPageButton, "grow, wmin 0, h 40!");
+        filterBand.add(pageBand, "span 2, growx, wmin 0");
         add(filterBand, "growx");
 
         choiceList.setName("remoteModpackResults");
@@ -495,18 +555,28 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(choiceList, "grow");
 
         JPanel installBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3",
-                "[][grow,fill][180!]",
-                "[40!]8[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]8[40!]"));
         installBand.setOpaque(false);
+        installBand.setMinimumSize(new Dimension(0, 0));
         JLabel versionLabel = new JLabel(strings.versionLabel());
         versionLabel.setLabelFor(versionBox);
         installBand.add(versionLabel);
         versionBox.setName("remoteModpackVersion");
-        versionBox.setRenderer(new RemoteModpackVersionRenderer());
+        versionBox.setRenderer(versionRenderer);
         versionBox.addActionListener(event -> updateControls());
-        installBand.add(versionBox, "growx, h 40!");
-        installBand.add(new JLabel(), "h 40!");
+        versionBox.setMinimumSize(new Dimension(0, 0));
+        installBand.add(versionBox, "growx, wmin 0, h 40!");
+
+        JLabel versionSortLabel = new JLabel(filterStrings.versionSortLabel());
+        versionSortLabel.setLabelFor(versionSortBox);
+        installBand.add(versionSortLabel);
+        versionSortBox.setName("remoteModpackVersionSort");
+        versionSortBox.setRenderer(new RemoteAddonVersionSortRenderer(filterStrings));
+        versionSortBox.addActionListener(event -> versionSortChanged());
+        versionSortBox.setMinimumSize(new Dimension(0, 0));
+        installBand.add(versionSortBox, "growx, wmin 0, h 40!");
 
         JLabel instanceNameLabel = new JLabel(strings.instanceNameLabel());
         instanceNameLabel.setLabelFor(instanceNameField);
@@ -519,17 +589,70 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             instanceNameField.setText(fixedInstanceId.id());
             instanceNameField.setEditable(false);
         }
-        installBand.add(instanceNameField, "growx, h 40!");
+        instanceNameField.setMinimumSize(new Dimension(0, 0));
+        installBand.add(instanceNameField, "growx, wmin 0, h 40!");
         installButton.setName("remoteModpackInstall");
         installButton.setText(strings.installAction());
         installButton.addActionListener(event -> beginInstall());
-        installBand.add(installButton, "grow, h 40!");
+        installButton.setMinimumSize(new Dimension(0, 0));
+        installBand.add(installButton, "span 2, grow, wmin 0, h 40!");
         add(installBand, "growx");
 
         statusLabel.setName("remoteModpackStatus");
+        statusLabel.addMouseListener(statusMouseListener);
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteModpackInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Configures the editable game-version selector with the launcher's common version choices.
+    ///
+    /// The empty first item preserves the unfiltered query. The editor remains free-form so a
+    /// provider-specific or newly released version can still be entered before the local list is
+    /// refreshed.
+    private void configureGameVersionSelector() {
+        EdtDispatcher.requireEventDispatchThread();
+        gameVersionField.setEditable(true);
+        gameVersionField.setMaximumRowCount(12);
+        if (gameVersionField.getItemCount() == 0) {
+            gameVersionField.addItem("");
+            for (String version : GameVersionNumber.getDefaultGameVersions()) {
+                if (!version.isBlank()) {
+                    gameVersionField.addItem(version);
+                }
+            }
+            gameVersionField.setSelectedItem("");
+        }
+        SwingTextFields.showClearButton(gameVersionField);
+        SwingTextFields.textEditor(gameVersionField).getDocument().addDocumentListener(criteriaListener);
+        gameVersionField.addActionListener(event -> criteriaChanged());
+    }
+
+    /// Formats the description, author, and provider tags already present in one remote modpack.
+    ///
+    /// @param addon loaded remote project metadata
+    /// @return compact metadata line suitable for a narrow result row
+    private static String remoteModpackRowDetail(RemoteAddon addon) {
+        RemoteAddon selected = Objects.requireNonNull(addon, "addon");
+        List<String> values = new java.util.ArrayList<>();
+        String description = selected.description().lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
+        if (!description.isBlank()) {
+            values.add(description);
+        }
+        if (!selected.author().isBlank()) {
+            values.add(selected.author());
+        }
+        if (!selected.categories().isEmpty()) {
+            values.add(String.join(", ", selected.categories()));
+        }
+        if (values.isEmpty()) {
+            values.add(selected.slug());
+        }
+        return String.join(" | ", values);
     }
 
     /// Invalidates source-specific categories, clears stale results, and loads the new tree when visible.
@@ -538,6 +661,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         categoryRequestRevision.incrementAndGet();
         categoryLoading = false;
         loadedCategorySource = null;
+        categoryLoadFailed = false;
         resetCategoryOptions();
         resetSortOptions();
         criteriaChanged();
@@ -569,12 +693,18 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             return;
         }
         RemoteModpackCatalogSource source = selectedSource();
-        if (loadedCategorySource == source || !source.isAvailable()) {
+        if (!source.isAvailable()) {
+            setStatus(strings.sourceUnavailableStatus());
+            updateControls();
+            return;
+        }
+        if (loadedCategorySource == source) {
             updateControls();
             return;
         }
         long requestRevision = categoryRequestRevision.incrementAndGet();
         categoryLoading = true;
+        categoryLoadFailed = false;
         updateControls();
         try {
             workerExecutor.execute(() -> loadCategories(source, requestRevision));
@@ -612,9 +742,14 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
             return;
         }
+        boolean failureStatusVisible = strings.categoryLoadFailedStatus().equals(statusLabel.getText());
         categoryLoading = false;
         loadedCategorySource = source;
+        categoryLoadFailed = false;
         applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        if (failureStatusVisible) {
+            setStatus(catalogIdleStatus());
+        }
         updateControls();
     }
 
@@ -629,9 +764,22 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             }
             categoryLoading = false;
             loadedCategorySource = null;
+            categoryLoadFailed = true;
             resetCategoryOptions();
+            if (canShowCategoryFailure()) {
+                setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+            }
             updateControls();
         });
+    }
+
+    /// Retries loading category metadata for the still-selected provider.
+    private void retryCategories() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryLoading) {
+            return;
+        }
+        requestCategoriesForSelectedSource();
     }
 
     /// Replaces category options without interpreting combo-box events as user filter edits.
@@ -657,7 +805,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         applyCategoryOptions(List.of(RemoteCatalogCategoryOption.all()));
     }
 
-    /// Publishes only the current provider's distinct server sort behaviors.
+    /// Publishes every ordering exposed by the current provider catalog control.
     private void resetSortOptions() {
         applyingSortOptions = true;
         try {
@@ -737,7 +885,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         RemoteModpackCatalogQuery query = new RemoteModpackCatalogQuery(
                 source,
                 searchField.getText(),
-                gameVersionField.getText(),
+                SwingTextFields.comboText(gameVersionField),
                 selectedCategory(),
                 selectedSortType(),
                 pageOffset,
@@ -792,7 +940,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         displayedPage = Objects.requireNonNull(page, "page");
         dataSource.replaceItems(page.items());
         choiceList.reloadData();
-        setStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
+        setCatalogIdleStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
         updateControls();
     }
 
@@ -805,7 +953,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 return;
             }
             catalogLoading = false;
-            setStatus(strings.searchFailedStatus());
+            setStatus(strings.searchFailedStatus(), this::retryCatalogSearch);
             updateControls();
         });
     }
@@ -823,6 +971,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         long requestRevision = selectionRequestRevision.incrementAndGet();
         selectedItem = item;
         versionLoading = true;
+        loadedVersions = List.of();
+        recommendedVersion = null;
         versionBox.removeAllItems();
         suggestInstanceName(item);
         setStatus(strings.loadingVersionsStatus());
@@ -833,6 +983,105 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             LOG.warning("Failed to schedule remote modpack version loading", schedulingFailure);
             applyVersionFailure(item, requestRevision);
         }
+    }
+
+    /// Retries the failed first-page search using the current criteria and measured viewport.
+    private void retryCatalogSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        submitFirstPageSearch();
+    }
+
+    /// Retries loading versions for the currently selected project.
+    private void retrySelectedVersions() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || catalogLoading || activeExecutor != null || versionLoading) {
+            return;
+        }
+        @Nullable RemoteModpackCatalogItem item = selectedItem;
+        if (item == null) {
+            return;
+        }
+        long requestRevision = selectionRequestRevision.incrementAndGet();
+        versionLoading = true;
+        loadedVersions = List.of();
+        recommendedVersion = null;
+        versionBox.removeAllItems();
+        setStatus(strings.loadingVersionsStatus());
+        updateControls();
+        try {
+            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision));
+        } catch (RuntimeException schedulingFailure) {
+            LOG.warning("Failed to schedule remote modpack version loading retry", schedulingFailure);
+            applyVersionFailure(item, requestRevision);
+        }
+    }
+
+    /// Returns from an empty selected-project version list to the loaded project results.
+    private void returnFromEmptyVersions() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || catalogLoading || activeExecutor != null) {
+            return;
+        }
+        selectionRequestRevision.incrementAndGet();
+        clearSelectedProject();
+        setCatalogIdleStatus("");
+        updateControls();
+    }
+
+    /// Dispatches one primary status-label click to its current retry or return action.
+    ///
+    /// @param event mouse event delivered by the status label
+    private void activateStatusAction(MouseEvent event) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (event.getClickCount() != 1 || event.getButton() != MouseEvent.BUTTON1) {
+            return;
+        }
+        @Nullable Runnable action = statusAction;
+        if (action == null || closed) {
+            return;
+        }
+        statusAction = null;
+        statusLabel.setCursor(Cursor.getDefaultCursor());
+        action.run();
+    }
+
+    /// Reorders the retained selected-project versions without issuing another provider request.
+    private void versionSortChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (applyingVersionSort || loadedVersions.isEmpty() || selectedItem == null) {
+            return;
+        }
+        @Nullable RemoteAddon.Version previousSelection =
+                (RemoteAddon.Version) versionBox.getSelectedItem();
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
+        versionRenderer.setSelectionContext(this.recommendedVersion, SwingTextFields.comboText(gameVersionField));
+        applyingVersionSort = true;
+        try {
+            versionBox.removeAllItems();
+            for (RemoteAddon.Version version : orderedVersions) {
+                versionBox.addItem(version);
+            }
+            if (previousSelection != null && orderedVersions.contains(previousSelection)) {
+                versionBox.setSelectedItem(previousSelection);
+            } else if (this.recommendedVersion != null) {
+                versionBox.setSelectedItem(this.recommendedVersion);
+            }
+        } finally {
+            applyingVersionSort = false;
+        }
+        updateControls();
+    }
+
+    /// Returns the retained versions in the currently selected user-facing order.
+    ///
+    /// @return immutable ordered version snapshot
+    private @Unmodifiable List<RemoteAddon.Version> orderedLoadedVersions() {
+        return RemoteAddonVersionOrdering.order(
+                loadedVersions,
+                SwingTextFields.comboText(gameVersionField),
+                Objects.requireNonNull(
+                        (RemoteAddonVersionSortMode) versionSortBox.getSelectedItem(),
+                        "remote modpack version sort mode"));
     }
 
     /// Loads versions for one user-selected project away from the EDT.
@@ -863,14 +1112,25 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             return;
         }
         versionLoading = false;
-        for (RemoteAddon.Version version : List.copyOf(Objects.requireNonNull(versions, "versions"))) {
+        loadedVersions = List.copyOf(Objects.requireNonNull(versions, "versions"));
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
+        String requestedGameVersion = SwingTextFields.comboText(gameVersionField);
+        recommendedVersion = RemoteAddonVersionOrdering.recommended(
+                loadedVersions,
+                requestedGameVersion);
+        versionRenderer.setSelectionContext(recommendedVersion, requestedGameVersion);
+        for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
         if (versionBox.getItemCount() > 0) {
-            versionBox.setSelectedIndex(0);
+            if (recommendedVersion == null) {
+                versionBox.setSelectedIndex(0);
+            } else {
+                versionBox.setSelectedItem(recommendedVersion);
+            }
             setStatus("");
         } else {
-            setStatus(strings.noVersionsStatus());
+            setStatus(strings.noVersionsStatus(), this::returnFromEmptyVersions);
         }
         updateControls();
     }
@@ -885,8 +1145,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 return;
             }
             versionLoading = false;
+            loadedVersions = List.of();
+            recommendedVersion = null;
             versionBox.removeAllItems();
-            setStatus(strings.versionLoadFailedStatus());
+            setStatus(strings.versionLoadFailedStatus(), this::retrySelectedVersions);
             updateControls();
         });
     }
@@ -960,6 +1222,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             unsubscribe(activeCompletionSubscription);
             activeCompletionSubscription = null;
             activeExecutor = null;
+            releaseCompletedPresentation();
             setStatus(succeeded ? strings.installSucceededStatus() : strings.installFailedStatus());
             updateControls();
         });
@@ -1009,8 +1272,41 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         clearSelectedProject();
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
-        setStatus(strings.initialStatus());
+        setCatalogIdleStatus(strings.initialStatus());
         updateControls();
+    }
+
+    /// Shows category retry feedback whenever an otherwise passive catalog status is published.
+    ///
+    /// @param status ordinary passive catalog status
+    private void setCatalogIdleStatus(String status) {
+        if (categoryLoadFailed) {
+            setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
+        } else {
+            setStatus(status);
+        }
+    }
+
+    /// Returns the ordinary passive status appropriate for the currently displayed result page.
+    ///
+    /// @return initial, empty-result, or blank loaded-result status
+    private String catalogIdleStatus() {
+        if (completedQuery == null || displayedPage == null) {
+            return strings.initialStatus();
+        }
+        return displayedPage.items().isEmpty() ? strings.noResultsStatus() : "";
+    }
+
+    /// Tests whether category feedback can replace the current status without hiding active work or recovery.
+    ///
+    /// @return true when the visible status is passive catalog feedback
+    private boolean canShowCategoryFailure() {
+        @Nullable String status = statusLabel.getText();
+        return status == null
+                || status.isBlank()
+                || status.equals(strings.initialStatus())
+                || status.equals(strings.noResultsStatus())
+                || status.equals(strings.categoryLoadFailedStatus());
     }
 
     /// Clears list selection, version state, and project-derived instance-name ownership.
@@ -1019,7 +1315,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         choiceList.getList().clearSelection();
         selectedItem = null;
         versionLoading = false;
+        loadedVersions = List.of();
+        recommendedVersion = null;
         versionBox.removeAllItems();
+        versionRenderer.setSelectionContext(null, "");
         suggestedInstanceName = null;
     }
 
@@ -1103,7 +1402,14 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         nextPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
         lastPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
 
-        versionBox.setEnabled(inputsEnabled && selectedItem != null && !versionLoading && versionBox.getItemCount() > 0);
+        versionBox.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && versionBox.getItemCount() > 0);
+        versionSortBox.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && !loadedVersions.isEmpty());
         instanceNameField.setEnabled(inputsEnabled);
         installButton.setEnabled(inputsEnabled
                 && !catalogLoading
@@ -1119,14 +1425,36 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// @param status non-null current feedback text, or empty text to clear it
     private void setStatus(String status) {
         EdtDispatcher.requireEventDispatchThread();
+        setStatus(status, null);
+    }
+
+    /// Updates visible feedback and installs the optional primary-click action for that state.
+    ///
+    /// @param status non-null current feedback text, or empty to clear it
+    /// @param action retry or return action, or null for ordinary feedback
+    private void setStatus(String status, @Nullable Runnable action) {
+        EdtDispatcher.requireEventDispatchThread();
         String text = Objects.requireNonNull(status, "status");
+        statusAction = action;
+        statusLabel.setCursor(action == null
+                ? Cursor.getDefaultCursor()
+                : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         statusLabel.setText(text);
         statusLabel.setToolTipText(text.isBlank() ? null : text);
+    }
+
+    /// Clears status interaction when the panel releases its Swing resources.
+    private void clearStatusAction() {
+        statusAction = null;
+        statusLabel.removeMouseListener(statusMouseListener);
+        statusLabel.setCursor(Cursor.getDefaultCursor());
     }
 
     /// Cancels live task execution and releases all listeners and child presentation resources on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        clearStatusAction();
+        iconCache.close();
         @Nullable TaskExecutor executor = activeExecutor;
         activeExecutor = null;
         if (executor != null) {
@@ -1144,7 +1472,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             presentation.close();
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
-        gameVersionField.getDocument().removeDocumentListener(criteriaListener);
+        SwingTextFields.textEditor(gameVersionField).getDocument().removeDocumentListener(criteriaListener);
         if (fixedInstanceId == null) {
             instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
         }
@@ -1157,6 +1485,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         categoryBox.setEnabled(false);
         sortBox.setEnabled(false);
         versionBox.setEnabled(false);
+        versionSortBox.setEnabled(false);
         instanceNameField.setEnabled(false);
         searchButton.setEnabled(false);
         firstPageButton.setEnabled(false);
@@ -1296,6 +1625,25 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Renders a Core version record as concise project-version text in the selector.
     @NotNullByDefault
     private static final class RemoteModpackVersionRenderer extends DefaultListCellRenderer {
+        /// Version selected as the current compatibility recommendation, or null before loading.
+        private @Nullable RemoteAddon.Version recommendedVersion;
+
+        /// Game-version search context placed first in every compatible selector row.
+        private String requestedGameVersion = "";
+
+        /// Updates recommendation and game-version context without replacing the combo-box model.
+        ///
+        /// @param version recommended version, or null when no project is selected
+        /// @param requestedGameVersion optional exact game-version search context
+        private void setSelectionContext(
+                @Nullable RemoteAddon.Version version,
+                String requestedGameVersion) {
+            recommendedVersion = version;
+            this.requestedGameVersion = Objects.requireNonNull(
+                    requestedGameVersion,
+                    "requestedGameVersion").trim();
+        }
+
         /// Renders a version record while leaving empty selector values visually blank.
         ///
         /// @param list owning selector list
@@ -1318,16 +1666,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                     isSelected,
                     cellHasFocus);
             setIcon(null);
+            setText("");
             if (value instanceof RemoteAddon.Version version) {
-                String displayName = version.name().isBlank() ? version.version() : version.name();
-                @Nullable RemoteAddon.VersionType versionType = version.versionType();
-                if (versionType == null) {
-                    setText(displayName + " (" + version.version() + ")");
-                } else {
-                    setText(displayName + " (" + version.version() + ") - "
-                            + RemoteVersionChannelPresentation.label(versionType));
-                    setIcon(RemoteVersionChannelPresentation.icon(versionType));
-                }
+                setText(RemoteAddonVersionOrdering.displayText(
+                        version,
+                        Objects.equals(version, recommendedVersion),
+                        requestedGameVersion));
+                setIcon(RemoteVersionChannelPresentation.icon(version.versionType()));
             }
             return component;
         }

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
 import space.minecraftstl.xyml.library.nbt.io.NBTPartialSaveException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
@@ -28,6 +29,7 @@ import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.nbt.NBTDocument;
@@ -39,12 +41,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -55,18 +59,19 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies UI dispatch, typed mutation, stale conflicts, reload, and late-result suppression.
+/// Verifies UI dispatch, typed mutation, rolling-backup saves, reload, and late-result suppression.
 @NotNullByDefault
 final class NBTEditorControllerTest {
     /// Temporary filesystem root used for real atomic backend transactions.
     @TempDir
     private Path temporaryDirectory;
 
-    /// Opens, edits, saves, detects an external replacement, and reloads without EDT filesystem work.
+    /// Opens, edits, saves over an external replacement, and reloads without EDT filesystem work.
     @Test
     void editsSavesAndRecoversFromAStaleSource() throws Exception {
         Path source = temporaryDirectory.resolve("level.dat");
@@ -79,10 +84,10 @@ final class NBTEditorControllerTest {
 
         ui.run(() -> controller.open(source));
         assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.runNext();
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
 
@@ -109,12 +114,12 @@ final class NBTEditorControllerTest {
         ui.run(controller::save);
         ioExecutor.runNext();
         ui.runNext();
-        assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
-        assertTrue(controller.snapshot().dirty());
-        assertEquals(99, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertFalse(controller.snapshot().dirty());
+        assertEquals(3, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
         ui.run(controller::save);
         assertEquals(0, ioExecutor.pendingCount());
-        assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
 
         ui.run(controller::reload);
         ioExecutor.runNext();
@@ -122,8 +127,43 @@ final class NBTEditorControllerTest {
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
         assertFalse(controller.snapshot().dirty());
         CompoundTag reloaded = (CompoundTag) requiredDocument(controller).rootSnapshot();
-        assertEquals(99, reloaded.getInt("value"));
-        assertEquals("external", reloaded.getString("name"));
+        assertEquals(3, reloaded.getInt("value"));
+        assertEquals("old", reloaded.getString("name"));
+        ui.run(controller::close);
+        ioExecutor.runAll();
+    }
+
+    /// Creates a new standalone document without publishing bytes until its explicit first save.
+    @Test
+    void createsNewDocumentAndPublishesOnExplicitSave() throws Exception {
+        Path source = temporaryDirectory.resolve("created.nbt");
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+
+        ui.run(() -> controller.create(source));
+        assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.runNext();
+
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertTrue(controller.snapshot().dirty());
+        assertFalse(Files.exists(source));
+
+        ui.run(controller::save);
+        assertEquals(NBTEditorStatus.SAVING, controller.snapshot().status());
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.runNext();
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertFalse(controller.snapshot().dirty());
+        assertTrue(Files.isRegularFile(source));
+        assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+
         ui.run(controller::close);
         ioExecutor.runAll();
     }
@@ -147,13 +187,13 @@ final class NBTEditorControllerTest {
         ui.run(() -> result.set(controller.replaceSnbtAsync(root, "{value:2}")));
 
         assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         assertFalse(Objects.requireNonNull(result.get()).isDone());
         assertEquals(1, rootSnapshot(controller).getInt("value"));
 
         ioExecutor.runNext();
         assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.runNext();
 
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
@@ -164,7 +204,7 @@ final class NBTEditorControllerTest {
         ioExecutor.runAll();
     }
 
-    /// Locks the document and propagates an executor Error raised while an edit is submitted.
+    /// Locks the document and keeps an executor Error primary when a failure listener also throws.
     @Test
     void failsClosedAfterAFatalEditSubmission() throws Exception {
         Path source = temporaryDirectory.resolve("fatal-edit.dat");
@@ -182,10 +222,22 @@ final class NBTEditorControllerTest {
         ui.run(() -> controller.open(source));
         ui.runNext();
         NBTEditorTreeNode value = child(controller, 0);
+        AssertionError listenerFailure = new AssertionError("synthetic fatal listener failure");
+        AtomicBoolean failFatalPublication = new AtomicBoolean(true);
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null
+                    && current.status() == NBTEditorStatus.EDIT_UNCERTAIN
+                    && failFatalPublication.compareAndSet(true, false)) {
+                throw listenerFailure;
+            }
+        });
 
         reject.set(true);
         assertSame(fatal, assertThrows(AssertionError.class, () ->
                 ui.run(() -> controller.applyValueEditAsync(value, "2"))));
+        assertEquals(1, fatal.getSuppressed().length);
+        assertSame(listenerFailure, fatal.getSuppressed()[0]);
 
         assertEquals(NBTEditorStatus.EDIT_UNCERTAIN, controller.snapshot().status());
         assertTrue(controller.snapshot().dirty());
@@ -235,7 +287,7 @@ final class NBTEditorControllerTest {
         AtomicReference<CompletableFuture<NBTEditResult>> completed = new AtomicReference<>();
         ui.run(() -> completed.set(second.applyValueEditAsync(child(second, 0), "3")));
         ioExecutor.runNext();
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.run(second::close);
         ui.runAll();
         ioExecutor.runAll();
@@ -574,18 +626,18 @@ final class NBTEditorControllerTest {
         ui.run(controller::close);
     }
 
-    /// Treats the library's strict-open fingerprint race as an external source conflict.
+    /// Classifies source and publication failures without a separate source-fingerprint state.
     @Test
-    void classifiesSourceChangesDuringReadAsConflicts() {
+    void classifiesSourceChangesDuringReadAsOrdinaryFailures() {
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.ERROR,
                 NBTEditorController.classifySaveFailure(
                         new IOException("NBT source changed while it was being read")));
         assertSame(
                 NBTEditorStatus.ERROR,
                 NBTEditorController.classifySaveFailure(new IOException("Disk is unavailable")));
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.classifySaveFailure(new NBTPartialSaveException(
                         java.util.List.of(0),
                         1,
@@ -601,7 +653,7 @@ final class NBTEditorControllerTest {
                         NBTEditorStatus.PARTIAL_SAVE,
                         new IOException("Disk is unavailable")));
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.classifySaveFailure(
                         NBTEditorStatus.PARTIAL_SAVE,
                         new IOException("Region path was replaced")));
@@ -634,9 +686,6 @@ final class NBTEditorControllerTest {
                 NBTEditorStatus.COMMIT_UNCERTAIN,
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.COMMIT_UNCERTAIN, true));
         assertSame(
-                NBTEditorStatus.CONFLICT,
-                NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.CONFLICT, true));
-        assertSame(
                 NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.PARTIAL_SAVE, true));
         assertSame(
@@ -645,6 +694,111 @@ final class NBTEditorControllerTest {
         assertSame(
                 NBTEditorStatus.ERROR,
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.COMMIT_UNCERTAIN, false));
+    }
+
+    /// Cancelling a queued reload to open another file preserves the old session when the replacement open fails.
+    @Test
+    void cancelledReloadPreservesRecoveryDocumentAfterReplacementFailure() throws Exception {
+        Path source = temporaryDirectory.resolve("reload-recovery.dat");
+        Path missing = temporaryDirectory.resolve("missing-replacement.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+        ui.run(() -> controller.open(source));
+        ioExecutor.runNext();
+        ui.runNext();
+        NBTDocument original = requiredDocument(controller);
+
+        ui.run(controller::reload);
+        ioExecutor.awaitPendingCount(1);
+        ui.run(() -> controller.open(missing));
+        ioExecutor.runNext();
+        ioExecutor.runNext();
+        ui.runAll();
+
+        assertEquals(NBTEditorStatus.ERROR, controller.snapshot().status());
+        assertSame(original, controller.snapshot().document());
+        assertFalse(original.isClosed());
+        assertEquals(1, rootSnapshot(controller).getInt("value"));
+        ui.run(controller::close);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+    }
+
+    /// Defers a new open despite a READY listener Error and retains the committed replacement on later failure.
+    @Test
+    void defersOpenBehindCommittedReload() throws Exception {
+        Path source = temporaryDirectory.resolve("committed-reload.dat");
+        Path missing = temporaryDirectory.resolve("missing-after-commit.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+        ui.run(() -> controller.open(source));
+        ioExecutor.runNext();
+        ui.runNext();
+        NBTDocument original = requiredDocument(controller);
+        AssertionError listenerFailure = new AssertionError("reload listener failed");
+        AtomicBoolean failReloadPublication = new AtomicBoolean(true);
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null
+                    && current.status() == NBTEditorStatus.READY
+                    && current.document() != original
+                    && failReloadPublication.compareAndSet(true, false)) {
+                throw listenerFailure;
+            }
+        });
+        writeTag(source, new CompoundTag().addInt("value", 2));
+
+        ui.run(controller::reload);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.run(() -> controller.open(missing));
+        assertSame(original, controller.snapshot().document());
+
+        assertSame(listenerFailure, assertThrows(AssertionError.class, ui::runNext));
+        NBTDocument replacement = requiredDocument(controller);
+        assertNotSame(original, replacement);
+        assertEquals(2, ((CompoundTag) replacement.rootSnapshot()).getInt("value"));
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+        ui.runAll();
+
+        assertEquals(NBTEditorStatus.ERROR, controller.snapshot().status());
+        assertSame(replacement, controller.snapshot().document());
+        assertFalse(replacement.isClosed());
+        assertTrue(original.isClosed());
+        ui.run(controller::close);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+    }
+
+    /// A rejected UI completion closes an undelivered document so another owner can acquire the same resource.
+    @Test
+    void releasesOpenedSessionWhenUiDispatcherRejectsCompletion() throws Exception {
+        Path source = temporaryDirectory.resolve("rejected-delivery.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                new RejectingUiDispatcher());
+
+        controller.open(source);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ioExecutor.runAll();
+
+        NBTDocumentService competingService = new NBTDocumentService(Runnable::run);
+        NBTDocument competing = competingService.open(source).get(5L, TimeUnit.SECONDS);
+        assertFalse(competing.isClosed());
+        competingService.close(competing).get(5L, TimeUnit.SECONDS);
     }
 
     /// Isolates ordinary listener failures after a committed edit and still notifies later listeners.
@@ -718,7 +872,11 @@ final class NBTEditorControllerTest {
 
         ui.run(() -> controller.open(first));
         ui.run(() -> controller.open(second));
-        ioExecutor.runAll();
+        // The replacement cancels the first session before its resource-resolution callback can enqueue a command;
+        // only the surviving second open reaches this caller-owned executor.
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
         ui.runAll();
         assertEquals(second.toAbsolutePath().normalize(), controller.snapshot().file());
         CompoundTag loaded = (CompoundTag) requiredDocument(controller).rootSnapshot();
@@ -784,8 +942,11 @@ final class NBTEditorControllerTest {
     /// Deterministic caller-owned blocking executor.
     @NotNullByDefault
     private static final class ManualExecutor implements Executor {
+        /// Maximum time a test waits for asynchronous resource resolution to enqueue its command.
+        private static final long COMMAND_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of submitted operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Queues one operation without running it.
         ///
@@ -802,9 +963,30 @@ final class NBTEditorControllerTest {
             return commands.size();
         }
 
+        /// Waits until at least the requested number of commands has been submitted.
+        ///
+        /// @param expected minimum command count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COMMAND_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " executor command(s)");
+        }
+
         /// Runs the next submitted command.
         private void runNext() {
-            commands.remove().run();
+            try {
+                Runnable command = commands.poll(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for an executor command");
+                }
+                command.run();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for an executor command", interrupted);
+            }
         }
 
         /// Drains every submitted command, including commands added while draining.
@@ -818,8 +1000,11 @@ final class NBTEditorControllerTest {
     /// Deterministic toolkit-neutral UI queue that exposes its dispatch context to the controller.
     @NotNullByDefault
     private static final class ManualUiDispatcher implements UiDispatcher {
+        /// Maximum time a test waits for a background completion to enqueue a UI callback.
+        private static final long CALLBACK_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of asynchronously dispatched UI operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Whether the current test call is executing in the simulated UI context.
         private boolean dispatchThread;
@@ -871,10 +1056,30 @@ final class NBTEditorControllerTest {
             return commands.size();
         }
 
+        /// Waits until at least the requested number of callbacks has been submitted.
+        ///
+        /// @param expected minimum callback count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CALLBACK_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " UI callback(s)");
+        }
+
         /// Runs the next queued callback in the simulated UI context.
         private void runNext() {
-            Runnable command = commands.remove();
-            run(command);
+            try {
+                Runnable command = commands.poll(CALLBACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for a UI callback");
+                }
+                run(command);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for a UI callback", interrupted);
+            }
         }
 
         /// Drains every queued callback.
@@ -882,6 +1087,25 @@ final class NBTEditorControllerTest {
             while (!commands.isEmpty()) {
                 runNext();
             }
+        }
+    }
+
+    /// UI dispatcher fixture that accepts direct controller calls but rejects every completion submission.
+    @NotNullByDefault
+    private static final class RejectingUiDispatcher implements UiDispatcher {
+        /// Treats the test thread as the UI context for the initial controller call.
+        @Override
+        public boolean isDispatchThread() {
+            return true;
+        }
+
+        /// Rejects asynchronous completion delivery deterministically.
+        ///
+        /// @param operation rejected callback
+        @Override
+        public void dispatch(Runnable operation) {
+            Objects.requireNonNull(operation, "operation");
+            throw new RejectedExecutionException("synthetic UI rejection");
         }
     }
 }

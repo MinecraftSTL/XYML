@@ -43,6 +43,7 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -312,6 +313,42 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.close();
         });
         assertNotNull(panelReference.get());
+    }
+
+    /// Switches the first layout to a stacked catalog when the instance shell is narrow.
+    @Test
+    void switchesResponsiveOrientationAtNarrowWidth() {
+        WorldCatalogItem world = new WorldCatalogItem(
+                Path.of("build", "test-worlds", "responsive-world").toAbsolutePath().normalize(),
+                "responsive-world",
+                "Responsive World",
+                1L,
+                "1.21.1",
+                false,
+                null);
+
+        EdtDispatcher.executeAndWait(() -> {
+            WorldCatalogPanel panel = new WorldCatalogPanel(
+                    new ImmediateWorldCatalogModel(world),
+                    WorldCatalogStrings.english(),
+                    new RecordingInteractions(Path.of("build", "responsive-world.bat")),
+                    WorldQuickPlayActions.unavailable());
+            JSplitPane split = findNamed(panel, "worldsCatalogSplit", JSplitPane.class);
+
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+
+            panel.setSize(960, 620);
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+
+            panel.setSize(600, 420);
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertTrue(split.getTopComponent().getWidth() <= split.getWidth());
+            assertTrue(split.getBottomComponent().getWidth() <= split.getWidth());
+            panel.close();
+        });
     }
 
     /// Restored detail controls submit one complete update and target the exact world level data.

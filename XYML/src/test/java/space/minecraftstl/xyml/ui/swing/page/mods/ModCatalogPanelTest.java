@@ -27,17 +27,21 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
@@ -50,11 +54,15 @@ import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -171,6 +179,53 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// Renders an explicitly disabled Mod row with a muted surface and its embedded logo.
+    @Test
+    public void rendersDisabledModSurfaceAndArchiveIcon() throws Exception {
+        ModCatalogItem disabledItem = new ModCatalogItem(
+                "disabled",
+                Path.of("mods", "disabled.jar"),
+                "disabled",
+                "Disabled Mod",
+                "Description",
+                "Author",
+                "1.0",
+                "1.21.1",
+                ModLoaderType.FABRIC,
+                "disabled.jar",
+                onePixelLogo(),
+                false);
+        RecordingModel model = new RecordingModel(List.of(disabledItem));
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS,
+                    new RecordingInteractions());
+            JList<ChoiceListEntry<ModCatalogItem>> list = panel.choiceList().getList();
+            list.setSize(new Dimension(48, 68));
+            ListCellRenderer<? super ChoiceListEntry<ModCatalogItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, disabledItem),
+                    0,
+                    false,
+                    false);
+            assertFalse(row.isOpaque());
+            assertEquals(list.getBackground(), row.getBackground());
+            assertEquals("", findLabel(row, "richChoiceListBadge").getText());
+            assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
+            panel.close();
+        });
+    }
+
+    /// Creates a deterministic one-pixel PNG payload for the archive-logo row test.
+    ///
+    /// @return Base64-encoded one-pixel PNG
+    private static String onePixelLogo() throws IOException {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return Base64.getEncoder().encodeToString(output.toByteArray());
     }
 
     /// Same-key imports prompt for a decision and submit that exact decision with the source batch.
@@ -407,6 +462,33 @@ public final class ModCatalogPanelTest {
             assertTrue(
                     detailsScroll.getVerticalScrollBar().getMaximum()
                             <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
+    /// Switches the first layout to a stacked catalog when the instance shell is narrow.
+    @Test
+    public void switchesResponsiveOrientationAtNarrowWidth() throws Exception {
+        RecordingModel model = new RecordingModel(items(4));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+
+            panel.setSize(new Dimension(960, 620));
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+
+            panel.setSize(new Dimension(600, 420));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertTrue(split.getTopComponent().getWidth() <= split.getWidth());
+            assertTrue(split.getBottomComponent().getWidth() <= split.getWidth());
             panel.close();
         });
 

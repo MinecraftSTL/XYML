@@ -61,6 +61,12 @@ public abstract class FetchTask<T> extends Task<T> {
     /// Repository used for content-addressed and HTTP validator caches.
     protected CacheRepository repository = CacheRepository.getInstance();
 
+    /// Whether this fetch occupies one cache-operation resource for its complete lifecycle.
+    private boolean cacheOperationResource;
+
+    /// Normalized cache directory captured by the current resource declaration, or null when unconfigured.
+    private @Nullable Path cacheDirectorySnapshot;
+
     /// Creates a fetch task for one or more ordered candidate URIs.
     ///
     /// @param uris candidate URIs; the first successful source wins
@@ -91,7 +97,45 @@ public abstract class FetchTask<T> extends Task<T> {
     ///
     /// @param repository cache repository
     public void setCacheRepository(CacheRepository repository) {
-        this.repository = repository;
+        this.repository = Objects.requireNonNull(repository, "repository");
+        if (cacheOperationResource) {
+            updateCacheOperationResource();
+        }
+    }
+
+    /// Declares that this fetch only writes through one exclusive cache-operation resource.
+    ///
+    /// Concrete fetchers that also write an external target must not call this method. The declaration follows later
+    /// [#setCacheRepository(CacheRepository)] changes so arbitration always uses the repository active at execution.
+    protected final void useCacheOperationResource() {
+        cacheOperationResource = true;
+        updateCacheOperationResource();
+    }
+
+    /// Refreshes the shared cache-operation key or falls back conservatively for an unconfigured legacy repository.
+    private void updateCacheOperationResource() {
+        @Nullable Path cacheDirectory = repository.getCacheDirectory();
+        cacheDirectorySnapshot = normalizeCacheDirectory(cacheDirectory);
+        if (cacheDirectory == null) {
+            setResources(TaskResource.conservative());
+        } else {
+            TaskResource cacheResource = TaskResource.cacheOperation(
+                    Objects.requireNonNull(cacheDirectorySnapshot, "cache directory snapshot"));
+            setResources(cacheResource);
+        }
+    }
+
+    /// Returns one normalized cache directory snapshot, or null for an unconfigured legacy repository.
+    private static @Nullable Path normalizeCacheDirectory(@Nullable Path cacheDirectory) {
+        return cacheDirectory == null ? null : cacheDirectory.toAbsolutePath().normalize();
+    }
+
+    /// Rejects a cache repository whose mutable directory changed after this task declared its resource.
+    private void validateCacheDirectorySnapshot() {
+        if (cacheOperationResource
+                && !Objects.equals(cacheDirectorySnapshot, normalizeCacheDirectory(repository.getCacheDirectory()))) {
+            throw new IllegalStateException("Cache directory changed after task resource declaration");
+        }
     }
 
     /// Runs immediately before each network attempt.
@@ -134,6 +178,7 @@ public abstract class FetchTask<T> extends Task<T> {
     /// @throws Exception if every candidate source fails
     @Override
     public void execute() throws Exception {
+        validateCacheDirectorySnapshot();
         boolean checkETag;
         switch (shouldCheckETag()) {
             case CHECK_E_TAG -> checkETag = true;

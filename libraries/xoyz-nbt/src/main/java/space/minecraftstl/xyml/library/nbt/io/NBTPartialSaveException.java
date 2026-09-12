@@ -28,7 +28,7 @@ import java.util.Objects;
 /// A failed flush never rolls back chunks which were already published. The indexes in
 /// [#committedIndexes()] identify those chunks. When [#failedIndex()] is nonnegative, that chunk
 /// and all later pending chunks stay dirty. A value of `-1` reports post-commit work which failed
-/// after every listed chunk became durable.
+/// after every listed chunk became published and visible through the region header.
 @NotNullByDefault
 public final class NBTPartialSaveException extends IOException {
     /// Serialization identifier for the stable checked exception type.

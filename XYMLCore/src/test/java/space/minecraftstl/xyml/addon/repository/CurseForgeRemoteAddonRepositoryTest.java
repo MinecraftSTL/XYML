@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.addon.repository;
 
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.util.MurmurHash2;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /// Tests CurseForge fingerprint calculation for local files.
 @NotNullByDefault
 public final class CurseForgeRemoteAddonRepositoryTest {
+
+    /// Verifies that every provider-neutral sort maps to its CurseForge field.
+    @Test
+    public void mapsSortTypesToCurseForgeFields() {
+        assertEquals(2, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.POPULARITY));
+        assertEquals(4, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.NAME));
+        assertEquals(1, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.DATE_CREATED));
+        assertEquals(3, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.LAST_UPDATED));
+        assertEquals(5, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.AUTHOR));
+        assertEquals(6, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.TOTAL_DOWNLOADS));
+    }
 
     /// Verifies that streaming calculation remains identical to the previous in-memory algorithm.
     ///

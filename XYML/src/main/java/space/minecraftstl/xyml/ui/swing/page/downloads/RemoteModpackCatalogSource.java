@@ -60,20 +60,13 @@ public enum RemoteModpackCatalogSource {
         return this != CURSEFORGE || CurseForgeRemoteAddonRepository.isAvailable();
     }
 
-    /// Returns only result orderings that the selected provider maps to distinct server behavior.
+    /// Returns every result ordering exposed by the shared catalog control.
     ///
-    /// Modrinth maps name and author to relevance, so those duplicate controls are omitted while
-    /// CurseForge exposes every Core sort field directly.
+    /// Modrinth maps name and author to its relevance endpoint internally, but keeping those
+    /// choices visible preserves the complete catalog contract.
     ///
     /// @return immutable provider-supported result orderings
     public @Unmodifiable List<RemoteAddonRepository.SortType> supportedSortTypes() {
-        if (this == MODRINTH) {
-            return List.of(
-                    RemoteAddonRepository.SortType.POPULARITY,
-                    RemoteAddonRepository.SortType.DATE_CREATED,
-                    RemoteAddonRepository.SortType.LAST_UPDATED,
-                    RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
-        }
         return List.of(RemoteAddonRepository.SortType.values());
     }
 

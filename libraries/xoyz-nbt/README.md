@@ -11,7 +11,7 @@ It supports:
 - Supports reading and writing SNBT (Stringified Named Binary Tag).
 - Supports [NBTPath](https://minecraft.wiki/w/NBT_path) (a query language for NBT data).
 - Supports transactional tree editing with stale-node protection, undo/redo, detached snapshots, and structural validation.
-- Supports conflict-detecting file sessions which preserve standalone compression and publish Region chunks copy-on-write.
+- Supports safe file sessions which preserve standalone compression and publish Region chunks copy-on-write.
 
 To get started, check out the following tutorials:
 

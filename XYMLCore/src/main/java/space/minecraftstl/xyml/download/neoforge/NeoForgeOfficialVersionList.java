@@ -126,7 +126,7 @@ public final class NeoForgeOfficialVersionList extends VersionList<NeoForgeRemot
             } finally {
                 lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     @JsonSerializable

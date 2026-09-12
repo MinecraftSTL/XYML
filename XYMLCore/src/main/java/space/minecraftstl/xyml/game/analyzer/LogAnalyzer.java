@@ -61,7 +61,7 @@ public final class LogAnalyzer {
                 logSnapshot.stream().map(Log::getLog).toList()));
     }
 
-    /// Runs every registered analyzer until one requests an exclusive stop, then deduplicates by result ID.
+    /// Runs registered analyzers until one requests an exclusive stop, then deduplicates by result ID.
     ///
     /// Normal and launcher-interrupted exits intentionally produce no diagnosis even if retained output contains an
     /// error-like line from an earlier recoverable operation.
@@ -69,6 +69,28 @@ public final class LogAnalyzer {
     /// @param input immutable launch and log snapshot
     /// @return immutable ordered diagnoses with at most one result per ID
     public static @Unmodifiable List<AnalyzeResult<LogAnalyzable>> analyze(LogAnalyzable input) {
+        return analyzeInternal(input, false);
+    }
+
+    /// Runs every registered analyzer and returns all independently established causes in registration order.
+    ///
+    /// Unlike [#analyze(LogAnalyzable)], this method deliberately ignores `BREAK_OTHER` so a crash window can expose
+    /// multiple repair rows. A result ID is retained only once, at the position of its first established match.
+    ///
+    /// @param input immutable launch and log snapshot
+    /// @return immutable ordered diagnoses with at most one result per ID
+    public static @Unmodifiable List<AnalyzeResult<LogAnalyzable>> analyzeAll(LogAnalyzable input) {
+        return analyzeInternal(input, true);
+    }
+
+    /// Executes one of the two analyzer control-flow modes.
+    ///
+    /// @param input immutable launch and log snapshot
+    /// @param collectAll whether later analyzers must run after `BREAK_OTHER`
+    /// @return immutable ordered diagnoses
+    private static @Unmodifiable List<AnalyzeResult<LogAnalyzable>> analyzeInternal(
+            LogAnalyzable input,
+            boolean collectAll) {
         Objects.requireNonNull(input, "input");
         if (input.exitType() == ProcessListener.ExitType.NORMAL
                 || input.exitType() == ProcessListener.ExitType.INTERRUPTED) {
@@ -76,7 +98,9 @@ public final class LogAnalyzer {
         }
 
         @Unmodifiable List<AnalyzeResult<LogAnalyzable>> collected =
-                Analyzer.analyze(AnalyzableType.LOG.logAnalyzers(), input);
+                collectAll
+                        ? Analyzer.analyzeAll(AnalyzableType.LOG.logAnalyzers(), input)
+                        : Analyzer.analyze(AnalyzableType.LOG.logAnalyzers(), input);
 
         Map<ResultID, AnalyzeResult<LogAnalyzable>> uniqueResults = new LinkedHashMap<>();
         for (AnalyzeResult<LogAnalyzable> result : collected) {

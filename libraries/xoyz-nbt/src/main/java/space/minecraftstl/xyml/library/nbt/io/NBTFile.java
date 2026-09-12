@@ -16,11 +16,11 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.io;
 
-import net.jpountz.lz4.LZ4BlockOutputStream;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.edit.NBTSavepoint;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.Contract;
@@ -30,34 +30,41 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.GZIPOutputStream;
 
-/// A synchronous, conflict-detecting editable session for one NBT file.
+/// A synchronous editable session for one NBT file.
 ///
 /// Standalone saves preserve the detected RAW, GZIP, ZLIB, or LZ4 envelope. They serialize to a
-/// same-directory temporary file, force it, strictly parse it back, compare semantic content,
-/// recheck the source fingerprint, and require an atomic replacement. Region sessions delegate
+/// deterministic `<source>.xyml_new` staging and an atomic replacement. A tolerant opening keeps
+/// its diagnostics until the caller explicitly saves a strict repair. Region sessions delegate
 /// changed slots to [NBTRegionFile]'s copy-on-write publication.
 ///
 /// @param <E> root element type
 @NotNullByDefault
 public final class NBTFile<E extends NBTElement> implements AutoCloseable {
+    /// Maximum strict standalone payload accepted for one save, matching the bounded read policy.
+    private static final int MAX_STANDALONE_RAW_BYTES = Math.toIntExact(
+            ReadLimits.defaults().maxDecompressedBytes());
+
+    /// Maximum strict standalone envelope accepted for one save, matching the bounded read policy.
+    private static final int MAX_STANDALONE_ENCODED_BYTES = Math.toIntExact(
+            ReadLimits.defaults().maxEncodedBytes());
+
     /// Absolute normalized source path.
     private final Path path;
 
@@ -73,8 +80,11 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// Open copy-on-write storage for a region session, or `null` for standalone tags.
     private final @Nullable NBTRegionFile regionFile;
 
-    /// Expected standalone source fingerprint, or `null` for region sessions.
-    private @Nullable SourceFingerprint sourceFingerprint;
+    /// Diagnostics captured while opening this session.
+    private volatile NBTReadReport readReport;
+
+    /// Immutable storage-profile changes emitted by the most recent region save.
+    private @Unmodifiable List<StorageProfileChange> storageProfileChanges = List.of();
 
     /// Last fully or partially published region baseline, or `null` for standalone tags.
     private @Nullable ChunkRegion regionBaseline;
@@ -82,32 +92,116 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// Whether this session has been closed.
     private boolean closed;
 
+    /// Whether the source did not exist when this session was created and still needs its first publication.
+    private boolean creationPending;
+
+    /// Owned standalone publication stages which could not be removed after a failed save.
+    private final NBTRegionFileIO.PendingCleanup pendingCleanup =
+            new NBTRegionFileIO.PendingCleanup("Owned NBT stage");
+
     /// Creates a file session from already validated state.
     ///
     /// @param path absolute normalized path
     /// @param codec standalone codec
     /// @param encoding preserved envelope
     /// @param editor detached editor
-    /// @param sourceFingerprint standalone source fingerprint, or `null`
+    /// @param readReport opening diagnostics
     /// @param regionFile open region storage, or `null`
     /// @param regionBaseline detached region baseline, or `null`
     private NBTFile(Path path, NBTCodec codec, NBTFileEncoding encoding, NBTEditor<E> editor,
-                    @Nullable SourceFingerprint sourceFingerprint, @Nullable NBTRegionFile regionFile,
+                    NBTReadReport readReport, @Nullable NBTRegionFile regionFile,
                     @Nullable ChunkRegion regionBaseline) {
+        this(path, codec, encoding, editor, readReport, regionFile, regionBaseline, false);
+    }
+
+    /// Creates a file session with an explicit first-publication state.
+    private NBTFile(Path path, NBTCodec codec, NBTFileEncoding encoding, NBTEditor<E> editor,
+                    NBTReadReport readReport, @Nullable NBTRegionFile regionFile,
+                    @Nullable ChunkRegion regionBaseline, boolean creationPending) {
         this.path = path;
         this.codec = codec;
         this.encoding = encoding;
         this.editor = editor;
-        this.sourceFingerprint = sourceFingerprint;
+        this.readReport = Objects.requireNonNull(readReport, "readReport");
         this.regionFile = regionFile;
         this.regionBaseline = regionBaseline;
+        this.creationPending = creationPending;
+    }
+
+    /// Creates a new standalone Compound tag session using a filename-derived envelope.
+    ///
+    /// `.nbt` targets default to RAW; Minecraft standalone `.dat`, `.dat_old`, and `.xyml_old` targets
+    /// default to GZIP. Other standalone names use the GZIP default as well. The target must not exist.
+    /// The first [#save()] publishes a strictly encoded file through the normal deterministic staging path
+    /// and does not create a backup for a source that was absent.
+    ///
+    /// @param path new standalone `.nbt`, `.dat`, `.dat_old`, or `.xyml_old` target
+    /// @return editable new-file session
+    /// @throws IOException if the target or its parent is unsafe, or the target already exists
+    @Contract("_ -> new")
+    public static NBTFile<CompoundTag> createTag(Path path) throws IOException {
+        Path selectedPath = Objects.requireNonNull(path, "path");
+        return createTag(selectedPath, defaultCreationEncoding(selectedPath));
+    }
+
+    /// Creates a new standalone Compound tag session with an explicit outer envelope.
+    ///
+    /// `REGION` is not a standalone envelope and is rejected. The target must not exist at creation and again at
+    /// first publication, preventing an unrelated file from being silently overwritten after the session starts.
+    ///
+    /// @param path new standalone target
+    /// @param encoding RAW, GZIP, ZLIB, or LZ4 envelope
+    /// @return editable new-file session
+    /// @throws IOException if the target or its parent is unsafe, already exists, or the encoding is REGION
+    @Contract("_, _ -> new")
+    public static NBTFile<CompoundTag> createTag(Path path, NBTFileEncoding encoding) throws IOException {
+        return createTag(path, new CompoundTag(), encoding);
+    }
+
+    /// Creates a new standalone session with any valid named tag as its root.
+    ///
+    /// This overload is the generic counterpart to the empty-Compound convenience methods. The supplied root is
+    /// detached by [NBTEditor] and is validated before the first strict publication, so scalar and array roots remain
+    /// available without weakening the Java Edition NBT wire rules.
+    ///
+    /// @param path new standalone target
+    /// @param root initial named root tag
+    /// @param encoding RAW, GZIP, ZLIB, or LZ4 envelope
+    /// @param <T> root tag type
+    /// @return editable new-file session
+    /// @throws IOException if the target or its parent is unsafe, already exists, or the encoding is REGION
+    @Contract("_, _, _ -> new")
+    public static <T extends Tag> NBTFile<T> createTag(Path path, T root, NBTFileEncoding encoding)
+            throws IOException {
+        Path absolute = normalizeCreationPath(path);
+        NBTFileEncoding selectedEncoding = Objects.requireNonNull(encoding, "encoding");
+        if (selectedEncoding == NBTFileEncoding.REGION) {
+            throw new IOException("REGION is not a standalone NBT envelope");
+        }
+        return new NBTFile<>(absolute, NBTCodec.of(), selectedEncoding,
+                NBTEditor.of(Objects.requireNonNull(root, "root")),
+                standaloneReadReport(selectedEncoding, true, List.of()),
+                null, null, true);
+    }
+
+    /// Creates a new standalone session with an arbitrary named root and the filename-derived envelope.
+    ///
+    /// @param path new standalone target
+    /// @param root initial named root tag
+    /// @param <T> root tag type
+    /// @return editable new-file session
+    /// @throws IOException if the target or its parent is unsafe, or the target already exists
+    @Contract("_, _ -> new")
+    public static <T extends Tag> NBTFile<T> createTag(Path path, T root) throws IOException {
+        Path selectedPath = Objects.requireNonNull(path, "path");
+        return createTag(selectedPath, root, defaultCreationEncoding(selectedPath));
     }
 
     /// Opens a standalone Java Edition tag and detects its complete outer envelope.
     ///
     /// @param path existing standalone NBT path
     /// @return editable tag session
-    /// @throws IOException if the source changes during open or is not one strict complete tag
+    /// @throws IOException if the source is oversized, unsafe, or is not one strict complete tag
     @Contract("_ -> new")
     public static NBTFile<Tag> openTag(Path path) throws IOException {
         return openTag(path, Tag.class, NBTCodec.of());
@@ -119,7 +213,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @param tagType expected root tag type
     /// @param <T> root tag type
     /// @return editable typed tag session
-    /// @throws IOException if the source is invalid, changes during open, or has another root type
+    /// @throws IOException if the source is invalid, oversized, unsafe, or has another root type
     @Contract("_, _ -> new")
     public static <T extends Tag> NBTFile<T> openTag(Path path, TagType<T> tagType) throws IOException {
         Objects.requireNonNull(tagType, "tagType");
@@ -136,7 +230,7 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @param codec codec whose edition is used for parsing and serialization
     /// @param <T> root tag type
     /// @return editable typed tag session
-    /// @throws IOException if the source is invalid, changes during open, or has another root type
+    /// @throws IOException if the source is invalid, exceeds a read limit, or has another root type
     @Contract("_, _, _ -> new")
     public static <T extends Tag> NBTFile<T> openTag(Path path, Class<T> tagClass, NBTCodec codec)
             throws IOException {
@@ -146,14 +240,76 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         SourceSnapshot source = SourceSnapshot.read(absolute);
         NBTFileEncoding detected = NBTFileEncoding.detectStandalone(source.bytes());
         T root = selectedCodec.readTag(source.bytes(), expectedClass);
-        return new NBTFile<>(absolute, selectedCodec, detected, NBTEditor.of(root), source.fingerprint(),
-                null, null);
+        return new NBTFile<>(absolute, selectedCodec, detected, NBTEditor.of(root),
+                standaloneReadReport(detected, true, List.of()), null, null);
+    }
+
+    /// Opens a standalone tag with bounded tolerant recovery when strict parsing fails.
+    ///
+    /// @param path existing standalone NBT path
+    /// @return editable tag session carrying a recovery report
+    /// @throws IOException if no root can be recovered or a limit is exceeded
+    @Contract("_ -> new")
+    public static NBTFile<Tag> openTagTolerant(Path path) throws IOException {
+        return openTagTolerant(path, Tag.class, NBTCodec.of(), ReadLimits.defaults());
+    }
+
+    /// Opens a typed standalone tag with bounded tolerant recovery.
+    ///
+    /// @param path existing standalone NBT path
+    /// @param tagType expected root type
+    /// @param limits defensive read limits
+    /// @param <T> root type
+    /// @return editable tag session carrying a recovery report
+    /// @throws IOException if no root can be recovered or a limit is exceeded
+    @Contract("_, _, _ -> new")
+    public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, TagType<T> tagType,
+                                                               ReadLimits limits) throws IOException {
+        Objects.requireNonNull(tagType, "tagType");
+        return openTagTolerant(path, tagType.tagClass(), NBTCodec.of(), limits);
+    }
+
+    /// Opens a typed standalone tag with the default bounded tolerant-read policy.
+    ///
+    /// @param path existing standalone NBT path
+    /// @param tagType expected root type
+    /// @param <T> root type
+    /// @return editable tag session carrying a recovery report
+    /// @throws IOException if no root can be recovered or a limit is exceeded
+    @Contract("_, _ -> new")
+    public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, TagType<T> tagType) throws IOException {
+        return openTagTolerant(path, tagType, ReadLimits.defaults());
+    }
+
+    /// Opens a standalone tag with a supplied codec and bounded tolerant recovery.
+    ///
+    /// @param path existing standalone NBT path
+    /// @param tagClass expected root type
+    /// @param codec codec controlling edition and byte order
+    /// @param limits defensive read limits
+    /// @param <T> root type
+    /// @return editable tag session carrying a recovery report
+    /// @throws IOException if no root can be recovered or a limit is exceeded
+    @Contract("_, _, _, _ -> new")
+    public static <T extends Tag> NBTFile<T> openTagTolerant(Path path, Class<T> tagClass,
+                                                               NBTCodec codec, ReadLimits limits)
+            throws IOException {
+        Path absolute = normalizeExistingPath(path);
+        Class<T> expectedClass = Objects.requireNonNull(tagClass, "tagClass");
+        NBTCodec selectedCodec = Objects.requireNonNull(codec, "codec");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        SourceSnapshot source = SourceSnapshot.read(absolute, selectedLimits.maxEncodedBytes());
+        NBTReadResult<T> result = NBTRepairReader.read(source.bytes(), expectedClass, selectedCodec, selectedLimits);
+        NBTReadReport report = standaloneReadReport(result.report().encoding(), result.report().strictValid(),
+                result.report().issues());
+        return new NBTFile<>(absolute, selectedCodec, report.encoding(), NBTEditor.of(result.root()),
+                report, null, null);
     }
 
     /// Opens and fully validates a Java Edition region as an editable 1024-slot tree.
     ///
-    /// The returned session keeps its [NBTRegionFile] open so later saves can reject changes to
-    /// either the main region file or a referenced external chunk companion.
+    /// The returned session keeps its [NBTRegionFile] open so later saves can publish changed slots
+    /// through the same copy-on-write storage handle.
     ///
     /// @param path existing or newly created region path
     /// @return editable region session
@@ -161,6 +317,57 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     @Contract("_ -> new")
     public static NBTFile<ChunkRegion> openRegion(Path path) throws IOException {
         return openRegion(NBTRegionFile.open(Objects.requireNonNull(path, "path")));
+    }
+
+    /// Opens a Java Edition region while isolating malformed chunk slots.
+    ///
+    /// Each slot is read with bounded tolerant recovery. A bad slot becomes an empty editable
+    /// chunk with a `PARTIAL_DATA_LOSS` report; all unaffected slots remain available. The report
+    /// stays attached to the session until the caller explicitly saves or reopens it.
+    ///
+    /// @param path existing or newly created region path
+    /// @return editable tolerant region session
+    /// @throws IOException if the region envelope cannot be opened or the default limits reject it
+    @Contract("_ -> new")
+    public static NBTFile<ChunkRegion> openRegionTolerant(Path path) throws IOException {
+        return openRegionTolerant(Objects.requireNonNull(path, "path"), ReadLimits.defaults());
+    }
+
+    /// Opens a Java Edition region with explicit bounded tolerant recovery.
+    ///
+    /// @param path existing or newly created region path
+    /// @param limits defensive decompression and parser limits
+    /// @return editable tolerant region session
+    /// @throws IOException if the region envelope cannot be opened or the limits are invalid
+    @Contract("_, _ -> new")
+    public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ReadLimits limits) throws IOException {
+        return openRegionTolerant(NBTRegionFile.openTolerant(Objects.requireNonNull(path, "path")), limits);
+    }
+
+    /// Opens a Java Edition region with an explicit companion accessor and default limits.
+    ///
+    /// @param path existing or newly created region path
+    /// @param accessor external chunk locator
+    /// @return editable tolerant region session
+    /// @throws IOException if the region envelope cannot be opened
+    @Contract("_, _ -> new")
+    public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ExternalChunkAccessor accessor)
+            throws IOException {
+        return openRegionTolerant(path, accessor, ReadLimits.defaults());
+    }
+
+    /// Opens a Java Edition region with an explicit companion accessor and read policy.
+    ///
+    /// @param path existing or newly created region path
+    /// @param accessor external chunk locator
+    /// @param limits defensive decompression and parser limits
+    /// @return editable tolerant region session
+    /// @throws IOException if the region envelope cannot be opened or the limits are invalid
+    @Contract("_, _, _ -> new")
+    public static NBTFile<ChunkRegion> openRegionTolerant(Path path, ExternalChunkAccessor accessor,
+                                                           ReadLimits limits) throws IOException {
+        return openRegionTolerant(NBTRegionFile.openTolerant(
+                Objects.requireNonNull(path, "path"), Objects.requireNonNull(accessor, "accessor")), limits);
     }
 
     /// Opens an editable region session which takes ownership of an existing storage session.
@@ -178,8 +385,50 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         try {
             ChunkRegion root = readRegion(selectedStorage);
             ChunkRegion baseline = root.clone();
+            NBTReadReport report = selectedStorage.readReport();
             NBTFile<ChunkRegion> result = new NBTFile<>(selectedStorage.path(), NBTCodec.of(),
-                    NBTFileEncoding.REGION, NBTEditor.of(root), null, selectedStorage, baseline);
+                    NBTFileEncoding.REGION, NBTEditor.of(root),
+                    report, selectedStorage, baseline);
+            success = true;
+            return result;
+        } finally {
+            if (!success) {
+                selectedStorage.close();
+            }
+        }
+    }
+
+    /// Opens a tolerant region session from an already-open storage owner.
+    ///
+    /// @param storage open tolerant region storage whose ownership is transferred
+    /// @param limits defensive decompression and parser limits
+    /// @return editable tolerant region session
+    /// @throws IOException if a session slot cannot be materialized
+    static NBTFile<ChunkRegion> openRegionTolerant(NBTRegionFile storage, ReadLimits limits) throws IOException {
+        NBTRegionFile selectedStorage = Objects.requireNonNull(storage, "storage");
+        ReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        boolean success = false;
+        try {
+            List<NBTReadIssue> issues = new java.util.ArrayList<>(selectedStorage.readReport().issues());
+            ChunkRegion root = new ChunkRegion();
+            ReadLimits.Budget budget = selectedLimits.newDocumentBudget();
+            ReadLimits.NodeBudget nodeBudget = selectedLimits.newNodeBudget();
+            for (int localIndex = 0; localIndex < root.size(); localIndex++) {
+                NBTReadResult<space.minecraftstl.xyml.library.nbt.chunk.Chunk> result =
+                        selectedStorage.readChunkTolerant(localIndex, selectedLimits, budget, nodeBudget);
+                root.setChunk(localIndex, result.root());
+                for (NBTReadIssue issue : result.report().issues()) {
+                    if (!issues.contains(issue)) {
+                        issues.add(issue);
+                    }
+                }
+            }
+            ChunkRegion baseline = root.clone();
+            NBTReadReport report = issues.isEmpty()
+                    ? NBTReadReport.clean(NBTFileEncoding.REGION)
+                    : new NBTReadReport(NBTFileEncoding.REGION, false, issues);
+            NBTFile<ChunkRegion> result = new NBTFile<>(selectedStorage.path(), NBTCodec.of(),
+                    NBTFileEncoding.REGION, NBTEditor.of(root), report, selectedStorage, baseline);
             success = true;
             return result;
         } finally {
@@ -213,9 +462,69 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         return encoding;
     }
 
-    /// Saves the current editor snapshot without creating a backup.
+    /// Returns an immutable snapshot of the storage algorithm used by this session.
     ///
-    /// @throws IOException if validation, conflict detection, or publication fails
+    /// Standalone sessions return their detected outer encoding. Region sessions obtain a fresh
+    /// per-slot snapshot so markers reflect headers already published by copy-on-write saves;
+    /// pending edits are not included until the next successful flush.
+    ///
+    /// @return immutable standalone or region storage profile
+    public synchronized StorageProfile storageProfile() {
+        return regionFile == null ? StorageProfile.standalone(encoding) : regionFile.storageProfile();
+    }
+
+    /// Bean-style alias for [#storageProfile()].
+    ///
+    /// @return immutable standalone or region storage profile
+    public synchronized StorageProfile getStorageProfile() {
+        return storageProfile();
+    }
+
+    /// Returns storage-profile changes emitted by the most recent region save.
+    ///
+    /// Standalone sessions always return an empty list. Region sessions retain the immutable
+    /// before/after snapshots until the next save or until the session is reopened. This lets a
+    /// caller explicitly report an inline payload that was moved to an external companion.
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> storageProfileChanges() {
+        return storageProfileChanges;
+    }
+
+    /// Bean-style alias for [#storageProfileChanges()].
+    ///
+    /// @return immutable profile-change snapshot in publication order
+    public synchronized @Unmodifiable List<StorageProfileChange> getStorageProfileChanges() {
+        return storageProfileChanges();
+    }
+
+    /// Returns immutable diagnostics captured while opening this session.
+    ///
+    /// @return opening report
+    @Contract(pure = true)
+    public NBTReadReport readReport() {
+        return readReport;
+    }
+
+    /// Returns whether an explicit repair save is required before normal writes.
+    ///
+    /// @return `true` when strict opening found a defect requiring a repair publication
+    @Contract(pure = true)
+    public boolean requiresRepair() {
+        return readReport.requiresRepair();
+    }
+
+    /// Returns whether the editor has unpublished changes or this is a newly created source awaiting first save.
+    ///
+    /// @return `true` when a publication is required
+    @Contract(pure = true)
+    public synchronized boolean isDirty() {
+        return creationPending || editor.isDirty();
+    }
+
+    /// Saves the current editor snapshot and keeps the previous standalone bytes in `.xyml_old`.
+    ///
+    /// @throws IOException if validation or publication fails
     public synchronized void save() throws IOException {
         save(NBTSaveOptions.defaults());
     }
@@ -227,10 +536,14 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// its external companions cannot be represented by one general backup path.
     ///
     /// @param options backup and publication options
-    /// @throws IOException if validation, conflict detection, staging, or publication fails
+    /// @throws IOException if validation, staging, or publication fails
     public synchronized void save(NBTSaveOptions options) throws IOException {
         ensureOpen();
+        pendingCleanup.retry();
         NBTSaveOptions selectedOptions = Objects.requireNonNull(options, "options");
+        if (encoding != NBTFileEncoding.REGION && selectedOptions.usesDefaultBackup()) {
+            selectedOptions = NBTSaveOptions.withBackup(defaultBackupPath(path));
+        }
         NBTSavepoint<E> savepoint = editor.saveSnapshot();
         if (encoding == NBTFileEncoding.REGION) {
             saveRegion(savepoint, selectedOptions);
@@ -251,46 +564,61 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         if (closed) {
             return;
         }
-        try {
-            if (regionFile != null) {
-                regionFile.close();
-            }
-        } finally {
-            closed = true;
+        // Mark the logical session closed only after every physical region handle has closed. A
+        // failed close remains retryable and therefore keeps its owning document lease alive.
+        pendingCleanup.retry();
+        if (regionFile != null) {
+            regionFile.close();
         }
+        closed = true;
     }
 
-    /// Publishes one standalone savepoint through a validated atomic replacement.
+    /// Publishes one standalone savepoint through deterministic staging and atomic replacement.
     ///
     /// @param savepoint detached editor savepoint
     /// @param options save options
-    /// @throws IOException if the source is stale or publication fails
+    /// @throws IOException if strict serialization or publication fails
     private void saveStandalone(NBTSavepoint<E> savepoint, NBTSaveOptions options) throws IOException {
-        SourceFingerprint expected = Objects.requireNonNull(sourceFingerprint, "sourceFingerprint");
-        verifyCurrentSource(expected);
         E root = savepoint.root();
         if (!(root instanceof Tag tag)) {
             throw new IOException("Standalone NBT session does not contain a tag root");
         }
 
         byte[] encoded = encodeTag(tag);
-        Path staged = createTemporarySibling(path);
+        if (creationPending) {
+            requireCreationTarget(path);
+        } else {
+            requireRegularSource(path);
+        }
+        Path staged = deterministicStage(path);
+        boolean stageCreated = false;
         IOException failure = null;
         try {
-            writeAndForce(staged, encoded);
-            SourceSnapshot stagedSource = SourceSnapshot.read(staged);
-            validateStagedTag(stagedSource.bytes(), tag);
-            verifyCurrentSource(expected);
-            publishBackup(options, expected);
-            verifyCurrentSource(expected);
-            atomicReplace(staged, path, "NBT source");
-            sourceFingerprint = stagedSource.fingerprint();
+            writeStage(staged, encoded);
+            stageCreated = true;
+            verifyStage(staged, encoded);
+            if (!creationPending) {
+                publishBackup(options);
+                requireRegularSource(path);
+            } else {
+                // A creator must never replace a file that appeared after the session was opened.
+                requireCreationTarget(path);
+            }
+            if (creationPending) {
+                atomicCreate(staged, path, "NBT source");
+            } else {
+                atomicReplace(staged, path, "NBT source");
+            }
             editor.markSaved(savepoint);
+            readReport = standaloneReadReport(encoding, true, List.of());
+            creationPending = false;
         } catch (IOException exception) {
             failure = exception;
             throw exception;
         } finally {
-            deleteStaged(staged, failure);
+            if (stageCreated) {
+                deleteStaged(staged, failure);
+            }
         }
     }
 
@@ -311,8 +639,12 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         storage.synchronizePendingChanges(current, baseline);
         try {
             storage.flush();
+            storageProfileChanges = storage.storageProfileChanges();
+            readReport = storage.readReport();
         } catch (NBTPartialSaveException exception) {
+            storageProfileChanges = storage.storageProfileChanges();
             updateRegionBaseline(baseline, current, exception.committedIndexes());
+            readReport = storage.readReport();
             throw exception;
         }
         regionBaseline = current.clone();
@@ -328,77 +660,107 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         ByteArrayOutputStream rawOutput = new ByteArrayOutputStream();
         codec.writeTag(rawOutput, tag);
         byte[] raw = rawOutput.toByteArray();
+        if (raw.length > MAX_STANDALONE_RAW_BYTES) {
+            throw new IOException("Uncompressed NBT payload exceeds the write limit: " + raw.length);
+        }
         if (encoding == NBTFileEncoding.RAW) {
             return raw;
         }
-        ByteArrayOutputStream encodedOutput = new ByteArrayOutputStream(Math.max(128, raw.length / 2));
-        try (OutputStream compressor = switch (encoding) {
-                case GZIP -> new GZIPOutputStream(encodedOutput);
-                case ZLIB -> new DeflaterOutputStream(encodedOutput);
-                case LZ4 -> new LZ4BlockOutputStream(encodedOutput);
-                case RAW, REGION -> throw new IOException("Invalid standalone NBT encoding: " + encoding);
-            }) {
-            compressor.write(raw);
+        NBTRegionFile.CompressionType compression = switch (encoding) {
+            case GZIP -> NBTRegionFile.CompressionType.GZIP;
+            case ZLIB -> NBTRegionFile.CompressionType.ZLIB;
+            case LZ4 -> NBTRegionFile.CompressionType.LZ4;
+            case RAW, REGION -> throw new IOException("Invalid standalone NBT encoding: " + encoding);
+        };
+        byte[] encoded = NBTRegionCompression.compress(compression, raw);
+        if (encoded.length > MAX_STANDALONE_ENCODED_BYTES) {
+            throw new IOException("Encoded NBT payload exceeds the write limit: " + encoded.length);
         }
-        return encodedOutput.toByteArray();
-    }
-
-    /// Strictly reads staged standalone bytes and verifies envelope and semantic equality.
-    ///
-    /// @param staged complete staged bytes
-    /// @param expected expected detached semantic tag
-    /// @throws IOException if the staged representation is invalid or differs from the savepoint
-    private void validateStagedTag(byte[] staged, Tag expected) throws IOException {
-        if (NBTFileEncoding.detectStandalone(staged) != encoding) {
-            throw new IOException("Staged NBT data changed its storage encoding");
-        }
-        Tag actual = codec.readTag(staged);
-        if (!actual.equals(expected)) {
-            throw new IOException("Staged NBT data differs from the editor savepoint");
-        }
+        return encoded;
     }
 
     /// Atomically publishes an optional rolling backup of the current source.
     ///
     /// @param options save options
-    /// @param expected expected current source fingerprint
-    /// @throws IOException if the backup cannot be staged, verified, or atomically published
-    private void publishBackup(NBTSaveOptions options, SourceFingerprint expected) throws IOException {
+    /// @throws IOException if the backup cannot be staged or atomically published
+    private void publishBackup(NBTSaveOptions options) throws IOException {
         Path configured = options.backupPath();
         if (configured == null) {
             return;
         }
         Path backup = configured.toAbsolutePath().normalize();
+        if (isStagingPath(backup)) {
+            throw new IOException("NBT staging files cannot be used as backup destinations: " + backup);
+        }
         if (backup.equals(path)) {
             throw new IOException("The NBT backup path must differ from the source path");
         }
-        Path stagedBackup = createTemporarySibling(backup);
+        Path stagedBackup = deterministicStage(backup);
+        boolean stageCreated = false;
         IOException failure = null;
         try {
-            copyAndForce(path, stagedBackup);
-            SourceSnapshot backupSource = SourceSnapshot.read(stagedBackup);
-            if (!expected.equals(backupSource.fingerprint())) {
-                throw new IOException("Staged NBT backup differs from the current source");
-            }
-            verifyCurrentSource(expected);
+            requireRegularSource(path);
+            copyStage(path, stagedBackup);
+            stageCreated = true;
+            requireRegularFile(stagedBackup, "NBT backup stage");
             atomicReplace(stagedBackup, backup, "NBT backup");
         } catch (IOException exception) {
             failure = exception;
             throw exception;
         } finally {
-            deleteStaged(stagedBackup, failure);
+            if (stageCreated) {
+                deleteStaged(stagedBackup, failure);
+            }
         }
     }
 
-    /// Verifies that the current standalone source still matches the expected content.
+    /// Resolves the deterministic standalone rolling-backup sibling.
     ///
-    /// @param expected expected source fingerprint
-    /// @throws IOException if the source changed or can no longer be read safely
-    private void verifyCurrentSource(SourceFingerprint expected) throws IOException {
-        SourceFingerprint actual = SourceSnapshot.read(path).fingerprint();
-        if (!expected.equals(actual)) {
-            throw new IOException("NBT source changed since it was opened: " + path);
+    /// @param source standalone source path
+    /// @return source-relative `.xyml_old` path
+    /// @throws IOException if the source has no ordinary file name
+    private static Path defaultBackupPath(Path source) throws IOException {
+        @Nullable Path fileName = source.getFileName();
+        if (fileName == null) {
+            throw new IOException("NBT source has no file name: " + source);
         }
+        return source.resolveSibling(fileName + ".xyml_old");
+    }
+
+    /// Selects the default standalone envelope for a newly created filename.
+    ///
+    /// The editor uses raw bytes for ordinary `.nbt` documents and GZIP for the Minecraft
+    /// standalone data-file family. Keeping the fallback compressed makes extensionless or
+    /// application-specific data files safe to create without changing the explicit overload.
+    ///
+    /// @param path requested target path
+    /// @return default standalone envelope
+    private static NBTFileEncoding defaultCreationEncoding(Path path) {
+        @Nullable Path fileName = path.getFileName();
+        String name = fileName == null ? "" : fileName.toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".nbt") ? NBTFileEncoding.RAW : NBTFileEncoding.GZIP;
+    }
+
+    /// Builds a standalone report while retaining the supported LZ4 extension diagnostic.
+    ///
+    /// LZ4 is intentionally available as a library extension, but it is not a format the
+    /// official Java Edition reader is required to understand. The warning remains visible after
+    /// a strict save so a later editor session does not silently lose that compatibility context.
+    ///
+    /// @param encoding detected standalone envelope
+    /// @param strictValid whether the source was strictly parsed
+    /// @param existing existing diagnostics in detection order
+    /// @return immutable report with the LZ4 extension warning when applicable
+    private static NBTReadReport standaloneReadReport(NBTFileEncoding encoding, boolean strictValid,
+                                                       List<NBTReadIssue> existing) {
+        if (encoding != NBTFileEncoding.LZ4
+                || existing.stream().anyMatch(issue -> "LZ4_EXTENSION".equals(issue.code()))) {
+            return new NBTReadReport(encoding, strictValid, existing);
+        }
+        List<NBTReadIssue> issues = new ArrayList<>(existing);
+        issues.add(new NBTReadIssue(NBTReadIssue.Severity.INFORMATIONAL, "LZ4_EXTENSION", "",
+                "检测到扩展 LZ4 独立文件，保存时将保留该算法；官方原版可能无法直接读取"));
+        return new NBTReadReport(encoding, strictValid, issues);
     }
 
     /// Reads all fixed slots from an open region storage session.
@@ -408,8 +770,11 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if any chunk cannot be decoded
     private static ChunkRegion readRegion(NBTRegionFile storage) throws IOException {
         ChunkRegion region = new ChunkRegion();
+        ReadLimits limits = ReadLimits.defaults();
+        ReadLimits.Budget budget = limits.newDocumentBudget();
+        ReadLimits.NodeBudget nodeBudget = limits.newNodeBudget();
         for (int localIndex = 0; localIndex < region.size(); localIndex++) {
-            region.setChunk(localIndex, storage.readChunk(localIndex));
+            region.setChunk(localIndex, storage.readChunk(localIndex, budget, nodeBudget));
         }
         return region;
     }
@@ -433,6 +798,10 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @throws IOException if the path is not a regular non-symbolic-link file
     private static Path normalizeExistingPath(Path path) throws IOException {
         Path absolute = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        if (isStagingPath(absolute)) {
+            throw new IOException("NBT staging files are not valid edit targets: " + absolute);
+        }
+        NBTRegionFileIO.requireSafeParent(absolute);
         BasicFileAttributes attributes = Files.readAttributes(
                 absolute, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
@@ -441,58 +810,124 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         return absolute;
     }
 
-    /// Creates a temporary sibling so the later move stays on one filesystem provider.
+    /// Normalizes a new-file target and proves that no filesystem object currently occupies it.
+    ///
+    /// @param path requested target
+    /// @return absolute normalized target
+    /// @throws IOException if the parent or target is unsafe, or the target already exists
+    private static Path normalizeCreationPath(Path path) throws IOException {
+        Path absolute = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        if (isStagingPath(absolute)) {
+            throw new IOException("NBT staging files are not valid edit targets: " + absolute);
+        }
+        NBTRegionFileIO.requireSafeParent(absolute);
+        requireCreationTarget(absolute);
+        return absolute;
+    }
+
+    /// Returns whether a path names the deterministic staging-file suffix.
+    ///
+    /// The comparison is case-insensitive because the editor must keep the temporary namespace
+    /// reserved on case-insensitive file systems as well.
+    ///
+    /// @param path normalized or absolute path
+    /// @return whether the final name ends in `.xyml_new`
+    private static boolean isStagingPath(Path path) {
+        @Nullable Path fileName = path.getFileName();
+        return fileName != null && fileName.toString().toLowerCase(Locale.ROOT).endsWith(".xyml_new");
+    }
+
+    /// Returns the deterministic staging sibling used by one save operation.
     ///
     /// @param target eventual target
-    /// @return newly created temporary sibling
-    /// @throws IOException if the target has no parent or staging fails
-    private static Path createTemporarySibling(Path target) throws IOException {
+    /// @return deterministic stage path
+    /// @throws IOException if the target has no parent or file name
+    private static Path deterministicStage(Path target) throws IOException {
         @Nullable Path parent = target.getParent();
         @Nullable Path fileName = target.getFileName();
         if (parent == null || fileName == null) {
             throw new IOException("NBT target has no parent directory: " + target);
         }
-        return Files.createTempFile(parent, "." + fileName + ".", ".tmp");
+        return parent.resolve(fileName + ".xyml_new");
     }
 
-    /// Writes complete bytes to an existing stage and forces content and metadata.
+    /// Creates and writes a complete stage without forcing it to stable storage.
     ///
     /// @param target staged file
     /// @param bytes complete encoded bytes
-    /// @throws IOException if writing or forcing fails
-    private static void writeAndForce(Path target, byte[] bytes) throws IOException {
-        try (FileChannel channel = FileChannel.open(
-                target, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            while (buffer.hasRemaining()) {
-                int written = channel.write(buffer);
-                if (written <= 0) {
-                    throw new IOException("NBT staging channel made no progress");
+    /// @throws IOException if the stage already exists or writing fails
+    private void writeStage(Path target, byte[] bytes) throws IOException {
+        NBTRegionFileIO.requireSafeParent(target);
+        boolean created = false;
+        try (FileChannel output = FileChannel.open(target,
+                StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+            created = true;
+            writeFileChannelFully(output, ByteBuffer.wrap(bytes));
+        } catch (IOException | RuntimeException failure) {
+            if (created) {
+                try {
+                    Files.deleteIfExists(target);
+                } catch (IOException | RuntimeException cleanup) {
+                    pendingCleanup.remember(target);
+                    failure.addSuppressed(cleanup);
                 }
             }
-            channel.force(true);
+            throw failure;
         }
     }
 
-    /// Copies a source to an existing stage and forces the completed copy.
+    /// Verifies that a staged publication contains exactly the bytes produced by strict encoding.
+    ///
+    /// This is deliberately a bounded byte comparison rather than a second semantic NBT parse:
+    /// serialization already validated the object graph, while a full read-back would add latency
+    /// and could turn a successful write into an unrelated parser compatibility test.
+    ///
+    /// @param target staged path
+    /// @param expected complete encoded bytes
+    /// @throws IOException if the stage is missing, oversized, truncated, or differs from `expected`
+    private static void verifyStage(Path target, byte[] expected) throws IOException {
+        requireRegularFile(target, "NBT source stage");
+        long size = Files.size(target);
+        if (size != expected.length) {
+            throw new IOException("NBT source stage length differs from strict encoding: " + size);
+        }
+        byte[] actual = SourceSnapshot.read(target, expected.length).bytes();
+        if (!Arrays.equals(actual, expected)) {
+            throw new IOException("NBT source stage differs from strict encoding");
+        }
+    }
+
+    /// Copies a source to a newly created deterministic stage.
     ///
     /// @param source source file
     /// @param target staged backup file
-    /// @throws IOException if copying or forcing fails
-    private static void copyAndForce(Path source, Path target) throws IOException {
-        try (FileChannel input = FileChannel.open(source, StandardOpenOption.READ);
-             FileChannel output = FileChannel.open(
-                     target, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            long position = 0L;
-            long size = input.size();
-            while (position < size) {
-                long transferred = input.transferTo(position, size - position, output);
-                if (transferred <= 0L) {
-                    throw new IOException("NBT backup channel made no progress");
+    /// @throws IOException if copying or stage creation fails
+    private void copyStage(Path source, Path target) throws IOException {
+        boolean absentBefore = !Files.exists(target, LinkOption.NOFOLLOW_LINKS);
+        try {
+            NBTRegionFileIO.copyFileBounded(source, target, ReadLimits.defaults().maxEncodedBytes());
+        } catch (IOException | RuntimeException failure) {
+            if (absentBefore) {
+                try {
+                    if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                        pendingCleanup.remember(target);
+                    }
+                } catch (RuntimeException existenceFailure) {
+                    pendingCleanup.remember(target);
+                    failure.addSuppressed(existenceFailure);
                 }
-                position += transferred;
             }
-            output.force(true);
+            throw failure;
+        }
+    }
+
+    /// Writes one complete buffer to a file channel without relying on a single write call.
+    private static void writeFileChannelFully(FileChannel output, ByteBuffer buffer) throws IOException {
+        while (buffer.hasRemaining()) {
+            int written = output.write(buffer);
+            if (written <= 0) {
+                throw new IOException("NBT stage channel made no progress");
+            }
         }
     }
 
@@ -503,10 +938,33 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @param description target description for diagnostics
     /// @throws IOException if atomic replacement is unsupported or fails
     private static void atomicReplace(Path source, Path target, String description) throws IOException {
+        NBTRegionFileIO.requireSafeParent(source);
+        NBTRegionFileIO.requireSafeParent(target);
+        requireRegularFile(source, description + " stage");
+        requireReplaceTarget(target, description);
         try {
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (AtomicMoveNotSupportedException exception) {
             throw new IOException("Filesystem does not support atomic " + description + " replacement: " + target,
+                    exception);
+        }
+    }
+
+    /// Atomically publishes a first-generation source without replacing a concurrent target.
+    ///
+    /// @param source fully validated staged source
+    /// @param target absent publication target
+    /// @param description target description for diagnostics
+    /// @throws IOException if atomic creation is unsupported or the target appeared
+    private static void atomicCreate(Path source, Path target, String description) throws IOException {
+        NBTRegionFileIO.requireSafeParent(source);
+        NBTRegionFileIO.requireSafeParent(target);
+        requireRegularFile(source, description + " stage");
+        requireCreationTarget(target);
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException exception) {
+            throw new IOException("Filesystem does not support atomic " + description + " creation: " + target,
                     exception);
         }
     }
@@ -516,15 +974,80 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
     /// @param staged staging path
     /// @param primary primary operation failure, or `null`
     /// @throws IOException if cleanup alone fails
-    private static void deleteStaged(Path staged, @Nullable IOException primary) throws IOException {
+    private void deleteStaged(Path staged, @Nullable IOException primary) throws IOException {
         try {
             Files.deleteIfExists(staged);
-        } catch (IOException cleanup) {
+        } catch (IOException | RuntimeException cleanup) {
+            pendingCleanup.remember(staged);
             if (primary != null) {
                 primary.addSuppressed(cleanup);
+            } else if (cleanup instanceof IOException ioException) {
+                throw ioException;
             } else {
-                throw cleanup;
+                throw (RuntimeException) cleanup;
             }
+        }
+    }
+
+    /// Requires a source path to remain an ordinary non-symbolic file immediately before publication.
+    ///
+    /// This check is intentionally repeated during a save because the editor does not retain a source
+    /// file descriptor for standalone sessions. It prevents a replaced symlink, directory, or special
+    /// file from being copied into a rolling backup or treated as the publication target.
+    ///
+    /// @param source source path
+    /// @throws IOException if the source is missing, symbolic, or not a regular file
+    private static void requireRegularSource(Path source) throws IOException {
+        requireRegularFile(source, "NBT source");
+    }
+
+    /// Requires a path to be a regular non-symbolic file without following links.
+    ///
+    /// @param candidate candidate file path
+    /// @param description path description for diagnostics
+    /// @throws IOException if the candidate is missing, symbolic, or not a regular file
+    private static void requireRegularFile(Path candidate, String description) throws IOException {
+        NBTRegionFileIO.requireSafeParent(candidate);
+        BasicFileAttributes attributes = Files.readAttributes(
+                candidate, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
+            throw new IOException(description + " is not a regular non-symbolic file: " + candidate);
+        }
+    }
+
+    /// Rejects an existing replacement target that is not an ordinary non-symbolic file.
+    ///
+    /// An absent target is valid for a first backup publication. Reading attributes without
+    /// following links prevents a symlink from being treated as a safe replacement destination.
+    ///
+    /// @param target replacement destination
+    /// @param description path description for diagnostics
+    /// @throws IOException if an existing target is symbolic, special, or a directory
+    private static void requireReplaceTarget(Path target, String description) throws IOException {
+        NBTRegionFileIO.requireSafeParent(target);
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(
+                    target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
+                throw new IOException(description + " target is not a regular non-symbolic file: " + target);
+            }
+        } catch (NoSuchFileException ignored) {
+            // A new backup destination is allowed; CREATE_NEW staging still guards its sibling.
+        }
+    }
+
+    /// Requires a target to remain absent for a new-file publication.
+    ///
+    /// @param target candidate target
+    /// @throws IOException if any filesystem object is present or its state cannot be inspected
+    private static void requireCreationTarget(Path target) throws IOException {
+        NBTRegionFileIO.requireSafeParent(target);
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(
+                    target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            throw new IOException("NBT creation target already exists: " + target);
+        } catch (NoSuchFileException ignored) {
+            // The target is absent. CREATE_NEW staging and the final atomic move provide the remaining race guard.
         }
     }
 
@@ -537,25 +1060,19 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         }
     }
 
-    /// Complete stable read of a regular source and its content fingerprint.
+    /// Complete bounded read of a regular source.
     ///
     /// @param bytes complete source bytes
-    /// @param fingerprint content fingerprint
     @NotNullByDefault
     private static final class SourceSnapshot {
         /// Complete immutable encoded source bytes.
         private final byte @Unmodifiable [] bytes;
 
-        /// Immutable content fingerprint for the encoded source.
-        private final SourceFingerprint fingerprint;
-
         /// Creates a detached immutable source snapshot.
         ///
         /// @param bytes complete encoded source bytes
-        /// @param fingerprint content fingerprint
-        private SourceSnapshot(byte @Unmodifiable [] bytes, SourceFingerprint fingerprint) {
+        private SourceSnapshot(byte @Unmodifiable [] bytes) {
             this.bytes = bytes.clone();
-            this.fingerprint = fingerprint;
         }
 
         /// Returns a defensive copy of the complete encoded source bytes.
@@ -565,29 +1082,56 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
             return bytes.clone();
         }
 
-        /// Returns the immutable source fingerprint.
-        ///
-        /// @return source fingerprint
-        private SourceFingerprint fingerprint() {
-            return fingerprint;
-        }
-
-        /// Reads a source while checking that its basic attributes remain stable.
+        /// Reads a bounded source after checking that it is a regular non-symbolic file.
         ///
         /// @param path source path
-        /// @return complete stable source snapshot
-        /// @throws IOException if the source changes during the read or is not a regular file
+        /// @return complete bounded source snapshot
+        /// @throws IOException if the source exceeds the bound or is not a regular file
         private static SourceSnapshot read(Path path) throws IOException {
-            BasicFileAttributes before = readAttributes(path);
-            byte @Unmodifiable [] bytes = Files.readAllBytes(path);
-            BasicFileAttributes after = readAttributes(path);
-            if (before.size() != after.size()
-                    || !before.lastModifiedTime().equals(after.lastModifiedTime())
-                    || !Objects.equals(before.fileKey(), after.fileKey())
-                    || bytes.length != after.size()) {
-                throw new IOException("NBT source changed while it was being read: " + path);
+            return read(path, ReadLimits.defaults().maxEncodedBytes());
+        }
+
+        /// Reads a source with an explicit encoded-input bound.
+        private static SourceSnapshot read(Path path, long maximum) throws IOException {
+            BasicFileAttributes attributes = readAttributes(path);
+            long size = attributes.size();
+            if (size > maximum) {
+                throw new IOException("Encoded NBT input exceeds the read limit: " + size);
             }
-            return new SourceSnapshot(bytes, new SourceFingerprint(bytes.length, digest(bytes)));
+            return new SourceSnapshot(readBounded(path, maximum));
+        }
+
+        /// Reads at most `maximum` bytes without using an unbounded convenience method.
+        private static byte @Unmodifiable [] readBounded(Path path, long maximum) throws IOException {
+            ByteArrayOutputStream output = new ByteArrayOutputStream(
+                    (int) Math.min(maximum, 8192L));
+            try (InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+                byte[] buffer = new byte[8192];
+                long total = 0L;
+                while (true) {
+                    int count = input.read(buffer);
+                    if (count < 0) {
+                        return output.toByteArray();
+                    }
+                    if (count == 0) {
+                        int single = input.read();
+                        if (single < 0) {
+                            return output.toByteArray();
+                        }
+                        if (total >= maximum) {
+                            throw new IOException("Encoded NBT input exceeds the read limit");
+                        }
+                        output.write(single);
+                        total++;
+                        continue;
+                    }
+                    total += count;
+                    if (total > maximum) {
+                        throw new IOException("Encoded NBT input exceeds the read limit");
+                    }
+                    output.write(buffer, 0, count);
+                }
+            }
         }
 
         /// Reads non-following basic attributes and rejects non-regular sources.
@@ -605,54 +1149,4 @@ public final class NBTFile<E extends NBTElement> implements AutoCloseable {
         }
     }
 
-    /// Content fingerprint used to reject stale standalone saves.
-    @NotNullByDefault
-    private static final class SourceFingerprint {
-        /// Encoded byte length.
-        private final long size;
-
-        /// SHA-256 digest of the complete encoded bytes.
-        private final byte @Unmodifiable [] digest;
-
-        /// Creates a content fingerprint.
-        ///
-        /// @param size encoded byte length
-        /// @param digest SHA-256 digest
-        private SourceFingerprint(long size, byte @Unmodifiable [] digest) {
-            this.size = size;
-            this.digest = digest.clone();
-        }
-
-        /// Returns whether another object describes identical encoded bytes.
-        ///
-        /// @param object candidate object
-        /// @return whether the fingerprints are equal
-        @Override
-        public boolean equals(Object object) {
-            return this == object
-                    || object instanceof SourceFingerprint other
-                    && size == other.size
-                    && Arrays.equals(digest, other.digest);
-        }
-
-        /// Returns a hash code consistent with [#equals(Object)].
-        ///
-        /// @return fingerprint hash code
-        @Override
-        public int hashCode() {
-            return 31 * Long.hashCode(size) + Arrays.hashCode(digest);
-        }
-    }
-
-    /// Computes SHA-256 without exposing a mutable digest object.
-    ///
-    /// @param bytes complete encoded bytes
-    /// @return SHA-256 digest
-    private static byte @Unmodifiable [] digest(byte[] bytes) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(bytes);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new AssertionError("SHA-256 is required by the Java platform", exception);
-        }
-    }
 }

@@ -17,7 +17,9 @@
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 import space.minecraftstl.xyml.library.nbt.internal.StringCache;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Closeable;
@@ -27,6 +29,8 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
+/// Root input owner which shares caches and structural limits with all bounded payload readers.
+@NotNullByDefault
 public final class RawDataReader extends DataReader implements Closeable {
     public static final int DEFAULT_BUFFER_SIZE = 8192;
 
@@ -43,17 +47,69 @@ public final class RawDataReader extends DataReader implements Closeable {
 
     private final InputBuffer buffer;
     private final long sourceStartPosition;
+    /// Structure budget shared by inline and external payload readers in one region operation.
+    private final StructureBudget structureBudget;
 
     public final StringCache stringCache = DEFAULT_CACHE;
     @Nullable StringBuilder charsBuffer;
 
     private @Nullable Map<CacheKey<?>, Object> cacheMap;
 
+    /// Creates a raw reader with the default NBT structure limits.
+    ///
+    /// @param source byte source owned by this reader
+    /// @param edition NBT byte order and string encoding
     public RawDataReader(InputSource source, MinecraftEdition edition) {
+        this(source, edition, new StructureBudget(ReadLimits.defaults()));
+    }
+
+    /// Creates a raw reader sharing an existing structure budget.
+    ///
+    /// @param source byte source owned by this reader
+    /// @param edition NBT byte order and string encoding
+    /// @param structureBudget document budget shared with related readers
+    private RawDataReader(InputSource source, MinecraftEdition edition, StructureBudget structureBudget) {
         this.source = source;
         this.edition = edition;
         this.buffer = InputBuffer.allocate(DEFAULT_BUFFER_SIZE, source.supportDirectBuffer(), edition.byteOrder());
         this.sourceStartPosition = source.position();
+        this.structureBudget = structureBudget;
+    }
+
+    /// Creates another owning reader whose tags count toward this reader's document budget.
+    ///
+    /// @param source external payload source
+    /// @return a reader sharing this operation's structure budget
+    RawDataReader newSharedStructureReader(InputSource source) {
+        return new RawDataReader(source, edition, structureBudget);
+    }
+
+    /// Reserves one logical tag and enters its nesting level.
+    ///
+    /// @throws IOException if the document node or nesting limit is exhausted
+    void enterStructureTag() throws IOException {
+        structureBudget.enter();
+    }
+
+    /// Leaves the current nesting level.
+    void leaveStructureTag() {
+        structureBudget.leave();
+    }
+
+    /// Validates one collection length against the default structural policy.
+    ///
+    /// @param length declared collection size
+    /// @throws IOException if the count is negative or exceeds the limit
+    void requireStructureCollectionLength(int length) throws IOException {
+        structureBudget.requireCollectionLength(length);
+    }
+
+    /// Reserves non-container list elements before their objects are allocated.
+    ///
+    /// @param count declared leaf-tag count
+    /// @throws IOException if the document node or depth limit would be exceeded
+    void reserveStructureLeafTags(int count) throws IOException {
+        structureBudget.reserveLeafTags(count);
     }
 
     @Override
@@ -165,6 +221,77 @@ public final class RawDataReader extends DataReader implements Closeable {
         protected abstract T create(RawDataReader rawReader);
 
         public void close(T value) {
+        }
+    }
+
+    /// Mutable structure budget shared by all readers participating in one logical document read.
+    @NotNullByDefault
+    private static final class StructureBudget {
+        /// Maximum number of logical tags in the document.
+        private final long maxNodes;
+        /// Maximum active tag nesting depth.
+        private final long maxDepth;
+        /// Maximum list or primitive-array element count.
+        private final long maxArrayLength;
+        /// Number of logical tags already entered.
+        private long nodes;
+        /// Current active nesting depth.
+        private long depth;
+
+        /// Creates a budget from an immutable read policy.
+        ///
+        /// @param limits source policy
+        private StructureBudget(ReadLimits limits) {
+            maxNodes = limits.maxNodes();
+            maxDepth = limits.maxDepth();
+            maxArrayLength = limits.maxArrayLength();
+        }
+
+        /// Reserves one node before its payload is materialized.
+        ///
+        /// @throws IOException if the node or depth limit is exhausted
+        private void enter() throws IOException {
+            if (nodes >= maxNodes) {
+                throw new IOException("NBT node count exceeds the read limit");
+            }
+            if (depth >= maxDepth) {
+                throw new IOException("NBT nesting depth exceeds the read limit");
+            }
+            nodes++;
+            depth++;
+        }
+
+        /// Releases one active nesting level without refunding its node.
+        private void leave() {
+            if (depth <= 0L) {
+                throw new IllegalStateException("No NBT tag is currently active");
+            }
+            depth--;
+        }
+
+        /// Validates one declared list or primitive-array element count.
+        ///
+        /// @param length declared collection size
+        /// @throws IOException if the count is negative or exceeds the limit
+        private void requireCollectionLength(int length) throws IOException {
+            if (length < 0 || (long) length > maxArrayLength) {
+                throw new IOException("NBT collection length exceeds the read limit");
+            }
+        }
+
+        /// Reserves leaf list elements as one allocation-free budget operation.
+        ///
+        /// @param count declared leaf-tag count
+        /// @throws IOException if the node or depth limit would be exceeded
+        private void reserveLeafTags(int count) throws IOException {
+            requireCollectionLength(count);
+            if (count > 0 && depth >= maxDepth) {
+                throw new IOException("NBT nesting depth exceeds the read limit");
+            }
+            if ((long) count > maxNodes - nodes) {
+                throw new IOException("NBT node count exceeds the read limit");
+            }
+            nodes += count;
         }
     }
 }

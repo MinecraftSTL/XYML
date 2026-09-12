@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
 import java.nio.file.Files;
@@ -107,14 +108,18 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
-                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest());
+                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest())
+                    .setResources(metadataResource(), instanceResource(id));
             for (RemoteVersion remoteVersion : validatedVersions) {
                 mutation = mutation.thenComposeAsync(
                         ioExecutor,
-                        manifest -> dependencyManager.installLibraryAsync(manifest, remoteVersion));
+                        manifest -> dependencyManager.installLibraryAsync(manifest, remoteVersion))
+                        .asOrchestration();
             }
             return completeMutation(id, mutation);
-        }).withStagesHints(stages);
+        }).setResources(metadataResource(), instanceResource(id))
+                .releaseResourcesBeforeDependencies()
+                .withStagesHints(stages);
     }
 
     /// Builds the ordered progress stages needed to group each loader's dependency downloads.
@@ -151,11 +156,15 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
-                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest()).thenComposeAsync(
+                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest())
+                    .setResources(metadataResource(), instanceResource(id))
+                    .thenComposeAsync(
                     ioExecutor,
-                    manifest -> dependencyManager.removeLibraryAsync(manifest, requestedLibraryId));
+                    manifest -> dependencyManager.removeLibraryAsync(manifest, requestedLibraryId))
+                    .asOrchestration();
             return completeMutation(id, mutation);
-        });
+        }).setResources(metadataResource(), instanceResource(id))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Builds one deferred local-installer chain while keeping Core format detection authoritative.
@@ -166,38 +175,75 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     @Override
     public Task<InstanceInstallerSnapshot> installOffline(GameInstanceID instanceId, Path installer) {
         GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
-        Path installerPath = Objects.requireNonNull(installer, "installer");
+        Path installerPath = Objects.requireNonNull(installer, "installer").toAbsolutePath().normalize();
         return Task.composeAsync(ioExecutor, () -> {
-            if (!Files.isRegularFile(installerPath)) {
-                throw new InstanceInstallerValidationException(
-                        InstanceInstallerValidationException.Reason.OFFLINE_INSTALLER_NOT_A_REGULAR_FILE,
-                        "Installer path is not a regular file: " + installerPath);
-            }
             DefaultDependencyManager dependencyManager = repository.getDependency(
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
-                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest()).thenComposeAsync(
+                    () -> {
+                        if (!Files.isRegularFile(installerPath)) {
+                            throw new InstanceInstallerValidationException(
+                                    InstanceInstallerValidationException.Reason.OFFLINE_INSTALLER_NOT_A_REGULAR_FILE,
+                                    "Installer path is not a regular file: " + installerPath);
+                        }
+                        return repository.getResolvedInstanceManifest(id).standaloneManifest();
+                    }).setResources(
+                            metadataResource(),
+                            instanceResource(id),
+                            TaskResource.archive(installerPath))
+                    .thenComposeAsync(
                     ioExecutor,
-                    manifest -> dependencyManager.installLibraryAsync(manifest, installerPath));
-            return completeMutation(id, mutation);
-        });
+                    manifest -> dependencyManager.installLibraryAsync(manifest, installerPath))
+                    .asOrchestration();
+            return completeMutation(id, mutation, TaskResource.archive(installerPath));
+        }).setResources(metadataResource(), instanceResource(id))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Saves a mutated manifest, refreshes authoritative repository caches on every outcome, then rereads it.
     ///
     /// @param instanceId stable target identifier
     /// @param mutation stopped Core mutation task returning the changed standalone manifest
+    /// @param additionalResources additional immutable inputs retained through the mutation
     /// @return stopped task that returns a fresh snapshot after a successful mutation
     private Task<InstanceInstallerSnapshot> completeMutation(
             GameInstanceID instanceId,
-            Task<GameInstanceManifest> mutation) {
-        Task<@Nullable Void> refreshed = Objects.requireNonNull(mutation, "mutation")
+            Task<GameInstanceManifest> mutation,
+            TaskResource... additionalResources) {
+        List<TaskResource> operationResources = new ArrayList<>();
+        operationResources.add(instanceResource(instanceId));
+        operationResources.addAll(List.of(Objects.requireNonNull(additionalResources, "additionalResources")));
+        Task<GameInstanceManifest> persisted = Objects.requireNonNull(mutation, "mutation")
                 .thenComposeAsync(ioExecutor, repository::saveAsync)
-                .whenComplete(ioExecutor, ignoredFailure -> repository.refresh());
+                .setResources(
+                        TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                        operationResources.toArray(TaskResource[]::new));
+        Task<@Nullable Void> refreshed = persisted.whenCompleteWithResources(
+                ioExecutor,
+                ignoredFailure -> repository.refresh(),
+                TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .asOrchestration();
         return refreshed.thenComposeAsync(
                 ioExecutor,
-                () -> Task.supplyAsync(ioExecutor, () -> readSnapshot(instanceId)));
+                () -> Task.supplyAsync(ioExecutor, () -> readSnapshot(instanceId))
+                        .setResources(metadataResource(), instanceResource(instanceId)))
+                .asOrchestration();
+    }
+
+    /// Returns the repository metadata scope used while reading or refreshing mutable catalog state.
+    ///
+    /// @return repository metadata resource
+    private TaskResource metadataResource() {
+        return TaskResource.repositoryMetadata(repository.getBaseDirectory());
+    }
+
+    /// Returns the stable filesystem scope for one existing instance.
+    ///
+    /// @param instanceId target instance identifier
+    /// @return instance resource
+    private TaskResource instanceResource(GameInstanceID instanceId) {
+        return TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
     }
 
     /// Reads one instance through Core's analyzer without assuming that detected libraries were XYML-installed.

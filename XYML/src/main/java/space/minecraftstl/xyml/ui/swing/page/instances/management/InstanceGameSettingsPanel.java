@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -301,7 +302,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Status, persistence, reload, and read-only recovery footer.
     private final InstanceGameSettingsFooterControls footerControls;
-
+    /// Resource-aware asynchronous settings persistence.
+    private final InstanceGameSettingsPersistence persistence;
     /// Snapshot currently represented by the controls, or `null` during construction only.
     private @Nullable InstanceGameSettingsSnapshot displayedSnapshot;
 
@@ -480,6 +482,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 store,
                 this::saveEditedSnapshot,
                 this::reloadSnapshot);
+        persistence = new InstanceGameSettingsPersistence(store, this::completeSave);
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
         this.workingDirectoryChanged = Objects.requireNonNull(
                 workingDirectoryChanged,
@@ -539,6 +542,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
+                persistence.close(); footerControls.close();
                 closed = true;
                 interactionEnabled = false;
                 javaRuntimeSubscription.unsubscribe();
@@ -816,19 +820,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Persists the currently edited values or presents one concise validation failure.
     private void saveEditedSnapshot() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
+        if (closed || persistence.isBusy()) {
             return;
         }
         try {
             InstanceGameSettingsSnapshot previous = displayedSnapshot();
-            store.save(editedSnapshot());
-            InstanceGameSettingsSnapshot saved = store.snapshot();
-            applySnapshot(saved);
-            footerControls.setStatus(i18n("message.success"));
-            if (workingDirectoryChanged(previous, saved)) {
-                workingDirectoryChanged.run();
-            }
+            InstanceGameSettingsSnapshot candidate = editedSnapshot();
+            footerControls.setStatus(i18n("message.doing"));
+            persistence.start(previous, candidate);
+            updateEditingAvailability();
         } catch (IllegalArgumentException | IllegalStateException exception) {
             footerControls.setStatus(i18n(
                     "swing.instance_settings.save_failed",
@@ -836,6 +836,33 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                             exception.getMessage(),
                             i18n("swing.instance_settings.invalid"))));
         }
+    }
+
+    /// Completes one asynchronous settings save on the event-dispatch thread.
+    private void completeSave(InstanceGameSettingsSnapshot previous, TaskExecutor executor, boolean successful) {
+        if (successful) {
+            try {
+                InstanceGameSettingsSnapshot saved = store.snapshot();
+                applySnapshot(saved); footerControls.setStatus(i18n("message.success"));
+                if (workingDirectoryChanged(previous, saved)) workingDirectoryChanged.run();
+            } catch (IllegalArgumentException | IllegalStateException exception) {
+                footerControls.setStatus(i18n(
+                        "swing.instance_settings.save_failed",
+                        Objects.requireNonNullElse(
+                                exception.getMessage(),
+                                i18n("swing.instance_settings.invalid"))));
+            }
+        } else if (executor.isCancelled()) {
+            footerControls.setStatus(i18n("message.cancelled"));
+        } else {
+            Throwable failure = executor.getFailure();
+            footerControls.setStatus(i18n(
+                    "swing.instance_settings.save_failed",
+                    Objects.requireNonNullElse(
+                            failure == null ? null : failure.getMessage(),
+                            i18n("swing.instance_settings.invalid"))));
+        }
+        updateEditingAvailability();
     }
 
     /// Returns whether saved settings resolve instance content from a different working-directory configuration.
@@ -1418,7 +1445,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private void updateEditingAvailability() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable InstanceGameSettingsSnapshot snapshot = displayedSnapshot;
-        boolean writable = interactionEnabled && !closed && snapshot != null && snapshot.writable();
+        boolean writable = interactionEnabled && !closed && !persistence.isBusy() && snapshot != null
+                && snapshot.writable();
         for (InheritedControl<? extends JComponent> control : allControls()) {
             control.overrideBox().setEnabled(
                     writable && presentation == GameSettingsEditorPresentation.INSTANCE);
@@ -1469,7 +1497,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         nativesDirectoryControl.editor().setEnabled(
                 nativesDirectoryControl.editor().isEnabled() && useCustomNatives);
 
-        footerControls.updateAvailability(writable, interactionEnabled && !closed);
+        footerControls.updateAvailability(writable, interactionEnabled && !closed && !persistence.isBusy());
         settingsTabs.setEnabled(interactionEnabled && !closed);
         if (!applyingSnapshot && snapshot != null && !snapshot.writable()) {
             footerControls.setStatus(i18n("settings.game.instance_settings.unsupported"));

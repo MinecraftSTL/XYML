@@ -40,11 +40,8 @@ public enum NBTEditorStatus {
     /// A document snapshot is being written on the background executor.
     SAVING,
 
-    /// The most recent operation failed without proving an external modification.
+    /// The most recent operation failed without a more specific recovery boundary.
     ERROR,
-
-    /// Saving was rejected because the source changed outside the editor.
-    CONFLICT,
 
     /// A region save committed an ordered prefix while later chunks remain dirty.
     PARTIAL_SAVE,

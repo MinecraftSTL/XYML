@@ -36,8 +36,10 @@ import java.net.http.HttpRequest;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
@@ -126,17 +128,61 @@ public class CacheRepository {
     public void tryCacheFile(Path path, String algorithm, String hash) throws IOException {
         checkHash(hash);
 
-        Path cache = getFile(algorithm, hash);
-        if (Files.isRegularFile(cache)) return;
-        FileUtils.copyFile(path, cache);
+        lock.writeLock().lock();
+        try {
+            Path cache = getFile(algorithm, hash);
+            if (Files.isRegularFile(cache)) return;
+            copyCacheFile(path, cache);
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     public Path cacheFile(Path path, String algorithm, String hash) throws IOException {
         checkHash(hash);
 
-        Path cache = getFile(algorithm, hash);
-        FileUtils.copyFile(path, cache);
-        return cache;
+        lock.writeLock().lock();
+        try {
+            Path cache = getFile(algorithm, hash);
+            copyCacheFile(path, cache);
+            return cache;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /// Publishes one cache payload through a complete same-directory temporary file.
+    ///
+    /// Cache readers can therefore observe either the old verified payload or the new complete payload, never a
+    /// partially copied file. The caller must hold the cache write lock for the whole publication operation.
+    ///
+    /// @param source verified source file
+    /// @param destination content-addressed cache destination
+    /// @throws IOException if the source cannot be copied or the replacement cannot be completed
+    private static void copyCacheFile(Path source, Path destination) throws IOException {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(destination, "destination");
+        Path parent = Objects.requireNonNull(destination.toAbsolutePath().getParent(), "cache destination parent");
+        Files.createDirectories(parent);
+        Path temporary = Files.createTempFile(parent, "." + destination.getFileName() + ".", ".tmp");
+        boolean moved = false;
+        try {
+            FileUtils.copyFile(source, temporary);
+            try {
+                Files.move(
+                        temporary,
+                        destination,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temporary);
+            }
+        }
     }
 
     public Optional<Path> checkExistentFile(@Nullable Path original, String algorithm, String hash) {
@@ -257,10 +303,48 @@ public class CacheRepository {
         return cacheData(info, () -> {
             String hash = DigestUtils.digestToString(SHA1, bytes);
             Path cached = getFile(SHA1, hash);
-            Files.createDirectories(cached.getParent());
-            Files.write(cached, bytes);
+            lock.writeLock().lock();
+            try {
+                publishCacheBytes(cached, bytes);
+            } finally {
+                lock.writeLock().unlock();
+            }
             return new CacheResult(hash, cached);
         });
+    }
+
+    /// Publishes one byte payload through a complete same-directory temporary file.
+    ///
+    /// The caller must hold the cache write lock. Readers therefore observe either a complete previous payload or a
+    /// complete replacement, never a partially written content-addressed file.
+    ///
+    /// @param destination content-addressed cache destination
+    /// @param bytes payload to publish
+    /// @throws IOException if the payload cannot be written or moved into place
+    private static void publishCacheBytes(Path destination, byte[] bytes) throws IOException {
+        Objects.requireNonNull(destination, "destination");
+        Objects.requireNonNull(bytes, "bytes");
+        Path parent = Objects.requireNonNull(destination.toAbsolutePath().getParent(), "cache destination parent");
+        Files.createDirectories(parent);
+        Path temporary = Files.createTempFile(parent, "." + destination.getFileName() + ".", ".tmp");
+        boolean moved = false;
+        try {
+            Files.write(temporary, bytes, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+            try {
+                Files.move(
+                        temporary,
+                        destination,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temporary);
+            }
+        }
     }
 
     private static final Pattern MAX_AGE = Pattern.compile("(s-maxage|max-age)=(?<time>[0-9]+)");

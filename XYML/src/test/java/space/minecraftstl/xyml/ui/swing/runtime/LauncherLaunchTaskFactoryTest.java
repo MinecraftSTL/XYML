@@ -333,6 +333,8 @@ final class LauncherLaunchTaskFactoryTest {
                 () -> true);
 
         assertEquals(1, hideCount.get());
+        assertEquals(0, closeCount.get());
+        assertEquals(0, showCount.get());
         lifecycleCompletion.complete(null);
 
         assertEquals(0, closeCount.get());

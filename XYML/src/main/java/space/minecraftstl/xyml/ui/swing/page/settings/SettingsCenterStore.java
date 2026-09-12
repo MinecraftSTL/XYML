@@ -25,6 +25,8 @@ import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
+import java.util.Objects;
+
 /// Owns toolkit-neutral reads and writes for the general and network settings center.
 ///
 /// Implementations may deliver change callbacks from any thread. Consumers that touch Swing components must dispatch
@@ -132,6 +134,18 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param enabled whether the MCP entry point may serve requests
     void setMcpEnabled(boolean enabled);
 
+    /// Persists the bearer token used by the local MCP HTTP listener.
+    ///
+    /// An empty token disables transport authentication for backwards-compatible local use.
+    ///
+    /// The default implementation validates the value and otherwise leaves it unchanged so legacy lightweight
+    /// stores remain source-compatible. Stores with MCP persistence should override this method.
+    ///
+    /// @param token bearer token, which may be empty
+    default void setMcpBearerToken(String token) {
+        Objects.requireNonNull(token, "token");
+    }
+
     /// Persists the local MCP server loopback port.
     ///
     /// @param port loopback TCP port in the range 1..65535
@@ -146,6 +160,16 @@ public interface SettingsCenterStore extends AutoCloseable {
     ///
     /// @param required whether mod-deletion confirmation is required
     void setMcpConfirmModDeletion(boolean required);
+
+    /// Persists whether the enablement risk warning is shown in the Swing settings page.
+    ///
+    /// The default implementation is a compatibility no-op for stores created before this preference existed.
+    /// Stores with MCP persistence should override this method.
+    ///
+    /// @param show whether to show the warning before enabling MCP
+    default void setShowMcpEnablementWarning(boolean show) {
+        // Compatibility default for read-only or legacy settings-center stores.
+    }
 
     /// Releases every store-owned listener.
     @Override

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.task.Task;
 
 import java.io.IOException;
@@ -29,6 +30,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
@@ -61,6 +63,10 @@ public final class McpTaskOperationRegistryTest {
             assertFalse((boolean) finished.get("cancellable"));
             assertTrue(finished.containsKey("started_at"));
             assertTrue(finished.containsKey("finished_at"));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> steps = (List<Map<String, Object>>) finished.get("steps");
+            assertFalse(steps.isEmpty());
+            assertEquals("SUCCEEDED", steps.get(0).get("status"));
         }
     }
 
@@ -79,12 +85,35 @@ public final class McpTaskOperationRegistryTest {
         }
     }
 
+    /// Confirms a retry checkpoint survives task creation failure and is returned to the caller.
+    @Test
+    public void retainsRetryCheckpointWhenFactoryFails() {
+        RepairCheckpoint checkpoint = new RepairCheckpoint(
+                List.of("validate source"),
+                List.of("install dependency"),
+                "install dependency");
+        try (McpTaskOperationRegistry registry = new McpTaskOperationRegistry()) {
+            Map<String, Object> failed = registry.startForOwner(
+                    "OPEN_MOD_SEARCH",
+                    true,
+                    checkpoint,
+                    () -> {
+                        throw new IllegalStateException("factory unavailable");
+                    });
+
+            assertEquals(List.of("validate source"), failed.get("retained_completed_steps"));
+            assertEquals(List.of("validate source"), failed.get("completed_steps"));
+            assertEquals(List.of("OPEN_MOD_SEARCH"), failed.get("failed_steps"));
+            assertEquals("OPEN_MOD_SEARCH", failed.get("resume_from_step"));
+        }
+    }
+
     /// Confirms asynchronous task failures are available without exposing a stack trace.
     @Test
     public void publishesTaskExecutionFailure() throws Exception {
         try (McpTaskOperationRegistry registry = new McpTaskOperationRegistry()) {
             Map<String, Object> started = registry.start(
-                    "OPEN_MOD_SEARCH", true, () -> Task.runAsync(() -> {
+                    "OPEN_MOD_SEARCH", true, () -> Task.runAsync("scan missing dependency", () -> {
                         throw new IOException("search failed");
                     }));
             Map<String, Object> failed = awaitTerminal(registry, operationId(started));
@@ -93,6 +122,8 @@ public final class McpTaskOperationRegistryTest {
             assertEquals("java.io.IOException", failed.get("failure_type"));
             assertEquals("search failed", failed.get("failure_message"));
             assertFalse(failed.containsKey("stack_trace"));
+            assertEquals("scan missing dependency", failed.get("failed_step"));
+            assertTrue(((List<?>) failed.get("failed_steps")).contains("scan missing dependency"));
         }
     }
 

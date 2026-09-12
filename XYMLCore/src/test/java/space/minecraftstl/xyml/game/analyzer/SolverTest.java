@@ -30,6 +30,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -102,6 +103,55 @@ class SolverTest {
         solver.configure(configurator);
         assertNotSame(secondTask, configurator.task);
         assertEquals(3, creationCount.get());
+    }
+
+    /// Keeps multiple Java choices inside one solver and forwards the selected identifier without creating a task
+    /// during candidate inspection.
+    @Test
+    void exposesImmutableJavaCandidatesAndSelectedTask() {
+        AtomicInteger automaticCreations = new AtomicInteger();
+        AtomicReference<@Nullable String> selectedId = new AtomicReference<>();
+        LogAnalyzable.JavaRuntimeCandidate recommended = new LogAnalyzable.JavaRuntimeCandidate(
+                "runtime-a",
+                "Java 21 (64-bit)",
+                true);
+        LogAnalyzable.JavaRuntimeCandidate alternative = new LogAnalyzable.JavaRuntimeCandidate(
+                "runtime-b",
+                "Java 17 (64-bit)",
+                false);
+        LogAnalyzable.JavaRuntimeRepair repair = new LogAnalyzable.JavaRuntimeRepair() {
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask() {
+                automaticCreations.incrementAndGet();
+                return Task.runAsync(() -> {
+                });
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates() {
+                return List.of(recommended, alternative);
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId) {
+                selectedId.set(candidateId);
+                return Task.runAsync(() -> {
+                });
+            }
+        };
+
+        Solver solver = Solver.ofUninstallJRE(repairableInput(repair));
+
+        assertEquals(List.of(recommended, alternative), solver.candidates());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> solver.candidates().add(recommended));
+        assertEquals(0, automaticCreations.get());
+        assertTrue(solver.createTask("runtime-b") != null);
+        assertEquals("runtime-b", selectedId.get());
     }
 
     /// Rejects a task factory that returns an already executed task.

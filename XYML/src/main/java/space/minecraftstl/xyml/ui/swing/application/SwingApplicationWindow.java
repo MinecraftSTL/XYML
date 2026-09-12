@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import java.awt.Component;
@@ -61,6 +62,16 @@ public interface SwingApplicationWindow extends AutoCloseable {
     default void openModSearch(String dependencyId) {
         Objects.requireNonNull(dependencyId, "dependencyId");
         navigateTo(ShellPageId.DOWNLOADS);
+    }
+
+    /// Opens the Mods catalog with one dependency query and analyzed Minecraft-version filter.
+    ///
+    /// The default retains compatibility with lightweight test windows that only expose ID-only navigation.
+    ///
+    /// @param dependencyId missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    default void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
     }
 
     /// Disposes the native window idempotently.

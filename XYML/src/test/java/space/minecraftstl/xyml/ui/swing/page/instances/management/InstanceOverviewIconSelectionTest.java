@@ -222,8 +222,11 @@ final class InstanceOverviewIconSelectionTest {
     /// @param executor executor carrying overview background work
     /// @throws Exception when the barrier cannot complete
     private static void awaitBackgroundWork(ExecutorService executor) throws Exception {
-        executor.submit(() -> { }).get(5, TimeUnit.SECONDS);
-        EdtDispatcher.executeAndWait(() -> { });
+        for (int attempt = 0; attempt < 20; attempt++) {
+            executor.submit(() -> { }).get(5, TimeUnit.SECONDS);
+            EdtDispatcher.executeAndWait(() -> { });
+            Thread.sleep(5L);
+        }
     }
 
     /// Finds one named descendant of the requested Swing component type.

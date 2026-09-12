@@ -19,10 +19,12 @@ package space.minecraftstl.xyml.library.nbt.io;
 import space.minecraftstl.xyml.library.nbt.TestResources;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,6 +37,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -47,9 +50,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -81,9 +85,91 @@ public final class NBTRegionFileTest {
 
             region.clearChunk(2);
             region.flush();
-            assertNull(region.readChunk(2).getRootTag());
+            Chunk cleared = region.readChunk(2);
+            assertNull(cleared.getRootTag());
+            assertEquals(Instant.ofEpochSecond(1234), cleared.getTimestamp());
         }
         assertEquals(0L, Files.size(file) % 4096L);
+    }
+
+    /// Charges every strict slot read to one cumulative region budget.
+    @Test
+    void strictReadsShareCumulativeDecompressionBudget() throws Exception {
+        Path file = temporaryDirectory.resolve("budget.0.0.mca");
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.writeChunk(1, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+
+        int onePayloadBytes = NBTCodec.of().writeTagToByteArray(root).length;
+        ReadLimits limits = new ReadLimits(
+                1_000_000L, 1_000_000L, onePayloadBytes,
+                100L, 100L, 100L, 100L, 1_000L);
+        ReadLimits.Budget budget = limits.newDocumentBudget();
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            assertDoesNotThrow(() -> region.readChunk(0, budget));
+            assertThrows(IOException.class, () -> region.readChunk(1, budget));
+        }
+    }
+
+    /// Charges tolerant slot trees to one region-wide logical-node budget.
+    @Test
+    void tolerantRegionSharesNodeBudgetAcrossSlots() throws Exception {
+        Path file = temporaryDirectory.resolve("node-budget.0.0.mca");
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.writeChunk(1, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+
+        ReadLimits defaults = ReadLimits.defaults();
+        ReadLimits limits = new ReadLimits(
+                defaults.maxEncodedBytes(), defaults.maxDecompressedBytes(),
+                defaults.maxDocumentDecompressedBytes(), 2L, defaults.maxDepth(),
+                defaults.maxStringBytes(), defaults.maxArrayLength(), defaults.maxArrayBytes());
+        try (NBTFile<ChunkRegion> fileSession = NBTFile.openRegionTolerant(file, limits)) {
+            ChunkRegion opened = fileSession.getEditor().snapshot();
+            assertEquals(1, opened.getChunk(0).getRootTag().getInt("value"));
+            assertNull(opened.getChunk(1).getRootTag());
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, fileSession.readReport().severity());
+        }
+    }
+
+    /// Charges strict slot trees to one caller-owned logical-node budget.
+    @Test
+    void strictRegionSharesNodeBudgetAcrossSlots() throws Exception {
+        Path file = temporaryDirectory.resolve("strict-node-budget.0.0.mca");
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.writeChunk(1, new Chunk(root), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+
+        ReadLimits defaults = ReadLimits.defaults();
+        ReadLimits limits = new ReadLimits(
+                defaults.maxEncodedBytes(), defaults.maxDecompressedBytes(),
+                defaults.maxDocumentDecompressedBytes(), 2L, defaults.maxDepth(),
+                defaults.maxStringBytes(), defaults.maxArrayLength(), defaults.maxArrayBytes());
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            ReadLimits.Budget byteBudget = limits.newDocumentBudget();
+            ReadLimits.NodeBudget nodeBudget = limits.newNodeBudget();
+            assertDoesNotThrow(() -> region.readChunk(0, byteBudget, nodeBudget));
+            assertThrows(IOException.class, () -> region.readChunk(1, byteBudget, nodeBudget));
+        }
+    }
+
+    /// Refuses to open the deterministic staging namespace as an editable region target.
+    @Test
+    void rejectsDeterministicNewRegionTarget() throws Exception {
+        Path file = temporaryDirectory.resolve("r.0.0.mca.xyml_new");
+        Files.write(file, new byte[ChunkUtils.SECTOR_BYTES * 2]);
+
+        assertThrows(IOException.class, () -> NBTRegionFile.open(file));
+        assertThrows(IOException.class, () -> NBTRegionFile.openTolerant(file));
     }
 
     /// Round-trips every compression identifier supported by the region format.
@@ -97,6 +183,10 @@ public final class NBTRegionFileTest {
         try (NBTRegionFile region = NBTRegionFile.open(file)) {
             region.writeChunk(17, new Chunk(root), compression);
             region.flush();
+            StorageProfile.RegionSlot profileSlot = region.storageProfile().regionSlot(17);
+            assertEquals(compression.id(), profileSlot.marker());
+            assertTrue(profileSlot.isOccupied());
+            assertFalse(profileSlot.isExternal());
         }
 
         assertEquals(compression.id(), compressionMarker(file, 17) & 0x7F);
@@ -119,7 +209,7 @@ public final class NBTRegionFileTest {
         }
     }
 
-    /// Publishes payloads on both sides of the inline threshold and removes an obsolete companion.
+    /// Publishes payloads on both sides of the inline threshold and preserves an existing companion.
     @Test
     void convertsBetweenInlineAndExternalStorage() throws Exception {
         Path file = temporaryDirectory.resolve("r.0.0.mca");
@@ -137,6 +227,14 @@ public final class NBTRegionFileTest {
             region.flush();
             assertEquals(0x80, compressionMarker(file, 0) & 0x80);
             assertTrue(Files.isRegularFile(companion));
+            assertEquals(1, region.storageProfileChanges().size());
+            StorageProfileChange externalization = region.storageProfileChanges().get(0);
+            assertEquals(0, externalization.localIndex());
+            assertFalse(externalization.before().isExternal());
+            assertTrue(externalization.after().isExternal());
+            assertTrue(externalization.changedToExternal());
+            assertEquals(NBTRegionFile.CompressionType.UNCOMPRESSED.id(), externalization.before().marker());
+            assertEquals(NBTRegionFile.CompressionType.UNCOMPRESSED.id(), externalization.after().marker());
             CompoundTag externalRoot = new CompoundTag().addTag("payload", new ByteArrayTag(external));
             assertArrayEquals(NBTCodec.of().writeTagToByteArray(externalRoot), Files.readAllBytes(companion));
             assertEquals(chunkWithPayload(external).getRootTag(), region.readChunk(0).getRootTag());
@@ -148,10 +246,49 @@ public final class NBTRegionFileTest {
             region.flush();
             assertEquals(chunkWithPayload(externalReplacement).getRootTag(), region.readChunk(0).getRootTag());
 
-            region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 4)));
+            CompoundTag smallRoot = new CompoundTag().addInt("value", 4);
+            region.writeChunk(0, new Chunk(smallRoot));
             region.flush();
-            assertEquals(0, compressionMarker(file, 0) & 0x80);
-            assertFalse(Files.exists(companion));
+            assertEquals(0x80, compressionMarker(file, 0) & 0x80);
+            assertTrue(Files.isRegularFile(companion));
+            assertArrayEquals(NBTCodec.of().writeTagToByteArray(smallRoot),
+                    Files.readAllBytes(companion));
+        }
+    }
+
+    /// Rejects replacing an external marker in `.mcr` because its storage profile cannot be preserved.
+    ///
+    /// `.mcr` has no `.mcc` companion contract. A tolerant session may still encounter a stale
+    /// external bit, but it must neither create a companion nor silently convert that slot inline.
+    ///
+    /// @throws Exception if fixture preparation or the bounded repair publication fails
+    @Test
+    void rejectsReplacingMcrExternalMarkerWithoutChangingStorage() throws Exception {
+        Path mca = initialTwoChunkRegion();
+        Path file = temporaryDirectory.resolve("r.0.0.mcr");
+        Files.copy(mca, file);
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+        byte[] original = Files.readAllBytes(file);
+
+        CompoundTag replacement = new CompoundTag().addInt("value", 42);
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> damaged = region.readChunkTolerant(0);
+            assertNull(damaged.root().getRootTag());
+            assertTrue(damaged.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_MISSING".equals(issue.code())));
+
+            region.writeChunk(0, new Chunk(replacement));
+            assertThrows(IOException.class, region::flush);
+            assertTrue(region.isDirty());
+        }
+
+        assertArrayEquals(original, Files.readAllBytes(file));
+        try (var files = Files.list(temporaryDirectory)) {
+            assertFalse(files.anyMatch(path -> path.getFileName().toString()
+                    .toLowerCase(java.util.Locale.ROOT).endsWith(".mcc")));
         }
     }
 
@@ -166,6 +303,27 @@ public final class NBTRegionFileTest {
             region.flush();
         }
         assertTrue(Files.isRegularFile(companion));
+    }
+
+    /// Finds an existing external companion whose `.mcc` extension has different case.
+    @Test
+    void readsCaseInsensitiveExternalCompanionName() throws Exception {
+        Path file = temporaryDirectory.resolve("r.0.0.mca");
+        Path companion = temporaryDirectory.resolve("c.0.0.mcc");
+        Path renameStage = temporaryDirectory.resolve("companion-rename.tmp");
+        Path upperCompanion = temporaryDirectory.resolve("c.0.0.MCC");
+        CompoundTag expected = new CompoundTag()
+                .addTag("payload", new ByteArrayTag(randomPayload(1_100_000, 97L)));
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(expected), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            region.flush();
+        }
+        Files.move(companion, renameStage);
+        Files.move(renameStage, upperCompanion);
+
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            assertEquals(expected, region.readChunk(0).getRootTag());
+        }
     }
 
     /// Reuses a sector only after its old header entry has been cleared and forced.
@@ -216,9 +374,124 @@ public final class NBTRegionFileTest {
         assertThrows(IOException.class, () -> NBTRegionFile.open(halfEmpty));
     }
 
-    /// Includes referenced companion bytes in stale-source conflict detection.
+    /// Isolates overlapping slots while leaving a disjoint valid slot readable.
     @Test
-    void rejectsAnExternallyChangedCompanion() throws Exception {
+    void tolerantOpenIsolatesOverlappingSlotsOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        setLocation(bytes, 1, sectorOffset(bytes, 0), 1);
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> first = region.readChunkTolerant(0);
+            NBTReadResult<Chunk> second = region.readChunkTolerant(1);
+            assertNull(first.root().getRootTag());
+            assertNull(second.root().getRootTag());
+            assertTrue(first.report().issues().stream()
+                    .anyMatch(issue -> "REGION_HEADER_OVERLAP".equals(issue.code())));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Isolates a maximum 24-bit out-of-range offset without overflowing range arithmetic.
+    @Test
+    void tolerantOpenIsolatesMaximumSectorOffsetOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        setLocation(bytes, 0, 0xFF_FFFF, 0xFF);
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_HEADER_SLOT_OUT_OF_RANGE".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Rejects arithmetic ranges that cannot be represented as one addressable byte array.
+    @Test
+    void rejectsByteRangesWhoseLongEndWouldOverflow() throws Exception {
+        try (FileChannel channel = FileChannel.open(
+                threeChunkRegion(), StandardOpenOption.READ)) {
+            assertThrows(IOException.class, () -> NBTRegionFileIO.readBytes(
+                    channel, Long.MAX_VALUE - 1L, 4L));
+        }
+    }
+
+    /// Isolates a missing external companion while retaining another valid slot.
+    @Test
+    void tolerantOpenIsolatesMissingCompanionOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_MISSING".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Isolates an external slot when companion discovery itself fails without blocking other slots.
+    @Test
+    void tolerantOpenIsolatesUnavailableCompanionOnly() throws Exception {
+        Path file = threeChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+        ExternalChunkAccessor failingAccessor = new ExternalChunkAccessor() {
+            /// Fails discovery for the damaged slot while leaving other slots unsupported.
+            ///
+            /// @param localX local chunk X coordinate
+            /// @param localZ local chunk Z coordinate
+            /// @return no stream for non-damaged slots
+            /// @throws IOException when the damaged slot is probed
+            @Override
+            public @Nullable InputStream openInputStream(int localX, int localZ) throws IOException {
+                if (localX == 0 && localZ == 0) {
+                    throw new IOException("injected companion discovery failure");
+                }
+                return null;
+            }
+        };
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file, failingAccessor)) {
+            NBTReadResult<Chunk> invalid = region.readChunkTolerant(0);
+            assertNull(invalid.root().getRootTag());
+            assertTrue(invalid.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_UNAVAILABLE".equals(issue.code())));
+            assertEquals(1, region.readChunkTolerant(1).root().getRootTag().getInt("value"));
+            assertEquals(9, region.readChunkTolerant(2).root().getRootTag().getInt("value"));
+        }
+    }
+
+    /// Rejects a new region path whose parent is a symbolic link.
+    @Test
+    void rejectsRegionUnderSymbolicParent() throws Exception {
+        Path realDirectory = temporaryDirectory.resolve("real-region");
+        Files.createDirectories(realDirectory);
+        Path linkedDirectory = temporaryDirectory.resolve("linked-region");
+        try {
+            Files.createSymbolicLink(linkedDirectory, realDirectory);
+        } catch (UnsupportedOperationException | IOException | SecurityException unsupported) {
+            Assumptions.abort("symbolic links are unavailable on this filesystem");
+        }
+
+        assertThrows(IOException.class, () -> NBTRegionFile.open(linkedDirectory.resolve("r.0.0.mca")));
+    }
+
+    /// Does not use a source fingerprint when another writer changes a companion.
+    @Test
+    void allowsAnExternallyChangedCompanion() throws Exception {
         Path file = temporaryDirectory.resolve("r.0.0.mca");
         Path companion = temporaryDirectory.resolve("c.0.0.mcc");
         try (NBTRegionFile initial = NBTRegionFile.open(file)) {
@@ -232,8 +505,8 @@ public final class NBTRegionFileTest {
             byte[] changed = Files.readAllBytes(companion);
             changed[changed.length - 1] ^= 1;
             Files.write(companion, changed);
-            assertThrows(IOException.class, region::flush);
-            assertEquals(List.of(1), region.dirtyChunkIndexes());
+            region.flush();
+            assertEquals(List.of(), region.dirtyChunkIndexes());
         }
     }
 
@@ -255,7 +528,7 @@ public final class NBTRegionFileTest {
                         file,
                         StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException unsupported) {
+            } catch (AtomicMoveNotSupportedException | AccessDeniedException unsupported) {
                 return;
             }
 
@@ -287,7 +560,7 @@ public final class NBTRegionFileTest {
         assertEquals(1, readValue(file, 0));
     }
 
-    /// Refreshes the session fingerprint after an allocation write fails so a retry can commit.
+    /// Restores an allocation after a write fails so a retry can commit.
     ///
     /// @param runtimeFailure whether the first allocation failure is unchecked
     @ParameterizedTest
@@ -432,8 +705,8 @@ public final class NBTRegionFileTest {
             region.writeChunk(0, chunkWithPayload(random), NBTRegionFile.CompressionType.UNCOMPRESSED);
             region.flush();
             region.writeChunk(0, chunkWithPayload(random), NBTRegionFile.CompressionType.GZIP);
-            assertThrows(IOException.class, region::flush);
-            assertEquals(List.of(0), region.dirtyChunkIndexes());
+            assertDoesNotThrow(region::flush);
+            assertEquals(List.of(), region.dirtyChunkIndexes());
         }
         assertEquals(NBTRegionFile.CompressionType.UNCOMPRESSED.id(), compressionMarker(file, 0) & 0x7F);
     }
@@ -545,109 +818,158 @@ public final class NBTRegionFileTest {
         }
     }
 
-    /// Preserves the committed prefix when the next slot detects a source fingerprint conflict.
+    /// Locks the session when publishing an external backup and restoring its staged copy both fail.
     @Test
-    void reportsCommittedPrefixWhenNextFingerprintConflicts() throws Exception {
+    void reportsUncertainCompanionBackupRollbackAndRequiresReopen() throws Exception {
+        Path file = temporaryDirectory.resolve("r.0.0.mca");
+        byte[] original = randomPayload(1_100_000, 53L);
+        byte[] replacement = randomPayload(1_100_000, 54L);
+        try (NBTRegionFile initial = NBTRegionFile.open(file)) {
+            initial.writeChunk(0, chunkWithPayload(original), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            initial.flush();
+        }
+        NBTRegionFile.CommitHook failure = (stage, index) -> {
+            if (index == 0 && (stage == NBTRegionFile.CommitStage.COMPANION_BACKUP_PUBLISH
+                    || stage == NBTRegionFile.CommitStage.COMPANION_ROLLBACK)) {
+                throw new IOException("injected companion backup rollback failure");
+            }
+        };
+
+        try (NBTRegionFile region = NBTRegionFile.open(file, ExternalChunkAccessor.of(file), failure)) {
+            region.writeChunk(0, chunkWithPayload(replacement), NBTRegionFile.CompressionType.UNCOMPRESSED);
+            assertThrows(NBTCommitUncertainException.class, region::flush);
+            assertThrows(IOException.class, () -> region.readChunk(0));
+            assertEquals(List.of(0), region.dirtyChunkIndexes());
+            assertThrows(IllegalStateException.class,
+                    () -> region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1))));
+        }
+    }
+
+    /// Allows a source-header edit made by another writer; no source fingerprint conflict is used.
+    @Test
+    void allowsExternalHeaderEditDuringFlush() throws Exception {
         Path file = initialTwoChunkRegion();
-        AtomicBoolean firstChunkCommitted = new AtomicBoolean();
-        AtomicInteger fingerprintsAfterCommit = new AtomicInteger();
-        NBTRegionFile.CommitHook conflict = (stage, index) -> {
-            if (stage == NBTRegionFile.CommitStage.HEADER_FORCED && index == 0) {
-                firstChunkCommitted.set(true);
-            } else if (stage == NBTRegionFile.CommitStage.FINGERPRINT_CAPTURE
-                    && firstChunkCommitted.get()
-                    && fingerprintsAfterCommit.incrementAndGet() == 2) {
+        NBTRegionFile.CommitHook editHeader = (stage, index) -> {
+            if (stage == NBTRegionFile.CommitStage.HEADER_WRITTEN && index == 0) {
                 overwriteTimestampByte(file, 12, (byte) 0x55);
             }
         };
-        try (NBTRegionFile region = NBTRegionFile.open(file, ExternalChunkAccessor.of(file), conflict)) {
+        try (NBTRegionFile region = NBTRegionFile.open(file, ExternalChunkAccessor.of(file), editHeader)) {
             region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 10)));
             region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 11)));
-            NBTPartialSaveException exception = assertThrows(NBTPartialSaveException.class, region::flush);
-            assertEquals(List.of(0), exception.committedIndexes());
-            assertEquals(1, exception.failedIndex());
-            assertEquals(List.of(1), region.dirtyChunkIndexes());
+            region.flush();
+            assertFalse(region.isDirty());
         }
         assertEquals(10, readValue(file, 0));
-        assertEquals(1, readValue(file, 1));
+        assertEquals(11, readValue(file, 1));
     }
 
-    /// Checks the source fingerprint even when no chunk is pending.
+    /// Does not reject an external source change when no chunk is pending.
     @Test
-    void emptyFlushRejectsExternalSourceChange() throws Exception {
+    void emptyFlushIgnoresExternalSourceChange() throws Exception {
         Path file = initialTwoChunkRegion();
         try (NBTRegionFile region = NBTRegionFile.open(file)) {
             overwriteTimestampByte(file, 0, (byte) 0x55);
 
-            assertThrows(IOException.class, region::flush);
+            region.flush();
             assertFalse(region.isDirty());
         }
     }
 
-    /// Reports a durable chunk when refreshing its post-commit fingerprint fails.
-    ///
-    /// @param runtimeFailure whether the injected fingerprint failure is unchecked
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void reportsCommittedChunkWhenPostCommitFingerprintFails(boolean runtimeFailure) throws Exception {
+    /// Repairs an incomplete trailing sector during an explicit tolerant save.
+    @Test
+    void tolerantSaveRemovesIncompleteTrailingSector() throws Exception {
         Path file = initialTwoChunkRegion();
-        AtomicInteger fingerprints = new AtomicInteger();
-        NBTRegionFile.CommitHook failure = (stage, index) -> {
-            if (stage == NBTRegionFile.CommitStage.FINGERPRINT_CAPTURE
-                    && fingerprints.incrementAndGet() == 4) {
-                if (runtimeFailure) {
-                    throw new IllegalStateException("injected runtime fingerprint failure");
-                }
-                throw new IOException("injected fingerprint failure");
-            }
-        };
-        try (NBTRegionFile region = NBTRegionFile.open(file, ExternalChunkAccessor.of(file), failure)) {
-            region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 10)));
-            region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 11)));
-            NBTPartialSaveException exception = assertThrows(NBTPartialSaveException.class, region::flush);
-            assertEquals(List.of(0), exception.committedIndexes());
-            assertEquals(-1, exception.failedIndex());
-            assertInstanceOf(NBTCommitUncertainException.class, exception.getCause());
-            assertEquals(List.of(1), region.dirtyChunkIndexes());
-            assertThrows(IOException.class, () -> region.readChunk(0));
+        Files.write(file, new byte[]{0x55}, StandardOpenOption.APPEND);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, region.readReport().severity());
+            region.flush();
+            assertEquals(0L, Files.size(file) % ChunkUtils.SECTOR_BYTES);
+            assertEquals(NBTReadReport.Severity.CLEAN, region.readReport().severity());
         }
-        assertEquals(10, readValue(file, 0));
-        assertEquals(1, readValue(file, 1));
+
+        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
+            assertEquals(1, reopened.readChunk(0).getRootTag().getInt("value"));
+        }
     }
 
-    /// Locks the session when fingerprint recovery fails after an unpublished payload write.
-    ///
-    /// @param runtimeFailure whether the injected fingerprint failure is unchecked
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void reportsUncertainStateWhenFailedWriteCannotRefreshFingerprint(boolean runtimeFailure) throws Exception {
+    /// Preserves a complete physical payload when only the inline frame length is damaged.
+    @Test
+    void preservesRecoverablePrefixFromTruncatedInlineFrame() throws Exception {
         Path file = initialTwoChunkRegion();
-        AtomicBoolean payloadFailed = new AtomicBoolean();
-        NBTRegionFile.CommitHook failure = (stage, index) -> {
-            if (index == 0 && stage == NBTRegionFile.CommitStage.PAYLOAD_WRITTEN) {
-                payloadFailed.set(true);
-                throw new IOException("injected payload failure");
-            }
-            if (stage == NBTRegionFile.CommitStage.FINGERPRINT_CAPTURE && payloadFailed.get()) {
-                if (runtimeFailure) {
-                    throw new IllegalStateException("injected runtime fingerprint failure");
-                }
-                throw new IOException("injected fingerprint failure");
-            }
-        };
-        try (NBTRegionFile region = NBTRegionFile.open(file, ExternalChunkAccessor.of(file), failure)) {
-            region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 10)));
+        byte[] bytes = Files.readAllBytes(file);
+        int slotOffset = sectorOffset(bytes, 0);
+        int frameOffset = slotOffset * ChunkUtils.SECTOR_BYTES;
+        ByteBuffer.wrap(bytes, frameOffset, Integer.BYTES).putInt(Integer.MAX_VALUE);
+        Files.write(file, bytes);
 
-            NBTCommitUncertainException exception = assertThrows(NBTCommitUncertainException.class, region::flush);
-            assertEquals(0, exception.localIndex());
-            assertEquals(1, exception.getSuppressed().length);
-            assertTrue(exception.getSuppressed()[0].getMessage().contains("injected payload failure"));
-            assertEquals(List.of(0), region.dirtyChunkIndexes());
-            assertThrows(IOException.class, () -> region.readChunk(0));
-            assertThrows(IllegalStateException.class,
-                    () -> region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1))));
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> result = region.readChunkTolerant(0);
+            assertNotNull(result.root().getRootTag(), result.report().toString());
+            assertEquals(1, result.root().getRootTag().getInt("value"));
+            assertTrue(result.report().issues().stream()
+                    .anyMatch(issue -> "REGION_FRAME_LENGTH_CLAMPED".equals(issue.code())
+                            || "REGION_FRAME_INVALID".equals(issue.code())
+                            || "REGION_SLOT_ISOLATED".equals(issue.code())),
+                    result.report().issues().toString());
+
+            ChunkRegion snapshot = new ChunkRegion();
+            ChunkRegion baseline = new ChunkRegion();
+            snapshot.setChunk(0, result.root().clone());
+            baseline.setChunk(0, result.root().clone());
+            region.synchronizePendingChanges(snapshot, baseline);
+            assertTrue(region.isDirty());
+            region.flush();
         }
-        assertEquals(1, readValue(file, 0));
+
+        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
+            assertEquals(1, reopened.readChunk(0).getRootTag().getInt("value"));
+            assertEquals(1, reopened.readChunk(1).getRootTag().getInt("value"));
+        }
+    }
+
+    /// Requires an explicit clear or replacement before publishing an unknown marker slot.
+    @Test
+    void tolerantSaveRequiresExplicitUnknownMarkerReplacement() throws Exception {
+        Path file = initialTwoChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int slotOffset = sectorOffset(bytes, 0);
+        bytes[slotOffset * ChunkUtils.SECTOR_BYTES + Integer.BYTES] = 5;
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            ChunkRegion snapshot = new ChunkRegion();
+            ChunkRegion baseline = new ChunkRegion();
+            Chunk valid = region.readChunkTolerant(1).root();
+            snapshot.setChunk(1, valid.clone());
+            baseline.setChunk(1, valid.clone());
+
+            region.synchronizePendingChanges(snapshot, baseline);
+            assertThrows(IOException.class, region::flush);
+            region.clearChunk(0);
+            assertDoesNotThrow(region::flush);
+            assertEquals(NBTReadReport.Severity.CLEAN, region.readReport().severity());
+        }
+
+        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
+            assertNull(reopened.readChunk(0).getRootTag());
+            assertEquals(1, reopened.readChunk(1).getRootTag().getInt("value"));
+        }
+    }
+
+    /// Rejects an opaque compression marker when a tolerant session has no explicit replacement.
+    @Test
+    void tolerantEmptyFlushRejectsUnknownMarker() throws Exception {
+        Path file = initialTwoChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int slotOffset = sectorOffset(bytes, 0);
+        bytes[slotOffset * ChunkUtils.SECTOR_BYTES + Integer.BYTES] = 5;
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            assertThrows(IOException.class, region::flush);
+        }
     }
 
     /// Removes the reversible companion backup after a post-header external failure is reported.
@@ -707,6 +1029,10 @@ public final class NBTRegionFileTest {
             assertEquals(List.of(0), exception.committedIndexes());
             assertEquals(-1, exception.failedIndex());
             assertFalse(region.isDirty());
+            assertDoesNotThrow(region::flush);
+            try (var files = Files.list(temporaryDirectory)) {
+                assertFalse(files.anyMatch(path -> path.getFileName().toString().endsWith(".old")));
+            }
         }
         try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
             assertEquals(chunkWithPayload(replacement).getRootTag(), reopened.readChunk(0).getRootTag());
@@ -716,6 +1042,9 @@ public final class NBTRegionFileTest {
     /// Never restores a new companion after the main path changes following a forced header write.
     @Test
     void locksWithoutRestoringCompanionWhenPathChangesAfterHeaderWrite() throws Exception {
+        Assumptions.assumeFalse(
+                System.getProperty("os.name", "").contains("Windows"),
+                "Windows keeps an open region channel from being atomically replaced");
         Path file = temporaryDirectory.resolve("r.0.0.mca");
         Path companion = temporaryDirectory.resolve("c.0.0.mcc");
         byte[] original = randomPayload(1_100_000, 81L);
@@ -729,6 +1058,22 @@ public final class NBTRegionFileTest {
         try (NBTRegionFile independent = NBTRegionFile.open(replacementFile)) {
             independent.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 99)));
             independent.flush();
+        }
+        Path atomicProbeSource = temporaryDirectory.resolve("atomic-probe-source.mca");
+        Path atomicProbeTarget = temporaryDirectory.resolve("atomic-probe-target.mca");
+        Files.writeString(atomicProbeSource, "source");
+        Files.writeString(atomicProbeTarget, "target");
+        try {
+            Files.move(
+                    atomicProbeSource,
+                    atomicProbeTarget,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException | AccessDeniedException unsupported) {
+            Assumptions.assumeTrue(false, "atomic replacement is unavailable on this filesystem");
+        } finally {
+            Files.deleteIfExists(atomicProbeSource);
+            Files.deleteIfExists(atomicProbeTarget);
         }
         NBTRegionFile.CommitHook replacementHook = (stage, index) -> {
             if (index == 0 && stage == NBTRegionFile.CommitStage.HEADER_WRITTEN) {
@@ -856,6 +1201,20 @@ public final class NBTRegionFileTest {
         try (NBTRegionFile region = NBTRegionFile.open(file)) {
             region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 1)));
             region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1)));
+            region.flush();
+        }
+        return file;
+    }
+
+    /// Creates three disjoint valid slots for tolerant-isolation tests.
+    ///
+    /// @return initialized region path
+    private Path threeChunkRegion() throws Exception {
+        Path file = temporaryDirectory.resolve("r.3.0.mca");
+        try (NBTRegionFile region = NBTRegionFile.open(file)) {
+            region.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 0)));
+            region.writeChunk(1, new Chunk(new CompoundTag().addInt("value", 1)));
+            region.writeChunk(2, new Chunk(new CompoundTag().addInt("value", 9)));
             region.flush();
         }
         return file;

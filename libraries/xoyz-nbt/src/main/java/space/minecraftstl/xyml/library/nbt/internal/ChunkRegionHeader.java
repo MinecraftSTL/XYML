@@ -74,11 +74,11 @@ public final class ChunkRegionHeader {
         for (int i = 0; i < occupiedCount; i++) {
             int left = occupied[i];
             int leftStart = getSectorOffset(left);
-            int leftEnd = leftStart + getSectorLength(left);
+            long leftEnd = (long) leftStart + getSectorLength(left);
             for (int j = i + 1; j < occupiedCount; j++) {
                 int right = occupied[j];
                 int rightStart = getSectorOffset(right);
-                int rightEnd = rightStart + getSectorLength(right);
+                long rightEnd = (long) rightStart + getSectorLength(right);
                 if (leftStart < rightEnd && rightStart < leftEnd) {
                     throw new IOException("Overlapping region sectors for chunks " + left + " and " + right);
                 }

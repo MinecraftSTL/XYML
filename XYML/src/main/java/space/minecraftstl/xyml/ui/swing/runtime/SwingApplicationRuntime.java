@@ -177,7 +177,8 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                 runtime::close,
                 runtime::hideIfOpen,
                 runtime::showIfOpen,
-                runtime::openModSearchIfOpen));
+                runtime::openModSearchIfOpen,
+                runtime::openMissingDependencySearchIfOpen));
         return runtime;
     }
 
@@ -225,6 +226,19 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             throw new IllegalStateException("Launcher Swing application runtime is closed");
         }
         composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
+    }
+
+    /// Opens one missing-dependency search with its analyzed game-version filter.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        if (closed.get()) {
+            throw new IllegalStateException("Launcher Swing application runtime is closed");
+        }
+        composition.openMissingDependencySearch(
+                Objects.requireNonNull(dependencyId, "dependencyId"),
+                gameVersion);
     }
 
     /// Returns whether application cleanup has started.
@@ -292,6 +306,19 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             throw new IllegalStateException("Launcher Swing application runtime is closed");
         }
         composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
+    }
+
+    /// Opens a missing-dependency search only while the runtime remains usable.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    private void openMissingDependencySearchIfOpen(String dependencyId, @Nullable String gameVersion) {
+        if (closed.get()) {
+            throw new IllegalStateException("Launcher Swing application runtime is closed");
+        }
+        composition.openMissingDependencySearch(
+                Objects.requireNonNull(dependencyId, "dependencyId"),
+                gameVersion);
     }
 
     /// Closes one nullable partially constructed resource after factory failure.
@@ -412,6 +439,16 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             Objects.requireNonNull(dependencyId, "dependencyId");
         }
 
+        /// Opens one missing-dependency query with its analyzed Minecraft-version filter.
+        ///
+        /// Lightweight lifecycle test doubles retain the legacy ID-only behavior by default.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        default void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            openModSearch(dependencyId);
+        }
+
         /// Closes the application surface.
         @Override
         void close();
@@ -502,6 +539,17 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
         }
 
+        /// Opens the concrete composition's version-aware missing-dependency search page.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            composition.openMissingDependencySearch(
+                    Objects.requireNonNull(dependencyId, "dependencyId"),
+                    gameVersion);
+        }
+
         /// Closes the concrete Swing composition.
         @Override
         public void close() {
@@ -570,7 +618,8 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                     () -> request(actions -> actions.close().run()),
                     () -> request(actions -> actions.hide().run()),
                     () -> request(actions -> actions.show().run()),
-                    this::requestModSearch);
+                    this::requestModSearch,
+                    this::requestMissingDependencySearch);
         }
 
         /// Attaches the sole runtime target and drains earlier actions in their original order.
@@ -637,6 +686,15 @@ public final class SwingApplicationRuntime implements AutoCloseable {
         private void requestModSearch(String dependencyId) {
             String query = Objects.requireNonNull(dependencyId, "dependencyId");
             request(actions -> actions.openModSearch().accept(query));
+        }
+
+        /// Queues or immediately forwards one version-aware missing-dependency search request.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        private void requestMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            String query = Objects.requireNonNull(dependencyId, "dependencyId");
+            request(actions -> actions.openMissingDependencySearch().open(query, gameVersion));
         }
     }
 }

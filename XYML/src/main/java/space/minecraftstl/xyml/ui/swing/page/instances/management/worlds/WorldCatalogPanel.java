@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
@@ -35,6 +36,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -59,6 +61,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Image;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
@@ -68,7 +71,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
@@ -86,6 +91,15 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Minimum page width for keeping the world list and details surfaces side by side.
+    private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
+
+    /// Fallback icon used when a world has no readable embedded PNG.
+    private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
     /// Pure background model owned and closed by this page.
     private final WorldCatalogModel model;
 
@@ -100,6 +114,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Viewport-driven sparse list backed by the shallow source index.
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
+
+    /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
+    private final ResponsiveCatalogSplitPane catalogSplit;
 
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
@@ -301,7 +318,14 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.quickPlayActions = Objects.requireNonNull(quickPlayActions, "quickPlayActions");
         displayedSnapshot = this.model.snapshot();
-        choiceList = new ViewportChoiceList<>(this.model, WorldCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                this.model,
+                new RichChoiceListCellRenderer<>(
+                        WorldCatalogItem::displayText,
+                        this::worldRowDetail,
+                        this::worldRowBadge,
+                        this::worldRowIcon,
+                        this::worldRowTooltip));
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;
 
@@ -309,7 +333,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
-        add(createCatalogSplit(), BorderLayout.CENTER);
+        catalogSplit = createCatalogSplit();
+        add(catalogSplit, BorderLayout.CENTER);
         add(createStatusBand(), BorderLayout.SOUTH);
         configureList();
         configureDetailsControls();
@@ -339,6 +364,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @return owned viewport-driven list
     public ViewportChoiceList<WorldCatalogItem> choiceList() {
         return choiceList;
+    }
+
+    /// Selects the list/details orientation from the width allocated by the instance shell.
+    @Override
+    public void doLayout() {
+        catalogSplit.updateForAvailableWidth(getWidth());
+        super.doLayout();
     }
 
     /// Returns the latest snapshot rendered by this panel.
@@ -417,7 +449,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Creates a stable split between the viewport list and the selected-world details.
     ///
     /// @return unframed catalog split component
-    private JComponent createCatalogSplit() {
+    private ResponsiveCatalogSplitPane createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout());
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
@@ -430,18 +462,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         listSurface.add(choiceList, BorderLayout.CENTER);
 
-        JSplitPane split = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
+        return new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
-        split.setName("worldsCatalogSplit");
-        split.setOpaque(false);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        split.setContinuousLayout(true);
-        split.setResizeWeight(0.46D);
-        split.setDividerLocation(0.46D);
-        split.setMinimumSize(new Dimension(0, 0));
-        return split;
     }
 
     /// Creates editable selected-world metadata and icon-only row actions.
@@ -696,6 +719,78 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private void configureList() {
         choiceList.getList().addListSelectionListener(selectionListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
+    }
+
+    /// Formats the compact world metadata shown beside the row title.
+    ///
+    /// @param world loaded world row
+    /// @return game-version and last-played metadata, or retained failure detail
+    private String worldRowDetail(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return firstNonBlankLine(world.failureDetail());
+        }
+        List<String> values = new ArrayList<>();
+        if (world.gameVersion() != null) {
+            values.add(strings.gameVersionLabel() + ": " + world.gameVersion());
+        }
+        values.add(strings.lastPlayedLabel() + ": " + formatLastPlayed(world.lastPlayed()));
+        return String.join(" | ", values);
+    }
+
+    /// Formats the lock/readability badge for one world row.
+    ///
+    /// @param world loaded world row
+    /// @return localized readability and lock state
+    private String worldRowBadge(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return strings.unreadableValue();
+        }
+        return world.locked() ? strings.lockedValue() : strings.unlockedValue();
+    }
+
+    /// Returns a decoded and row-sized embedded world icon when available.
+    ///
+    /// @param world loaded world row
+    /// @return fixed-size icon, or the bundled fallback icon
+    private Icon worldRowIcon(WorldCatalogItem world) {
+        @Nullable WorldCatalogDetails details = world.details();
+        if (details == null || details.iconPngBase64() == null) {
+            return WORLD_ROW_ICON;
+        }
+        try {
+            ImageIcon source = new ImageIcon(Base64.getDecoder().decode(details.iconPngBase64()));
+            if (source.getIconWidth() <= 0 || source.getIconHeight() <= 0) {
+                return WORLD_ROW_ICON;
+            }
+            Image scaled = source.getImage().getScaledInstance(40, 40, Image.SCALE_SMOOTH);
+            return new ImageIcon(scaled);
+        } catch (IllegalArgumentException failure) {
+            return WORLD_ROW_ICON;
+        }
+    }
+
+    /// Supplies a useful tooltip without forcing another world read.
+    ///
+    /// @param world loaded world row
+    /// @return full path and optional failure detail
+    private String worldRowTooltip(WorldCatalogItem world) {
+        return world.failureDetail() == null
+                ? world.path().toString()
+                : world.path() + "\n" + world.failureDetail();
+    }
+
+    /// Returns the first meaningful line from a potentially multiline failure message.
+    ///
+    /// @param text nullable failure detail
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Configures transparent detail controls and localized enum rendering.
@@ -1584,6 +1679,61 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         editLevelDataButton.setEnabled(false);
         interactions.close();
         removeAll();
+    }
+
+    /// Switches the world catalog between side-by-side and stacked layouts from actual host width.
+    @NotNullByDefault
+    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
+        /// Whether the divider ratio has been initialized for the current orientation.
+        private boolean orientationInitialized;
+
+        /// Creates a borderless split whose children may shrink to the allocated host width.
+        ///
+        /// @param list list and filter surface
+        /// @param details selected-world details surface
+        private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
+            // Start stacked so the first preferred-size calculation cannot add both wide child surfaces.
+            super(JSplitPane.VERTICAL_SPLIT, list, details);
+            setName("worldsCatalogSplit");
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder());
+            setContinuousLayout(true);
+            setResizeWeight(0.46D);
+        }
+
+        /// Selects side-by-side or stacked presentation before child layout occurs.
+        ///
+        /// @param availableWidth width allocated by the owning page
+        private void updateForAvailableWidth(int availableWidth) {
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desiredOrientation) {
+                setOrientation(desiredOrientation);
+                orientationInitialized = false;
+            }
+            setResizeWeight(horizontal ? 0.46D : 0.48D);
+        }
+
+        /// Initializes the divider only after the split has a real extent.
+        @Override
+        public void doLayout() {
+            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
+            if (!orientationInitialized) {
+                int extent = horizontal ? getWidth() : getHeight();
+                int usableExtent = extent - getDividerSize();
+                if (usableExtent > 1) {
+                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.46D : 0.48D)));
+                    orientationInitialized = true;
+                }
+            }
+            super.doLayout();
+        }
+
+        /// Allows the shell to constrain both children without honoring their preferred widths.
+        @Override
+        public Dimension getMinimumSize() {
+            return new Dimension(0, 0);
+        }
     }
 
     /// Removes asynchronous wrapper exceptions and returns concise failure detail.

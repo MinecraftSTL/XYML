@@ -20,9 +20,12 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.task.Task;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /// Provides toolkit-neutral instance icon state and repository mutations to the Swing overview.
 ///
@@ -41,16 +44,49 @@ interface InstanceIconStore {
     /// @throws IOException when the repository cannot complete the file mutation
     void selectBuiltIn(GameInstanceIconType iconType) throws IOException;
 
+    /// Creates a resource-aware task for selecting a bundled icon.
+    ///
+    /// The default keeps test and non-repository stores source-compatible; repository-backed implementations should
+    /// override it with precise instance and configuration resources.
+    ///
+    /// @param iconType one of the bundled icon types
+    /// @param executor executor used for the mutation body
+    /// @return deferred icon mutation task
+    default Task<?> selectBuiltInTask(GameInstanceIconType iconType, Executor executor) {
+        Objects.requireNonNull(iconType, "iconType");
+        return Task.runAsync(Objects.requireNonNull(executor, "executor"), () -> selectBuiltIn(iconType));
+    }
+
     /// Copies one custom image and restores the default built-in fallback type.
     ///
     /// @param sourceImage local image selected by the user
     /// @throws IOException when the repository cannot copy the custom image
     void selectCustom(Path sourceImage) throws IOException;
 
+    /// Creates a resource-aware task for selecting a custom icon.
+    ///
+    /// @param sourceImage local image selected by the user
+    /// @param executor executor used for the mutation body
+    /// @return deferred icon mutation task
+    default Task<?> selectCustomTask(Path sourceImage, Executor executor) {
+        Objects.requireNonNull(sourceImage, "sourceImage");
+        return Task.runAsync(
+                Objects.requireNonNull(executor, "executor"),
+                () -> selectCustom(sourceImage));
+    }
+
     /// Removes every persisted custom-image variant while retaining the built-in fallback type.
     ///
     /// @throws IOException when the repository cannot remove a custom image
     void deleteCustom() throws IOException;
+
+    /// Creates a resource-aware task for deleting custom icon files.
+    ///
+    /// @param executor executor used for the mutation body
+    /// @return deferred icon mutation task
+    default Task<?> deleteCustomTask(Executor executor) {
+        return Task.runAsync(Objects.requireNonNull(executor, "executor"), this::deleteCustom);
+    }
 
     /// Publishes one successful icon transition to repository listeners.
     ///

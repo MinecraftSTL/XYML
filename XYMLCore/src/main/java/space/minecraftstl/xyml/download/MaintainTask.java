@@ -17,8 +17,11 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.SimpleMultimap;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -38,13 +41,20 @@ import java.util.stream.Stream;
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Normalizes legacy loader manifests and publishes bundled compatibility libraries when required.
+@NotNullByDefault
 public class MaintainTask extends Task<GameInstanceManifest> {
     private final GameRepository repository;
     private final GameInstanceManifest manifest;
 
+    /// Creates a maintenance task scoped to the manifest's effective library directory.
+    ///
+    /// @param repository repository used to resolve the manifest and library paths
+    /// @param manifest independent manifest to normalize
     public MaintainTask(GameRepository repository, GameInstanceManifest manifest) {
         this.repository = repository;
         this.manifest = manifest;
+        setResources(TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)));
 
         if (manifest.inheritsFrom() != null)
             throw new IllegalArgumentException("MaintainTask requires independent game version");
@@ -59,7 +69,7 @@ public class MaintainTask extends Task<GameInstanceManifest> {
         if (manifest.inheritsFrom() != null)
             throw new IllegalArgumentException("MaintainTask requires independent game version");
 
-        String mainClass = manifest.resolve(repository).mainClass();
+        @Nullable String mainClass = manifest.resolve(repository).mainClass();
 
         if (mainClass != null && mainClass.equals(LibraryAnalyzer.LAUNCH_WRAPPER_MAIN)) {
             manifest = maintainOptiFineLibrary(repository, maintainGameWithLaunchWrapper(repository, unique(manifest), true), false);
@@ -101,7 +111,7 @@ public class MaintainTask extends Task<GameInstanceManifest> {
     private static GameInstanceManifest maintainGameWithLaunchWrapper(GameRepository repository, GameInstanceManifest manifest, boolean reorderTweakClass) {
         LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
         GameInstanceLibraryBuilder builder = new GameInstanceLibraryBuilder(manifest);
-        String mainClass = null;
+        @Nullable String mainClass = null;
 
         // Installing Forge will override the Minecraft arguments in json, so LiteLoader and OptiFine Tweaker are being re-added.
         if (libraryAnalyzer.has(LITELOADER) && !libraryAnalyzer.hasModLauncher()) {
@@ -161,7 +171,8 @@ public class MaintainTask extends Task<GameInstanceManifest> {
                 builder.addJvmArgument("-Dxyml.transformer.candidates=${library_directory}/" + library.getPath());
                 if (!libraryExisting) builder.addLibrary(xymlTransformerDiscoveryService);
                 Path libraryPath = repository.getLibraryFile(manifest, xymlTransformerDiscoveryService);
-                try (InputStream input = MaintainTask.class.getResourceAsStream("/assets/game/XYMLTransformerDiscoveryService-1.0.jar")) {
+                try (@Nullable InputStream input = MaintainTask.class.getResourceAsStream(
+                        "/assets/game/XYMLTransformerDiscoveryService-1.0.jar")) {
                     Files.createDirectories(libraryPath.getParent());
                     Files.copy(Objects.requireNonNull(input, "Bundled XYMLTransformerDiscoveryService is missing."), libraryPath, StandardCopyOption.REPLACE_EXISTING);
                 } catch (IOException | NullPointerException e) {
@@ -247,9 +258,18 @@ public class MaintainTask extends Task<GameInstanceManifest> {
         return builder.build();
     }
 
-    private static GameInstanceManifest maintainOptiFineLibrary(GameRepository repository, GameInstanceManifest manifest, boolean remove) {
+    /// Rewrites OptiFine library placement while tolerating legacy calls without a repository.
+    ///
+    /// @param repository repository used to locate installed libraries, or null to skip filesystem checks
+    /// @param manifest manifest to rewrite
+    /// @param remove whether the replacement OptiFine library should be removed
+    /// @return rewritten manifest
+    private static GameInstanceManifest maintainOptiFineLibrary(
+            @Nullable GameRepository repository,
+            GameInstanceManifest manifest,
+            boolean remove) {
         LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
-        List<Library> libraries = new ArrayList<>(manifest.getLibraries());
+        List<@Nullable Library> libraries = new ArrayList<>(manifest.getLibraries());
 
         if (libraryAnalyzer.has(OPTIFINE)) {
             if (libraryAnalyzer.has(LITELOADER) || libraryAnalyzer.has(FORGE)) {
@@ -257,7 +277,10 @@ public class MaintainTask extends Task<GameInstanceManifest> {
                 // And we should load the installer jar instead of patch jar.
                 if (repository != null) {
                     for (int i = 0; i < manifest.getLibraries().size(); ++i) {
-                        Library library = libraries.get(i);
+                        @Nullable Library library = libraries.get(i);
+                        if (library == null) {
+                            continue;
+                        }
                         if (library.is("optifine", "OptiFine")) {
                             Library newLibrary = new Library(new Artifact("optifine", "OptiFine", library.version(), "installer"));
                             if (Files.exists(repository.getLibraryFile(manifest, newLibrary))) {

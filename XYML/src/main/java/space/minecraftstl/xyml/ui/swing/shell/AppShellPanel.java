@@ -445,6 +445,24 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         catalogPanel.openModSearch(query);
     }
 
+    /// Navigates to one read-only missing-dependency search with its analyzed game-version filter.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        String query = Objects.requireNonNull(dependencyId, "dependencyId").trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("dependencyId must not be blank");
+        }
+        navigateTo(ShellPageId.DOWNLOADS);
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
+            throw new IllegalStateException("Downloads page does not expose the game-version catalog");
+        }
+        catalogPanel.openMissingDependencySearch(query, gameVersion);
+    }
+
     /// Opens or toggles one side destination from the left navigation rail.
     ///
     /// Repeating an active rail destination closes it and exposes persistent instance management. Other programmatic

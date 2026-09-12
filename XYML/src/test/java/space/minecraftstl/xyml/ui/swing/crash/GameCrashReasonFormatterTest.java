@@ -77,6 +77,16 @@ class GameCrashReasonFormatterTest {
         assertEquals(i18n("game.crash.reason.stacktrace", "alpha, zeta"), message);
     }
 
+    /// Escapes log-derived unknown keywords before they enter the localized HTML document.
+    @Test
+    void escapesUnknownCrashKeywords() {
+        String message = new GameCrashReasonFormatter().format(
+                new GameCrashAnalysis(List.of(), Set.of("<script>alert(1)</script>")));
+
+        assertTrue(message.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assertTrue(!message.contains("<script>alert(1)</script>"));
+    }
+
     /// Formats a limited diagnosis through its solver localization key and immutable arguments.
     @Test
     void formatsLimitedLogDiagnosis() {

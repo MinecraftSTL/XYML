@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeAcquisitionService.IncompleteInstallCleanup;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -196,6 +197,7 @@ final class JavaRuntimeInstallationPublisher {
                         "Manifest update metadata uses reserved key " + INSTALL_OWNER_UPDATE_KEY);
             }
             setName("Install managed Java runtime " + name);
+            setResources(TaskResource.javaRuntime(this.platformRoot));
         }
 
         /// Creates the owned staging directory and the stopped legacy extraction task.

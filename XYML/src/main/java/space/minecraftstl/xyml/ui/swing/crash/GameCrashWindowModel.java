@@ -31,7 +31,8 @@ import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
-import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.mcp.SwingMcpMissingDependencySearch;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchAction;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
@@ -42,7 +43,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.DataSizeUnit.MEGABYTES;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -62,6 +62,9 @@ final class GameCrashWindowModel {
     /// Path to the on-disk log written by the launched game.
     private final Path latestLog;
 
+    /// Window-owned read-only dependency catalog cache, or null when dependency search is unavailable.
+    private final @Nullable SwingMcpMissingDependencySearch missingDependencySearch;
+
     /// Creates an immutable game-crash window model.
     ///
     /// @param exitType classified process-exit outcome
@@ -73,10 +76,27 @@ final class GameCrashWindowModel {
             List<Detail> details,
             LogAnalyzable logAnalyzable,
             Path latestLog) {
+        this(exitType, details, logAnalyzable, latestLog, null);
+    }
+
+    /// Creates an immutable game-crash window model with an optional window-owned dependency search.
+    ///
+    /// @param exitType classified process-exit outcome
+    /// @param details ordered environment details
+    /// @param logAnalyzable immutable Core log-analysis input
+    /// @param latestLog path to the launched instance's latest log
+    /// @param missingDependencySearch read-only dependency search owned by the window, or null
+    private GameCrashWindowModel(
+            ProcessListener.ExitType exitType,
+            List<Detail> details,
+            LogAnalyzable logAnalyzable,
+            Path latestLog,
+            @Nullable SwingMcpMissingDependencySearch missingDependencySearch) {
         this.exitType = Objects.requireNonNull(exitType, "exitType");
         this.details = List.copyOf(Objects.requireNonNull(details, "details"));
         this.logAnalyzable = Objects.requireNonNull(logAnalyzable, "logAnalyzable");
         this.latestLog = Objects.requireNonNull(latestLog, "latestLog");
+        this.missingDependencySearch = missingDependencySearch;
     }
 
     /// Builds the production model from one completed launch.
@@ -111,7 +131,7 @@ final class GameCrashWindowModel {
             GameInstanceManifest manifest,
             LaunchOptions launchOptions,
             List<Log> capturedLogs,
-            @Nullable Consumer<String> openMissingModSearch) {
+            @Nullable MissingDependencySearchAction openMissingModSearch) {
         Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(manifest, "manifest");
         Objects.requireNonNull(launchOptions, "launchOptions");
@@ -164,18 +184,19 @@ final class GameCrashWindowModel {
                 launchOptions.getJava().getBits(),
                 launchOptions.getMaxMemory(),
                 capturedLogs.stream().map(Log::getLog).toList());
+        @Nullable SwingMcpMissingDependencySearch missingDependencySearch = null;
         if (openMissingModSearch != null) {
-            Consumer<String> searchAction = openMissingModSearch;
-            logAnalyzable = logAnalyzable.withMissingDependencySearch(dependencyIds -> Task.runAsync(
-                    () -> searchAction.accept(dependencyIds.get(0))));
+            missingDependencySearch = SwingMcpMissingDependencySearch.forMissingDependencySearchAction(
+                    openMissingModSearch);
+            logAnalyzable = logAnalyzable.withMissingDependencySearch(missingDependencySearch);
         }
         if (repository instanceof XYMLGameRepository xymlRepository) {
-            logAnalyzable = logAnalyzable.withJavaRuntimeRepair(() -> JavaRuntimeRepairTaskFactory.create(
+            logAnalyzable = logAnalyzable.withJavaRuntimeRepair(JavaRuntimeRepairTaskFactory.createRepair(
                     xymlRepository,
                     manifest));
         }
         Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
-        return new GameCrashWindowModel(exitType, details, logAnalyzable, latestLog);
+        return new GameCrashWindowModel(exitType, details, logAnalyzable, latestLog, missingDependencySearch);
     }
 
     /// Returns the classified process-exit outcome.
@@ -204,6 +225,13 @@ final class GameCrashWindowModel {
     /// @return latest-log path
     Path latestLog() {
         return latestLog;
+    }
+
+    /// Releases the window-owned read-only dependency catalog cache.
+    void close() {
+        if (missingDependencySearch != null) {
+            missingDependencySearch.close();
+        }
     }
 
     /// Formats the configured Java version and its non-native architecture.

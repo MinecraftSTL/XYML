@@ -84,6 +84,7 @@ public final class DiscoFetchJavaListTask extends Task<EnumMap<JavaPackageType, 
                 downloadProvider.injectURLWithCandidates(
                         NetworkUtils.withQuery(API_ROOT + "/packages", params)),
                 MAXIMUM_DIRECTORY_RESPONSE_BYTES);
+        asOrchestration();
     }
 
     /// Returns the sole bounded directory request prerequisite.

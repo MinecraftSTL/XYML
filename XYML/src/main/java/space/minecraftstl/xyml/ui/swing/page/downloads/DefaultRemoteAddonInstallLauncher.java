@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,17 +59,21 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
     @Override
     public Task<?> createInstallTask(RemoteAddonInstallRequest request) {
         RemoteAddonInstallRequest installRequest = Objects.requireNonNull(request, "request");
-        return Task.composeAsync(Schedulers.io(), () -> createDeferredTask(installRequest))
+        Path destination = installRequest.target().resolveDestination(installRequest.version());
+        Path directory = Objects.requireNonNull(destination.getParent(), "destination parent");
+        return Task.composeAsync(Schedulers.io(), () -> createDeferredTask(installRequest, destination))
+                .setResources(TaskResource.gameDirectory(directory))
+                .releaseResourcesBeforeDependencies()
                 .setName(installRequest.version().file().filename());
     }
 
     /// Creates one safe temporary download and no-replace final publication chain on the I/O scheduler.
     ///
     /// @param request selected artifact and resolved target
+    /// @param destination immutable final destination resolved before task startup
     /// @return task graph that owns temporary-file cleanup
     /// @throws IOException when local target preparation fails
-    private Task<?> createDeferredTask(RemoteAddonInstallRequest request) throws IOException {
-        Path destination = request.target().resolveDestination(request.version());
+    private Task<?> createDeferredTask(RemoteAddonInstallRequest request, Path destination) throws IOException {
         Path directory = Objects.requireNonNull(destination.getParent(), "destination parent");
         Files.createDirectories(directory);
         if (Files.exists(destination)) {
@@ -84,9 +89,16 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
                 ? request.version().file().filename()
                 : request.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
-        return download
+        Task<?> publication = download
                 .thenRunAsync(Schedulers.io(), () -> Files.move(temporary, destination))
-                .whenComplete(Schedulers.io(), failure -> Files.deleteIfExists(temporary));
+                .setResources(
+                        TaskResource.downloadTarget(temporary),
+                        TaskResource.addonFile(destination));
+        return publication
+                .whenComplete(Schedulers.io(), failure -> Files.deleteIfExists(temporary))
+                .setResources(
+                        TaskResource.downloadTarget(temporary),
+                        TaskResource.addonFile(destination));
     }
 
     /// Keeps temporary-file suffixes compatible with ZIP/JAR structural validation.

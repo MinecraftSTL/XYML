@@ -3,7 +3,7 @@
 XoyzNBT 将“修改内存中的 NBT 树”和“把修改安全发布到文件”分成两层：
 
 - `NBTEditor<E>` 负责结构约束、原子编辑、undo/redo、revision 和保存点。
-- `NBTFile<E>` 负责严格读取、编码保持、外部冲突检测、校验回读和文件发布。
+- `NBTFile<E>` 负责严格读取、编码保持、字节级暂存校验和文件发布。
 - `NBTRegionFile` 是更低层的 Region copy-on-write 存储接口，适合需要逐 chunk 控制的调用方。
 
 这些接口是通用库 API，不包含扩展名选择、线程调度或界面逻辑。调用方应在自己的 I/O 线程中打开和保存文件。
@@ -32,11 +32,13 @@ try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
 Standalone 保存流程为：
 
 1. 对保存快照做完整结构校验并序列化。
-2. 在目标目录创建暂存文件并 `force`。
-3. 严格回读暂存文件并比较语义内容。
-4. 再次核对源文件指纹。
-5. 可选地原子发布滚动备份。
-6. 使用原子替换发布源文件。
+2. 在目标目录以独占方式创建 `<source>.xyml_new` 暂存文件并写入完整编码字节。
+3. 以有界字节比较验证暂存文件，不做完整语义回读，也不强制落盘。
+4. 可选地原子发布滚动备份；默认备份路径为 `<source>.xyml_old`。
+5. 使用原子替换发布源文件。
+
+保存会重复检查源文件及其父目录是普通非符号链接路径，但不使用磁盘源指纹或冲突状态机制。
+这套流程不提供断电或内核崩溃后的持久顺序保证；暂存清理失败会保留为可重试状态，未清理完成前关闭会话会失败。
 
 文件系统不支持原子替换时，保存会失败，不会退化为覆盖原文件。
 
@@ -130,7 +132,7 @@ boolean becameClean = editor.markSaved(savepoint);
 
 `SNBTCodec` 仍只负责通用 SNBT 解析和格式化。高级编辑流程应完整解析 SNBT，然后将 detached Tag 交给 `NBTEditor.insertTag`、`replace` 或 `replaceContent`；不要直接修改编辑器内部对象。
 
-以 `Path` 为目标的 `NBTCodec.writeRegion` 会委托安全的 Region 路径实现。`OutputStream` 和 `SeekableByteChannel` 重载会保证结构错误发生在首字节之前，但无法提供路径级冲突检测和原子发布；编辑已有文件时优先使用 `NBTFile` 或 `NBTRegionFile`。
+以 `Path` 为目标的 `NBTCodec.writeRegion` 会委托安全的 Region 路径实现。`OutputStream` 和 `SeekableByteChannel` 重载会保证结构错误发生在首字节之前，但无法提供路径级检查和原子发布；编辑已有文件时优先使用 `NBTFile` 或 `NBTRegionFile`。
 
 ## 编辑 Region 文件
 
@@ -174,4 +176,4 @@ try (NBTRegionFile region = NBTRegionFile.open(Path.of("r.0.0.mca"))) {
 
 `NBTCommitUncertainException` 表示 header 发布后的可见状态无法可靠确认，或者 header 回滚失败。此时当前 Region 会话会拒绝继续读取和写入；调用方必须保留内存编辑、关闭会话并重新打开文件，重新发现磁盘上的完整状态后再决定下一步。
 
-外部进程非协作写入、介质损坏或文件系统无法提供所需原子语义不在库的可修复范围内。XoyzNBT 会检测可观测冲突并失败关闭，不会用未校验数据覆盖源文件。
+外部进程非协作写入、介质损坏或文件系统无法提供所需原子语义不在库的可修复范围内。文件系统不支持原子替换时保存会失败，不会退化为覆盖源文件。

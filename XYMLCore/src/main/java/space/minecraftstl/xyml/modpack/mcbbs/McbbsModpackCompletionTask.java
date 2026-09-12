@@ -18,6 +18,9 @@
 package space.minecraftstl.xyml.modpack.mcbbs;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
@@ -30,8 +33,6 @@ import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -50,6 +51,7 @@ import static space.minecraftstl.xyml.util.Lang.wrapConsumer;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Completes updates and missing files for an installed MCBBS modpack instance.
+@NotNullByDefault
 public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
 
     private final DefaultDependencyManager dependency;
@@ -65,13 +67,28 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
+    /// Creates a completion task that loads its configuration from the destination instance.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
     public McbbsModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    public McbbsModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModpackConfiguration<McbbsModpackManifest> configuration) {
+    /// Creates a repository-scoped completion task with an optional in-memory configuration.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param configuration configuration, or null to load it from the instance
+    public McbbsModpackCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable ModpackConfiguration<McbbsModpackManifest> configuration) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.configurationFile = repository.getModpackConfiguration(instanceId);
@@ -101,7 +118,9 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
                     throw new CustomException();
                 }
             })).thenComposeAsync(wrap(unused1 -> {
-                return executor.one(new GetTask(manifest.getFileApi() + "/manifest.json"));
+                GetTask task = new GetTask(manifest.getFileApi() + "/manifest.json");
+                task.setCacheRepository(dependency.getCacheRepository());
+                return executor.one(task);
             })).thenComposeAsync(wrap(remoteManifestJson -> {
                 McbbsModpackManifest remoteManifest;
                 // We needs to update modpack from online server.

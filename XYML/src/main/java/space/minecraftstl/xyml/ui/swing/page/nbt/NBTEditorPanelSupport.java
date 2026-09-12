@@ -78,6 +78,47 @@ final class NBTEditorPanelSupport {
                 || selected == TagType.DOUBLE ? "0" : "";
     }
 
+    /// Returns localized lifecycle status text for one immutable editor snapshot.
+    ///
+    /// @param strings localized editor strings
+    /// @param current current editor state
+    /// @return visible status text
+    static String statusText(NBTEditorStrings strings, NBTEditorSnapshot current) {
+        NBTEditorStrings localized = Objects.requireNonNull(strings, "strings");
+        NBTEditorSnapshot state = Objects.requireNonNull(current, "current");
+        return switch (state.status()) {
+            case EMPTY, CLOSED -> localized.emptyText();
+            case OPENING -> localized.openingText();
+            case READY -> state.dirty() ? localized.modifiedText() : localized.readyText();
+            case EDITING -> localized.editingText();
+            case EDIT_UNCERTAIN -> localized.editUncertainText();
+            case SAVING -> localized.savingText();
+            case PARTIAL_SAVE -> localized.partialSaveText();
+            case COMMIT_UNCERTAIN -> localized.commitUncertainText();
+            case ERROR -> localized.errorText();
+        };
+    }
+
+    /// Returns whether the selected row is an empty List.
+    ///
+    /// @param selected selected row
+    /// @return whether its declared element type can change
+    static boolean emptyListSelected(NBTEditorTreeNode selected) {
+        return Objects.requireNonNull(selected, "selected").node().getType() == TagType.LIST
+                && selected.childCount() == 0;
+    }
+
+    /// Returns whether the selected address is a Compound name segment.
+    ///
+    /// @param selected selected row
+    /// @return whether rename is structurally valid
+    static boolean nameEditable(NBTEditorTreeNode selected) {
+        @Unmodifiable List<NBTAddress.Segment> segments = Objects.requireNonNull(selected, "selected")
+                .address()
+                .segments();
+        return !segments.isEmpty() && segments.get(segments.size() - 1) instanceof NBTAddress.NameSegment;
+    }
+
     /// Generates a readable unused default Compound child name.
     static String uniqueChildName(NBTEditorStrings strings, NBTEditorTreeNode parent) {
         String base = Objects.requireNonNull(strings, "strings").defaultTagName();

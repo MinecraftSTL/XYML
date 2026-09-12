@@ -21,10 +21,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,6 +80,32 @@ final class SkinImageLoadingTest {
     void leavesDefaultSkinSelectionToCaller() throws Exception {
         Skin skin = new Skin(Skin.Type.DEFAULT, null, null, null, null);
         assertNull(skin.load("Player").run());
+    }
+
+    /// Read-only skin sources use only the non-filesystem orchestration marker.
+    @Test
+    void readOnlySkinSourcesUseOrchestrationResource() {
+        for (Skin.Type type : List.of(Skin.Type.DEFAULT, Skin.Type.ALEX, Skin.Type.LOCAL_FILE)) {
+            Skin skin = new Skin(type, null, null, null, null);
+            assertEquals(
+                    List.of(TaskResource.Kind.ORCHESTRATION),
+                    skin.load("Player").getResources().stream().map(TaskResource::getKind).toList());
+        }
+    }
+
+    /// A remote skin graph keeps only its concrete network and cache children locked.
+    @Test
+    void remoteSkinCompositionUsesOrchestrationResource() {
+        Skin skin = new Skin(
+                Skin.Type.CUSTOM_SKIN_LOADER_API,
+                "https://example.invalid/csl",
+                null,
+                null,
+                null);
+
+        assertEquals(
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                skin.load("Player").getResources().stream().map(TaskResource::getKind).toList());
     }
 
     /// Writes one solid PNG fixture.

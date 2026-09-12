@@ -26,7 +26,9 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -83,7 +85,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         Objects.requireNonNull(request, "request");
         return Task.composeAsync(() -> createDeferredInstallTask(
                 request,
-                unwrapProvider(downloadProvider)));
+                unwrapProvider(downloadProvider)))
+                .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Performs destination validation and side-effectful task construction only after execution starts.
@@ -108,15 +112,33 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
 
         GameBuilder builder = repository.getDependency(requestProvider).newGameBuilder();
         configureBuilder(builder, instanceId, request);
-        repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
-        return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
+        Task<?> installation = Task.runAsync(() -> {
+            if (repository.instanceIdConflicts(instanceId)) {
+                throw new GameInstallRequestRejectedException(
+                        request,
+                        GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
+            }
+            repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
+        }).setResources(metadataResource, instanceResource)
+                .thenComposeAsync(builder.buildAsync())
+                .setResources(operationResource, instanceResource);
+        Task<@Nullable Void> refreshed = installation.whenCompleteWithResources(
+                repositoryRefreshExecutor,
+                ignoredFailure -> {
                     repository.refresh();
                     repository.applyDefaultIsolationSetting(instanceId);
-                })
-                .thenRunAsync(
+                },
+                TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .asOrchestration();
+        return refreshed.thenComposeAsync(instanceSelectionExecutor, () -> Task.runAsync(
+                        "Select installed instance",
                         instanceSelectionExecutor,
-                        () -> repository.setSelectedInstance(instanceId));
+                        () -> repository.setSelectedInstance(instanceId))
+                .setResources(TaskResource.configuration(SettingsManager.settingsLocation())))
+                .asOrchestration();
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.

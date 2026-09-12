@@ -18,10 +18,13 @@
 package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.util.platform.Bits;
 
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /// Identifies heap reservation failures that are verified to come from a 32-bit Java runtime.
@@ -46,14 +49,17 @@ public final class JRE32BitAnalyzer implements Analyzer<LogAnalyzable> {
         }
 
         String log = input.logText();
-        boolean legacyEvidence = CrashReportRuleEvidence.find(
+        @Nullable CrashReportAnalyzer.Result legacyEvidence = CrashReportRuleEvidence.find(
                 log,
-                CrashReportAnalyzer.Rule.JVM_32BIT) != null;
-        boolean supplementalEvidence = INVALID_INITIAL_HEAP.matcher(log).find()
-                && log.contains(VM_CREATION_FAILURE);
-        if (!legacyEvidence && !supplementalEvidence) {
+                CrashReportAnalyzer.Rule.JVM_32BIT);
+        Matcher supplementalEvidence = INVALID_INITIAL_HEAP.matcher(log);
+        boolean hasSupplementalEvidence = supplementalEvidence.find() && log.contains(VM_CREATION_FAILURE);
+        if (legacyEvidence == null && !hasSupplementalEvidence) {
             return ControlFlow.CONTINUE;
         }
+        @Unmodifiable List<String> evidence = legacyEvidence == null
+                ? List.of(supplementalEvidence.group(), VM_CREATION_FAILURE)
+                : List.of(legacyEvidence.matcher().group());
 
         Solver solver = input.javaRuntimeRepair() == null
                 ? new TextSolver(
@@ -69,7 +75,8 @@ public final class JRE32BitAnalyzer implements Analyzer<LogAnalyzable> {
         results.add(new AnalyzeResult<>(
                 this,
                 ResultID.JRE_32BIT,
-                solver));
+                solver,
+                evidence));
         return ControlFlow.BREAK_OTHER;
     }
 }

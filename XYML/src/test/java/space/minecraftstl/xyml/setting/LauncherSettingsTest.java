@@ -38,15 +38,21 @@ public final class LauncherSettingsTest {
         LauncherSettings settings = new LauncherSettings();
 
         assertFalse(settings.mcpEnabledProperty().get());
+        assertEquals(LauncherSettings.DEFAULT_MCP_BEARER_TOKEN, settings.mcpBearerTokenProperty().get());
+        assertTrue(settings.showMcpEnablementWarningProperty().get());
         assertEquals(LauncherSettings.DEFAULT_MCP_PORT, settings.mcpPortProperty().get());
         assertTrue(settings.mcpConfirmInstanceDeletionProperty().get());
         assertTrue(settings.mcpConfirmModDeletionProperty().get());
         settings.mcpEnabledProperty().set(true);
+        settings.mcpBearerTokenProperty().set("test-token");
+        settings.showMcpEnablementWarningProperty().set(false);
         settings.mcpPortProperty().set(23969);
         settings.mcpConfirmInstanceDeletionProperty().set(false);
         settings.mcpConfirmModDeletionProperty().set(false);
         JsonObject serialized = JsonParser.parseString(settings.toJson()).getAsJsonObject();
         assertTrue(serialized.get("mcpEnabled").getAsBoolean());
+        assertEquals("test-token", serialized.get("mcpBearerToken").getAsString());
+        assertFalse(serialized.get("showMcpEnablementWarning").getAsBoolean());
         assertEquals(23969, serialized.get("mcpPort").getAsInt());
         assertFalse(serialized.get("mcpConfirmInstanceDeletion").getAsBoolean());
         assertFalse(serialized.get("mcpConfirmModDeletion").getAsBoolean());
@@ -55,8 +61,14 @@ public final class LauncherSettingsTest {
         LauncherSettings migrated = LauncherSettings.fromJson(JsonParser.parseString("{\"mcpPort\":23969}")
                 .getAsJsonObject());
         assertEquals(23969, migrated.mcpPortProperty().get());
+        assertEquals(LauncherSettings.DEFAULT_MCP_BEARER_TOKEN, migrated.mcpBearerTokenProperty().get());
+        assertTrue(migrated.showMcpEnablementWarningProperty().get());
         assertTrue(migrated.mcpConfirmInstanceDeletionProperty().get());
         assertTrue(migrated.mcpConfirmModDeletionProperty().get());
+        JsonObject migratedJson = JsonParser.parseString(migrated.toJson()).getAsJsonObject();
+        assertFalse(migratedJson.has("mcpEnabled"));
+        assertFalse(migratedJson.has("mcpBearerToken"));
+        assertFalse(migratedJson.has("showMcpEnablementWarning"));
 
         LauncherSettings confirmationDisabled = LauncherSettings.fromJson(
                 JsonParser.parseString("{\"mcpConfirmDeletion\":false}").getAsJsonObject());
@@ -77,6 +89,22 @@ public final class LauncherSettingsTest {
         LauncherSettings invalid = LauncherSettings.fromJson(JsonParser.parseString("{\"mcpPort\":70000}")
                 .getAsJsonObject());
         assertEquals(LauncherSettings.DEFAULT_MCP_PORT, invalid.mcpPortProperty().get());
+    }
+
+    /// Preserves explicit MCP authentication and warning preferences during deserialization.
+    @Test
+    public void preservesExplicitMcpSecurityPreferences() {
+        LauncherSettings settings = LauncherSettings.fromJson(JsonParser.parseString("""
+                {
+                  "mcpEnabled": true,
+                  "mcpBearerToken": "configured-token",
+                  "showMcpEnablementWarning": false
+                }
+                """).getAsJsonObject());
+
+        assertTrue(settings.mcpEnabledProperty().get());
+        assertEquals("configured-token", settings.mcpBearerTokenProperty().get());
+        assertFalse(settings.showMcpEnablementWarningProperty().get());
     }
 
     /// Tests that launcher settings serialization preserves a patch-version schema and unknown fields.

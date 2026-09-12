@@ -390,6 +390,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
         window.openModSearch(query);
     }
 
+    /// Opens a missing-dependency catalog search with the analyzer's captured version constraint.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        String query = Objects.requireNonNull(dependencyId, "dependencyId");
+        window.open();
+        window.openMissingDependencySearch(query, gameVersion);
+    }
+
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
     ///
     /// @return `true` after the first close request begins cleanup
@@ -441,7 +454,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         presentation.gameInstall(),
                         presentation.taskProgress(),
                         animator,
-                        presentation.taskProgressAnimationDuration()));
+                        presentation.taskProgressAnimationDuration(),
+                        models.instances()));
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
@@ -1318,6 +1332,26 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     throw new IllegalStateException("Swing application window is closed");
                 }
                 frame.shellPanel().openModSearch(dependencyId);
+                frame.toFront();
+                frame.requestFocusInWindow();
+            });
+        }
+
+        /// Routes a version-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            Objects.requireNonNull(dependencyId, "dependencyId");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openMissingDependencySearch(dependencyId, gameVersion);
                 frame.toFront();
                 frame.requestFocusInWindow();
             });

@@ -47,6 +47,9 @@ import space.minecraftstl.xyml.setting.GameDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.setting.SettingFileUtils;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
+import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
@@ -63,12 +66,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.awt.EventQueue;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -85,6 +93,34 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId the game instance ID, or `null` when only repository context is available
     @NotNullByDefault
     public record InstanceReference(XYMLGameRepository repository, @Nullable GameInstanceID instanceId) {
+    }
+
+    /// Immutable settings and path snapshot used by a staged instance duplication.
+    ///
+    /// @param sourceRunDirectory normalized effective source running directory
+    /// @param instanceSettingsJson serialized independent destination settings
+    @NotNullByDefault
+    public record InstanceDuplicationSnapshot(Path sourceRunDirectory, String instanceSettingsJson) {
+        /// Creates a validated duplication snapshot with a stable absolute source path.
+        public InstanceDuplicationSnapshot {
+            sourceRunDirectory = Objects.requireNonNull(sourceRunDirectory, "sourceRunDirectory")
+                    .toAbsolutePath().normalize();
+            Objects.requireNonNull(instanceSettingsJson, "instanceSettingsJson");
+        }
+    }
+
+    /// Atomically published state of one instance-settings cache entry.
+    ///
+    /// A missing map entry means the file has not been loaded. A present entry may deliberately contain no settings
+    /// object when no file exists or loading failed; `readOnly` distinguishes a creatable absence from data that must
+    /// be preserved without overwrite.
+    ///
+    /// @param setting loaded settings, or null when no settings object is available
+    /// @param readOnly whether the on-disk data must not be overwritten
+    @NotNullByDefault
+    private record InstanceSettingsState(
+            @Nullable GameSettings.Instance setting,
+            boolean readOnly) {
     }
 
     /// Directory under the instance root that stores XYML-managed instance metadata.
@@ -105,6 +141,12 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// The persistent game directory for this repository.
     private final GameDirectory gameDirectory;
 
+    /// Settings owner supplied with this repository, including isolated owners used by tests.
+    private final LauncherSettings launcherSettings;
+
+    /// Prevents a repository-root replacement while a captured-root operation is accessing the repository.
+    private final ReentrantReadWriteLock repositoryDirectoryLock = new ReentrantReadWriteLock();
+
     /// The selected instance ID persisted for this repository's game directory.
     private final ObjectProperty<@Nullable GameInstanceID> selectedInstance;
 
@@ -114,38 +156,144 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Toolkit-neutral selected-instance transitions for Swing and later core migration.
     private final ValueChangeSupport<GameInstanceID> selectedInstanceChanges = new ValueChangeSupport<>(this);
 
-    /// Loaded instance settings indexed by instance ID.
-    private final Map<GameInstanceID, GameSettings.Instance> instanceGameSettings = new HashMap<>();
+    /// Atomically published instance settings states indexed by instance ID.
+    private final Map<GameInstanceID, InstanceSettingsState> instanceGameSettings = new ConcurrentHashMap<>();
 
-    /// Instance IDs whose local game settings file has already been checked.
-    private final Set<GameInstanceID> loadedInstanceGameSettings = new HashSet<>();
+    /// Per-instance monitors closing the gap between an asynchronous save enqueue and a lifecycle move.
+    private final Map<GameInstanceID, Object> instanceGameSettingsLocks = new ConcurrentHashMap<>();
 
-    /// Instance IDs whose newer settings schema must be preserved without writing.
-    private final Set<GameInstanceID> readOnlyInstanceGameSettings = new HashSet<>();
+    /// Allows unrelated instance settings operations in parallel while repository refresh atomically invalidates all.
+    private final ReentrantReadWriteLock instanceGameSettingsLifecycleLock = new ReentrantReadWriteLock();
 
-    /// Instance IDs provisionally treated as modpacks while installation is in progress.
-    private final Set<GameInstanceID> beingModpackInstances = new HashSet<>();
+    /// Thread-safe instance IDs provisionally treated as modpacks while concurrent installations are in progress.
+    private final Set<GameInstanceID> beingModpackInstances = Collections.synchronizedSet(new HashSet<>());
 
     /// Publishes changes to per-instance icon files.
     public final EventManager<Event> onInstanceIconChanged = new EventManager<>();
 
     /// Creates a repository backed by the given game directory.
     public XYMLGameRepository(GameDirectory gameDirectory) {
+        this(gameDirectory, settings());
+    }
+
+    /// Creates a repository with an explicitly supplied settings owner for isolated package tests.
+    ///
+    /// @param gameDirectory persistent game directory
+    /// @param launcherSettings settings object owning selected-instance state
+    XYMLGameRepository(GameDirectory gameDirectory, LauncherSettings launcherSettings) {
         super(gameDirectory.getPath().toPath());
         this.gameDirectory = gameDirectory;
+        this.launcherSettings = Objects.requireNonNull(launcherSettings, "launcherSettings");
         this.selectedInstance = new SimpleObjectProperty<>(
-                settings().getSelectedInstance(gameDirectory.getId()));
-        this.selectedInstanceSubscription = settings().getSelectedInstance().subscribe(change -> {
+                launcherSettings.getSelectedInstance(gameDirectory.getId()));
+        this.selectedInstanceSubscription = launcherSettings.getSelectedInstance().subscribe(change -> {
             if (change.affectedKeys().contains(gameDirectory.getId())) {
-                selectedInstance.set(settings().getSelectedInstance(gameDirectory.getId()));
+                selectedInstance.set(launcherSettings.getSelectedInstance(gameDirectory.getId()));
             }
         });
-        gameDirectory.pathProperty().subscribe(change -> changeDirectory(gameDirectory.getPath().toPath()));
+        gameDirectory.pathProperty().subscribe(change -> followGameDirectoryPath());
+    }
+
+    /// Applies the persistent game-directory path without making the Swing event thread wait for captured-root work.
+    private void followGameDirectoryPath() {
+        Path newDirectory = gameDirectory.getPath().toPath();
+        if (EventQueue.isDispatchThread()) {
+            Task.runAsync("Apply game repository directory", Schedulers.io(), () -> changeDirectory(newDirectory))
+                    .setResources(TaskResource.configuration(SettingsManager.settingsLocation()))
+                    .start();
+        } else {
+            changeDirectory(newDirectory);
+        }
     }
 
     /// Returns the persistent game directory for this repository.
     public GameDirectory getGameDirectory() {
         return gameDirectory;
+    }
+
+    /// Replaces the repository root after every captured-root operation has left its critical section.
+    ///
+    /// @param baseDirectory replacement repository root
+    @Override
+    public void setBaseDirectory(Path baseDirectory) {
+        if (repositoryDirectoryLock.getReadHoldCount() > 0
+                && !repositoryDirectoryLock.isWriteLockedByCurrentThread()) {
+            throw new IllegalStateException("Cannot replace the game repository directory from a captured-root operation");
+        }
+        repositoryDirectoryLock.writeLock().lock();
+        instanceGameSettingsLifecycleLock.writeLock().lock();
+        try {
+            super.setBaseDirectory(baseDirectory);
+            instanceGameSettings.clear();
+            instanceGameSettingsLocks.clear();
+        } finally {
+            instanceGameSettingsLifecycleLock.writeLock().unlock();
+            repositoryDirectoryLock.writeLock().unlock();
+        }
+    }
+
+    /// Runs one filesystem mutation only while the repository still owns its captured root.
+    ///
+    /// Different instance operations share the read side and therefore remain parallel; a directory switch waits for
+    /// all of them and cannot redirect an already validated operation into the replacement root.
+    ///
+    /// @param expectedDirectory normalized repository root captured before task scheduling
+    /// @param operation filesystem operation that must not cross a root replacement
+    /// @throws IOException when the filesystem operation fails
+    public void withStableBaseDirectory(Path expectedDirectory, StableDirectoryOperation operation)
+            throws IOException {
+        withStableBaseDirectory(expectedDirectory, () -> {
+            Objects.requireNonNull(operation, "operation").execute();
+            return null;
+        });
+    }
+
+    /// Computes one value only while the repository still owns its captured root.
+    ///
+    /// @param expectedDirectory normalized repository root captured before task scheduling
+    /// @param operation value-producing operation that must not cross a root replacement
+    /// @param <T> result type
+    /// @return operation result
+    /// @throws IOException when the filesystem operation fails
+    public <T> T withStableBaseDirectory(Path expectedDirectory, StableDirectorySupplier<T> operation)
+            throws IOException {
+        Path expected = Objects.requireNonNull(expectedDirectory, "expectedDirectory").toAbsolutePath().normalize();
+        StableDirectorySupplier<T> checkedOperation = Objects.requireNonNull(operation, "operation");
+        repositoryDirectoryLock.readLock().lock();
+        try {
+            Path current = getBaseDirectory().toAbsolutePath().normalize();
+            if (!expected.equals(current)) {
+                throw new IllegalStateException("Game repository directory changed while waiting for resources");
+            }
+            return checkedOperation.execute();
+        } finally {
+            repositoryDirectoryLock.readLock().unlock();
+        }
+    }
+
+    /// Calls one checked operation only while the repository still owns its captured root.
+    ///
+    /// This variant accepts the broader [Callable] contract used by asynchronous Task bodies while retaining the same
+    /// shared-read/exclusive-switch ordering as [#withStableBaseDirectory(Path, StableDirectorySupplier)].
+    ///
+    /// @param expectedDirectory normalized repository root captured before task scheduling
+    /// @param operation checked operation that must not cross a root replacement
+    /// @param <T> result type
+    /// @return operation result
+    /// @throws Exception when the checked operation fails
+    public <T> T callWithStableBaseDirectory(Path expectedDirectory, Callable<T> operation) throws Exception {
+        Path expected = Objects.requireNonNull(expectedDirectory, "expectedDirectory").toAbsolutePath().normalize();
+        Callable<T> checkedOperation = Objects.requireNonNull(operation, "operation");
+        repositoryDirectoryLock.readLock().lock();
+        try {
+            Path current = getBaseDirectory().toAbsolutePath().normalize();
+            if (!expected.equals(current)) {
+                throw new IllegalStateException("Game repository directory changed while waiting for resources");
+            }
+            return checkedOperation.call();
+        } finally {
+            repositoryDirectoryLock.readLock().unlock();
+        }
     }
 
     /// Returns the selected instance ID property for this repository's game directory.
@@ -161,7 +309,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Sets the selected instance ID for this repository's game directory.
     public void setSelectedInstance(@Nullable GameInstanceID instanceId) {
         @Nullable GameInstanceID previous = getSelectedInstance();
-        settings().setSelectedInstance(gameDirectory.getId(), instanceId);
+        launcherSettings.setSelectedInstance(gameDirectory.getId(), instanceId);
         selectedInstanceChanges.fireChange(previous, getSelectedInstance());
     }
 
@@ -175,7 +323,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Refreshes the selected instance ID after instances are loaded.
     public void refreshSelectedInstance() {
-        @Nullable GameInstanceID selectedInstance = settings().getSelectedInstance(gameDirectory.getId());
+        @Nullable GameInstanceID selectedInstance = launcherSettings.getSelectedInstance(gameDirectory.getId());
         @Nullable GameInstanceID refreshedInstance = selectedInstance;
         if (refreshedInstance == null || !hasInstance(refreshedInstance)) {
             refreshedInstance = getInstanceManifests().isEmpty() ? null : getInstanceManifests().iterator().next().id();
@@ -263,18 +411,43 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// Separate game repositories may still refresh concurrently.
     @Override
-    public synchronized void refresh() {
-        super.refresh();
+    public void refresh() {
+        if (instanceGameSettingsLifecycleLock.getReadHoldCount() > 0
+                && !instanceGameSettingsLifecycleLock.isWriteLockedByCurrentThread()) {
+            throw new IllegalStateException("Cannot refresh the game repository from an instance lifecycle callback");
+        }
+        repositoryDirectoryLock.readLock().lock();
+        try {
+            synchronized (this) {
+                super.refresh();
+            }
+        } finally {
+            repositoryDirectoryLock.readLock().unlock();
+        }
+    }
+
+    /// Creates a captured-root refresh task using the same root-lock-first order as synchronous refresh.
+    ///
+    /// @return unstarted refresh task occupying the captured game directory
+    @Override
+    public Task<Void> refreshAsync() {
+        Path expectedDirectory = getBaseDirectory().toAbsolutePath().normalize();
+        return Task.runAsync(() -> withStableBaseDirectory(expectedDirectory, this::refresh))
+                .setResources(TaskResource.gameDirectory(expectedDirectory));
     }
 
     /// Rebuilds manifest and instance-setting caches, then creates the Forge-compatible profile file when needed.
     @Override
     protected void refreshImpl() {
-        instanceGameSettings.clear();
-        loadedInstanceGameSettings.clear();
-        readOnlyInstanceGameSettings.clear();
-        super.refreshImpl();
-        getInstanceManifests().stream().map(GameInstanceManifest::id).forEach(this::loadInstanceGameSettings);
+        instanceGameSettingsLifecycleLock.writeLock().lock();
+        try {
+            super.refreshImpl();
+            instanceGameSettings.clear();
+            instanceGameSettingsLocks.clear();
+            getInstanceManifests().stream().map(GameInstanceManifest::id).forEach(this::loadInstanceGameSettings);
+        } finally {
+            instanceGameSettingsLifecycleLock.writeLock().unlock();
+        }
 
         try {
             Path file = getBaseDirectory().resolve("launcher_profiles.json");
@@ -316,29 +489,75 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         clean(getRunDirectory(instanceId));
     }
 
+    /// Renames an instance after all queued settings writes have reached disk.
+    ///
+    /// Successful renames discard settings cached under both identifiers so the destination is lazily reloaded from
+    /// its moved configuration. A provisional modpack marker follows the renamed instance.
+    ///
+    /// @param from source instance ID
+    /// @param to destination instance ID
+    /// @return whether the instance was renamed
+    @Override
+    public boolean renameInstance(GameInstanceID from, GameInstanceID to) {
+        try {
+            return withInstanceSettingsLocks(List.of(from, to), () -> {
+                waitForPendingSaves("renaming", from);
+                boolean provisionalModpack = beingModpackInstances.contains(from);
+                boolean renamed = super.renameInstance(from, to);
+                if (renamed) {
+                    discardInstanceCaches(from);
+                    discardInstanceCaches(to);
+                    if (provisionalModpack) {
+                        beingModpackInstances.add(to);
+                    }
+                }
+                return renamed;
+            });
+        } catch (IOException exception) {
+            LOG.warning("Interrupted while flushing settings before renaming instance " + from, exception);
+            return false;
+        }
+    }
+
     /// Removes an instance from disk and drops any cached instance settings for that instance.
     ///
     /// @param instanceId instance ID
     /// @return whether the instance was removed from disk
     @Override
     public boolean removeInstanceFromDisk(GameInstanceID instanceId) {
-        if (instanceGameSettings.containsKey(instanceId)) {
-            try {
-                FileSaver.waitForAllSaves();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                LOG.warning("Interrupted while flushing settings for instance " + instanceId, exception);
-                return false;
-            }
+        return removeInstanceFromDisk(instanceId, true);
+    }
+
+    /// Removes an instance from disk without starting the repository-wide asynchronous refresh.
+    ///
+    /// @param instanceId instance ID
+    /// @return whether the instance was removed from disk
+    @Override
+    public boolean removeInstanceFromDiskWithoutRefresh(GameInstanceID instanceId) {
+        return removeInstanceFromDisk(instanceId, false);
+    }
+
+    /// Flushes settings, removes an instance through the selected superclass entry point, and clears local caches.
+    ///
+    /// @param instanceId instance ID
+    /// @param refreshAfterDeletion whether to preserve the legacy asynchronous refresh side effect
+    /// @return whether the instance was removed from disk
+    private boolean removeInstanceFromDisk(GameInstanceID instanceId, boolean refreshAfterDeletion) {
+        try {
+            return withInstanceSettingsLocks(List.of(instanceId), () -> {
+                waitForPendingSaves("deleting", instanceId);
+                boolean removed = refreshAfterDeletion
+                        ? super.removeInstanceFromDisk(instanceId)
+                        : super.removeInstanceFromDiskWithoutRefresh(instanceId);
+                if (removed) {
+                    discardInstanceCaches(instanceId);
+                }
+                return removed;
+            });
+        } catch (IOException exception) {
+            LOG.warning("Interrupted while flushing settings before deleting instance " + instanceId, exception);
+            return false;
         }
-        boolean removed = super.removeInstanceFromDisk(instanceId);
-        if (removed) {
-            instanceGameSettings.remove(instanceId);
-            loadedInstanceGameSettings.remove(instanceId);
-            readOnlyInstanceGameSettings.remove(instanceId);
-            beingModpackInstances.remove(instanceId);
-        }
-        return removed;
     }
 
     /// Duplicates an instance and its selected data under a new ID.
@@ -348,6 +567,68 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param copySaves whether save data should be copied
     /// @throws IOException if the destination already exists or copying fails
     public void duplicateInstance(GameInstanceID srcId, GameInstanceID dstId, boolean copySaves) throws IOException {
+        duplicateInstance(srcId, dstId, copySaves, prepareInstanceDuplication(srcId));
+    }
+
+    /// Captures every setting-derived input needed before a potentially long instance copy.
+    ///
+    /// @param srcId source instance ID
+    /// @return immutable duplication snapshot
+    /// @throws IOException if pending saves are interrupted or settings cannot be serialized
+    public InstanceDuplicationSnapshot prepareInstanceDuplication(GameInstanceID srcId) throws IOException {
+        return withInstanceSettingsLocks(List.of(srcId), () -> {
+            @Nullable Throwable primaryFailure = null;
+            try {
+                waitForPendingSaves("duplicating", srcId);
+                Path sourceRunDirectory = getRunDirectory(srcId);
+                GameSettings.Instance newGameSettings = copyInstanceGameSettings(srcId);
+                return new InstanceDuplicationSnapshot(
+                        sourceRunDirectory,
+                        LauncherSettings.SETTINGS_GSON.toJson(newGameSettings));
+            } catch (RuntimeException | Error failure) {
+                primaryFailure = failure;
+                throw failure;
+            } catch (IOException failure) {
+                primaryFailure = failure;
+                throw failure;
+            } finally {
+                try {
+                    waitForPendingSaves("duplicating", srcId);
+                } catch (InterruptedIOException saveFailure) {
+                    if (primaryFailure == null) {
+                        throw saveFailure;
+                    }
+                    primaryFailure.addSuppressed(saveFailure);
+                }
+            }
+        });
+    }
+
+    /// Duplicates an instance using inputs captured before its precise filesystem resources were acquired.
+    ///
+    /// @param srcId source instance ID
+    /// @param dstId destination instance ID
+    /// @param copySaves whether save data should be copied
+    /// @param snapshot settings-derived inputs captured under their configuration resources
+    /// @throws IOException if the destination exists, the snapshot is invalid, or copying fails
+    public void duplicateInstance(
+            GameInstanceID srcId,
+            GameInstanceID dstId,
+            boolean copySaves,
+            InstanceDuplicationSnapshot snapshot) throws IOException {
+        withInstanceSettingsLocks(List.of(srcId, dstId), () -> {
+            duplicateInstanceWithLockedSettings(srcId, dstId, copySaves, snapshot);
+            return null;
+        });
+    }
+
+    /// Performs the duplication body after source and destination settings have been excluded from asynchronous saves.
+    private void duplicateInstanceWithLockedSettings(
+            GameInstanceID srcId,
+            GameInstanceID dstId,
+            boolean copySaves,
+            InstanceDuplicationSnapshot snapshot) throws IOException {
+        InstanceDuplicationSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
         Path srcDir = getInstanceRoot(srcId);
         Path dstDir = getInstanceRoot(dstId);
 
@@ -356,10 +637,13 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         List<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
         blackList.add(srcId.id() + ".jar");
         blackList.add(srcId.id() + ".json");
-        if (!copySaves)
+        if (!copySaves) {
             blackList.add("saves");
+        }
 
-        if (Files.exists(dstDir)) throw new IOException("Instance exists");
+        if (Files.exists(dstDir)) {
+            throw new IOException("Instance exists");
+        }
 
         Files.createDirectories(dstDir);
         FileUtils.copyDirectory(srcDir, dstDir, path -> Modpack.acceptFile(path, blackList, null));
@@ -376,25 +660,135 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
         JsonUtils.writeToJsonFile(toJson, fromManifest.withId(dstId).withJar(dstId));
 
+        Path srcGameDir = checkedSnapshot.sourceRunDirectory();
         boolean copyOriginalGameDir;
         try {
-            copyOriginalGameDir = !Files.isSameFile(getRunDirectory(srcId), getInstanceRoot(srcId));
+            copyOriginalGameDir = !Files.isSameFile(srcGameDir, srcDir);
         } catch (IOException e) {
             copyOriginalGameDir = true;
         }
 
-        Path srcGameDir = getRunDirectory(srcId);
-
-        GameSettings.Instance newGameSettings = copyInstanceGameSettings(srcId);
+        @Nullable GameSettings.Instance newGameSettings;
+        try {
+            newGameSettings = LauncherSettings.SETTINGS_GSON.fromJson(
+                    checkedSnapshot.instanceSettingsJson(), GameSettings.Instance.class);
+        } catch (JsonParseException exception) {
+            throw new IOException("Invalid captured instance settings", exception);
+        }
+        if (newGameSettings == null) {
+            throw new IOException("Captured instance settings are empty");
+        }
         newGameSettings.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
         newGameSettings.runningDirectoryProperty().setValue("");
         initInstanceGameSettings(dstId, newGameSettings);
         saveGameSettingsSync(dstId);
 
-        Path dstGameDir = getRunDirectory(dstId);
+        if (copyOriginalGameDir) {
+            FileUtils.copyDirectory(srcGameDir, dstDir, path -> Modpack.acceptFile(path, blackList, null));
+        }
+    }
 
-        if (copyOriginalGameDir)
-            FileUtils.copyDirectory(srcGameDir, dstGameDir, path -> Modpack.acceptFile(path, blackList, null));
+    /// Waits until every settings write queued before this lifecycle mutation has completed.
+    ///
+    /// @param operation present-participle operation name used in interruption diagnostics
+    /// @param instanceId instance whose lifecycle mutation is about to begin
+    /// @throws InterruptedIOException when the caller is interrupted while waiting
+    private static void waitForPendingSaves(String operation, GameInstanceID instanceId) throws InterruptedIOException {
+        @Nullable InterruptedException interruption = null;
+        while (true) {
+            try {
+                FileSaver.waitForAllSaves();
+                break;
+            } catch (InterruptedException exception) {
+                if (interruption == null) {
+                    interruption = exception;
+                } else {
+                    interruption.addSuppressed(exception);
+                }
+                Thread.interrupted();
+            }
+        }
+        if (interruption != null) {
+            Thread.currentThread().interrupt();
+            InterruptedIOException interrupted = new InterruptedIOException(
+                    "Interrupted while " + operation + " instance " + instanceId);
+            interrupted.initCause(interruption);
+            throw interrupted;
+        }
+    }
+
+    /// Runs one operation while asynchronous setting saves for every affected instance are excluded.
+    ///
+    /// Instance monitors are acquired by stable ID order, allowing unrelated instances to proceed in parallel without
+    /// introducing an ABBA cycle. The shared lifecycle read lock prevents refresh from replacing monitor identities
+    /// while an operation is waiting or running.
+    ///
+    /// @param instanceIds affected instance identifiers
+    /// @param operation protected operation
+    /// @param <T> result type
+    /// @return operation result
+    /// @throws IOException when the protected operation fails
+    private <T> T withInstanceSettingsLocks(
+            Collection<GameInstanceID> instanceIds,
+            InstanceSettingsOperation<T> operation) throws IOException {
+        List<GameInstanceID> orderedIds = instanceIds.stream()
+                .map(instanceId -> Objects.requireNonNull(instanceId, "instanceId"))
+                .distinct()
+                .sorted(Comparator.comparing(GameInstanceID::id))
+                .toList();
+        InstanceSettingsOperation<T> checkedOperation = Objects.requireNonNull(operation, "operation");
+        repositoryDirectoryLock.readLock().lock();
+        instanceGameSettingsLifecycleLock.readLock().lock();
+        try {
+            return withInstanceSettingsLocks(orderedIds, 0, checkedOperation);
+        } finally {
+            instanceGameSettingsLifecycleLock.readLock().unlock();
+            repositoryDirectoryLock.readLock().unlock();
+        }
+    }
+
+    /// Runs an unchecked operation under one instance monitor and the shared refresh lifecycle.
+    ///
+    /// @param instanceId affected instance identifier
+    /// @param operation protected operation
+    /// @param <T> result type
+    /// @return operation result
+    private <T> T withInstanceSettingsLock(GameInstanceID instanceId, java.util.function.Supplier<T> operation) {
+        GameInstanceID checkedId = Objects.requireNonNull(instanceId, "instanceId");
+        java.util.function.Supplier<T> checkedOperation = Objects.requireNonNull(operation, "operation");
+        repositoryDirectoryLock.readLock().lock();
+        instanceGameSettingsLifecycleLock.readLock().lock();
+        try {
+            Object monitor = instanceGameSettingsLocks.computeIfAbsent(checkedId, ignored -> new Object());
+            synchronized (monitor) {
+                return checkedOperation.get();
+            }
+        } finally {
+            instanceGameSettingsLifecycleLock.readLock().unlock();
+            repositoryDirectoryLock.readLock().unlock();
+        }
+    }
+
+    /// Acquires the remaining stable-order instance monitors recursively.
+    private <T> T withInstanceSettingsLocks(
+            List<GameInstanceID> orderedIds,
+            int index,
+            InstanceSettingsOperation<T> operation) throws IOException {
+        if (index >= orderedIds.size()) {
+            return operation.execute();
+        }
+        Object monitor = instanceGameSettingsLocks.computeIfAbsent(orderedIds.get(index), ignored -> new Object());
+        synchronized (monitor) {
+            return withInstanceSettingsLocks(orderedIds, index + 1, operation);
+        }
+    }
+
+    /// Discards every repository-local cache entry associated with one instance identifier.
+    ///
+    /// @param instanceId instance identifier whose cached state is obsolete
+    private void discardInstanceCaches(GameInstanceID instanceId) {
+        instanceGameSettings.remove(instanceId);
+        beingModpackInstances.remove(instanceId);
     }
 
     /// Copies explicit instance settings or derives a new instance from the effective parent preset.
@@ -430,7 +824,10 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     }
 
     /// Returns the current local game settings path under the instance configuration directory.
-    private Path getInstanceGameSettingsFile(GameInstanceID instanceId) {
+    ///
+    /// @param instanceId instance identifier
+    /// @return instance-specific settings file
+    public Path getInstanceGameSettingsFile(GameInstanceID instanceId) {
         return getInstanceConfigDirectory(instanceId).resolve(INSTANCE_GAME_SETTINGS_FILENAME);
     }
 
@@ -438,16 +835,18 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// @param instanceId instance ID
     private void loadInstanceGameSettings(GameInstanceID instanceId) {
-        loadedInstanceGameSettings.add(instanceId);
-        InstanceGameSettingsLoadResult result = loadGameSettingsFile(getInstanceGameSettingsFile(instanceId));
-        if (result.setting() != null) {
-            initInstanceGameSettings(instanceId, result.setting(), result.allowSave());
-            return;
-        }
-        if (!result.allowSave()) {
-            readOnlyInstanceGameSettings.add(instanceId);
-            return;
-        }
+        withInstanceSettingsLock(instanceId, () -> {
+            if (instanceGameSettings.containsKey(instanceId)) {
+                return null;
+            }
+            InstanceGameSettingsLoadResult result = loadGameSettingsFile(getInstanceGameSettingsFile(instanceId));
+            if (result.setting() != null) {
+                initInstanceGameSettings(instanceId, result.setting(), result.allowSave());
+                return null;
+            }
+            instanceGameSettings.put(instanceId, new InstanceSettingsState(null, !result.allowSave()));
+            return null;
+        });
     }
 
     /// Loads a current-format instance game settings file.
@@ -514,18 +913,24 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId instance ID
     /// @return the created settings, existing settings, or `null` for an unknown or read-only instance
     public @Nullable GameSettings.Instance createInstanceGameSettings(GameInstanceID instanceId) {
-        if (!hasInstance(instanceId)) {
-            return null;
-        }
-        if (readOnlyInstanceGameSettings.contains(instanceId)) {
-            return null;
-        }
-        if (instanceGameSettings.containsKey(instanceId)) {
-            return getInstanceGameSettings(instanceId);
-        }
+        return withInstanceSettingsLock(instanceId, () -> {
+            if (!hasInstance(instanceId)) {
+                return null;
+            }
+            loadInstanceGameSettings(instanceId);
+            InstanceSettingsState state = Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state");
+            if (state.readOnly()) {
+                return null;
+            }
+            @Nullable GameSettings.Instance existing = state.setting();
+            if (existing != null) {
+                return existing;
+            }
 
-        GameSettings.Instance setting = new GameSettings.Instance();
-        return initInstanceGameSettings(instanceId, setting);
+            GameSettings.Instance setting = new GameSettings.Instance();
+            return initInstanceGameSettings(instanceId, setting);
+        });
     }
 
     /// Registers writable instance settings and their auto-save listener.
@@ -546,16 +951,14 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @return the registered settings
     private GameSettings.Instance initInstanceGameSettings(
             GameInstanceID instanceId, GameSettings.Instance setting, boolean allowSave) {
-        setting.setSavable(allowSave);
-        loadedInstanceGameSettings.add(instanceId);
-        instanceGameSettings.put(instanceId, setting);
-        if (allowSave) {
-            readOnlyInstanceGameSettings.remove(instanceId);
-            setting.changes().subscribe(change -> saveGameSettings(instanceId));
-        } else {
-            readOnlyInstanceGameSettings.add(instanceId);
-        }
-        return setting;
+        return withInstanceSettingsLock(instanceId, () -> {
+            setting.setSavable(allowSave);
+            if (allowSave) {
+                setting.changes().subscribe(change -> saveGameSettings(instanceId));
+            }
+            instanceGameSettings.put(instanceId, new InstanceSettingsState(setting, !allowSave));
+            return setting;
+        });
     }
 
     /// Returns loaded settings for an instance, loading them on first access.
@@ -564,10 +967,11 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @return loaded settings, or `null` when no settings exist
     @Nullable
     public GameSettings.Instance getInstanceGameSettings(GameInstanceID instanceId) {
-        if (!loadedInstanceGameSettings.contains(instanceId)) {
+        return withInstanceSettingsLock(instanceId, () -> {
             loadInstanceGameSettings(instanceId);
-        }
-        return instanceGameSettings.get(instanceId);
+            return Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state").setting();
+        });
     }
 
     /// Returns existing instance settings or creates writable defaults when possible.
@@ -588,39 +992,73 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId the instance ID
     /// @return whether the instance settings are loaded in read-only mode
     public boolean isInstanceGameSettingsReadOnly(GameInstanceID instanceId) {
-        if (!loadedInstanceGameSettings.contains(instanceId)) {
+        return withInstanceSettingsLock(instanceId, () -> {
             loadInstanceGameSettings(instanceId);
-        }
-
-        return readOnlyInstanceGameSettings.contains(instanceId);
+            return Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state").readOnly();
+        });
     }
 
     /// Backs up and overwrites the instance-specific game settings file with the currently loaded settings.
     ///
     /// @param instanceId the instance ID
     public void forceOverwriteInstanceGameSettings(GameInstanceID instanceId) {
-        if (!loadedInstanceGameSettings.contains(instanceId)) {
+        withInstanceSettingsLock(instanceId, () -> {
             loadInstanceGameSettings(instanceId);
-        }
 
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
-        if (setting == null) {
-            setting = new GameSettings.Instance();
-            instanceGameSettings.put(instanceId, setting);
-            loadedInstanceGameSettings.add(instanceId);
-        }
+            InstanceSettingsState state = Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state");
+            @Nullable GameSettings.Instance setting = state.setting();
+            if (setting == null) {
+                setting = new GameSettings.Instance();
+            }
 
-        boolean installAutoSave = !setting.isSavable();
-        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
-        SettingFileUtils.backupInvalidConfig(file);
-        setting.setSchema(GameSettings.Instance.CURRENT_SCHEMA);
-        setting.setSavable(true);
-        setting.setBackupOnNextSave(false);
-        readOnlyInstanceGameSettings.remove(instanceId);
-        saveGameSettings(instanceId);
-        if (installAutoSave) {
-            setting.changes().subscribe(change -> saveGameSettings(instanceId));
-        }
+            boolean installAutoSave = !setting.isSavable();
+            Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
+            SettingFileUtils.backupInvalidConfig(file);
+            setting.setSchema(GameSettings.Instance.CURRENT_SCHEMA);
+            setting.setSavable(true);
+            setting.setBackupOnNextSave(false);
+            instanceGameSettings.put(instanceId, new InstanceSettingsState(setting, false));
+            saveGameSettings(instanceId);
+            if (installAutoSave) {
+                setting.changes().subscribe(change -> saveGameSettings(instanceId));
+            }
+            return null;
+        });
+    }
+
+    /// Backs up and synchronously overwrites the instance-specific game settings file with the loaded settings.
+    ///
+    /// This entry point is intended for resource-aware mutation tasks. It keeps the complete recovery transition under
+    /// the repository's instance-settings locks and does not enqueue the final write in [FileSaver].
+    ///
+    /// @param instanceId the instance ID
+    /// @throws IOException if the recovered settings file cannot be written
+    public void forceOverwriteInstanceGameSettingsSync(GameInstanceID instanceId) throws IOException {
+        withInstanceSettingsLocks(List.of(instanceId), () -> {
+            loadInstanceGameSettings(instanceId);
+
+            InstanceSettingsState state = Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state");
+            @Nullable GameSettings.Instance setting = state.setting();
+            if (setting == null) {
+                setting = new GameSettings.Instance();
+            }
+
+            boolean installAutoSave = !setting.isSavable();
+            Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
+            SettingFileUtils.backupInvalidConfig(file);
+            setting.setSchema(GameSettings.Instance.CURRENT_SCHEMA);
+            setting.setSavable(true);
+            setting.setBackupOnNextSave(false);
+            instanceGameSettings.put(instanceId, new InstanceSettingsState(setting, false));
+            saveGameSettingsSyncLocked(instanceId);
+            if (installAutoSave) {
+                setting.changes().subscribe(change -> saveGameSettings(instanceId));
+            }
+            return null;
+        });
     }
 
     /// Returns the explicit parent preset of the instance, falling back to the default preset.
@@ -676,17 +1114,26 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Applies default isolation to a new instance before its manifest is saved.
     public void applyDefaultIsolationSettingForNewInstance(GameInstanceID instanceId, boolean modded) {
-        if (!shouldIsolateNewInstance(modded) || readOnlyInstanceGameSettings.contains(instanceId)) {
+        if (!shouldIsolateNewInstance(modded)) {
             return;
         }
 
-        @Nullable GameSettings.Instance setting = getInstanceGameSettings(instanceId);
-        if (setting == null) {
-            setting = initInstanceGameSettings(instanceId, new GameSettings.Instance());
-        }
-        if (setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY)) {
-            saveGameSettings(instanceId);
-        }
+        withInstanceSettingsLock(instanceId, () -> {
+            loadInstanceGameSettings(instanceId);
+            InstanceSettingsState state = Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state");
+            if (state.readOnly()) {
+                return null;
+            }
+            @Nullable GameSettings.Instance setting = state.setting();
+            if (setting == null) {
+                setting = initInstanceGameSettings(instanceId, new GameSettings.Instance());
+            }
+            if (setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY)) {
+                saveGameSettings(instanceId);
+            }
+            return null;
+        });
     }
 
     /// Finds the first supported icon file for an instance.
@@ -742,39 +1189,49 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// @param instanceId instance ID
     public void saveGameSettings(GameInstanceID instanceId) {
-        if (!instanceGameSettings.containsKey(instanceId) || readOnlyInstanceGameSettings.contains(instanceId))
-            return;
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
-        if (setting == null) {
-            return;
-        }
-        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
-        try {
-            Files.createDirectories(file.getParent());
-        } catch (IOException e) {
-            LOG.warning("Failed to create directory: " + file.getParent(), e);
-        }
+        withInstanceSettingsLock(instanceId, () -> {
+            @Nullable InstanceSettingsState state = instanceGameSettings.get(instanceId);
+            if (state == null || state.readOnly() || state.setting() == null) {
+                return null;
+            }
+            GameSettings.Instance setting = state.setting();
+            Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
+            try {
+                Files.createDirectories(file.getParent());
+            } catch (IOException e) {
+                LOG.warning("Failed to create directory: " + file.getParent(), e);
+            }
 
-        if (setting.isBackupOnNextSave()) {
-            setting.setBackupOnNextSave(false);
-            SettingFileUtils.backupInvalidConfig(file);
-        }
-        FileSaver.save(file, LauncherSettings.SETTINGS_GSON.toJson(setting));
+            if (setting.isBackupOnNextSave()) {
+                setting.setBackupOnNextSave(false);
+                SettingFileUtils.backupInvalidConfig(file);
+            }
+            FileSaver.save(file, LauncherSettings.SETTINGS_GSON.toJson(setting));
+            return null;
+        });
     }
 
     /// Saves instance-specific game settings synchronously.
     ///
     /// @param instanceId the instance ID
     /// @throws IOException if saving the file fails
-    void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
-        if (!instanceGameSettings.containsKey(instanceId) || readOnlyInstanceGameSettings.contains(instanceId)) {
-            return;
-        }
+    public void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
+        withInstanceSettingsLocks(List.of(instanceId), () -> {
+            saveGameSettingsSyncLocked(instanceId);
+            return null;
+        });
+    }
 
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
-        if (setting == null) {
+    /// Writes one loaded instance-settings object while its caller already owns the lifecycle and instance locks.
+    ///
+    /// @param instanceId the instance ID
+    /// @throws IOException if the settings file cannot be written
+    private void saveGameSettingsSyncLocked(GameInstanceID instanceId) throws IOException {
+        @Nullable InstanceSettingsState state = instanceGameSettings.get(instanceId);
+        if (state == null || state.readOnly() || state.setting() == null) {
             return;
         }
+        GameSettings.Instance setting = state.setting();
 
         Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
         Files.createDirectories(file.getParent());
@@ -1055,5 +1512,41 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                 }
             }
         };
+    }
+
+    /// Performs a checked filesystem operation while the repository root is stable.
+    @FunctionalInterface
+    @NotNullByDefault
+    public interface StableDirectoryOperation {
+        /// Performs the protected operation.
+        ///
+        /// @throws IOException when filesystem access fails
+        void execute() throws IOException;
+    }
+
+    /// Produces a value while the repository root is stable.
+    ///
+    /// @param <T> result type
+    @FunctionalInterface
+    @NotNullByDefault
+    public interface StableDirectorySupplier<T> {
+        /// Performs the protected operation.
+        ///
+        /// @return operation result
+        /// @throws IOException when filesystem access fails
+        T execute() throws IOException;
+    }
+
+    /// Performs one value-producing operation while affected instance settings are stable.
+    ///
+    /// @param <T> result type
+    @FunctionalInterface
+    @NotNullByDefault
+    private interface InstanceSettingsOperation<T> {
+        /// Performs the protected operation.
+        ///
+        /// @return operation result
+        /// @throws IOException when the operation fails
+        T execute() throws IOException;
     }
 }

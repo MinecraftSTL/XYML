@@ -54,8 +54,9 @@ public final class CrashReportAnalyzer {
         MACOS_FAILED_TO_FIND_SERVICE_PORT_FOR_DISPLAY("java\\.lang\\.IllegalStateException: GLFW error before init: \\[0x10008\\]Cocoa: Failed to find service port for display"),
         // Out of memory
         OUT_OF_MEMORY("(java\\.lang\\.OutOfMemoryError|The system is out of physical RAM or swap space|Out of Memory Error|Error occurred during initialization of VM\\RToo small maximum heap)"),
-        // Memory exceeded
-        MEMORY_EXCEEDED("There is insufficient memory for the Java Runtime Environment to continue"),
+        // Memory exceeded: only an explicit JVM-native commit/map/reservation failure is specific
+        // enough to outrank the broad OUT_OF_MEMORY fallback rule.
+        MEMORY_EXCEEDED("(?im)(?:\\bNative memory allocation\\b[^\\r\\n]*\\bfailed\\b[^\\r\\n]*\\b(?:commit|map|reserv)\\w*\\b|\\bos::commit_memory\\s*\\([^\\r\\n]*\\)\\s+failed\\b)"),
         // Too high resolution
         RESOLUTION_TOO_HIGH("Maybe try a (lower resolution|lowerresolution) (resourcepack|texturepack)\\?"),
         // game can only run on Java 8. Version of uesr's JVM is too high.
@@ -165,16 +166,93 @@ public final class CrashReportAnalyzer {
             return pattern;
         }
 
+        /// Returns the named groups used by this rule.
+        ///
+        /// @return a defensive copy of the group names
         public String[] getGroupNames() {
-            return groupNames;
+            return groupNames.clone();
         }
     }
 
-    public record Result(Rule rule, String log, Matcher matcher) {
+    /// Immutable snapshot of one rule match.
+    ///
+    /// The public matcher accessor creates a fresh cursor on each call. This preserves the legacy
+    /// API while preventing a mutable [Matcher] from being retained in analysis state.
+    public static final class Result {
+        private final Rule rule;
+        private final String log;
+        private final int matchStart;
+        private final int matchEnd;
+
+        /// Creates a match snapshot from a matcher positioned at a successful match.
+        ///
+        /// @param rule rule that produced the match
+        /// @param log complete input log
+        /// @param matcher matcher positioned at its successful match
+        public Result(Rule rule, String log, Matcher matcher) {
+            this.rule = Objects.requireNonNull(rule, "rule");
+            this.log = Objects.requireNonNull(log, "log");
+            Matcher source = Objects.requireNonNull(matcher, "matcher");
+            try {
+                this.matchStart = source.start();
+                this.matchEnd = source.end();
+            } catch (IllegalStateException exception) {
+                throw new IllegalArgumentException("matcher must be positioned at a successful match", exception);
+            }
+            if (matchStart < 0 || matchEnd < matchStart || matchEnd > log.length()) {
+                throw new IllegalArgumentException("matcher match range is outside the supplied log");
+            }
+        }
+
+        /// Returns the rule that produced this match.
+        public Rule rule() {
+            return rule;
+        }
+
+        /// Returns the complete captured input log.
+        public String log() {
+            return log;
+        }
+
+        /// Returns a fresh matcher positioned at the captured match.
+        ///
+        /// @return mutable matcher isolated from this immutable snapshot
+        /// @throws IllegalStateException if the rule no longer reproduces the captured match
+        public Matcher matcher() {
+            Matcher result = rule.pattern.matcher(log);
+            while (result.find()) {
+                if (result.start() == matchStart && result.end() == matchEnd) {
+                    return result;
+                }
+            }
+            throw new IllegalStateException("Crash rule no longer matches its captured log");
+        }
+
+        /// Compares the stable rule, input and match range.
+        @Override
+        public boolean equals(Object object) {
+            return this == object || object instanceof Result other
+                    && rule == other.rule
+                    && matchStart == other.matchStart
+                    && matchEnd == other.matchEnd
+                    && log.equals(other.log);
+        }
+
+        /// Returns a hash code consistent with [#equals(Object)].
+        @Override
+        public int hashCode() {
+            return Objects.hash(rule, log, matchStart, matchEnd);
+        }
+
+        /// Returns a diagnostic representation without exposing the complete log.
+        @Override
+        public String toString() {
+            return "Result[rule=" + rule + ", matchStart=" + matchStart + ", matchEnd=" + matchEnd + ']';
+        }
     }
 
     public static Set<Result> analyze(String log) {
-        Set<Result> results = new HashSet<>();
+        Set<Result> results = new LinkedHashSet<>();
         for (Rule rule : Rule.values()) {
             Matcher matcher = rule.pattern.matcher(log);
             if (matcher.find()) {

@@ -16,7 +16,9 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -25,8 +27,44 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
+/// Buffered primitive reader shared by bounded raw and decompressed NBT inputs.
+@NotNullByDefault
 public sealed abstract class DataReader implements Closeable
         permits BoundedDataReader, RawDataReader {
+    /// Default upper bound for one encoded NBT string.
+    private static final long MAX_STRING_BYTES = ReadLimits.defaults().maxStringBytes();
+
+    /// Default upper bound for one encoded NBT array.
+    private static final long MAX_ARRAY_BYTES = ReadLimits.defaults().maxArrayBytes();
+
+    /// Enters one logical tag while enforcing the region-wide node and nesting limits.
+    ///
+    /// @throws IOException if the node or depth budget is exhausted
+    public final void enterTag() throws IOException {
+        getRawReader().enterStructureTag();
+    }
+
+    /// Leaves the current logical tag after its payload has been parsed.
+    public final void leaveTag() {
+        getRawReader().leaveStructureTag();
+    }
+
+    /// Validates a list or primitive-array element count before allocation or iteration.
+    ///
+    /// @param length declared element count
+    /// @throws IOException if the count is negative or exceeds the configured limit
+    public final void requireCollectionLength(int length) throws IOException {
+        getRawReader().requireStructureCollectionLength(length);
+    }
+
+    /// Reserves a complete run of non-container list elements before any element is allocated.
+    ///
+    /// @param count number of leaf tags declared by the list
+    /// @throws IOException if the document node or depth budget would be exceeded
+    public final void reserveLeafTags(int count) throws IOException {
+        getRawReader().reserveStructureLeafTags(count);
+    }
+
     protected abstract RawDataReader getRawReader();
 
     protected abstract InputBuffer getBuffer();
@@ -37,7 +75,8 @@ public sealed abstract class DataReader implements Closeable
     public abstract void close() throws IOException;
 
     public byte[] readByteArray(int len) throws IOException {
-        if (len < 0 || len >= Integer.MAX_VALUE - 8) {
+        requireCollectionLength(len);
+        if ((long) len > MAX_ARRAY_BYTES || len >= Integer.MAX_VALUE - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -46,7 +85,9 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public int[] readIntArray(int len) throws IOException {
-        if (len < 0 || len > Integer.MAX_VALUE / Integer.BYTES - 8) {
+        requireCollectionLength(len);
+        if ((long) len * Integer.BYTES > MAX_ARRAY_BYTES
+                || len > Integer.MAX_VALUE / Integer.BYTES - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -55,7 +96,9 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public long[] readLongArray(int len) throws IOException {
-        if (len < 0 || len > Integer.MAX_VALUE / Long.BYTES - 8) {
+        requireCollectionLength(len);
+        if ((long) len * Long.BYTES > MAX_ARRAY_BYTES
+                || len > Integer.MAX_VALUE / Long.BYTES - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -89,8 +132,14 @@ public sealed abstract class DataReader implements Closeable
         if (offset < 0) {
             throw new IllegalArgumentException("offset must be non-negative");
         }
-        ensureBufferRemaining(offset + 1);
-        return getBuffer().getByteBuffer().get(getBuffer().getByteBuffer().position() + offset);
+        if (offset == Integer.MAX_VALUE) {
+            throw new IOException("Look-ahead offset is too large");
+        }
+        int required = offset + 1;
+        ensureBufferRemaining(required);
+        ByteBuffer buffer = getBuffer().getByteBuffer();
+        int position = buffer.position();
+        return buffer.get(position + offset);
     }
 
     /// Read a short from the input stream.
@@ -167,6 +216,10 @@ public sealed abstract class DataReader implements Closeable
     public String readString() throws IOException {
         int len = readUnsignedShort();
 
+        if ((long) len > MAX_STRING_BYTES) {
+            throw new IOException("String payload exceeds the read limit");
+        }
+
         if (len == 0) {
             return "";
         }
@@ -175,7 +228,12 @@ public sealed abstract class DataReader implements Closeable
 
         ByteBuffer bytes = getBuffer().getByteBuffer();
         int offset = bytes.position();
-        int limit = offset + len;
+        final int limit;
+        try {
+            limit = Math.addExact(offset, len);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("String boundary overflows the input buffer", overflow);
+        }
 
         bytes.position(limit);
 

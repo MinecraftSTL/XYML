@@ -63,16 +63,23 @@ public enum NBTFileEncoding {
         if (startsWith(encoded, LZ4_MAGIC)) {
             return LZ4;
         }
-        if (encoded.length >= 2 && Byte.toUnsignedInt(encoded[0]) == 0x78) {
+        if (encoded.length >= 2 && isZlibHeader(encoded[0], encoded[1])) {
             int flags = Byte.toUnsignedInt(encoded[1]);
-            if (((0x78 << 8) | flags) % 31 == 0) {
-                if ((flags & 0x20) != 0) {
-                    throw new IOException("Preset-dictionary zlib streams are not supported");
-                }
-                return ZLIB;
+            if ((flags & 0x20) != 0) {
+                throw new IOException("Preset-dictionary zlib streams are not supported");
             }
+            return ZLIB;
         }
         return RAW;
+    }
+
+    /// Returns whether a CMF/FLG pair is a legal zlib header.
+    private static boolean isZlibHeader(byte cmfByte, byte flagsByte) {
+        int cmf = Byte.toUnsignedInt(cmfByte);
+        int flags = Byte.toUnsignedInt(flagsByte);
+        return (cmf & 0x0F) == 8
+                && (cmf >>> 4) <= 7
+                && ((cmf << 8) | flags) % 31 == 0;
     }
 
     /// Returns whether the byte array begins with all supplied unsigned byte values.

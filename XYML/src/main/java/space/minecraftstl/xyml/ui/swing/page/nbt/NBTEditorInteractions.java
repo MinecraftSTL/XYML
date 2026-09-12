@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -28,6 +30,17 @@ import java.util.Objects;
 /// Toolkit-neutral boundary for file selection, drop choice, and destructive replacement prompts.
 @NotNullByDefault
 public interface NBTEditorInteractions {
+    /// Selects an absent target for a new NBT document without creating it.
+    ///
+    /// The compatibility default represents cancellation. Graphical implementations should use a save-style chooser
+    /// and leave final target validation to the document service.
+    ///
+    /// @param currentFile current source used only to choose an initial directory, or `null`
+    /// @return selected target, or `null` when cancelled
+    default @Nullable Path chooseNewFile(@Nullable Path currentFile) {
+        return null;
+    }
+
     /// Selects one candidate NBT source without reading it.
     ///
     /// @param currentFile current source, or `null` before a successful open
@@ -45,6 +58,35 @@ public interface NBTEditorInteractions {
     /// @param currentFile current dirty source
     /// @return whether unsaved edits may be discarded
     boolean confirmDiscardChanges(Path currentFile);
+
+    /// Confirms a save which will strictly rewrite a source with confirmed partial data loss.
+    ///
+    /// Implementations must fail closed when no graphical confirmation is available. The default is deliberately
+    /// `false`, so headless callers must opt into repair publication explicitly rather than accidentally replacing a
+    /// damaged source. Clean and fully recovered reports are never passed by the panel.
+    ///
+    /// @param currentFile current source
+    /// @param report immutable diagnostics captured during open
+    /// @return whether strict repair publication was explicitly approved
+    default boolean confirmRepairSave(Path currentFile, NBTReadReport report) {
+        Objects.requireNonNull(currentFile, "currentFile");
+        Objects.requireNonNull(report, "report");
+        return false;
+    }
+
+    /// Confirms a partial-data-loss repair save while exposing the immutable storage profile for diagnostics.
+    ///
+    /// The two-argument method remains the compatibility hook for existing non-Swing callers;
+    /// implementations which do not need region metadata may continue overriding it.
+    ///
+    /// @param currentFile current source
+    /// @param report immutable diagnostics captured during open
+    /// @param storageProfile immutable standalone or region profile
+    /// @return whether strict repair publication was explicitly approved
+    default boolean confirmRepairSave(Path currentFile, NBTReadReport report, StorageProfile storageProfile) {
+        Objects.requireNonNull(storageProfile, "storageProfile");
+        return confirmRepairSave(currentFile, report);
+    }
 
     /// Confirms clearing the fixed compound root of one Region chunk slot.
     ///

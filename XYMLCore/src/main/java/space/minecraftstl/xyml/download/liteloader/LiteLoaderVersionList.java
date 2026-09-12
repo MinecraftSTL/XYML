@@ -83,7 +83,7 @@ public final class LiteLoaderVersionList extends VersionList<LiteLoaderRemoteVer
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
     @Override

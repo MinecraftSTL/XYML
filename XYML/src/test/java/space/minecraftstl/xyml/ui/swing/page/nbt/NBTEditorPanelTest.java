@@ -22,6 +22,8 @@ import com.formdev.flatlaf.FlatLightLaf;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntTag;
@@ -72,13 +74,16 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
@@ -104,10 +109,160 @@ final class NBTEditorPanelTest {
         assertEquals("No NBT file open.", NBTEditorStrings.english().emptyText());
         assertEquals("未打开 NBT 文件。", NBTEditorStrings.simplifiedChinese().emptyText());
         assertTrue(NBTEditorStrings.english().fileFilter().contains("*.nbt"));
+        assertTrue(NBTEditorStrings.english().fileFilter().contains("*.xyml_old"));
+        assertEquals("Create NBT file", NBTEditorStrings.english().newTooltip());
+        assertEquals("新建 NBT 文件", NBTEditorStrings.simplifiedChinese().newTooltip());
         assertEquals("new_tag", NBTEditorStrings.traditionalChinese().defaultTagName());
         assertEquals(
                 "Editing was interrupted. Reload this file before continuing.",
                 NBTEditorStrings.english().editUncertainText());
+    }
+
+    /// Routes the independent new-file command through the controller and leaves the target absent until save.
+    @Test
+    void createsNewFileFromTheToolbar() throws Exception {
+        Path target = temporaryDirectory.resolve("toolbar-created.nbt");
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        RecordingInteractions interactions = new RecordingInteractions(target);
+        interactions.chosenNewFile = target;
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            iconExecutor.runAll();
+            onEdt(() -> {
+                AbstractButton create = findNamed(panel, "nbtEditorNew", AbstractButton.class);
+                assertTrue(create.isEnabled());
+                create.doClick();
+            });
+            assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
+            ioExecutor.runNext();
+            flushEdt();
+            assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+            assertTrue(controller.snapshot().dirty());
+            assertFalse(Files.exists(target));
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Keeps recovered diagnostics visible while allowing an immediate strict repair save.
+    @Test
+    void savesRecoveredSourceWithoutRepairConfirmation() throws Exception {
+        Path source = temporaryDirectory.resolve("recovered.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        byte[] damaged = Files.readAllBytes(source);
+        damaged[damaged.length - 8] ^= 1;
+        Files.write(source, damaged);
+
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            iconExecutor.runAll();
+            flushEdt();
+
+            assertTrue(controller.snapshot().document().requiresRepair());
+            assertEquals(NBTReadReport.Severity.RECOVERED,
+                    controller.snapshot().document().readReport().severity());
+            assertTrue(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(0, interactions.repairConfirmations());
+            assertEquals(1, ioExecutor.pendingCount());
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
+            assertFalse(controller.snapshot().document().requiresRepair());
+            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            assertEquals(1, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Requires confirmation for partial data loss and passes the complete diagnostics to the interaction boundary.
+    @Test
+    void confirmsPartialDataLossWithIssueDetailsBeforeSaving() throws Exception {
+        Path source = temporaryDirectory.resolve("r.0.0.mca");
+        byte[] damaged = new byte[8193];
+        damaged[damaged.length - 1] = 0x55;
+        Files.write(source, damaged);
+
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            iconExecutor.runAll();
+            flushEdt();
+
+            NBTReadReport report = controller.snapshot().document().readReport();
+            StorageProfile profile = controller.snapshot().document().storageProfile();
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, report.severity());
+            assertTrue(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(1, interactions.repairConfirmations());
+            assertEquals(source.toAbsolutePath().normalize(), interactions.repairSource());
+            assertEquals(report, interactions.repairReport());
+            assertEquals(profile, interactions.repairStorageProfile());
+            assertTrue(interactions.repairReport().issues().stream().anyMatch(issue ->
+                    "REGION_FILE_TRAILING_TRUNCATION".equals(issue.code())
+                            && "region".equals(issue.path())
+                            && !issue.message().isBlank()));
+            assertEquals(0, ioExecutor.pendingCount());
+
+            interactions.setRepairApproved(true);
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(2, interactions.repairConfirmations());
+            assertEquals(1, ioExecutor.pendingCount());
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
+            assertFalse(controller.snapshot().document().requiresRepair());
+            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            assertEquals(8192L, Files.size(source));
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
     }
 
     /// Exercises the complete headless page workflow without performing NBT I/O on the EDT.
@@ -130,7 +285,7 @@ final class NBTEditorPanelTest {
                 interactions,
                 closeRequests::incrementAndGet,
                 iconExecutor));
-        assertEquals(1, iconExecutor.pendingCount());
+        iconExecutor.awaitPendingCount(1);
         iconExecutor.runNext();
         flushEdt();
 
@@ -143,7 +298,7 @@ final class NBTEditorPanelTest {
             assertTrue(findNamed(panel, "nbtEditorProgress", JProgressBar.class).isVisible());
             assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
         });
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
 
@@ -194,7 +349,7 @@ final class NBTEditorPanelTest {
             assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
             assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
         });
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
 
@@ -234,7 +389,7 @@ final class NBTEditorPanelTest {
         assertEquals(0, ioExecutor.pendingCount());
         interactions.confirmDiscard = true;
         assertTrue(onEdt(() -> panel.openDroppedPaths(List.of(second))));
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
         assertEquals(second.toAbsolutePath().normalize(), controller.snapshot().file());
@@ -265,6 +420,115 @@ final class NBTEditorPanelTest {
         ioExecutor.runAll();
         flushEdt();
         assertEquals(NBTEditorStatus.CLOSED, controller.snapshot().status());
+    }
+
+    /// Coalesces busy routes and prevents a stale confirmation from overtaking a reentrant newer route.
+    @Test
+    void opensOnlyTheLatestRouteRequestAfterBusyEditing() throws Exception {
+        Path source = temporaryDirectory.resolve("busy-source.dat");
+        Path superseded = temporaryDirectory.resolve("superseded.dat");
+        Path pending = temporaryDirectory.resolve("pending.dat");
+        Path expected = temporaryDirectory.resolve("reentrant-latest.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        writeTag(superseded, new CompoundTag().addInt("value", 2));
+        writeTag(pending, new CompoundTag().addInt("value", 3));
+        writeTag(expected, new CompoundTag().addInt("value", 4));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        List<Path> openingPaths = new ArrayList<>();
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null && current.status() == NBTEditorStatus.OPENING && current.file() != null) {
+                openingPaths.add(current.file());
+            }
+        });
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { }));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
+                value.setText("4");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                panel.open(superseded);
+                panel.open(pending.getParent().resolve("child").resolve("..").resolve(pending.getFileName()));
+            });
+            assertEquals(0, interactions.discardConfirmations);
+            interactions.discardConfirmationAction = () -> panel.open(expected);
+
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.OPENING);
+            assertEquals(2, interactions.discardConfirmations);
+            ioExecutor.awaitPendingCount(1);
+            assertEquals(1, ioExecutor.pendingCount());
+
+            ioExecutor.runNext();
+            flushEdt();
+            assertEquals(expected.toAbsolutePath().normalize(), controller.snapshot().file());
+            assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+            assertEquals(2, interactions.discardConfirmations);
+            assertEquals(4, ioExecutor.submissionCount());
+            assertEquals(List.of(source.toAbsolutePath().normalize(), expected.toAbsolutePath().normalize()),
+                    openingPaths);
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Discards a retained route request when the panel closes during controller work.
+    @Test
+    void doesNotOpenARetainedRouteAfterClose() throws Exception {
+        Path source = temporaryDirectory.resolve("closing-source.dat");
+        Path retained = temporaryDirectory.resolve("retained.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        writeTag(retained, new CompoundTag().addInt("value", 2));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { }));
+        onEdt(() -> panel.open(source));
+        ioExecutor.runNext();
+        flushEdt();
+
+        onEdt(() -> {
+            JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+            NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+            tree.setSelectionPath(model.pathForAddress(List.of(0)));
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
+            value.setText("3");
+            findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+            assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+            panel.open(retained);
+        });
+        assertEquals(2, ioExecutor.submissionCount());
+
+        panel.close();
+        ioExecutor.runAll();
+        flushEdt();
+        assertEquals(NBTEditorStatus.CLOSED, controller.snapshot().status());
+        assertEquals(0, interactions.discardConfirmations);
+        assertEquals(3, ioExecutor.submissionCount());
     }
 
     /// Prevents accidental classpath image reads from being moved back onto the EDT.
@@ -312,9 +576,9 @@ final class NBTEditorPanelTest {
         });
     }
 
-    /// Requires reload after a stale save and never queues a repeated doomed save.
+    /// Reports an externally replaced source as an ordinary failed save and does not queue a redundant clean save.
     @Test
-    void disablesSaveAfterAStaleSourceConflict() throws Exception {
+    void disablesSaveAfterAStaleSourceFailure() throws Exception {
         Path source = temporaryDirectory.resolve("conflict.dat");
         writeTag(source, new CompoundTag().addInt("value", 1));
         ManualExecutor ioExecutor = new ManualExecutor();
@@ -343,16 +607,18 @@ final class NBTEditorPanelTest {
             writeTag(source, new CompoundTag().addInt("value", 99));
             onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
             ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
             flushEdt();
             onEdt(() -> {
-                assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
+                assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
                 assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
-                assertTrue(findNamed(panel, "nbtEditorReload", AbstractButton.class).isEnabled());
                 findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick();
             });
             assertEquals(0, ioExecutor.pendingCount());
         } finally {
             panel.close();
+            ioExecutor.runAll();
+            flushEdt();
         }
     }
 
@@ -795,7 +1061,7 @@ final class NBTEditorPanelTest {
                         findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
                 assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
             });
-            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(1);
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> {
@@ -842,7 +1108,7 @@ final class NBTEditorPanelTest {
                 () -> { },
                 backgroundExecutor));
         try {
-            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(1);
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> panel.open(source));
@@ -866,7 +1132,7 @@ final class NBTEditorPanelTest {
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
             });
-            assertEquals(2, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(2);
 
             backgroundExecutor.runNext();
             flushEdt();
@@ -1106,6 +1372,8 @@ final class NBTEditorPanelTest {
             assertTrue(ImageIO.write(image, "PNG", report.toFile()));
         } finally {
             panel.close();
+            ioExecutor.runAll();
+            flushEdt();
         }
     }
 
@@ -1261,17 +1529,45 @@ final class NBTEditorPanelTest {
         EdtDispatcher.executeAndWait(() -> { });
     }
 
+    /// Waits for an asynchronous controller transition while keeping the Swing event queue responsive.
+    ///
+    /// @param condition expected state predicate
+    private static void awaitEdtCondition(BooleanSupplier condition) {
+        BooleanSupplier selected = Objects.requireNonNull(condition, "condition");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+        while (!selected.getAsBoolean() && System.nanoTime() < deadline) {
+            flushEdt();
+            Thread.yield();
+        }
+        assertTrue(selected.getAsBoolean(), "Timed out waiting for the Swing controller transition");
+    }
+
+    /// Waits for one controller status from a non-EDT test call.
+    ///
+    /// @param controller controller under test
+    /// @param expected expected status
+    private static void awaitControllerStatus(NBTEditorController controller, NBTEditorStatus expected) {
+        awaitEdtCondition(() -> controller.snapshot().status() == expected);
+    }
+
     /// Deterministic executor proving when blocking work is allowed to run.
     @NotNullByDefault
     private static final class ManualExecutor implements Executor {
+        /// Maximum time a test waits for asynchronous resource resolution to enqueue its command.
+        private static final long COMMAND_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of submitted blocking operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
+
+        /// Total operations submitted over this executor's lifetime.
+        private final AtomicInteger submissions = new AtomicInteger();
 
         /// Queues one operation.
         ///
         /// @param command submitted operation
         @Override
         public void execute(Runnable command) {
+            submissions.incrementAndGet();
             commands.add(command);
         }
 
@@ -1282,9 +1578,37 @@ final class NBTEditorPanelTest {
             return commands.size();
         }
 
+        /// Returns the total operation count submitted so far.
+        ///
+        /// @return submitted operation count
+        private int submissionCount() {
+            return submissions.get();
+        }
+
+        /// Waits until at least the requested number of operations has been submitted.
+        ///
+        /// @param expected minimum operation count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COMMAND_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " executor operation(s)");
+        }
+
         /// Runs the next operation.
         private void runNext() {
-            commands.remove().run();
+            try {
+                Runnable command = commands.poll(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for an executor operation");
+                }
+                command.run();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for an executor operation", interrupted);
+            }
         }
 
         /// Drains every operation.
@@ -1301,14 +1625,38 @@ final class NBTEditorPanelTest {
         /// Source returned by the chooser, or `null` to simulate cancellation.
         private @Nullable Path chosenFile;
 
+        /// Target returned by the new-document chooser, or `null` to simulate cancellation.
+        private @Nullable Path chosenNewFile;
+
         /// Whether dirty-document replacement is confirmed.
         private boolean confirmDiscard = true;
+
+        /// Number of dirty-document replacement confirmations requested.
+        private int discardConfirmations;
+
+        /// One-shot action invoked inside dirty confirmation to model a nested EDT event, or `null`.
+        private @Nullable Runnable discardConfirmationAction;
 
         /// Whether destructive chunk-root clearing is confirmed.
         private boolean confirmClearChunk;
 
         /// Number of destructive chunk-root confirmations requested.
         private int clearChunkConfirmations;
+
+        /// Whether tolerant-read repair publication is approved.
+        private boolean repairApproved;
+
+        /// Number of repair-save confirmations requested.
+        private int repairConfirmations;
+
+        /// Source supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable Path repairSource;
+
+        /// Read report supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable NBTReadReport repairReport;
+
+        /// Storage profile supplied to the most recent repair-save confirmation, or `null` before the first prompt.
+        private @Nullable StorageProfile repairStorageProfile;
 
         /// Creates interactions with one initial chooser result.
         ///
@@ -1324,6 +1672,15 @@ final class NBTEditorPanelTest {
         @Override
         public @Nullable Path chooseFile(@Nullable Path currentFile) {
             return chosenFile;
+        }
+
+        /// Returns the configured new-document target.
+        ///
+        /// @param currentFile current source, or `null`
+        /// @return configured target
+        @Override
+        public @Nullable Path chooseNewFile(@Nullable Path currentFile) {
+            return chosenNewFile;
         }
 
         /// Accepts exactly one supported lexical path.
@@ -1343,6 +1700,12 @@ final class NBTEditorPanelTest {
         @Override
         public boolean confirmDiscardChanges(Path currentFile) {
             Objects.requireNonNull(currentFile, "currentFile");
+            discardConfirmations++;
+            @Nullable Runnable action = discardConfirmationAction;
+            discardConfirmationAction = null;
+            if (action != null) {
+                action.run();
+            }
             return confirmDiscard;
         }
 
@@ -1359,6 +1722,59 @@ final class NBTEditorPanelTest {
             }
             clearChunkConfirmations++;
             return confirmClearChunk;
+        }
+
+        /// Returns the configured repair-save decision and records the prompt.
+        ///
+        /// @param source source to rewrite
+        /// @param report tolerant-read report
+        /// @param storageProfile immutable source storage profile
+        /// @return configured approval
+        @Override
+        public boolean confirmRepairSave(
+                Path source,
+                NBTReadReport report,
+                StorageProfile storageProfile) {
+            repairSource = Objects.requireNonNull(source, "source");
+            repairReport = Objects.requireNonNull(report, "report");
+            repairStorageProfile = Objects.requireNonNull(storageProfile, "storageProfile");
+            repairConfirmations++;
+            return repairApproved;
+        }
+
+        /// Updates the repair-save decision for the next prompt.
+        ///
+        /// @param approved whether repair publication is approved
+        private void setRepairApproved(boolean approved) {
+            repairApproved = approved;
+        }
+
+        /// Returns the number of repair-save prompts.
+        ///
+        /// @return prompt count
+        private int repairConfirmations() {
+            return repairConfirmations;
+        }
+
+        /// Returns the source supplied to the most recent repair-save prompt.
+        ///
+        /// @return prompted source
+        private Path repairSource() {
+            return Objects.requireNonNull(repairSource, "repair source was not captured");
+        }
+
+        /// Returns the report supplied to the most recent repair-save prompt.
+        ///
+        /// @return prompted report
+        private NBTReadReport repairReport() {
+            return Objects.requireNonNull(repairReport, "repair report was not captured");
+        }
+
+        /// Returns the storage profile supplied to the most recent repair-save prompt.
+        ///
+        /// @return prompted storage profile
+        private StorageProfile repairStorageProfile() {
+            return Objects.requireNonNull(repairStorageProfile, "repair storage profile was not captured");
         }
     }
 }

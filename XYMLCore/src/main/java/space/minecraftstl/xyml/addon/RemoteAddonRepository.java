@@ -43,12 +43,19 @@ public interface RemoteAddonRepository {
     /// @return absolute provider web base URL
     String getBaseUrl();
 
+    /// Provider-neutral result orderings exposed by the remote catalog filter.
     enum SortType {
+        /// Provider popularity or follower ranking.
         POPULARITY,
+        /// Project name ordering.
         NAME,
+        /// Project creation time.
         DATE_CREATED,
+        /// Latest project update time.
         LAST_UPDATED,
+        /// Project author ordering.
         AUTHOR,
+        /// Total project download count.
         TOTAL_DOWNLOADS
     }
 
