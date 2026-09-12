@@ -25,9 +25,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 
+import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
+import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
 import space.minecraftstl.xyml.addon.RemoteAddon;
@@ -111,7 +112,7 @@ public class ModrinthModpackExportTask extends Task<Void> {
 
         boolean isDisabled = repository.getModManager(instanceId).isDisabled(file);
         if (isDisabled) {
-            relativePath = repository.getModManager(instanceId).enableMod(Paths.get(relativePath)).toString();
+            relativePath = StringUtils.removeSuffix(relativePath, LocalAddonManager.DISABLED_EXTENSION);
         }
 
         Optional<RemoteAddon.Version> modrinthVersion = Optional.empty();

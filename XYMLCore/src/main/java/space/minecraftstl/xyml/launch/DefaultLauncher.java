@@ -323,6 +323,7 @@ public class DefaultLauncher extends Launcher {
 
         if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
             classpath.removeIf(c -> c.contains("2.9.4-nightly-20150209"));
+            classpath.removeIf(c -> c.contains("platform-3.4.0"));
         }
 
         Path jar = repository.getInstanceJar(manifest);

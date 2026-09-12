@@ -19,24 +19,69 @@ package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.task.FileDownloadTask;
+import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.Validation;
-import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+
+import static space.minecraftstl.xyml.util.Pair.pair;
 
 /// @author huangyuhui
 @JsonSerializable
+@NotNullByDefault
 public record CurseManifestFile(@SerializedName("projectID") int projectID,
                                 @SerializedName("fileID") int fileID,
-                                @SerializedName("fileName") String fileName,
-                                @SerializedName("url") String url,
-                                @SerializedName("required") boolean required) implements Validation {
+                                @SerializedName("fileName") @Nullable String fileName,
+                                @SerializedName("url") @Nullable String url,
+                                @SerializedName("required") boolean required,
+                                @SerializedName("hashes") @Nullable Map<String, String> hashes) implements Validation {
+
+    private static final @Unmodifiable List<Pair<String, String>> HASH_ALGORITHMS = List.of(
+            pair("sha1", "SHA-1"),
+            pair("sha256", "SHA-256"),
+            pair("sha512", "SHA-512"),
+            pair("md5", "MD5")
+    );
+
+    /// Creates a manifest file using the legacy five-field representation.
+    ///
+    /// @param projectID CurseForge project identifier
+    /// @param fileID CurseForge file identifier
+    /// @param fileName file name, or null when not resolved
+    /// @param url download URL, or null when it should be derived
+    /// @param required whether the file is required
+    public CurseManifestFile(int projectID, int fileID, @Nullable String fileName, @Nullable String url, boolean required) {
+        this(projectID, fileID, fileName, url, required, null);
+    }
 
     @Override
     public void validate() throws JsonParseException {
         if (projectID == 0 || fileID == 0)
             throw new JsonParseException("Missing Project ID or File ID.");
+    }
+
+    /// Returns the strongest supported checksum declared by the manifest.
+    ///
+    /// @return a download integrity check, or null when no supported hash is present
+    public @Nullable FileDownloadTask.IntegrityCheck getIntegrityCheck() {
+        if (hashes == null || hashes.isEmpty()) {
+            return null;
+        }
+
+        for (Pair<String, String> algorithm : HASH_ALGORITHMS) {
+            String hash = hashes.get(algorithm.key());
+            if (hash != null) {
+                return new FileDownloadTask.IntegrityCheck(algorithm.value(), hash);
+            }
+        }
+        return null;
     }
 
     @Override
@@ -52,11 +97,19 @@ public record CurseManifestFile(@SerializedName("projectID") int projectID,
     }
 
     public CurseManifestFile withFileName(String fileName) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes);
     }
 
     public CurseManifestFile withURL(String url) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes);
+    }
+
+    /// Returns a copy carrying the supplied remote checksum map.
+    ///
+    /// @param hashes checksum names and values, or null when unavailable
+    /// @return manifest file with the supplied checksums
+    public CurseManifestFile withHashes(@Nullable Map<String, String> hashes) {
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes);
     }
 
     @Override
