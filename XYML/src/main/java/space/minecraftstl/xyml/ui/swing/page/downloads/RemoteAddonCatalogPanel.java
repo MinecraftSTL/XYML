@@ -614,8 +614,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         filterBand.setOpaque(false);
         filterBand.setMinimumSize(new Dimension(0, 0));
         JPanel searchBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
                 "[40!]8[40!]8[40!]"));
         searchBand.setName("remoteAddonSearchBand");
         searchBand.setOpaque(false);
@@ -623,31 +623,31 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
-        searchBand.add(sourceLabel);
+        searchBand.add(sourceLabel, "split 2");
         sourceBox.setName("remoteAddonSource");
         sourceBox.addActionListener(event -> sourceChanged());
         sourceBox.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(sourceBox, "growx, wmin 0, h 40!");
+        searchBand.add(sourceBox, "growx, wmin 0, h 40!, wrap");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
-        searchBand.add(searchLabel);
+        searchBand.add(searchLabel, "split 2");
         searchField.setName("remoteAddonSearch");
         SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(criteriaListener);
         searchField.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(searchField, "growx, wmin 0, h 40!");
+        searchBand.add(searchField, "growx, wmin 0, h 40!, wrap");
 
         searchButton.setName("remoteAddonSearchAction");
         searchButton.setText(strings.searchAction());
         searchButton.addActionListener(event -> submitFirstPageSearch());
         searchButton.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
+        searchBand.add(searchButton, "growx, wmin 0, h 40!");
         filterBand.add(searchBand, "growx, wmin 0");
 
         JPanel criteriaBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
                 "[40!]8[40!]8[40!]"));
         criteriaBand.setName("remoteAddonCriteriaBand");
         criteriaBand.setOpaque(false);
@@ -655,16 +655,16 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
-        criteriaBand.add(gameVersionLabel);
+        criteriaBand.add(gameVersionLabel, "split 2");
         gameVersionField.setName("remoteAddonGameVersion");
         configureGameVersionSelector();
         gameVersionField.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
+        criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!, wrap");
 
         RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
         JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
         categoryLabel.setLabelFor(categoryBox);
-        criteriaBand.add(categoryLabel);
+        criteriaBand.add(categoryLabel, "split 2");
         categoryBox.setName("remoteAddonCategory");
         categoryBox.setRenderer(new RemoteCatalogCategoryRenderer(
                 () -> selectedSource() == RemoteAddonCatalogSource.MODRINTH,
@@ -672,17 +672,17 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         resetCategoryOptions();
         categoryBox.addActionListener(event -> categoryChanged());
         categoryBox.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(categoryBox, "growx, wmin 0, h 40!");
+        criteriaBand.add(categoryBox, "growx, wmin 0, h 40!, wrap");
 
         JLabel sortLabel = new JLabel(filterStrings.sortLabel());
         sortLabel.setLabelFor(sortBox);
-        criteriaBand.add(sortLabel);
+        criteriaBand.add(sortLabel, "split 2");
         sortBox.setName("remoteAddonSort");
         sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
         resetSortOptions();
         sortBox.addActionListener(event -> sortChanged());
         sortBox.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
+        criteriaBand.add(sortBox, "growx, wmin 0, h 40!, wrap");
         filterBand.add(criteriaBand, "growx, wmin 0");
 
         JPanel pageBand = new JPanel(new MigLayout(

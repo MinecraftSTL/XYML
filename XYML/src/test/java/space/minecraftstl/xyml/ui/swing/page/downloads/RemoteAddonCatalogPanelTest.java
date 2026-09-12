@@ -1055,9 +1055,21 @@ final class RemoteAddonCatalogPanelTest {
                             () -> "size=" + size + ", filter=" + filterBand.getBounds()
                                     + ", results=" + results.getBounds());
                     assertComponentInside(searchBand, findNamed(panel, "remoteAddonSearchAction", JButton.class));
-                    assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonGameVersion", JComboBox.class));
-                    assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonCategory", JComboBox.class));
-                    assertComponentInside(criteriaBand, findNamed(panel, "remoteAddonSort", JComboBox.class));
+                    assertFilterControlUsesRemainingWidth(
+                            searchBand,
+                            "remoteAddonSource");
+                    assertFilterControlUsesRemainingWidth(
+                            searchBand,
+                            "remoteAddonSearch");
+                    assertFilterControlUsesRemainingWidth(
+                            criteriaBand,
+                            "remoteAddonGameVersion");
+                    assertFilterControlUsesRemainingWidth(
+                            criteriaBand,
+                            "remoteAddonCategory");
+                    assertFilterControlUsesRemainingWidth(
+                            criteriaBand,
+                            "remoteAddonSort");
                     assertComponentInside(pageBand, findNamed(panel, "remoteAddonLastPage", JButton.class));
                 }
             });
@@ -1069,6 +1081,31 @@ final class RemoteAddonCatalogPanelTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    /// Verifies that a filter control starts after its preceding label and receives more than the label column.
+    ///
+    /// @param band filter row container
+    /// @param controlName named input or selector
+    private static void assertFilterControlUsesRemainingWidth(
+            JComponent band,
+            String controlName) {
+        JComponent control = Objects.requireNonNull(findNamed(band, controlName, JComponent.class), controlName);
+        @Nullable JLabel label = null;
+        Component[] children = band.getComponents();
+        for (int index = 1; index < children.length; index++) {
+            if (children[index] == control && children[index - 1] instanceof JLabel precedingLabel) {
+                label = precedingLabel;
+                break;
+            }
+        }
+        JLabel resolvedLabel = Objects.requireNonNull(label, "label for " + controlName);
+        assertComponentInside(band, control);
+        int labelEnd = resolvedLabel.getX() + resolvedLabel.getWidth();
+        int labelToControlGap = control.getX() - labelEnd;
+        assertTrue(labelToControlGap >= 0);
+        assertTrue(labelToControlGap <= 16, () -> controlName + " gap=" + labelToControlGap);
+        assertTrue(control.getWidth() > resolvedLabel.getWidth());
     }
 
     /// Gives a detached sparse list measurable result geometry without invoking a source request.
