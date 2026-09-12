@@ -1,213 +1,127 @@
-# Swing UI migration
+# Swing UI 迁移
 
-## Status
+<!-- #BEGIN LANGUAGE_SWITCHER -->
+**中文** | [English](swing-ui-migration_en.md)
+<!-- #END LANGUAGE_SWITCHER -->
 
-Implemented on branch `uniether/swing-ui-rewrite`.
+## 状态
 
-This document records the completed desktop UI architecture and the invariants
-that subsequent changes must preserve. The application UI is Swing-only; no
-JavaFX implementation, bridge, adapter, dependency, or runtime downloader is
-part of the current design.
+已在 `uniether/swing-ui-rewrite` 分支完成。
 
-## Decision
+本文记录已经完成的桌面 UI 架构及后续变更必须遵守的不变量。当前应用 UI 仅使用 Swing；设计中不包含 JavaFX 实现、桥接层、适配器、依赖或运行时下载器。
 
-XYML uses a desktop interface built on Java 17, Swing, and Java2D. The visual
-foundation uses a pinned pure-Java look and feel and a pure-Java layout
-manager. UI libraries, fonts, icons, and application assets are bundled into
-the launcher artifact; startup does not download UI runtime components.
+## 决策
 
-The migration deliberately does not use JCEF, Chromium, React, Compose, SWT,
-or another platform-native UI runtime. Those options introduce a narrower
-native platform matrix than the launcher currently supports.
+XYML 的桌面界面基于 Java 17、Swing 和 Java2D 构建。视觉基础使用固定版本的纯 Java 外观与纯 Java 布局管理器。UI 库、字体、图标和应用资源都会打包进启动器制品；启动时不会下载 UI 运行时组件。
 
-`XYMLCore` remains UI-toolkit-neutral. It does not expose or depend on
-`javafx.*` or `javax.swing.*` types. The Swing implementation belongs in the
-`XYML` application module. `XYMLBoot` keeps its small Swing-based error path
-and Java 8 bytecode target so an unsupported JVM can still display a useful
-upgrade message.
+迁移方案明确不采用 JCEF、Chromium、React、Compose、SWT 或其他平台原生 UI 运行时。这些选项会让启动器当前支持的平台范围变得更窄。
 
-## Product surface
+`XYMLCore` 继续保持 UI 工具包中立，不暴露也不依赖 `javafx.*` 或 `javax.swing.*` 类型。Swing 实现位于 `XYML` 应用模块。`XYMLBoot` 保留小型的 Swing 错误提示路径和 Java 8 字节码目标，使不受支持的 JVM 仍能显示有用的升级提示。
 
-The Swing application retains the operational workflows:
+## 产品界面
 
-- Downloads and remote search
-- Game instances, versions, mods, resource packs, worlds, and schematics
-- Accounts and authentication
-- Launcher and per-instance settings
-- Personalization, themes, backgrounds, and accessibility settings
-- Tasks, logs, crash handling, dialogs, and multi-step wizards
+Swing 应用保留以下操作工作流：
 
-There is no independent home page, announcement page, or announcement prompt
-system. The instance list is the default main surface. Downloads, settings,
-accounts, and other full-content pages are displayed over that surface; closing
-the active page reveals the instance list again.
+- 下载和远程搜索；
+- 游戏实例、版本、模组、资源包、存档和原理图；
+- 账户和认证；
+- 启动器及单实例设置；
+- 个性化、主题、背景和无障碍设置；
+- 任务、日志、崩溃处理、对话框和多步骤向导。
 
-The persistent application toolbar exposes the current account selector, the
-current game-instance selector, and the launch action. Account and instance
-selection are therefore available without routing through a home page, while
-their management pages remain reachable from navigation and selector actions.
+没有独立的主页、公告页或公告提示系统。实例列表是默认主界面。下载、设置、账户和其他完整内容页面会覆盖在该界面上显示；关闭活动页面后会再次显示实例列表。
 
-The interface is an operational desktop tool. It uses stable navigation,
-compact controls, list- and table-oriented content, and restrained framing.
-It must not turn data-heavy views into card grids or add marketing content.
+持久显示的应用工具栏提供当前账户选择器、当前游戏实例选择器和启动操作。因此无需经过主页即可选择账户和实例；它们的管理页面仍可通过导航和选择器操作访问。
 
-## Design system
+界面是面向操作的桌面工具，使用稳定的导航、紧凑的控件以及以列表和表格为主的内容，并保持克制的边框处理。不得把数据密集型视图改造成卡片网格，也不得加入营销内容。
 
-The initial visual specification uses true white or neutral charcoal page
-backgrounds, charcoal or white primary text, a restrained grass-green action
-color, and small sky-blue and warm-red semantic accents. Purple, beige, brown,
-dark-navy monocultures, decorative gradients, glows, glass effects, and nested
-cards are out of scope.
+## 设计系统
 
-Typography is defined separately for page titles, body text, captions, list
-rows, form labels, buttons, navigation, and status surfaces. Control typography
-must never rely on Swing defaults accidentally inherited from the host system.
+初始视觉规范使用纯白或中性炭黑页面背景、炭黑或白色主要文字、克制的草绿色操作色，以及少量天蓝和暖红语义强调色。紫色、米色、棕色、深海军蓝单色调、装饰性渐变、光晕、玻璃效果和嵌套卡片均不在范围内。
 
-Icons use one bundled SVG family with consistent stroke, fill, optical size,
-alignment, and selected/disabled treatment. Text glyphs are not substitutes
-for navigation arrows, disclosure controls, or common commands.
+页面标题、正文、说明文字、列表行、表单标签、按钮、导航和状态表面分别定义排版。控件排版不能意外依赖宿主系统继承的 Swing 默认值。
 
-### Corner radius
+图标使用一套打包的 SVG 图标族，并保持描边、填充、光学尺寸、对齐方式以及选中/禁用状态一致。导航箭头、展开控件或常用命令不能用文本字符代替图标。
 
-Corner radius is a persisted user setting rather than a hard-coded component
-constant. The selected value is expressed as a device-independent design token
-and applied consistently to buttons, text inputs, list selections, panels,
-dialogs, and scroll surfaces. Controls that must remain circular derive their
-radius from their measured size.
+### 圆角
 
-Top-level windows retain system decorations. Transparent, custom-shaped windows
-are not used because their behavior is inconsistent across Linux, BSD, window
-managers, and accessibility tools.
+圆角是持久化的用户设置，而不是硬编码的组件常量。选定值以与设备无关的设计令牌表示，并一致应用于按钮、文本输入框、列表选中项、面板、对话框和滚动表面。必须保持圆形的控件根据自身测量尺寸计算圆角。
 
-### Theme mode
+顶层窗口保留系统装饰。不使用透明的自定义形状窗口，因为它们在 Linux、BSD、窗口管理器和无障碍工具中的行为不一致。
 
-Brightness preference has four values: `THEME`, `SYSTEM`, `LIGHT`, and `DARK`.
-`THEME` follows the selected theme pack, `SYSTEM` follows the operating-system
-appearance, and the other two values force the corresponding brightness.
-Changing the preference updates all open windows on the Swing event-dispatch
-thread while preserving focus, selection, scroll position, and in-progress
-form values. Theme-pack and background settings remain the source of the rest
-of the user's appearance intent.
+### 主题模式
 
-### Motion
+亮度偏好有四个值：`THEME`、`SYSTEM`、`LIGHT` 和 `DARK`。`THEME` 跟随所选主题包，`SYSTEM` 跟随操作系统外观，另外两个值强制使用对应亮度。偏好变化会在 Swing 事件分发线程上更新所有打开的窗口，同时保留焦点、选择、滚动位置和正在编辑的表单值。主题包和背景设置仍是用户其余外观意图的来源。
 
-Motion is limited to page transitions, dialog appearance, selection movement,
-expand/collapse state, and theme transitions. The animation engine uses
-`javax.swing.Timer` and monotonic elapsed time. It must not animate every row in
-a long list or perform blocking work on the event-dispatch thread.
+### 动效
 
-The existing animation-disabled preference remains authoritative. A reduced
-motion policy can shorten or remove spatial transitions without hiding state
-changes.
+动效仅用于页面切换、对话框出现、选择移动、展开/折叠状态和主题过渡。动画引擎使用 `javax.swing.Timer` 和单调递增的耗时，不得为长列表中的每一行都添加动画，也不得在事件分发线程上执行阻塞工作。
 
-## Viewport-driven single-choice lists
+现有的禁用动画偏好仍具最高权威。减少动效策略可以缩短或移除空间过渡，但不能隐藏状态变化。
 
-Large single-choice lists use a `JList` with `SINGLE_SELECTION` and a reusable
-cell renderer. They must not create one `JRadioButton` per item. Selection is
-represented by list state and painted by the renderer.
+## 视口驱动的单选列表
 
-Loading is driven by the measured viewport, not by an arbitrary default page
-size or a fixed number of cached pages:
+大型单选列表使用设置为 `SINGLE_SELECTION` 的 `JList` 和可复用的单元格渲染器，不得为每个条目创建一个 `JRadioButton`。选择状态由列表状态表示，并由渲染器绘制。
 
-1. The model waits until layout provides an actual viewport height and a
-   measured renderer row height.
-2. It derives the visible item range from those measurements.
-3. It requests the visible range and a predictive range derived from scroll
-   direction, scroll velocity, observed load latency, and data-source bounds.
-4. It cancels obsolete requests after search, filter, source, or lifecycle
-   changes.
-5. It pins the selected item and current focus even when they are outside the
-   visible range.
-6. It reports loading and retry states as real list rows without changing the
-   geometry of already rendered items.
+加载由测量得到的视口驱动，而不是任意默认页大小或固定缓存页数：
 
-Remote providers keep their server-defined pagination contract. The UI maps
-provider pages into viewport ranges without exposing page size to the user.
-Local providers divide work by an event-dispatch-thread time budget and publish
-incremental immutable snapshots.
+1. 模型等待布局提供实际视口高度和测量得到的渲染行高。
+2. 根据这些测量值推导可见条目范围。
+3. 请求可见范围，以及由滚动方向、滚动速度、观测到的加载延迟和数据源边界推导出的预测范围。
+4. 在搜索、筛选、来源或生命周期变化后取消过时请求。
+5. 即使选中项和当前焦点位于可见范围之外，也固定保留它们。
+6. 将加载和重试状态作为真实列表行报告，同时不改变已渲染条目的几何尺寸。
 
-Cache retention is governed by measured item weight, available memory, current
-memory pressure, selection/focus pins, distance from the viewport, and recent
-access. It is not expressed as a fixed number of pages. Instrumentation records
-load latency, cache hits, evictions, blank-frame incidents, and event-dispatch
-thread stalls so policy changes are evidence-based.
+远程提供方继续遵守服务器定义的分页契约。UI 将提供方页面映射到视口范围，不向用户暴露页大小。本地提供方按事件分发线程时间预算分批工作，并发布增量不可变快照。
 
-## State and threading
+缓存保留由测量得到的条目权重、可用内存、当前内存压力、选择/焦点固定项、与视口的距离和近期访问记录共同决定，不以固定页数表示。埋点记录加载延迟、缓存命中、驱逐、空白帧事件和事件分发线程停顿，使策略调整有据可依。
 
-JavaFX properties and observable collections are replaced by plain values,
-immutable snapshots, explicit commands, and documented change events. Simple
-bean state may use `PropertyChangeSupport`; task and collection state uses
-domain-specific event types so callers do not depend on a UI toolkit.
+## 状态与线程
 
-Business work never runs on the Swing event-dispatch thread. UI updates pass
-through a single documented dispatcher backed by
-`SwingUtilities.invokeLater`. Background operations remain cancellable and
-must discard stale results before they reach a closed or superseded view.
+JavaFX 属性和可观察集合由普通值、不可变快照、显式命令和有文档说明的变更事件取代。简单 bean 状态可以使用 `PropertyChangeSupport`；任务和集合状态使用领域专用事件类型，使调用方不依赖 UI 工具包。
 
-Images use toolkit-neutral encoded data or `BufferedImage` at the application
-boundary. Core color values use a toolkit-neutral immutable representation and
-are converted to `java.awt.Color` only inside the Swing module.
+业务工作不能运行在 Swing 事件分发线程上。UI 更新通过由 `SwingUtilities.invokeLater` 支持的单一、已记录的调度器执行。后台操作必须可取消，并在结果到达已关闭或已被替换的视图前丢弃过时结果。
 
-## Offline artifact
+图片在应用边界使用与工具包无关的编码数据或 `BufferedImage`。Core 的颜色值使用与工具包无关的不可变表示，只在 Swing 模块内转换为 `java.awt.Color`。
 
-The universal fat JAR is the dependency-complete launcher artifact. Pure-Java
-UI dependencies and resources are merged by Shadow and do not use a first-run
-downloader. Platform runtime images can be produced with `jlink` and
-`jpackage` in addition to the universal JAR where a matching Java 17
-distribution and packaging toolchain exist.
+## 离线制品
 
-The current application contains no OpenJFX dependency manifest, JavaFX
-downloader or module patcher, JFoenix, MonetFX, `fx-gson`,
-`simple-png-javafx`, or JavaFX SVG integration.
+通用 fat JAR 是依赖完整的启动器制品。纯 Java UI 依赖和资源由 Shadow 合并，不使用首次启动下载器。在具备匹配的 Java 17 发行版和打包工具链时，还可以用 `jlink` 和 `jpackage` 生成平台运行时镜像。
 
-The offline-artifact verification task checks that the launcher:
+当前应用不包含 OpenJFX 依赖清单、JavaFX 下载器或模块修补器，也不包含 JFoenix、MonetFX、`fx-gson`、`simple-png-javafx` 或 JavaFX SVG 集成。
 
-- Contains all required UI classes, fonts, icons, and theme resources
-- Starts with an empty external dependency directory and unavailable network
-- Contains no JavaFX classes or JavaFX-specific runtime metadata
-- Contains no UI-runtime download endpoints
-- Produces deterministic dependency and license inventories
+离线制品验证任务会检查启动器：
 
-## Implemented architecture
+- 包含所有必需的 UI 类、字体、图标和主题资源；
+- 在外部依赖目录为空且网络不可用时仍能启动；
+- 不包含 JavaFX 类或 JavaFX 专用运行时元数据；
+- 不包含 UI 运行时下载端点；
+- 生成确定性的依赖和许可证清单。
 
-The completed implementation has these boundaries:
+## 已实现的架构
 
-1. Pure-Java UI dependencies and resources are pinned and bundled with the
-   application.
-2. UI-neutral state, task, scheduler, color, and image contracts keep
-   `XYMLCore` independent of Swing.
-3. The Swing application shell owns navigation, dialogs, theme tokens, motion,
-   viewport-driven lists, task presentation, logs, and crash windows.
-4. Account, instance, download, settings, personalization, file-operation, and
-   wizard workflows use the Swing presentation directly.
-5. New-instance actions route to the downloads workflow; the instance list is
-   the default surface before and after an overlaid page is closed.
-6. JavaFX sources, dependencies, runtime patching, module-opening flags, and
-   UI-runtime downloads are absent.
-7. Current presentation and application contracts are direct Swing contracts.
-   There is no transitional or legacy UI adapter layer.
+完成后的实现具有以下边界：
 
-## Verification policy
+1. 固定版本的纯 Java UI 依赖和资源随应用打包。
+2. UI 中立的状态、任务、调度器、颜色和图片契约使 `XYMLCore` 独立于 Swing。
+3. Swing 应用外壳负责导航、对话框、主题令牌、动效、视口驱动列表、任务展示、日志和崩溃窗口。
+4. 账户、实例、下载、设置、个性化、文件操作和向导工作流直接使用 Swing 展示层。
+5. 新建实例操作进入下载工作流；在覆盖页面关闭前后，实例列表都是默认界面。
+6. JavaFX 源码、依赖、运行时修补、模块开放标志和 UI 运行时下载均不存在。
+7. 当前展示层和应用契约都是直接的 Swing 契约，不存在过渡或旧版 UI 适配器层。
 
-UI changes must preserve the offline and toolkit boundaries above. Run the
-strongest applicable subset of:
+## 验证策略
 
-- `gradlew.bat test checkstyle checkTranslations --no-daemon`
-- UI unit tests on the event-dispatch thread
-- Fixed-size screenshot tests for light and dark themes
-- Keyboard, focus, high-DPI, and reduced-motion checks
-- Offline fat-JAR assembly and startup smoke tests
+UI 变更必须保持上述离线和工具包边界。根据变更范围运行最强的适用子集：
 
-Repository search, dependency inspection, and offline-artifact verification
-guard against JavaFX or downloadable UI-runtime regressions. Screenshot checks
-and platform-specific `jpackage` installer runs are release-validation evidence
-and must be reported only for the environments in which they were actually
-executed; this architecture record does not imply unrecorded cross-platform
-installer or screenshot results.
+- `gradlew.bat test checkstyle checkTranslations --no-daemon`；
+- 在事件分发线程上运行 UI 单元测试；
+- 浅色和深色主题的固定尺寸截图测试；
+- 键盘、焦点、高 DPI 和减少动效检查；
+- 离线 fat JAR 组装和启动冒烟测试。
 
-## Java source policy
+仓库搜索、依赖检查和离线制品验证用于防止重新引入 JavaFX 或可下载的 UI 运行时。截图检查和平台专用 `jpackage` 安装包运行是发布验证证据，只能报告实际执行过的环境；本文不代表未记录的跨平台安装包或截图结果。
 
-All new or modified Java classes follow the repository contract: every class
-uses `@NotNullByDefault`; nullable types are explicit; immutable arrays and
-collections use the appropriate JetBrains annotations; and every class, field,
-and method has accurate `///` Markdown documentation.
+## Java 源码策略
+
+所有新增或修改的 Java 类都遵守仓库契约：每个类使用 `@NotNullByDefault`，可空类型明确标注，不可变数组和集合使用适当的 JetBrains 注解，并为每个类、字段和方法提供准确的 `///` Markdown 文档。

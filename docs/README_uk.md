@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | **українська**
+中文 ([简体](README.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | **українська**
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## Вступ
@@ -32,7 +32,7 @@ XYML — це відкритий, кросплатформний лаунчер 
 
 XYML має чудові кросплатформні можливості. Він працює не лише на різних операційних системах, таких як Windows, Linux, macOS і FreeBSD, а й підтримує різні архітектури процесорів, такі як x86, ARM, RISC-V, MIPS і LoongArch. Ви можете легко насолоджуватися Minecraft на різних платформах за допомогою XYML.
 
-Щодо підтримуваних систем і архітектур процесорів дивіться [цю таблицю](PLATFORM.md).
+Щодо підтримуваних систем і архітектур процесорів дивіться [цю таблицю](PLATFORM_en.md).
 
 ## Завантаження
 
@@ -51,10 +51,10 @@ XYML — це відкритий проект, який розвиває спі�
 - Повідомляйте про помилки або пропонуйте нові функції, [створивши issue](https://github.com/MinecraftSTL/XYML/issues/new/choose) на GitHub.
 - Додавайте код, зробивши fork репозиторію на GitHub і [надіславши pull request](https://github.com/MinecraftSTL/XYML/compare).
 
-Перед участю прочитайте [посібник для учасників](./Contributing.md), який містить таке:
+Перед участю прочитайте [посібник для учасників](./Contributing_en.md), який містить таке:
 
-- [Як зібрати і запустити XYML з вихідного коду](./Contributing.md#build-xyml)
-- [Як змінювати поведінку XYML за допомогою параметрів налагодження](./Contributing.md#debug-options)
+- [Як зібрати і запустити XYML з вихідного коду](./Contributing_en.md#build-xyml)
+- [Як змінювати поведінку XYML за допомогою параметрів налагодження](./Contributing_en.md#debug-options)
 
 ## Учасники
 
@@ -64,4 +64,4 @@ XYML — це відкритий проект, який розвиває спі�
 
 ## Ліцензія
 
-Дивіться [README.md](README.md#license).
+Дивіться [README.md](README_uk.md#license).

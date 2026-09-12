@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | **español** | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | **español** | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## Introducción
@@ -32,7 +32,7 @@ XYML es un lanzador de Minecraft de código abierto y multiplataforma que admite
 
 XYML tiene increíbles capacidades multiplataforma. No solo funciona en diferentes sistemas operativos como Windows, Linux, macOS y FreeBSD, sino que también es compatible con varias arquitecturas de CPU como x86, ARM, RISC-V, MIPS y LoongArch. Puedes disfrutar fácilmente de Minecraft en diferentes plataformas a través de XYML.
 
-Para los sistemas y arquitecturas de CPU compatibles con XYML, consulta [esta tabla](PLATFORM.md).
+Para los sistemas y arquitecturas de CPU compatibles con XYML, consulta [esta tabla](PLATFORM_en.md).
 
 ## Descarga
 
@@ -51,10 +51,10 @@ Puedes contribuir al desarrollo de XYML de las siguientes maneras:
 - Informa errores o solicita funciones [creando un issue](https://github.com/MinecraftSTL/XYML/issues/new/choose) en GitHub.
 - Contribuye código haciendo fork del repositorio en GitHub y [enviando un pull request](https://github.com/MinecraftSTL/XYML/compare).
 
-Antes de contribuir, lee la [guía de contribución](./Contributing.md), que incluye lo siguiente:
+Antes de contribuir, lee la [guía de contribución](./Contributing_en.md), que incluye lo siguiente:
 
-- [Cómo compilar y ejecutar XYML desde el código fuente](./Contributing.md#build-xyml)
-- [Cómo ajustar el comportamiento de XYML con opciones de depuración](./Contributing.md#debug-options)
+- [Cómo compilar y ejecutar XYML desde el código fuente](./Contributing_en.md#build-xyml)
+- [Cómo ajustar el comportamiento de XYML con opciones de depuración](./Contributing_en.md#debug-options)
 
 ## Colaboradores
 
@@ -64,4 +64,4 @@ Desde 2015, más de 120 colaboradores han participado en XYML. Gracias por su tr
 
 ## Licencia
 
-Consulta [README.md](README.md#license).
+Consulta [README.md](README_es.md#license).

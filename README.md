@@ -15,7 +15,7 @@
 
 ---
 
-**中文** (**简体**, [繁體](docs/README_zh_Hant.md), [文言](docs/README_lzh.md)) | English ([Standard](docs/README.md), [uʍoᗡ ǝpᴉsd∩](docs/README_en_Qabs.md)) | [日本語](docs/README_ja.md) | [español](docs/README_es.md) | [русский](docs/README_ru.md) | [українська](docs/README_uk.md)
+**中文** (**简体**, [繁體](docs/README_zh_Hant.md), [文言](docs/README_lzh.md)) | English ([Standard](docs/README_en.md), [uʍoᗡ ǝpᴉsd∩](docs/README_en_Qabs.md)) | [日本語](docs/README_ja.md) | [español](docs/README_es.md) | [русский](docs/README_ru.md) | [українська](docs/README_uk.md)
 
 ## 简介
 
@@ -28,7 +28,7 @@ XYML 的主要功能包括：
 - 管理模组、资源包、存档和整合包，并支持整合包的安装、更新、创建与导出；
 - 自定义启动器主题、背景和界面外观。
 
-XYML 支持多种操作系统与 CPU 架构，具体支持程度及限制请参阅[平台支持状态](docs/PLATFORM_zh.md)。启动器主体需要 Java 17 或更高版本，推荐使用 Java 21。
+XYML 支持多种操作系统与 CPU 架构，具体支持程度及限制请参阅[平台支持状态](docs/PLATFORM.md)。启动器主体需要 Java 17 或更高版本，推荐使用 Java 21。
 
 ## 与 HMCL 的关系
 
@@ -40,7 +40,7 @@ XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发�
 
 ## 下载与发布
 
-请从 [Github Release](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 稳定版；官网发布稳定版和公测版。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](docs/ReleaseSchedule_zh.md)。
+请从 [Github Release](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 稳定版；官网发布稳定版和公测版。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](docs/ReleaseSchedule.md)。
 
 ## 参与贡献
 
@@ -48,7 +48,7 @@ XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发�
 
 - 在 [GitHub Issues](https://github.com/MinecraftSTL/XYML/issues/new/choose) 报告问题或提出功能建议；
 - Fork 本仓库并[提交 Pull Request](https://github.com/MinecraftSTL/XYML/compare)；
-- 按照[贡献指南](docs/Contributing_zh.md)从源码构建、运行和调试 XYML。
+- 按照[贡献指南](docs/Contributing.md)从源码构建、运行和调试 XYML。
 
 ## 贡献者与致谢
 

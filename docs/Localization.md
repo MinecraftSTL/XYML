@@ -1,164 +1,153 @@
-# Localization
+# 本地化
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](Localization_zh.md), [繁體](Localization_zh_Hant.md)) | **English**
+**中文** (**简体**, [繁體](Localization_zh_Hant.md)) | [English](Localization_en.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
-XYML provides localization support for multiple languages.
+XYML 为多种语言提供本地化支持。
 
-This document describes XYML's support status for these languages and provides a guide for contributors who want to help with XYML localization.
+本文档介绍了 XYML 对这些语言的支持状态，并给想要为 XYML 的本地化工作做出贡献的贡献者提供了一份指南。
 
-## Supported languages
+## 支持的语言
 
-Currently, XYML supports the following languages:
+目前，XYML 为这些语言提供支持:
 
-| Language              | Language Tag | Preferred Localization Key | Preferred Localization File Suffix | [Game Language Files](https://minecraft.wiki/w/Language) | Support Status | Volunteers                                |
-|-----------------------|--------------|----------------------------|------------------------------------|----------------------------------------------------------|----------------|-------------------------------------------|
-| English               | `en`         | `default`                  | (empty)                            | `en_us`                                                  | **Primary**    | [Glavo](https://github.com/Glavo)         |
-| English (Upside Down) | `en-Qabs`    | `en-Qabs`                  | `en_Qabs`                          | `en_ud`                                                  | Automatic      |                                           |
-| Chinese (Simplified)  | `zh-Hans`    | `zh`                       | `_zh`                              | `zh_cn`                                                  | **Primary**    | [Glavo](https://github.com/Glavo)         |
-| Chinese (Traditional) | `zh-Hant`    | `zh-Hant`                  | `_zh_Hant`                         | `zh_tw` <br/> `zh_hk`                                    | **Primary**    | [Glavo](https://github.com/Glavo)         |
-| Chinese (Classical)   | `lzh`        | `lzh`                      | `_lzh`                             | `lzh`                                                    | Secondary      |                                           |
-| Japanese              | `ja`         | `ja`                       | `_ja`                              | `ja_jp`                                                  | Secondary      |                                           |
-| Spanish               | `es`         | `es`                       | `_es`                              | `es_es`                                                  | Secondary      | [3gf8jv4dv](https://github.com/3gf8jv4dv) |
-| Russian               | `ru`         | `ru`                       | `_ru`                              | `ru_ru`                                                  | Secondary      | [3gf8jv4dv](https://github.com/3gf8jv4dv) |
-| Ukrainian             | `uk`         | `uk`                       | `_uk`                              | `uk_ua`                                                  | Secondary      |                                           |
-| German                | `de`         | `de`                       | `_de`                              | `de_de`                                                  | Secondary      | [BANSAFAn](https://github.com/BANSAFAn)   |
+| 语言      | 语言标签      | 首选本地化键    | 首选本地化文件后缀  | [游戏语言文件](https://minecraft.wiki/w/Language) | 支持状态   | 志愿者                                       |
+|---------|-----------|-----------|------------|---------------------------------------------|--------|-------------------------------------------|
+| 英语      | `en`      | `default` | (空)        | `en_us`                                     | **主要** | [Glavo](https://github.com/Glavo)         |
+| 英语 (颠倒) | `en-Qabs` | `en-Qabs` | `en_Qabs`  | `en_ud`                                     | 自动     |                                           |
+| 中文 (简体) | `zh-Hans` | `zh`      | `_zh`      | `zh_cn`                                     | **主要** | [Glavo](https://github.com/Glavo)         |
+| 中文 (繁体) | `zh-Hant` | `zh-Hant` | `_zh_Hant` | `zh_tw` <br/> `zh_hk`                       | **主要** | [Glavo](https://github.com/Glavo)         |
+| 中文 (文言) | `lzh`     | `lzh`     | `_lzh`     | `lzh`                                       | 次要     |                                           |
+| 日语      | `ja`      | `ja`      | `_ja`      | `ja_jp`                                     | 次要     |                                           |
+| 西班牙语    | `es`      | `es`      | `_es`      | `es_es`                                     | 次要     | [3gf8jv4dv](https://github.com/3gf8jv4dv) |
+| 俄语      | `ru`      | `ru`      | `_ru`      | `ru_ru`                                     | 次要     | [3gf8jv4dv](https://github.com/3gf8jv4dv) |
+| 乌克兰语    | `uk`      | `uk`      | `_uk`      | `uk_ua`                                     | 次要     |                                           |
+| 德语      | `de`      | `de`      | `_de`      | `de_de`                                     | 次要     | [BANSAFAn](https://github.com/BANSAFAn)   |
 
 <details>
-<summary>About Language Tags</summary>
+<summary>关于语言标签</summary>
 
-XYML uses language tags that conform to the IETF BCP 47 standard.
+XYML 使用符合 IETF BCP 47 规范的语言标签。
 
-When choosing language tags, we follow these principles:
+在选择语言标签时，我们会遵循以下原则:
 
-1. For languages defined in the ISO 639 standard, if a tag has already been registered in the [IANA Language Subtag Registry](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry),
-   we always use the registered tag.
+1. 对于 ISO 639 标准中定义的语言，如果已经在 [IANA 语言子标签注册表](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry)中注册，我们总是使用经过注册的标签。
 
-   For example, for English, we use `en` instead of `eng` as the language code.
+   例如，对于英语，我们使用 `en` 而不是 `eng` 作为语言代码。
 
-2. For non-standard languages defined by Minecraft, the code defined in the language file's `language.code` should be preferred over the game language file's name.
+2. 对于 Minecraft 所定义的非标准语言，应当优先使用语言文件的 `language.code` 中定义的代码，而非游戏语言文件的名称。
 
-   This is because Minecraft sometimes uses real-world country/region codes to represent joke languages
-   (for example, Pirate English uses the language file `en_pt`, but `PT` is actually the country code for Portugal).
+   这是因为 Minecraft 有时候会用现实中实际存在的国家/地区代码来表示虚构语言 (比如说海盗英语的语言文件为 `en_pt`，但 `PT` 其实是葡萄牙的国家代码)。
 
-   For example, for Upside down English, we use `en-Qabs` as the language code instead of `en-UD`.
+   例如，对于颠倒的英语，我们使用 `en-Qabs` 作为语言代码，而不是 `en-UD`。
 
 </details>
 
 <details>
-<summary>About Localization Keys and File Suffixes</summary>
+<summary>关于本地化键和本地化文件后缀</summary>
 
-Localization file suffixes and keys are used to name [localization resources](#localization-resources).
+本地化文件后缀和本地化键用于为[本地化资源](#本地化资源)命名。
 
-Generally, the localization key is the language code for the resource, and the localization file suffix is obtained by replacing `-` with `_` in the language code and adding a leading underscore.
+通常来说，本地化键就是这份本地化资源对应的语言代码，而本地化文件后缀是将语言代码中的 `-` 替换为 `_`，并加上一个前缀下划线得到的。
 
-As a special case, for default resources, the localization key is `default` and the file suffix is empty.
+作为特例，对于默认的资源，本地化键为 `default`，本地化文件后缀为空。
 
-Due to the existence of the [resource fallback mechanism](#resource-fallback-mechanism),
-if there is no resource that exactly matches the current locale,
-XYML will derive a search list from the current language tag and search for resources in order.
+由于[资源回退机制](#资源回退机制)的存在。
+如果没有完全匹配当前语言环境的资源，XYML 会根据当前环境的语言标签推导出一个搜索列表，根据该列表依次搜索资源。
 
-We recommend always providing a default resource (with the `default` key and empty file suffix) when providing localization resources,
-to ensure all users can load resources properly.
+我们建议在提供本地化资源时，总是提供默认资源 (对应 `default` 本地化键和空的本地化文件后缀)，
+以确保所有用户都能正常加载资源。
 
-We also recommend using broader language tags for localization resources whenever possible,
-so users are less likely to fall back to the default resource.
+并且我们建议尽可能为本地化资源使用更宽泛的语言标签，使用户更不容易回退到默认资源上。
 
-For example, if you provide a Simplified Chinese localization resource,
-we recommend using `zh` as the localization key instead of the more specific `zh-Hans`,
-so it will apply to all Chinese users and avoid falling back to the default resource for them.
+例如，如果你提供了一份简体中文的本地化资源，那么我们推荐使用 `zh` 作为本地化键，而不是更具体的 `zh-Hans`，
+这样它会对于所有使用中文的用户生效，避免对于这些用户回退到默认资源上。
 
-If you want to provide both Simplified and Traditional Chinese resources,
-it is recommended to use the broader `zh` as the key for the resource with more users (as the default Chinese resource),
-and use the more specific `zh-Hans`/`zh-Hant` as the key for the resource with fewer users.
+如果你想同时提供简体中文和繁体中文的资源，那么推荐对用户占比更高的资源使用更宽泛的 `zh` 作为本地化键，使其作为默认的中文资源，
+而对用户占比更低的资源使用更具体的 `zh-Hans`/`zh-Hant` 作为本地化键。
 
 </details>
 
-XYML requires all pull requests that update documentation and localization resources to also update the resources
-for all **primary** supported languages.
-If the PR author is not familiar with the relevant languages, they can request translation help in the comments,
-and maintainers will help translate these texts before merging the PR.
+XYML 会要求所有 Pull Request 在更新文档和本地化资源时同步更新所有**主要**支持的语言对应的资源。
+如果 PR 作者对相关语言并不了解，那么可以直接在评论中提出翻译请求，
+维护者会在合并 PR 前帮助 PR 作者翻译这些文本。
 
-For **secondary** supported languages, we cannot guarantee that these localization resources will always be updated in sync.
-We need collaborators who are proficient in these languages to help with maintenance.
+而对于**次要**支持的语言，我们不能保证这些本地化资源总是会同步更新。
+我们需要熟练掌握这些语言的协作者帮助我们进行维护。
 
-We will record volunteers willing to help maintain these language resources in the documentation.
-If contributors want to have new localization texts translated into these languages in a timely manner,
-they can @ these volunteers in the PR for help.
+我们会在文档中记录愿意帮助我们维护这些语言本地化资源的志愿者。
+如果贡献者希望及时将新增的本地化文本翻译至这些语言，
+那么可以在 PR 中 @ 这些志愿者寻求帮助。
 
-If you are willing to help maintain localization resources for any language, please open a PR
-and add your GitHub username to the volunteer list above.
-We greatly appreciate your help.
+如果你愿意帮助我们维护一些语言的本地化资源，那么请打开一个 PR，
+将自己的 GitHub 用户名加入上方的志愿者列表。
+我们非常感谢你的帮助。
 
-## Adding Support for a New Language
+## 添加新的语言支持
 
-XYML welcomes anyone to participate in translation and contribution.
-However, maintaining translations for more languages requires more maintenance effort, so we have some requirements for newly added languages.
-Please confirm the following requirements before contributing:
+XYML 欢迎任何人参与翻译和贡献。但是维护更多语言的翻译需要付出更多维护成本，所以我们对新增加的语言有一些要求。
+请在贡献前确认以下要求:
 
-- We prioritize [languages officially supported by Minecraft](https://minecraft.wiki/w/Language).
+- 我们优先考虑 [Minecraft 官方支持的语言](https://minecraft.wiki/w/Language)。
+  如果没有特殊理由，我们不会为 Minecraft 官方尚未支持的语言提供支持。
+- 我们希望对所有语言都提供长久的维护支持。
+  由于本项目的维护者们擅长的语言有限，为了避免对新语言的支持很快就因无人维护而过时，
+  我们希望能够找到擅长该语言者帮助我们长期维护新增的本地化文件。
+  如果可能缺少长期维护者，我们会更慎重地考虑是否要加入对该语言的支持。
 
-  Unless there are special reasons, we do not provide support for languages not yet supported by Minecraft.
-- We hope to provide long-term maintenance support for all languages.
+我们建议贡献者在提供新语言翻译之前先通过 [Issue](https://github.com/MinecraftSTL/XYML/issues/new?template=feature.yml) 提出一个功能请求，
+与其他贡献者先进行讨论，确定了未来的维护方式后再进行翻译工作。
 
-  Since the maintainers of this project are proficient in only a limited number of languages,
-  to avoid support for new languages quickly becoming outdated due to lack of maintainers,
-  we hope to find people proficient in the language to help us maintain the newly added localization files in the long term.
-  If there may be a lack of long-term maintainers, we will be more cautious about adding support for that language.
+### 开始翻译
 
-We recommend that contributors submit a [feature request](https://github.com/MinecraftSTL/XYML/issues/new?template=feature.yml) before providing a new language translation,
-discuss with other contributors first, and determine the future maintenance plan before starting the translation work.
+如果你想为 XYML 添加新的语言支持，请从翻译 [`I18N.properties`](../XYML/src/main/resources/assets/lang/I18N.properties) 开始。
+XYML 的绝大多数文本都位于这个文件中，翻译此文件就能翻译整个界面。
 
-### Getting Started with Translation
+这是一个 Java Properties 文件，格式非常简单。
+在翻译前请先阅读该格式的介绍: [Properties 文件](https://en.wikipedia.org/wiki/.properties)。
 
-If you want to add support for a new language to XYML, please start by translating [`I18N.properties`](../XYML/src/main/resources/assets/lang/I18N.properties).
-The vast majority of XYML's texts are in this file, and translating it will translate the entire interface.
+作为翻译的第一步，请从[这张表格](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry)中查询这个语言对应的两字母或三字母语言标签。
+例如，英语的语言标签为 `en`。
 
-This is a Java Properties file, which is very simple in format.
-Before translating, please read the introduction to this format: [Properties file](https://en.wikipedia.org/wiki/.properties).
+在确定了语言标签后，请在 [`I18N.properties` 文件旁](../XYML/src/main/resources/assets/lang)创建 `I18N_<本地化文件后缀>.properties` (例如 `I18N_en.properties`) 文件。
+随后，你就可以开始在这个文件中进行翻译工作了。
 
-As the first step of translation, please look up the two- or three-letter language tag for your language in [this table](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry).
-For example, the language tag for English is `en`.
+`I18N.properties` 文件会遵循[资源回退机制](#资源回退机制)查询缺失的译文。
+也就是说，你可以逐条目进行翻译，而你尚未翻译的条目会自动回退到英语上。
 
-After determining the language tag, please create a file named `I18N_<localization file suffix>.properties` (e.g., `I18N_en.properties`) next to the [`I18N.properties` file](../XYML/src/main/resources/assets/lang).
-Then you can start translating in this file.
+在翻译了一部分后，你可以[自行构建 XYML](./Contributing.md#构建-xyml)，编译出的 XYML 中就会包含你的译文。
+如果你的电脑默认环境不是该语言，你可以将环境变量 `XYML_LANGUAGE` 指定为你刚刚从表格中找到的语言标签，
+XYML 会自动切换至这个语言。
 
-The `I18N.properties` file follows the [resource fallback mechanism](#resource-fallback-mechanism) to look up missing translations.
-That is, you can translate entry by entry, and any untranslated entries will automatically fall back to English.
+到这里，你就可以把文件推送到 GitHub 上，并向 XYML 提交 PR 了。
+XYML 的维护者会替你完成其他步骤。
 
-After translating part of the file, you can [build XYML yourself](./Contributing.md#build-xyml),
-and your translations will be included in the compiled XYML.
-If your computer's default environment is not the target language,
-you can set the environment variable `XYML_LANGUAGE` to the language tag you just found from the table,
-and XYML will automatically switch to that language.
+## 文档与本地化资源
 
-At this point, you can push the file to GitHub and submit a PR to XYML.
-The maintainers of XYML will complete the remaining steps for you.
+文档和本地化资源文件分别遵循各自的命名规则。项目 `docs/` 下的文档使用 `<文档名>_<语言后缀>.md`：无后缀文件是简体中文默认文档，标准英文使用 `_en`，繁体中文使用 `_zh_Hant`，文言使用 `_lzh`，其他语言使用对应的语言后缀。所有语言切换器都将简体中文放在列表首位。
 
-## Localization Resources
+本地化资源文件仍使用 `<资源名><本地化文件后缀>.<扩展名>`，其中空后缀表示英文默认资源；不要把文档的默认语言规则套用于资源文件。
 
-All documentation and localization resource files follow the naming rule `<resource name><localization file suffix>.<extension>`.
+例如，对于项目文档 `README.md` 来说，不同语言版本命名如下:
 
-For example, for `README.md`, the localized versions in different languages are named as follows:
+- 中文 (简体，默认): `README.md`
+- 英语 (标准): `README_en.md`
+- 中文 (繁体): `README_zh_Hant.md`
+- 中文 (文言): `README_lzh.md`
 
-- English: `README.md`
-- Chinese (Simplified): `README_zh.md`
-- Chinese (Traditional): `README_zh_Hant.md`
-- Chinese (Classical): `README_lzh.md`
-
-In addition to localized files, XYML also supports localizing certain text fields in JSON. Localized text in JSON uses the following format:
+除了本地化文件，XYML 还支持本地化 JSON 中的部分文本字段。JSON 中的本地化文本使用以下格式:
 
 ```json5
 {
-    "<Localization Key 1>": "<Localized Text 1>",
-    "<Localization Key 2>": "<Localized Text 2>",
+    "<本地化键 1>": "<本地化文本 1>",
+    "<本地化键 2>": "<本地化文本 2>",
     // ...
-    "<Localization Key N>": "<Localized Text N>"
+    "<本地化键 N>": "<本地化文本 N>"
 }
 ```
 
-For example, for the following text field:
+例如，对于以下文本字段:
 
 ```json
 {
@@ -166,7 +155,7 @@ For example, for the following text field:
 }
 ```
 
-It can be rewritten as localized text:
+可以将其改写为本地化文本:
 
 ```json
 {
@@ -178,50 +167,48 @@ It can be rewritten as localized text:
 }
 ```
 
-## Resource Fallback Mechanism
+## 资源回退机制
 
-For missing resources in a certain language, XYML supports a resource fallback mechanism,
-which derives a search list based on different language tags and searches for resources in order according to this list.
+对于某个语言下的缺失的资源，XYML 支持一套资源回退机制，会根据不同的语言标签推导出一个搜索列表，
+根据该列表依次搜索资源。
 
-Before searching, we first refine the language tag through the following steps.
+在搜索前，我们会先通过以下步骤对语言标签进行细化推导。
 
-1. Normalize Language Codes
+1. 归一化语言代码
 
-   If the language code subtag in the current language tag is not registered in the IANA Language Subtag Registry,
-   XYML will try to map it to a registered tag.
+   如果当前语言标签中的语言代码子标签未在 IANA 语言子标签注册表中进行注册，XYML 会先尝试将其映射为注册表中已注册的标签。
 
-   For example, XYML will replace the language code `eng` with `en`.
+   例如，XYML 会将语言代码 `eng` 替换为 `en`。
 
-2. Map Macrolanguages to Individual Languages
+2. 映射宏语言至子语言
 
-   If the current language code is an [ISO 639 macrolanguage](https://en.wikipedia.org/wiki/ISO_639_macrolanguage),
-   and the macrolanguage usually refers to a specific individual language, XYML will replace it with that individual language.
+   如果当前语言代码是一个 [ISO 639 宏语言](https://en.wikipedia.org/wiki/ISO_639_macrolanguage)，
+   且该宏语言通常指代某个个体语言，XYML 会将其替换为该个体语言。
 
-   For example, `zh` (Chinese) usually actually refers to `cmn` (Mandarin), so we replace the language code `zh` with `cmn`.
+   例如 `zh` (中文) 通常实际指代 `cmn` (官话)，所以我们会将语言代码 `zh` 替换为 `cmn`。
 
-3. Derive Script
+3. 推导拼写脚本
 
-   If the current language tag does not specify a script, XYML will try to derive the script according to the following rules in order:
+   如果当前语言标签中未指定拼写脚本，XYML 会依次根据以下规则尝试推导拼写脚本:
 
-    1. If the current language tag specifies a variant, and the variant is registered in the IANA Language Subtag Registry,
-       and all its `Prefix` entries in the registry contain the same script, then set the current script to that script.
+   1. 如果当前语言标签指定了语言变体，该语言变体已在 IANA 语言子标签注册表中，
+      且注册表中其所有 `Prefix` 都包含相同的拼写脚本，则将当前拼写脚本指定为该脚本。
 
-       For example, if the current variant is `pinyin` (Chinese Pinyin), the script will be set to `Latn` (Latin).
+      例如，如果当前语言变体为 `pinyin` (汉语拼音)，则当前拼写脚本会被指定为 `Latn` (拉丁文)。
 
-    2. If the current language code is assigned a `Suppress-Script` in the IANA Language Subtag Registry, set the current script to that script.
+   2. 如果当前语言代码在 IANA 语言子标签注册表中被指定了 `Suppress-Script`，则将当前拼写脚本指定为该脚本。
 
-       For example, if the current language code is `en` (English), the script will be set to `Latn` (Latin);
-       if the code is `ru` (Russian), the script will be set to `Cyrl` (Cyrillic).
+      例如，如果当前语言代码为 `en` (英语)，则当前拼写脚本会被指定为 `Latn` (拉丁文);
+      如果当前语言代码为 `ru` (俄语)，则当前拼写脚本会被指定为 `Cyrl` (西里尔文)。
 
-    3. If the current language code is `lzh` (Classical Chinese), set the script to `Hant` (Traditional Chinese Characters).
+   3. 如果当前语言代码是 `lzh` (文言)，则将当前拼写脚本指定为 `Hant` (繁体汉字)。
 
-    4. If the current language code is `zh` or a sublanguage of `zh`, check if the current region code is one of `TW`, `HK`, or `MO`.
-       If true, set the script to `Hant` (Traditional Chinese Characters);
-       otherwise, set it to `Hans` (Simplified Chinese Characters).
+   4. 如果当前语言代码是 `zh` 或 `zh` 的子语言，则检查当前国家/地区代码是否为 `TW`、`HK`、`MO` 之一。
+      如果结果为真，则将当前拼写脚本指定为 `Hant` (繁体汉字)；否则将当前拼写脚本指定为 `Hans` (简体汉字)。
 
-After refining the language code, XYML will derive a list of language tags based on this language tag.
+在对语言代码细化推导完成后，XYML 会开始根据此语言标签推导出一个语言标签列表。
 
-For example, for the language tag `en-US`, XYML will refine it to `en-Latn-US` and derive the following search list:
+例如，对于语言标签 `en-US`，XYML 会将其细化为 `en-Latn-US`，并据此推导出以下搜索列表:
 
 1. `en-Latn-US`
 2. `en-Latn`
@@ -229,7 +216,7 @@ For example, for the language tag `en-US`, XYML will refine it to `en-Latn-US` a
 4. `en`
 5. `und`
 
-For the language tag `zh-CN`, XYML will refine it to `cmn-Hans-CN` and derive the following search list:
+对于语言标签 `zh-CN`，XYML 会将其细化为 `cmn-Hans-CN`，并据此推导出以下搜索列表:
 
 1. `cmn-Hans-CN`
 2. `cmn-Hans`
@@ -241,22 +228,18 @@ For the language tag `zh-CN`, XYML will refine it to `cmn-Hans-CN` and derive th
 8. `zh`
 9. `und`
 
-For resources that can be merged (such as `.properties` files),
-XYML will merge resources according to the priority of this list; for resources that are difficult to merge (such as font files),
-XYML will load the highest-priority resource found in this list.
+对于能够混合的资源 (例如 `.properties` 文件)，XYML 会根据此列表的优先级混合资源；
+对于难以混合的资源 (例如字体文件)，XYML 会根据此列表加载找到的最高优先级的资源。
 
-If the current language uses a three-letter ISO 639 code, but there is also a corresponding two-letter code,
-XYML will map it to the two-letter code before searching for resources.
+如果当前语言使用 ISO 639 标准的三字符标签，但同时也存在对应的两字符标签，那么 XYML 会将其映射至两字符后再搜索资源。
 
-For example, if the current environment's language tag is `eng-US`,
-XYML will map it to `en-US` and then search for localization resources according to the above rules.
+例如，如果当前环境的语言标签为 `eng-US`，那么 XYML 会将其映射至 `en-US` 后再根据上述规则搜索本地化资源。
 
-### Additional Rules for Chinese
+### 对于中文的额外规则
 
-XYML always adds `zh-CN` to the search list for all Chinese environments,
-and adds `zh-TW` to the search list for all Traditional Chinese environments.
+XYML 总是会将 `zh-CN` 加入所有中文环境的搜索列表中，将 `zh-TW` 加入所有繁体中文环境的搜索列表中。
 
-Below are the localization resource search lists for several common Chinese environments.
+以下是几个常见中文环境对应的本地化资源搜索列表。
 
 - `zh-CN`:
     1. `cmn-Hans-CN`
@@ -269,15 +252,15 @@ Below are the localization resource search lists for several common Chinese envi
     8. `zh`
     9. `und`
 - `zh-SG`:
-    1. `cmn-Hans-SG`
-    2. `cmn-Hans`
-    3. `cmn-SG`
-    4. `cmn`
-    5. `zh-Hans-SG`
-    6. `zh-Hans`
-    7. `zh-SG`
-    8. `zh-CN`
-    9. `zh`
+    1.  `cmn-Hans-SG`
+    2.  `cmn-Hans`
+    3.  `cmn-SG`
+    4.  `cmn`
+    5.  `zh-Hans-SG`
+    6.  `zh-Hans`
+    7.  `zh-SG`
+    8.  `zh-CN`
+    9.  `zh`
     10. `und`
 - `zh-TW`:
     1. `zh-Hant-TW`
@@ -287,15 +270,15 @@ Below are the localization resource search lists for several common Chinese envi
     5. `zh-CN`
     6. `und`
 - `zh-HK`:
-    1. `cmn-Hant-HK`
-    2. `cmn-Hant`
-    3. `cmn-HK`
-    4. `cmn`
-    5. `zh-Hant-HK`
-    6. `zh-Hant`
-    7. `zh-HK`
-    8. `zh-TW`
-    9. `zh`
+    1.  `cmn-Hant-HK`
+    2.  `cmn-Hant`
+    3.  `cmn-HK`
+    4.  `cmn`
+    5.  `zh-Hant-HK`
+    6.  `zh-Hant`
+    7.  `zh-HK`
+    8.  `zh-TW`
+    9.  `zh`
     10. `zh-CN`
     11. `und`
 - `lzh`:
@@ -307,32 +290,30 @@ Below are the localization resource search lists for several common Chinese envi
     6. `zh-CN`
     7. `und`
 
-## Automatic Synchronization of Documentation Content
+## 自动同步文档内容
 
 <!-- #BEGIN BLOCK -->
 <!-- #PROPERTY PROCESS_LINK=false -->
-To simplify documentation maintenance, XYML uses a macro mechanism to automatically maintain parts of the documentation content.
-Run the following command in the terminal:
+为了简化文档的维护，XYML 使用了一套宏机制自动维护文档的部分内容。在命令行中执行
 
 ```bash
 ./gradlew updateDocuments
 ```
 
-This will automatically update all documentation content.
+即可自动更新所有文档内容。
 
-For example, to create links for switching between different language versions of the same document,
-add the following content under the document title:
+例如，为了创建在同一文档的不同语言译文之间跳转的链接，请在文档的标题下添加以下内容:
 
 ```markdown
 <!-- #BEGIN LANGUAGE_SWITCHER -->
 <!-- #END LANGUAGE_SWITCHER -->
 ```
 
-After running `./gradlew updateDocuments`, these two lines will be automatically replaced with language switcher links like the following:
+随后执行 `./gradlew updateDocuments`，这两行内容会被自动替换为类似这样的跳转链接:
 
 ```markdown
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** (**简体**, [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
-For more about macros, see [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java).
+关于宏的更多内容，请见 [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java)。
 <!-- #END BLOCK -->
