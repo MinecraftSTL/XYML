@@ -26,11 +26,13 @@ import space.minecraftstl.xyml.util.Lang;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.Lang.*;
@@ -48,8 +50,18 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Shared or test-injected semantic resource manager.
     private final TaskResourceLockManager resourceLockManager;
 
+    /// Registry receiving one immutable top-level execution stream.
+    private final TaskExecutionRegistry taskExecutionRegistry;
+
     /// Live cancellation domains belonging to repeated starts of this executor.
     private final Set<TaskResourceLockManager.Execution> resourceExecutions = ConcurrentHashMap.newKeySet();
+
+    /// Invocation domains cancelled through the task-management page.
+    private final Set<TaskResourceLockManager.Execution> cancelledExecutions = ConcurrentHashMap.newKeySet();
+
+    /// Associates every invocation resource domain with its top-level monitoring handle.
+    private final ConcurrentMap<TaskResourceLockManager.Execution, TaskExecutionRegistry.Execution>
+            monitoredExecutions = new ConcurrentHashMap<>();
 
     /// Terminal-cleanup domains whose pending acquisition must survive executor cancellation.
     ///
@@ -61,7 +73,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
     /// Creates an asynchronous executor rooted at the supplied task.
     public AsyncTaskExecutor(Task<?> task) {
-        this(task, TaskResourceLockManager.SHARED);
+        this(task, TaskResourceLockManager.SHARED, TaskExecutionRegistry.global());
     }
 
     /// Creates an asynchronous executor with an isolated resource manager for package tests.
@@ -69,8 +81,21 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// @param task root task
     /// @param resourceLockManager manager coordinating resources for this executor
     AsyncTaskExecutor(Task<?> task, TaskResourceLockManager resourceLockManager) {
+        this(task, resourceLockManager, TaskExecutionRegistry.global());
+    }
+
+    /// Creates an executor with explicit resource and execution-registry ownership for isolated lifecycle tests.
+    ///
+    /// @param task root task
+    /// @param resourceLockManager manager coordinating resources for this executor
+    /// @param taskExecutionRegistry registry receiving this executor's top-level execution records
+    AsyncTaskExecutor(
+            Task<?> task,
+            TaskResourceLockManager resourceLockManager,
+            TaskExecutionRegistry taskExecutionRegistry) {
         super(task);
         this.resourceLockManager = Objects.requireNonNull(resourceLockManager, "resourceLockManager");
+        this.taskExecutionRegistry = Objects.requireNonNull(taskExecutionRegistry, "taskExecutionRegistry");
     }
 
     /// Starts one execution chain and returns this executor.
@@ -80,18 +105,64 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Repeated calls retain the historical behavior of starting another chain and replacing [#future].
     @Override
     public TaskExecutor start() {
-        exception = null;
-        failure = null;
-        started = true;
-        TaskResourceLockManager.Execution resourceExecution = resourceLockManager.createExecution();
-        resourceExecutions.add(resourceExecution);
+        TaskResourceLockManager.Execution resourceExecution;
+        TaskExecutionRegistry.Execution monitoredExecution;
+        @Nullable Runnable cancellationToRun;
+        synchronized (this) {
+            exception = null;
+            failure = null;
+            started = true;
+            resourceExecution = resourceLockManager.createExecution();
+            resourceExecutions.add(resourceExecution);
+            monitoredExecution = taskExecutionRegistry.begin(
+                    this,
+                    taskExecutionTitle(),
+                    taskExecutionUserVisible());
+            monitoredExecutions.put(resourceExecution, monitoredExecution);
+            // A direct cancel can re-enter from the registry's initial publication before the monitoring map exists.
+            // Handoff the cancellation marker after installing the handle so that invocation history cannot miss it.
+            cancellationToRun = monitoredExecution.installCancellation(() -> cancel(resourceExecution));
+            if (cancelledExecutions.contains(resourceExecution)) {
+                taskExecutionRegistry.markCancellationRequested(monitoredExecution.id());
+            }
+        }
         AtomicBoolean stopNotificationAttempted = new AtomicBoolean();
+        AtomicReference<@Nullable Throwable> invocationFailure = new AtomicReference<>();
+        if (cancellationToRun != null) {
+            try {
+                cancellationToRun.run();
+            } catch (RuntimeException | Error cancellationFailure) {
+                failure = cancellationFailure;
+                invocationFailure.set(cancellationFailure);
+                try {
+                    stopInvocation(
+                            resourceExecution,
+                            monitoredExecution,
+                            false,
+                            invocationFailure,
+                            stopNotificationAttempted);
+                } catch (RuntimeException | Error stopFailure) {
+                    if (stopFailure != cancellationFailure) {
+                        cancellationFailure.addSuppressed(stopFailure);
+                    }
+                }
+                removeExecutionWhenClean(resourceExecution);
+                throw cancellationFailure;
+            }
+        }
         try {
+            monitoredExecution.started();
             notifyTaskListeners(TaskListener::onStart);
         } catch (RuntimeException | Error startFailure) {
             failure = startFailure;
+            invocationFailure.set(startFailure);
             try {
-                notifyStopOnce(stopNotificationAttempted, false);
+                stopInvocation(
+                        resourceExecution,
+                        monitoredExecution,
+                        false,
+                        invocationFailure,
+                        stopNotificationAttempted);
             } catch (RuntimeException | Error stopFailure) {
                 if (stopFailure != startFailure) {
                     startFailure.addSuppressed(stopFailure);
@@ -100,58 +171,92 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             removeExecutionWhenClean(resourceExecution);
             throw startFailure;
         }
-        future = executeTasks(null, null, resourceExecution, Collections.singleton(firstTask))
-                .handleAsync((@Nullable Exception exception, @Nullable Throwable throwable) -> {
-                    boolean success = exception == null && throwable == null;
-                    try {
-                        if (throwable != null) {
-                            Throwable resolvedFailure = resolveException(throwable);
-                            failure = resolvedFailure;
-                            Lang.handleUncaughtException(resolvedFailure);
-                        } else {
-                            failure = exception;
-                            if (exception != null) {
-                                // We log exception stacktrace because some exceptions indicate launcher defects.
-                                LOG.warning("An exception occurred in task execution", exception);
+        try {
+            future = executeTasks(null, null, resourceExecution, Collections.singleton(firstTask))
+                    .handleAsync((@Nullable Exception exception, @Nullable Throwable throwable) -> {
+                        boolean requestedSuccess = exception == null && throwable == null;
+                        AtomicBoolean effectiveSuccess = new AtomicBoolean();
+                        try {
+                            if (throwable != null) {
+                                Throwable resolvedFailure = resolveException(throwable);
+                                failure = resolvedFailure;
+                                invocationFailure.set(resolvedFailure);
+                                Lang.handleUncaughtException(resolvedFailure);
+                            } else {
+                                failure = exception;
+                                if (exception != null) {
+                                    invocationFailure.set(exception);
+                                    // We log exception stacktrace because some exceptions indicate launcher defects.
+                                    LOG.warning("An exception occurred in task execution", exception);
 
-                                Throwable resolvedException = resolveException(exception);
-                                if (resolvedException instanceof RuntimeException &&
-                                        !(resolvedException instanceof CancellationException) &&
-                                        !(resolvedException instanceof JsonParseException) &&
-                                        !(resolvedException instanceof RejectedExecutionException)) {
-                                    // Track unexpected RuntimeException without classifying known user failures.
-                                    @Nullable Thread.UncaughtExceptionHandler handler = uncaughtExceptionHandler;
-                                    if (handler != null)
-                                        handler.uncaughtException(
-                                                Thread.currentThread(), resolvedException);
+                                    Throwable resolvedException = resolveException(exception);
+                                    if (resolvedException instanceof RuntimeException
+                                            && !(resolvedException instanceof CancellationException)
+                                            && !(resolvedException instanceof JsonParseException)
+                                            && !(resolvedException instanceof RejectedExecutionException)) {
+                                        // Track unexpected RuntimeException without classifying known user failures.
+                                        @Nullable Thread.UncaughtExceptionHandler handler = uncaughtExceptionHandler;
+                                        if (handler != null) {
+                                            handler.uncaughtException(
+                                                    Thread.currentThread(), resolvedException);
+                                        }
+                                    }
                                 }
                             }
+                        } finally {
+                            effectiveSuccess.set(stopInvocation(
+                                    resourceExecution,
+                                    monitoredExecution,
+                                    requestedSuccess,
+                                    invocationFailure,
+                                    stopNotificationAttempted));
                         }
-                    } finally {
-                        notifyStopOnce(stopNotificationAttempted, success);
-                    }
 
-                    return success;
-                })
-                .exceptionally(e -> {
-                    Throwable resolved = resolveException(e);
-                    @Nullable Throwable previousFailure = failure;
-                    if (previousFailure != null && previousFailure != resolved) {
-                        resolved.addSuppressed(previousFailure);
-                    }
-                    failure = resolved;
-                    try {
-                        notifyStopOnce(stopNotificationAttempted, false);
-                    } catch (RuntimeException | Error stopFailure) {
-                        if (stopFailure != resolved) {
-                            resolved.addSuppressed(stopFailure);
+                        return effectiveSuccess.get();
+                    })
+                    .exceptionally(e -> {
+                        Throwable resolved = resolveException(e);
+                        @Nullable Throwable previousFailure = failure;
+                        if (previousFailure != null && previousFailure != resolved) {
+                            resolved.addSuppressed(previousFailure);
                         }
-                    }
-                    Lang.handleUncaughtException(resolved);
-                    return false;
-                })
-                .whenComplete((@Nullable Boolean success, @Nullable Throwable throwable) ->
-                        removeExecutionWhenClean(resourceExecution));
+                        failure = resolved;
+                        invocationFailure.set(resolved);
+                        try {
+                            stopInvocation(
+                                    resourceExecution,
+                                    monitoredExecution,
+                                    false,
+                                    invocationFailure,
+                                    stopNotificationAttempted);
+                        } catch (RuntimeException | Error stopFailure) {
+                            if (stopFailure != resolved) {
+                                resolved.addSuppressed(stopFailure);
+                            }
+                        }
+                        Lang.handleUncaughtException(resolved);
+                        return false;
+                    })
+                    .whenComplete((@Nullable Boolean success, @Nullable Throwable throwable) ->
+                            removeExecutionWhenClean(resourceExecution));
+        } catch (RuntimeException | Error startFailure) {
+            failure = startFailure;
+            invocationFailure.set(startFailure);
+            try {
+                stopInvocation(
+                        resourceExecution,
+                        monitoredExecution,
+                        false,
+                        invocationFailure,
+                        stopNotificationAttempted);
+            } catch (RuntimeException | Error stopFailure) {
+                if (stopFailure != startFailure) {
+                    startFailure.addSuppressed(stopFailure);
+                }
+            }
+            removeExecutionWhenClean(resourceExecution);
+            throw startFailure;
+        }
         return this;
     }
 
@@ -176,6 +281,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 return false;
             }
             terminalResourceExecutions.remove(execution);
+            cancelledExecutions.remove(execution);
+            monitoredExecutions.remove(execution);
             return true;
         });
     }
@@ -185,12 +292,76 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         if (isExecutionClean(execution)) {
             resourceExecutions.remove(execution);
             terminalResourceExecutions.remove(execution);
+            cancelledExecutions.remove(execution);
+            monitoredExecutions.remove(execution);
         }
     }
 
     /// Returns whether one execution domain has no residual lease.
     private boolean isExecutionClean(TaskResourceLockManager.Execution execution) {
         return resourceLockManager.residualResourceDescriptions(Set.of(execution)).isEmpty();
+    }
+
+    /// Returns the monitoring handle associated with one execution domain, or null after late cleanup.
+    private @Nullable TaskExecutionRegistry.Execution monitoredExecution(
+            TaskResourceLockManager.Execution resourceExecution) {
+        return monitoredExecutions.get(resourceExecution);
+    }
+
+    /// Publishes one monitored task-ready event while tolerating a late callback after domain cleanup.
+    private void monitorTaskReady(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task) {
+        @Nullable TaskExecutionRegistry.Execution monitor = monitoredExecution(resourceExecution);
+        if (monitor != null) {
+            monitor.taskReady(parentTask, task);
+        }
+    }
+
+    /// Publishes one monitored task-running event while tolerating a late callback after domain cleanup.
+    private void monitorTaskRunning(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task) {
+        @Nullable TaskExecutionRegistry.Execution monitor = monitoredExecution(resourceExecution);
+        if (monitor != null) {
+            monitor.taskRunning(parentTask, task);
+        }
+    }
+
+    /// Publishes one monitored task-finished event while tolerating a late callback after domain cleanup.
+    private void monitorTaskFinished(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task) {
+        @Nullable TaskExecutionRegistry.Execution monitor = monitoredExecution(resourceExecution);
+        if (monitor != null) {
+            monitor.taskFinished(parentTask, task);
+        }
+    }
+
+    /// Publishes one monitored task-failed event while tolerating a late callback after domain cleanup.
+    private void monitorTaskFailed(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task,
+            Throwable failure) {
+        @Nullable TaskExecutionRegistry.Execution monitor = monitoredExecution(resourceExecution);
+        if (monitor != null) {
+            monitor.taskFailed(parentTask, task, failure);
+        }
+    }
+
+    /// Publishes one monitored task-property event while tolerating a late callback after domain cleanup.
+    private void monitorTaskPropertiesUpdated(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task) {
+        @Nullable TaskExecutionRegistry.Execution monitor = monitoredExecution(resourceExecution);
+        if (monitor != null) {
+            monitor.taskPropertiesUpdated(parentTask, task);
+        }
     }
 
     /// Attempts the single terminal listener notification promised for one execution chain.
@@ -200,9 +371,56 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     ///
     /// @param attempted per-execution terminal notification guard
     /// @param success whether the execution chain completed successfully
-    private void notifyStopOnce(AtomicBoolean attempted, boolean success) {
+    /// @param invocationCancelled whether the invocation was cancelled
+    private void notifyStopOnce(AtomicBoolean attempted, boolean success, boolean invocationCancelled) {
         if (attempted.compareAndSet(false, true)) {
-            notifyTaskListeners(it -> it.onStop(success, this));
+            notifyTaskListenersForInvocation(
+                    invocationCancelled,
+                    it -> it.onStop(success, this));
+        }
+    }
+
+    /// Commits one invocation's terminal result while serializing it with direct cancellation.
+    ///
+    /// The registry also participates in the decision because a public row-cancellation request changes its state
+    /// before invoking the executor callback. Reading both cancellation domains while holding this executor's monitor
+    /// keeps the legacy `onStop` result aligned with the top-level registry terminal state.
+    ///
+    /// @param resourceExecution invocation resource domain
+    /// @param monitoredExecution top-level registry handle
+    /// @param requestedSuccess result reported by the task future before a late cancellation check
+    /// @param invocationFailure mutable terminal failure holder
+    /// @param stopNotificationAttempted one-shot legacy stop-notification guard
+    /// @return effective success after cancellation arbitration
+    private boolean stopInvocation(
+            TaskResourceLockManager.Execution resourceExecution,
+            TaskExecutionRegistry.Execution monitoredExecution,
+            boolean requestedSuccess,
+            AtomicReference<@Nullable Throwable> invocationFailure,
+            AtomicBoolean stopNotificationAttempted) {
+        synchronized (this) {
+            boolean success = requestedSuccess
+                    && !isExecutionCancelled(resourceExecution)
+                    && !monitoredExecution.cancellationRequested();
+            if (!success && requestedSuccess && invocationFailure.get() == null) {
+                CancellationException cancellation = new CancellationException("Cancelled by user");
+                // Row-level cancellation has an invocation-local domain, so the legacy executor failure surface must
+                // also receive a synthetic cancellation cause for existing launch-session classification.
+                failure = cancellation;
+                invocationFailure.set(cancellation);
+            }
+            TaskExecutionStatus terminalStatus = monitoredExecution.stopped(success, invocationFailure.get());
+            boolean effectiveSuccess = terminalStatus == TaskExecutionStatus.SUCCEEDED;
+            if (!effectiveSuccess && requestedSuccess && invocationFailure.get() == null) {
+                CancellationException cancellation = new CancellationException("Cancelled by user");
+                failure = cancellation;
+                invocationFailure.set(cancellation);
+            }
+            notifyStopOnce(
+                    stopNotificationAttempted,
+                    effectiveSuccess,
+                    terminalStatus == TaskExecutionStatus.CANCELLED);
+            return effectiveSuccess;
         }
     }
 
@@ -233,13 +451,18 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
         cancelled = true;
         @Nullable Throwable firstFailure = null;
+        Set<TaskExecutionRegistry.Execution> markedExecutions = new HashSet<>();
         for (TaskResourceLockManager.Execution resourceExecution : resourceExecutions) {
             if (terminalResourceExecutions.contains(resourceExecution)) {
                 // A terminal cleanup domain is already committed and must retain pending acquisition after cancel.
                 continue;
             }
+            @Nullable TaskExecutionRegistry.Execution monitored = monitoredExecutions.get(resourceExecution);
+            if (monitored != null && markedExecutions.add(monitored)) {
+                taskExecutionRegistry.markCancellationRequested(monitored.id());
+            }
             try {
-                resourceLockManager.cancel(resourceExecution);
+                cancel(resourceExecution);
             } catch (RuntimeException | Error cancellationFailure) {
                 // A cleanup race in one execution domain must not leave later domains running. Preserve the first
                 // failure for the caller after every domain has received the cancellation request.
@@ -258,6 +481,27 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
     }
 
+    /// Cancels one invocation domain without changing cancellation state of sibling starts.
+    ///
+    /// The public [#cancel()] method retains its historical all-invocations behavior. The task registry calls this
+    /// overload with the resource domain captured by one [#start()] invocation so a row-level cancellation cannot
+    /// stop another overlapping row.
+    private synchronized void cancel(TaskResourceLockManager.Execution resourceExecution) {
+        if (terminalResourceExecutions.contains(resourceExecution)
+                || !resourceExecutions.contains(resourceExecution)) {
+            return;
+        }
+        if (!cancelledExecutions.add(resourceExecution)) {
+            return;
+        }
+        try {
+            resourceLockManager.cancel(resourceExecution);
+        } catch (RuntimeException | Error cancellationFailure) {
+            cancelledExecutions.remove(resourceExecution);
+            throw cancellationFailure;
+        }
+    }
+
     /// Executes a possibly absent collection of sibling tasks and completes exceptionally when any sibling fails.
     private CompletableFuture<@Nullable Void> executeTasksExceptionally(
             @Nullable Task<?> parentTask,
@@ -270,9 +514,15 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         return CompletableFuture.<@Nullable Void>completedFuture(null)
                 .thenComposeAsync((@Nullable Void unused) -> {
                     boolean hasTerminalCleanup = tasks.stream().anyMatch(Task::isTerminalCleanup);
-                    if (isCancelled() && !hasTerminalCleanup) {
-                        for (Task<?> task : tasks) task.setException(new CancellationException());
-                        return CompletableFuture.runAsync(this::checkCancellation);
+                    if (isExecutionCancelled(resourceExecution) && !hasTerminalCleanup) {
+                        CancellationException cancellation = new CancellationException("Cancelled by user");
+                        for (Task<?> task : tasks) {
+                            task.resetExecutionOutcome();
+                            monitorTaskReady(parentTask, resourceExecution, task);
+                            task.setException(cancellation);
+                            monitorTaskFailed(parentTask, resourceExecution, task, cancellation);
+                        }
+                        return CompletableFuture.runAsync(() -> checkCancellation(resourceExecution));
                     }
 
                     return CompletableFuture.allOf(tasks.stream()
@@ -287,6 +537,13 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                                     // process-local write block.
                                     terminalResourceExecutions.add(taskExecution);
                                     resourceExecutions.add(taskExecution);
+                                    // Cleanup tasks still belong to the same top-level workflow. Reuse its monitoring
+                                    // handle even though their resource lease has a separate cancellation domain.
+                                    @Nullable TaskExecutionRegistry.Execution monitor =
+                                            monitoredExecution(resourceExecution);
+                                    if (monitor != null) {
+                                        monitoredExecutions.put(taskExecution, monitor);
+                                    }
                                 }
                                 CompletableFuture<?> taskFuture =
                                         CompletableFuture.<@Nullable Void>completedFuture(null)
@@ -351,7 +608,6 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             @Nullable TaskResourceLockManager.Owner parentOwner,
             TaskResourceLockManager.Execution resourceExecution,
             CompletableFutureTask<T> task) {
-        task.resetExecutionOutcome();
         LeaseReference leaseReference = new LeaseReference();
         CompletableFuture<@Nullable T> execution;
         try {
@@ -370,7 +626,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             execution = CompletableFuture.failedFuture(failure);
         }
 
-        return withLeaseRelease(handleCompletableFutureTaskCompletion(task, execution), leaseReference);
+        return withLeaseRelease(
+                handleCompletableFutureTaskCompletion(parentTask, resourceExecution, task, execution),
+                leaseReference);
     }
 
     /// Runs the established future-task lifecycle after its semantic resources have been acquired.
@@ -381,17 +639,25 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             CompletableFutureTask<T> task) {
         return CompletableFuture.<@Nullable Void>completedFuture(null)
                 .thenComposeAsync((@Nullable Void unused) -> {
-                    checkCancellation(task);
+                    checkCancellation(resourceExecution, task);
 
-                    task.setCancelled(this::isCancelled);
+                    task.setCancelled(() -> isExecutionCancelled(resourceExecution));
                     task.setState(Task.TaskState.READY);
                     if (parentTask != null && task.getStage() == null)
                         task.setStage(parentTask.getStage());
+                    task.setNotifyPropertiesChanged(() -> {
+                        notifyTaskListeners(task, it -> it.onPropertiesUpdate(task));
+                        monitorTaskPropertiesUpdated(parentTask, resourceExecution, task);
+                    });
 
                     if (task.getSignificance().shouldLog())
                         LOG.trace("Executing task: " + task.getName());
 
                     notifyTaskListeners(it -> it.onReady(task));
+                    monitorTaskReady(parentTask, resourceExecution, task);
+                    task.setState(Task.TaskState.RUNNING);
+                    notifyTaskListeners(it -> it.onRunning(task));
+                    monitorTaskRunning(parentTask, resourceExecution, task);
 
                     NestedTaskScope scope = new NestedTaskScope(task, owner, resourceExecution);
                     CompletableFuture<@Nullable T> mainFuture;
@@ -405,7 +671,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     return scope.closeAfter(mainFuture);
                 })
                 .thenApplyAsync((@Nullable T result) -> {
-                    checkCancellation(task);
+                    checkCancellation(resourceExecution, task);
 
                     if (task.getSignificance().shouldLog()) {
                         LOG.trace("Task finished: " + task.getName());
@@ -414,6 +680,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     task.setResult(result);
                     task.fireDoneEvent(this, false);
                     notifyTaskListeners(it -> it.onFinished(task));
+                    monitorTaskFinished(parentTask, resourceExecution, task);
 
                     task.setState(Task.TaskState.SUCCEEDED);
 
@@ -423,6 +690,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
     /// Applies the established future-task failure classification before the resource lease is released.
     private <T> CompletableFuture<@Nullable T> handleCompletableFutureTaskCompletion(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
             CompletableFutureTask<T> task,
             CompletableFuture<@Nullable T> execution) {
         return execution.exceptionally(throwable -> {
@@ -435,6 +704,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             }
                             task.fireDoneEvent(this, true);
                             notifyTaskListeners(it -> it.onFailed(task, e));
+                            monitorTaskFailed(parentTask, resourceExecution, task, e);
                         } else {
                             task.setException(e);
                             exception = e;
@@ -443,11 +713,12 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             }
                             task.fireDoneEvent(this, true);
                             notifyTaskListeners(it -> it.onFailed(task, e));
+                            monitorTaskFailed(parentTask, resourceExecution, task, e);
                         }
 
                         task.setState(Task.TaskState.FAILED);
-                    } else if (resolved instanceof OutOfMemoryError e) {
-                        handleOutOfMemoryError(task, e);
+                    } else {
+                        handleNonExceptionFailure(parentTask, resourceExecution, task, resolved);
                     }
 
                     throw new CompletionException(resolved); // rethrow error
@@ -461,7 +732,6 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             @Nullable TaskResourceLockManager.Owner parentOwner,
             TaskResourceLockManager.Execution resourceExecution,
             Task<T> task) {
-        task.resetExecutionOutcome();
         LeaseReference leaseReference = new LeaseReference();
         @Nullable TaskResourceLockManager.Owner ownerForCompletion = null;
         CompletableFuture<@Nullable T> execution;
@@ -482,7 +752,14 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             execution = CompletableFuture.failedFuture(failure);
         }
 
-        return withLeaseRelease(handleNormalTaskCompletion(task, ownerForCompletion, execution, leaseReference),
+        return withLeaseRelease(
+                handleNormalTaskCompletion(
+                        parentTask,
+                        resourceExecution,
+                        task,
+                        ownerForCompletion,
+                        execution,
+                        leaseReference),
                 leaseReference);
     }
 
@@ -498,22 +775,25 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         TaskResourceLockManager.Owner dependencyOwner = owner;
         return CompletableFuture.<@Nullable Void>completedFuture(null)
                 .thenComposeAsync((@Nullable Void unused) -> {
-                    checkCancellation(task);
+                    checkCancellation(resourceExecution, task);
 
-                    task.setCancelled(this::isCancelled);
+                    task.setCancelled(() -> isExecutionCancelled(resourceExecution));
                     task.setState(Task.TaskState.READY);
                     if (task.getStage() != null) {
                         task.setInheritedStage(task.getStage());
                     } else if (parentTask != null) {
                         task.setInheritedStage(parentTask.getInheritedStage());
                     }
-                    task.setNotifyPropertiesChanged(() ->
-                            notifyTaskListeners(task, it -> it.onPropertiesUpdate(task)));
+                    task.setNotifyPropertiesChanged(() -> {
+                        notifyTaskListeners(task, it -> it.onPropertiesUpdate(task));
+                        monitorTaskPropertiesUpdated(parentTask, resourceExecution, task);
+                    });
 
                     if (task.getSignificance().shouldLog())
                         LOG.trace("Executing task: " + task.getName());
 
                     notifyTaskListeners(task, it -> it.onReady(task));
+                    monitorTaskReady(parentTask, resourceExecution, task);
 
                     if (task.doPreExecute()) {
                         return CompletableFuture.runAsync(wrap(task::preExecute), task.getExecutor());
@@ -549,6 +829,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     CompletableFuture<@Nullable Void> mainExecution = CompletableFuture.runAsync(wrap(() -> {
                         task.setState(Task.TaskState.RUNNING);
                         notifyTaskListeners(task, it -> it.onRunning(task));
+                        monitorTaskRunning(parentTask, resourceExecution, task);
                         task.execute(scope);
                     }), task.getExecutor()).thenApply((@Nullable Void unused) -> (Void) null);
                     return scope.closeAfter(mainExecution).whenComplete(
@@ -592,7 +873,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         }
                     }
 
-                    checkCancellation(task);
+                    checkCancellation(resourceExecution, task);
 
                     if (task.getSignificance().shouldLog()) {
                         LOG.trace("Task finished: " + task.getName());
@@ -600,6 +881,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     task.fireDoneEvent(this, false);
                     notifyTaskListeners(task, it -> it.onFinished(task));
+                    monitorTaskFinished(parentTask, resourceExecution, task);
 
                     task.setState(Task.TaskState.SUCCEEDED);
                     return task.getResult();
@@ -608,6 +890,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
     /// Applies the established regular-task failure classification before the resource lease is released.
     private <T> CompletableFuture<@Nullable T> handleNormalTaskCompletion(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
             Task<T> task,
             @Nullable TaskResourceLockManager.Owner owner,
             CompletableFuture<@Nullable T> execution,
@@ -621,14 +905,18 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         if (reacquisitionFailure != null) {
                             attachReacquisitionFailure(throwable, reacquisitionFailure);
                         }
-                        return classifyNormalTaskFailure(task, throwable);
+                        return classifyNormalTaskFailure(parentTask, resourceExecution, task, throwable);
                     })
                     .thenCompose(stage -> stage);
         }).thenCompose(stage -> stage);
     }
 
     /// Classifies one established regular-task failure and republishes its historical terminal callbacks.
-    private <T> CompletableFuture<@Nullable T> classifyNormalTaskFailure(Task<T> task, Throwable throwable) {
+    private <T> CompletableFuture<@Nullable T> classifyNormalTaskFailure(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<T> task,
+            Throwable throwable) {
         Throwable resolved = resolveException(throwable);
         if (resolved instanceof Exception) {
             Exception e = convertInterruptedException((Exception) resolved);
@@ -645,10 +933,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             }
             task.fireDoneEvent(this, true);
             notifyTaskListeners(task, it -> it.onFailed(task, e));
+            monitorTaskFailed(parentTask, resourceExecution, task, e);
 
             task.setState(Task.TaskState.FAILED);
-        } else if (resolved instanceof OutOfMemoryError e) {
-            handleOutOfMemoryError(task, e);
+        } else {
+            handleNonExceptionFailure(parentTask, resourceExecution, task, resolved);
         }
 
         return CompletableFuture.failedFuture(new CompletionException(resolved));
@@ -679,16 +968,23 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         return leaseReference.reacquire(resourceLockManager, owner);
     }
 
-    /// Completes the failed task lifecycle while preserving the original error for the global handler.
+    /// Completes a non-Exception task failure while preserving the original throwable for the global handler.
     ///
+    /// @param parentTask parent task in the monitored execution tree
+    /// @param resourceExecution invocation resource domain
     /// @param task task whose terminal callbacks must be published
-    /// @param error original out-of-memory error
-    private void handleOutOfMemoryError(Task<?> task, OutOfMemoryError error) {
-        Exception taskException = new Exception(error);
+    /// @param failure original non-Exception failure
+    private void handleNonExceptionFailure(
+            @Nullable Task<?> parentTask,
+            TaskResourceLockManager.Execution resourceExecution,
+            Task<?> task,
+            Throwable failure) {
+        Exception taskException = new Exception(failure);
         task.setException(taskException);
         exception = taskException;
         task.fireDoneEvent(this, true);
-        notifyTaskListeners(task, it -> it.onFailed(task, error));
+        notifyTaskListeners(task, it -> it.onFailed(task, failure));
+        monitorTaskFailed(parentTask, resourceExecution, task, failure);
         task.setState(Task.TaskState.FAILED);
     }
 
@@ -708,6 +1004,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             @Nullable TaskResourceLockManager.Owner parentOwner,
             TaskResourceLockManager.Execution resourceExecution,
             Task<T> task) {
+        task.resetExecutionOutcome();
+        monitorTaskReady(parentTask, resourceExecution, task);
         if (task instanceof CompletableFutureTask<T> completableFutureTask) {
             return executeCompletableFutureTask(parentTask, parentOwner, resourceExecution, completableFutureTask);
         } else {
@@ -1057,9 +1355,14 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
     }
 
-    /// Throws a cancellation exception when cooperative cancellation has been requested.
-    private void checkCancellation() {
-        if (isCancelled()) {
+    /// Returns whether one invocation resource domain has been cancelled.
+    private boolean isExecutionCancelled(TaskResourceLockManager.Execution resourceExecution) {
+        return cancelledExecutions.contains(resourceExecution);
+    }
+
+    /// Throws a cancellation exception for one invocation resource domain.
+    private void checkCancellation(TaskResourceLockManager.Execution resourceExecution) {
+        if (isExecutionCancelled(resourceExecution)) {
             throw new CancellationException("Cancelled by user");
         }
     }
@@ -1067,9 +1370,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Throws a cancellation exception unless an already-committed terminal cleanup must still run.
     ///
     /// @param task task about to cross a cancellation checkpoint
-    private void checkCancellation(Task<?> task) {
+    private void checkCancellation(TaskResourceLockManager.Execution resourceExecution, Task<?> task) {
         if (!task.isTerminalCleanup()) {
-            checkCancellation();
+            checkCancellation(resourceExecution);
         }
     }
 
