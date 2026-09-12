@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Identifies the persistent instance workspace and its three top-level overlays.
+/// Identifies the persistent instance workspace and its top-level destinations.
 @NotNullByDefault
 public enum ShellPageId {
     /// The persistent installed-instance management workspace.
@@ -27,6 +27,9 @@ public enum ShellPageId {
 
     /// The game and mod download destination.
     DOWNLOADS,
+
+    /// The session task-management destination.
+    TASKS,
 
     /// The authenticated player account destination.
     ACCOUNTS,
