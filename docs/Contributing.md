@@ -1,32 +1,31 @@
-# Contributing Guide
+# 贡献指南
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](Contributing_zh.md), [繁體](Contributing_zh_Hant.md)) | **English**
+**中文** (**简体**, [繁體](Contributing_zh_Hant.md)) | [English](Contributing_en.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
-## Build XYML
+合并 HMCL 上游更改前，请先阅读[上游合并指南](UpstreamMerge.md)。
 
-### Requirements
+## 构建 XYML
 
-Building the complete XYML repository requires both JDK 17 and JDK 25. You can download them here:
-[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts). Use JDK 17 as the Gradle runtime by pointing
-`JAVA_HOME` and IntelliJ IDEA's Gradle JVM to it. Make only JDK 25 discoverable to
-[Gradle's toolchain support](https://docs.gradle.org/current/userguide/toolchains.html). The root build defaults all
-Java projects to Java 17, and only `lwjgl-unsafe-agent` overrides that default with a Java 25 toolchain. The boot and
-Minecraft helper modules retain their Java 8 targets, and the Mesa loader retains its older bytecode target.
+### 环境需求
 
-On Windows, building the native `XYMLL` launcher also requires CMake 3.16 or newer, Visual Studio 2022 Build Tools
-with the MSVC x86/x64 C++ tools, and a Windows SDK. The MinGW toolchain is not supported. Builds on other operating
-systems verify and use the checked-in executable produced from the same source snapshot.
+构建完整的 XYML 仓库需要同时安装 JDK 17 和 JDK 25。你可以从此处下载它们：[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts)。
+请将 `JAVA_HOME` 和 IntelliJ IDEA 的 Gradle JVM 指向 JDK 17，仅需确保 [Gradle 工具链](https://docs.gradle.org/current/userguide/toolchains.html)能够发现 JDK 25。
+根构建默认让所有 Java 项目继承 Java 17，只有 `lwjgl-unsafe-agent` 单独覆盖为 Java 25 工具链；
+启动模块和 Minecraft 辅助模块继续以 Java 8 为目标，Mesa 加载器也继续保留更低的字节码目标。
 
-After installing the JDKs, make sure the `JAVA_HOME` environment variable points to the JDK 17 directory.
-You can check the JDK version that `JAVA_HOME` points to like this:
+在 Windows 上构建原生 `XYMLL` 启动器还需要 CMake 3.16 或更高版本、带 MSVC x86/x64 C++ 工具的
+Visual Studio 2022 Build Tools，以及 Windows SDK。不支持 MinGW 工具链。其他操作系统会验证并使用仓库中
+由同一份源码构建的可执行文件。
+
+安装 JDK 后，请确保 `JAVA_HOME` 环境变量指向 JDK 17 目录。
+你可以这样查看 `JAVA_HOME` 指向的 JDK 版本:
 
 <details>
 <summary>Windows</summary>
 
 PowerShell:
-
 ```
 PS > & "$env:JAVA_HOME/bin/java.exe" -version
 openjdk version "17.0.8" 2023-07-18 LTS
@@ -60,103 +59,90 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 </details>
 
-### Get XYML Source Code
+### 获取 XYML 源码
 
-- You can get the latest source code via [Git](https://git-scm.com/downloads):
+- 通过 [Git](https://git-scm.com/downloads) 可以获取最新源码:
   ```shell
   git clone https://github.com/MinecraftSTL/XYML.git
   cd XYML
   ```
-- You can manually download a specific version of the source code from the [GitHub Release page](https://github.com/MinecraftSTL/XYML/releases).
+- 从 [GitHub Release 页面](https://github.com/MinecraftSTL/XYML/releases)可以手动下载特定版本的源码。
 
-### Build XYML
+### 构建 XYML
 
-To build XYML, switch to the root directory of the XYML project and run the following command:
+想要构建 XYML，请切换到 XYML 项目的根目录下，并执行以下命令:
 
 ```shell
 ./gradlew clean :build
 ```
 
-The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
-The root `:build` task assembles and packages the current checkout without invoking `check` or test tasks. Run `:test`
-separately when you need the test suite.
+构建出的 XYML 程序文件位于根目录下的 `XYML/build/libs` 子目录中。
+根 `:build` 任务只负责按当前工作树组装和打包，不会调用 `check` 或测试任务；需要测试时请单独运行 `:test`。
 
-### IDEA Gradle Workflows
+### IDEA Gradle 构建流程
 
-After importing the repository as a Gradle project, open the Gradle tool window and expand
-`XYML > Tasks > stl`. The group contains these entry points:
+将仓库作为 Gradle 项目导入后，打开 Gradle 工具窗口并展开 `XYML > Tasks > stl`。该分类包含以下入口：
 
-| Task | Behavior |
+| 任务 | 行为 |
 | --- | --- |
-| `buildMain` | Builds the tip of the local `main` branch in an isolated worktree. |
-| `buildBeta` | Builds the tip of the local `beta` branch in an isolated worktree. |
-| `buildAlpha` | Builds the tip of the local `alpha` branch in an isolated worktree. |
-| `buildDev` | Builds the tip of the local `dev` branch in an isolated worktree. |
-| `build` | Assembles and packages the current checkout in place, including its uncommitted changes, without running tests. |
-| `test` | Tests the current checkout using the same branch and version inference as `build`. |
-| `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
-| `run` | Always rebuilds `XYML`, `XYMLCore`, and `XYMLBoot`, then runs the current checkout artifact. |
+| `buildMain` | 在隔离工作树中构建本地 `main` 分支尖端。 |
+| `buildBeta` | 在隔离工作树中构建本地 `beta` 分支尖端。 |
+| `buildAlpha` | 在隔离工作树中构建本地 `alpha` 分支尖端。 |
+| `buildDev` | 在隔离工作树中构建本地 `dev` 分支尖端。 |
+| `build` | 按当前工作树组装并打包，包括未提交改动，但不运行测试。 |
+| `test` | 使用与 `build` 相同的分支和版本解析规则测试当前工作树。 |
+| `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
+| `run` | 始终重新构建 `XYML`、`XYMLCore` 和 `XYMLBoot`，然后运行当前工作树制品。 |
 
-The `build`, `test`, and `run` tasks always use the current repository root, including on `main`, `beta`, `alpha`, and
-`dev` checkouts. None of these tasks switches branches or delegates to a channel task. Without CI version inputs, the current
-branch and `HEAD` topology determine the artifact version; uncommitted changes are included in the artifact but do
-not increment the version. When invoking Gradle from a shell, keep the leading `:` (`:build` or `:test`) to target the
-root task exactly. IntelliJ's Gradle Tooling API may send a bare `build`; the root build script normalizes that
-aggregate invocation to package-only subproject builds as well.
+即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`build`、`test` 和 `run` 也始终使用当前仓库根目录；这些任务都不会切换分支或委托渠道任务。
+没有 CI 版本输入时，制品版本由当前分支与 `HEAD` 拓扑决定；未提交改动会进入制品，但不会使版本号递增。从命令行调用时建议保留任务名前的 `:`（`:build` 或 `:test`）以精确指向根任务。IntelliJ 的 Gradle Tooling API 可能会发送裸 `build`；根构建脚本也会将这种聚合调用规范化为只组装子项目。
 
-Every `run` invocation disables up-to-date and build-cache reuse for tasks in `XYML`, `XYMLCore`, and `XYMLBoot`.
-This includes Java compilation, generated language data, processed resources, and the final `shadowJar`. XoyzNBT and
-XoyzMCP are handled separately: a successful root `build` records an integrity-checked library snapshot, and `run`
-prefers that snapshot until the next successful root `build`. If no complete snapshot is available, or `clean run` is
-requested, both libraries are built into a temporary directory with Gradle reuse disabled and are removed after the
-launcher JAR is assembled; this fallback never updates the snapshot. A combined `:build run`, `:test run`, or
-`:check run` invocation uses the current project outputs instead. Other project dependencies retain their existing
-reuse behavior, so an unchanged native source may still reuse the XYMLL executable.
+每次调用 `run` 都会禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任务复用最新输出或构建缓存，包括 Java 编译、语言数据生成、
+资源处理和最终 `shadowJar`。XoyzNBT 和 XoyzMCP 使用单独的规则：成功的根 `build` 会登记一份经过完整性校验的库快照，
+`run` 会优先使用该快照，直到下一次根 `build` 成功。若不存在完整快照，或执行 `clean run`，两个库会在禁用 Gradle 复用的
+临时目录中构建，并在启动器 JAR 组装完成后删除；这种临时回退不会更新快照。同一次调用中包含 `:build run`、`:test run` 或 `:check run`
+时则使用当前项目输出。其他项目依赖保留原有复用规则，因此原生源码未变化时仍可复用已有的 XYMLL 可执行文件。
 
-`run` always rebuilds and selects the current `XYML/build/libs` application artifact; it never reuses an application
-JAR recorded by a previous root `:build`. It does not write the root result marker or start a second Wrapper process.
+`run` 始终重新构建并选择当前 `XYML/build/libs` 中的应用制品，不会复用之前根 `:build` 记录的应用 JAR、写入根结果清单或
+启动第二个 Wrapper。
+子项目任务改名为 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 执行根工作流时同时选中第二个启动器进程。
 
-The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
-a second launcher process together with the root workflow.
+四个渠道任务只读取本地 `main`、`beta`、`alpha` 和 `dev` 引用，不会执行拉取或其他在线 Git 操作。任务会在临时的游离 worktree
+中构建所选本地分支尖端，不会切换 IDEA 当前工作树。成功的渠道构建产物会连同 `build-info.properties` 复制到
+`build/libs/<branch>`；当前工作树的 `build` 产物仍位于 `XYML/build/libs`。
 
-The four channel tasks read only the local `main`, `beta`, `alpha`, and `dev` refs. They perform no fetch or other
-online Git operation, and build the selected local branch tip in a temporary detached worktree without switching the
-current IDEA checkout. Successful channel artifacts are copied to `build/libs/<branch>` together with
-`build-info.properties`; the current-checkout `build` artifact remains in `XYML/build/libs`.
+在 Windows 上，Gradle Wrapper 和嵌套渠道构建允许 Gradle 发行包及依赖下载使用已启用的 Windows 系统代理。
 
-On Windows, the Gradle Wrapper and nested channel builds allow Gradle distribution and dependency downloads to use
-the enabled Windows system proxy.
-
-## Debug Options
+## 调试选项
 
 > [!WARNING]
-> This document describes XYML's internal features, which we do not guarantee to be stable and may be modified or removed at any time.
+> 本文介绍的是 XYML 的内部功能，我们不保证这些功能的稳定性，并且随时可能修改或删除这些功能。
 >
-> Please use these features with caution, as improper use may cause XYML to behave abnormally or even crash.
+> 使用这些功能时请务必小心，错误地使用这些功能可能会导致 XYML 行为异常甚至崩溃。
 
-XYML provides a series of debug options to control the behavior of the launcher.
+XYML 提供了一系列调试选项，用于控制启动器的行为。
 
-These options can be specified via environment variables or JVM parameters. If both are present, JVM parameters will override the environment variable settings.
+这些选项可以通过环境变量或 JVM 参数指定。如果两者同时存在，那么 JVM 参数会覆盖环境变量的设置。
 
-| Environment Variable        | JVM Parameter                                | Function                                                  | Default Value                                                                                               | Additional Notes          |
-|-----------------------------|----------------------------------------------|-----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------|
-| `XYML_JAVA_HOME`            |                                              | Specifies the Java used to launch XYML                    |                                                                                                             | Only effective for exe/sh |
-| `XYML_JAVA_OPTS`            |                                              | Specifies the default JVM parameters when launching XYML  |                                                                                                             | Only effective for exe/sh |
-| `XYML_FORCE_GPU`            |                                              | Specifies whether to force GPU-accelerated rendering      | `false`                                                                                                     |                           |
-| `XYML_ANIMATION_FRAME_RATE` |                                              | Specifies the animation frame rate of XYML                | Matches display refresh rates of 90 Hz or higher; otherwise `60`                                            | Overridden by `-Dxyml.swing.animationFrameDelayMillis` |
-| `XYML_LANGUAGE`             |                                              | Specifies the default language of XYML                    | Uses the system default language                                                                            |                           |
-| `XYML_UI_SCALE`             |                                              | Specifies the UI scaling for XYML                         | Uses the system's current scaling                                                                           | Supports scale factor (1.5), percentage (150%), or DPI (144dpi).                          |
-| `XYML_SKIP_OFFLINE_USERNAME_CHECK` |                                      | Disables illegal offline username checks                    | `false`                                                                                                     | Set to `true`; logs a warning and may prevent joining servers or crash the game. |
-|                             | `-Dxyml.dir=<path>`                          | Specifies the current data folder of XYML                 | `./.xyml`                                                                                                   |                           |
-|                             | `-Dxyml.home=<path>`                         | Specifies the user data folder of XYML                    | Windows: `%APPDATA%\.xyml`<br>Linux/BSD: `$XDG_DATA_HOME/xyml`<br>macOS: `~Library/Application Support/xyml` |                           |
-|                             | `-Dxyml.swing.animationFrameDelayMillis=<milliseconds>` | Specifies the Swing animation timer delay in milliseconds | Matches display refresh rates of 90 Hz or higher; otherwise `16`                                            | Must be a positive integer |
-|                             | `-Dxyml.self_integrity_check.disable=true`   | Disables self-integrity checks during updates             |                                                                                                             |                           |
-|                             | `-Dxyml.bmclapi.override=<url>`              | Specifies the API Root for BMCLAPI                        | `https://bmclapi2.bangbang93.com`                                                                           |                           |
-|                             | `-Dxyml.discoapi.override=<url>`             | Specifies the API Root for foojay Disco API               | `https://api.foojay.io/disco/v3.0`                                                                          |                           |
-|                             | `-Dxyml.update_source.override=<url>`        | Specifies the channel update-source template for XYML     | `https://github.com/MinecraftSTL/XYML/releases/download/release-channels/xyml-update-{channel}.json`                                            | `{channel}` is replaced before the request |
-|                             | `-Dxyml.authlibinjector.location=<path>`     | Specifies the location of the authlib-injector JAR file   | Uses the built-in authlib-injector                                                                          |                           |
-|                             | `-Dxyml.native.encoding=<encoding>`          | Specifies the native encoding                             | Uses the system's native encoding                                                                           |                           |
-|                             | `-Dxyml.microsoft.auth.id=<App ID>`          | Specifies the Microsoft OAuth App ID                      | Uses the built-in Microsoft OAuth App ID                                                                    |                           |
-|                             | `-Dxyml.curseforge.apikey=<Api Key>`         | Specifies the CurseForge API key                          | Uses the built-in CurseForge API key                                                                        |                           |
-|                             | `-Dxyml.native.backend=<auto/jna/none>`      | Specifies the native backend used by XYML                 | `auto`                                                                                                      |                           |
-|                             | `-Dxyml.hardware.fastfetch=<true/false>`     | Specifies whether to use fastfetch for hardware detection | `true`                                                                                                      |                           |
+| 环境变量                        | JVM 参数                                       | 功能                             | 默认值                                                                                                         | 额外说明         |
+|-----------------------------|----------------------------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------------|--------------|
+| `XYML_JAVA_HOME`            |                                              | 指定用于启动 XYML 的 Java             |                                                                                                             | 仅对 exe/sh 生效 |
+| `XYML_JAVA_OPTS`            |                                              | 指定启动 XYML 时的默认 JVM 参数          |                                                                                                             | 仅对 exe/sh 生效 |
+| `XYML_FORCE_GPU`            |                                              | 指定是否强制使用 GPU 加速渲染              | `false`                                                                                                     |
+| `XYML_ANIMATION_FRAME_RATE` |                                              | 指定 XYML 的动画帧率                  | 自动匹配 90 Hz 及以上的显示器刷新率，否则为 `60`                                                                    | 会被 `-Dxyml.swing.animationFrameDelayMillis` 覆盖 |
+| `XYML_LANGUAGE`             |                                              | 指定 XYML 的默认语言                  | 使用系统默认语言                                                                                                    |
+| `XYML_UI_SCALE`             |                                              | 指定 XYML 的 UI 缩放比例                 | 遵循系统当前的缩放比例                                                                                       | 支持倍数 (1.5)、百分比 (150%) 或 DPI (144dpi) |
+| `XYML_SKIP_OFFLINE_USERNAME_CHECK` |                                      | 完全跳过非法离线用户名检查                 | `false`                                                                                                      | 设为 `true` 后启用，会记录警告，可能导致无法加入服务器或游戏崩溃。 |
+|                             | `-Dxyml.dir=<path>`                          | 指定 XYML 的当前数据文件夹               | `./.xyml`                                                                                                   |              |
+|                             | `-Dxyml.home=<path>`                         | 指定 XYML 的用户数据文件夹               | Windows: `%APPDATA%\.xyml`<br>Linux/BSD: `$XDG_DATA_HOME/xyml`<br>macOS: `~Library/Application Support/xyml` |              |
+|                             | `-Dxyml.swing.animationFrameDelayMillis=<milliseconds>` | 指定 Swing 动画计时器的毫秒延迟            | 自动匹配 90 Hz 及以上的显示器刷新率，否则为 `16`                                                                    | 必须为正整数 |
+|                             | `-Dxyml.self_integrity_check.disable=true`   | 检查更新时不检查本体完整性                  |                                                                                                             |              |
+|                             | `-Dxyml.bmclapi.override=<url>`              | 指定 BMCLAPI 的 API Root          | `https://bmclapi2.bangbang93.com`                                                                           |              |
+|                             | `-Dxyml.discoapi.override=<url>`             | 指定 foojay Disco API 的 API Root | `https://api.foojay.io/disco/v3.0`                                                                          |
+|                             | `-Dxyml.update_source.override=<url>`        | 指定 XYML 分渠道更新源模板            | `https://github.com/MinecraftSTL/XYML/releases/download/release-channels/xyml-update-{channel}.json`                                            | 请求前会替换 `{channel}` |
+|                             | `-Dxyml.authlibinjector.location=<path>`     | 指定 authlib-injector JAR 文件的位置  | 使用 XYML 内嵌的 authlib-injector                                                                                |              |
+|                             | `-Dxyml.native.encoding=<encoding>`          | 指定原生编码                         | 使用系统的本机编码                                                                                                   |              |
+|                             | `-Dxyml.microsoft.auth.id=<App ID>`          | 指定 Microsoft OAuth App ID      | 使用 XYML 内置的 Microsoft OAuth App ID                                                                          |              |
+|                             | `-Dxyml.curseforge.apikey=<Api Key>`         | 指定 CurseForge API 密钥           | 使用 XYML 内置的 CurseForge API 密钥                                                                               |              |
+|                             | `-Dxyml.native.backend=<auto/jna/none>`      | 指定XYML使用的本机后端                  | `auto`                                                                                                      |
+|                             | `-Dxyml.hardware.fastfetch=<true/false>`     | 指定是否使用 fastfetch 检测硬件信息        | `true`                                                                                                      |

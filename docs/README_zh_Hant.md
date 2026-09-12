@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](README_zh.md), **繁體**, [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** ([简体](README.md), **繁體**, [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## 簡介

@@ -26,7 +26,8 @@ import java.util.regex.Pattern;
 /// Users can use the macro processor in `.md` documents within the `docs` folder and its subfolders.
 /// The parts to be processed should be wrapped with `<!-- #BEGIN MACRO_NAME -->` and `<!-- #END MACRO_NAME -->` lines.
 ///
-/// For example, if you create a document `FOO.md` and translate it into Simplified Chinese, Traditional Chinese, and Japanese,
+/// For example, if you create a document `FOO.md` in Simplified Chinese and
+/// translate it into English, Traditional Chinese, and Japanese,
 /// you can add the following content in these files to create links to other language versions:
 ///
 /// ```markdown
@@ -38,7 +39,7 @@ import java.util.regex.Pattern;
 ///
 /// ```
 /// <!-- #BEGIN LANGUAGE_SWITCHER -->
-/// 中文 ([简体](FOO_zh.md), [繁體](FOO_zh_Hant.md)) | **English** | [日本語](FOO_ja.md)
+/// **中文** (**简体**, [繁體](FOO_zh_Hant.md)) | [English](FOO_en.md) | [日本語](FOO_ja.md)
 /// <!-- #END LANGUAGE_SWITCHER -->
 /// ```
 ///
@@ -155,7 +156,8 @@ public enum MacroProcessor {
         }
     },
 
-    /// Copy the block with the specified name from the English version of the current document.
+    /// Copy the block with the specified name from the English version, falling
+    /// back to Simplified Chinese.
     ///
     /// Supported properties:
     ///
@@ -196,19 +198,25 @@ public enum MacroProcessor {
                 throw new IllegalArgumentException("Unsupported properties: " + mutableProperties.keySet());
 
             LocalizedDocument localizedDocument = document.directory().getFiles().get(document.name());
-            Document fromDocument;
-            if (localizedDocument == null || (fromDocument = localizedDocument.getDocuments().get(DocumentLocale.ENGLISH)) == null)
-                throw new IOException("Document " + document.name() + " for english does not exist");
+            if (localizedDocument == null)
+                throw new IOException("Document " + document.name() + " does not exist");
+
+            Document fromDocument = localizedDocument.getDocuments().get(DocumentLocale.ENGLISH);
+            if (fromDocument == null)
+                fromDocument = localizedDocument.getDocuments().get(DocumentLocale.SIMPLIFIED_CHINESE);
+            if (fromDocument == null)
+                throw new IOException("Document " + document.name() + " has no english or simplified Chinese source");
+            final Document sourceDocument = fromDocument;
 
             List<String> nameList = List.of(blockName);
 
-            var fromBlock = (Document.MacroBlock) fromDocument.items().stream()
+            var fromBlock = (Document.MacroBlock) sourceDocument.items().stream()
                     .filter(it -> it instanceof Document.MacroBlock macro
                             && macro.name().equals(BLOCK.name())
                             && nameList.equals(macro.properties().get("NAME"))
                     )
                     .findFirst()
-                    .orElseThrow(() -> new IOException("Cannot find the block \"" + blockName + "\" in " + fromDocument.file()));
+                    .orElseThrow(() -> new IOException("Cannot find the block \"" + blockName + "\" in " + sourceDocument.file()));
 
             MacroProcessor.writeBegin(outputBuilder, macroBlock);
             MacroProcessor.writeProperties(outputBuilder, macroBlock);
@@ -278,7 +286,7 @@ public enum MacroProcessor {
     }
 
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "(?<=]\\()[a-zA-Z0-9_\\-./]+\\.md(?=\\))"
+            "(?<=]\\()[a-zA-Z0-9_\\-./]+\\.md(?=[?#)])"
     );
 
     static void processLine(StringBuilder outputBuilder, String line, Document document) {

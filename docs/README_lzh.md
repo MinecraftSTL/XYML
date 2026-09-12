@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](README_zh.md), [繁體](README_zh_Hant.md), **文言**) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** ([简体](README.md), [繁體](README_zh_Hant.md), **文言**) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ### 概敘
@@ -65,4 +65,4 @@ XYML 乃社群共驅之開源項目，迎諸君獻碼或建言。
 
 ## 開源之約
 
-詳見 [README_zh_Hant.md](README_zh_Hant.md#開源協議)。
+詳見 [README_zh_Hant.md](README_lzh.md#開源協議)。

@@ -1,7 +1,7 @@
 # 在地化
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](Localization_zh.md), **繁體**) | [English](Localization.md)
+**中文** ([简体](Localization.md), **繁體**) | [English](Localization_en.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 XYML 為多種語言提供在地化支援。
@@ -123,14 +123,16 @@ XYML 會自動切換至這個語言。
 到這裡，你就可以把檔案推送到 GitHub 上，並向 XYML 提交 PR 了。
 XYML 的維護者會替你完成其他步驟。
 
-## 在地化資源
+## 文件與在地化資源
 
-所有文件和在地化資源檔案的命名規則為 `<資源名><在地化檔案後綴>.<副檔名>`。
+文件和在地化資源檔案分別遵循各自的命名規則。專案 `docs/` 下的文件使用 `<文件名稱>_<語言後綴>.md`：無後綴檔案是簡體中文預設文件，標準英文使用 `_en`，繁體中文使用 `_zh_Hant`，文言使用 `_lzh`，其他語言使用對應的語言後綴。所有語言切換器都將簡體中文放在列表首位。
 
-例如，對於 `README.md` 來說，不同語言的在地化版本命名如下:
+在地化資源檔案仍使用 `<資源名稱><在地化檔案後綴>.<副檔名>`，其中空後綴表示英文預設資源；不要把文件的預設語言規則套用到資源檔案。
 
-- 英語: `README.md`
-- 中文 (簡體): `README_zh.md`
+例如，對於專案文件 `README.md` 來說，不同語言版本命名如下:
+
+- 中文 (簡體，預設): `README.md`
+- 英語 (標準): `README_en.md`
 - 中文 (繁體): `README_zh_Hant.md`
 - 中文 (文言): `README_lzh.md`
 
@@ -310,7 +312,7 @@ XYML 總是會將 `zh-CN` 加入所有中文環境的搜尋列表中，將 `zh-T
 隨後執行 `./gradlew updateDocuments`，這兩行內容會被自動取代為類似這樣的跳轉連結:
 
 ```markdown
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** ([簡體](README.md), **繁體**, [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
 關於巨集的更多內容，請見 [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java)。

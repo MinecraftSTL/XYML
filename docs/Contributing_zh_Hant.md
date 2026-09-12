@@ -1,8 +1,10 @@
 # 貢獻指南
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](Contributing_zh.md), **繁體**) | [English](Contributing.md)
+**中文** ([简体](Contributing.md), **繁體**) | [English](Contributing_en.md)
 <!-- #END LANGUAGE_SWITCHER -->
+
+合併 HMCL 上游變更前，請先閱讀[上游合併指南](UpstreamMerge_zh_Hant.md)。
 
 ## 構建 XYML
 
