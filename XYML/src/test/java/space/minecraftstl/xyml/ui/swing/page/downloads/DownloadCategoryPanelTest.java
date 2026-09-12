@@ -77,6 +77,20 @@ final class DownloadCategoryPanelTest {
         }
     }
 
+    /// Uses content-page labels for Mod catalog pagination instead of wizard-step labels.
+    @Test
+    void usesPageLabelsForModsCatalogPagination() {
+        I18n.setLocale(SupportedLocale.getLocale(Locale.SIMPLIFIED_CHINESE));
+
+        RemoteAddonCatalogStrings strings = RemoteAddonCatalogStrings.launcherLocalized(
+                RemoteAddonCatalogKind.MOD);
+
+        assertEquals(i18n("search.previous_page"), strings.previousPageAction());
+        assertEquals(i18n("search.next_page"), strings.nextPageAction());
+        assertNotEquals(i18n("wizard.prev"), strings.previousPageAction());
+        assertNotEquals(i18n("wizard.next"), strings.nextPageAction());
+    }
+
     /// Keeps the local modpack controls inside the tab when the download center is very narrow.
     @Test
     void keepsCategoryActionsInsideNarrowTab() {
