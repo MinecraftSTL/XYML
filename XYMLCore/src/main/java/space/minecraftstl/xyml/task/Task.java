@@ -393,6 +393,9 @@ public abstract class Task<T> {
         dependentFailure = null;
         dependentsSucceeded = false;
         dependenciesSucceeded = false;
+        progressTotal = null;
+        lastUpdateProgressTime = 0L;
+        observableProgress.reset();
     }
 
     /// Returns whether prerequisite failure prevents this task from executing.
@@ -541,6 +544,9 @@ public abstract class Task<T> {
     /// Progress source updated on the publishing worker thread.
     private final TaskProgressProperty observableProgress = new TaskProgressProperty(this, "progress", -1.0);
 
+    /// Latest count-based progress total, or null when progress was supplied as a normalized value.
+    private volatile @Nullable Long progressTotal;
+
     /// Returns the read-only progress property.
     ///
     /// The initial value is `-1.0`, which means that the task has not reported a quantifiable progress value yet.
@@ -557,13 +563,36 @@ public abstract class Task<T> {
         if (count < 0 || total < 0)
             throw new IllegalArgumentException("Invalid count or total: count=" + count + ", total=" + total);
 
-        updateProgress(count < total ? (double) count / total : 1.0);
+        boolean totalChanged = !Objects.equals(progressTotal, total);
+        if (totalChanged) {
+            progressTotal = total;
+            notifyPropertiesChanged();
+        }
+
+        double progress = count < total ? (double) count / total : 1.0;
+        if (totalChanged) {
+            publishObservableProgress(progress);
+            lastUpdateProgressTime = System.currentTimeMillis();
+        } else {
+            long now = System.currentTimeMillis();
+            if (progress == 1.0D || now - lastUpdateProgressTime >= 1000L) {
+                publishObservableProgress(progress);
+                lastUpdateProgressTime = now;
+            }
+        }
+    }
+
+    /// Returns the latest count-based progress total, or null when no total was supplied.
+    @Nullable Long getProgressTotal() {
+        return progressTotal;
     }
 
     /// Updates progress, coalescing non-terminal updates that arrive within one second.
     protected void updateProgress(double progress) {
         if (progress < 0 || progress > 1.0 || Double.isNaN(progress))
             throw new IllegalArgumentException("Invalid progress: " + progress);
+
+        clearProgressTotal();
 
         long now = System.currentTimeMillis();
         if (progress == 1.0 || now - lastUpdateProgressTime >= 1000L) {
@@ -575,7 +604,16 @@ public abstract class Task<T> {
     /// Publishes an immediate progress value synchronously to isolated listeners.
     protected void updateProgressImmediately(double progress) {
         // assert progress >= 0 && progress <= 1.0;
+        clearProgressTotal();
         publishObservableProgress(progress);
+    }
+
+    /// Clears count-based progress metadata when a caller switches to a normalized progress value.
+    private void clearProgressTotal() {
+        if (progressTotal != null) {
+            progressTotal = null;
+            notifyPropertiesChanged();
+        }
     }
 
     /// Publishes a neutral progress value to independently isolated listeners.

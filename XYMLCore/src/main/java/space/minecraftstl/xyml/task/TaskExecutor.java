@@ -46,6 +46,9 @@ public abstract class TaskExecutor {
     /// Whether cancellation has been requested for this execution chain.
     protected volatile boolean cancelled = false;
 
+    /// Invocation-local cancellation view exposed while a terminal listener is being notified.
+    private final ThreadLocal<@Nullable Boolean> cancellationNotificationView = new ThreadLocal<>();
+
     /// Last task failure, or `null` when execution has not failed or was cancelled before recording a failure.
     protected @Nullable Exception exception;
 
@@ -55,12 +58,49 @@ public abstract class TaskExecutor {
     /// Immutable stage metadata exposed to task-progress consumers.
     private final @Unmodifiable List<Task.StagesHint> hints;
 
+    /// Optional stable presentation title installed by a UI presentation model before start.
+    private volatile @Nullable String taskExecutionTitle;
+
+    /// Whether executions created by this executor are eligible for user-visible history.
+    private volatile boolean taskExecutionUserVisible;
+
     /// Creates an executor for the supplied first task.
     public TaskExecutor(Task<?> task) {
         this.firstTask = Objects.requireNonNull(task, "task");
         this.hints = task instanceof Task<?>.StagesHintTask hintTask
                 ? List.copyOf(hintTask.getHints())
                 : List.of();
+    }
+
+    /// Installs the stable top-level title used by the application task registry.
+    ///
+    /// The first non-empty title wins so repeated starts of one executor remain grouped under one presentation
+    /// contract. This metadata does not affect task scheduling or resource ownership.
+    ///
+    /// @param title user-facing title
+    /// @param userVisible whether the execution should appear in active and successful history
+    public final void setTaskExecutionPresentation(String title, boolean userVisible) {
+        Objects.requireNonNull(title, "title");
+        if (title.isBlank()) {
+            throw new IllegalArgumentException("title must not be blank");
+        }
+        synchronized (this) {
+            if (taskExecutionTitle == null) {
+                taskExecutionTitle = title;
+            }
+            taskExecutionUserVisible |= userVisible;
+        }
+    }
+
+    /// Returns the top-level execution title, falling back to the root task name.
+    final String taskExecutionTitle() {
+        @Nullable String title = taskExecutionTitle;
+        return title == null ? firstTask.getName() : title;
+    }
+
+    /// Returns whether this executor has an explicit user-visible presentation contract or a major root task.
+    final boolean taskExecutionUserVisible() {
+        return taskExecutionUserVisible || firstTask.getSignificance().shouldShow();
     }
 
     /// Registers a listener and returns a handle that removes only this registration.
@@ -112,7 +152,32 @@ public abstract class TaskExecutor {
 
     /// Returns whether cancellation has been requested.
     public boolean isCancelled() {
-        return cancelled;
+        @Nullable Boolean invocationCancelled = cancellationNotificationView.get();
+        return invocationCancelled == null ? cancelled : invocationCancelled;
+    }
+
+    /// Delivers one terminal listener notification with an invocation-local cancellation view.
+    ///
+    /// Repeated starts of one executor can have different terminal states. The view is therefore scoped to the
+    /// synchronous callback instead of mutating the executor-wide legacy flag and making a sibling invocation appear
+    /// cancelled.
+    ///
+    /// @param invocationCancelled whether the invocation being notified was cancelled
+    /// @param action terminal listener action
+    final void notifyTaskListenersForInvocation(
+            boolean invocationCancelled,
+            Consumer<? super TaskListener> action) {
+        @Nullable Boolean previous = cancellationNotificationView.get();
+        cancellationNotificationView.set(invocationCancelled);
+        try {
+            notifyTaskListeners(action);
+        } finally {
+            if (previous == null) {
+                cancellationNotificationView.remove();
+            } else {
+                cancellationNotificationView.set(previous);
+            }
+        }
     }
 
     /// Returns immutable stage metadata for progress presentation.
