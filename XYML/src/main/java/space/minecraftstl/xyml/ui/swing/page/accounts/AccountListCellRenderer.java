@@ -54,6 +54,9 @@ public final class AccountListCellRenderer extends JPanel
     /// Failed-state icon occupying the stable avatar slot.
     private static final Icon ERROR_ICON = new AccountStateIcon(true);
 
+    /// Neutral gray replacing the theme accent for the selected player row.
+    private static final Color SELECTED_BACKGROUND = Color.GRAY;
+
     /// Asynchronous shared account-avatar cache.
     private final AccountAvatarIconCache avatarCache = new AccountAvatarIconCache();
 
@@ -196,7 +199,7 @@ public final class AccountListCellRenderer extends JPanel
             JList<? extends ChoiceListEntry<AccountListItem>> list,
             boolean selected) {
         setOpaque(false);
-        Color background = selected ? list.getSelectionBackground() : list.getBackground();
+        Color background = selected ? SELECTED_BACKGROUND : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);
         setForeground(foreground);

@@ -161,14 +161,14 @@ public final class AccountListCellRendererTest {
             BufferedImage rendered = render((javax.swing.JComponent) selected);
             assertAll(
                     () -> assertFalse(((javax.swing.JComponent) selected).isOpaque()),
-                    () -> assertEquals(list.getSelectionBackground(), selected.getBackground()),
+                    () -> assertEquals(Color.GRAY, selected.getBackground()),
                     () -> assertEquals(0, rendered.getRGB(0, 0) >>> 24),
                     () -> assertEquals(0, rendered.getRGB(rendered.getWidth() - 1, 0) >>> 24),
                     () -> assertEquals(
                             Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
                             rendered.getRGB(0, rendered.getHeight() / 2)),
                     () -> assertEquals(
-                            list.getSelectionBackground().getRGB(),
+                            Color.GRAY.getRGB(),
                             rendered.getRGB(rendered.getWidth() - 2, rendered.getHeight() / 2)),
                     () -> assertFalse(containsComponentType(renderer, JRadioButton.class)));
 
