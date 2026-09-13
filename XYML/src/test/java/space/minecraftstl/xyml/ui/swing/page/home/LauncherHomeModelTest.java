@@ -270,7 +270,7 @@ public final class LauncherHomeModelTest {
                     () -> assertEquals(0, instanceSelections.get()),
                     () -> assertEquals(0, instanceAdditions.get()));
 
-            assertTrue(firstSession.cancel());
+            model.cancelLaunch();
             assertAll(
                     () -> assertEquals(LaunchStatus.CANCELLED, firstSession.status()),
                     () -> assertFalse(model.snapshot().launching()),

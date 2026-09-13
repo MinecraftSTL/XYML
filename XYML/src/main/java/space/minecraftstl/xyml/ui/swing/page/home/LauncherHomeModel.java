@@ -100,6 +100,9 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     /// Whether an external launch command is currently returning its session.
     private boolean launchInvocationPending;
 
+    /// Whether the toolbar requested cancellation before the launch command returned its session.
+    private boolean launchCancellationRequested;
+
     /// Whether the model has released its owned subscriptions.
     private volatile boolean closed;
 
@@ -191,6 +194,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             if (!currentSnapshot.launchEnabled() || launchInvocationPending || launchScriptExportPending) {
                 return;
             }
+            launchCancellationRequested = false;
             launchInvocationPending = true;
             request = new LaunchRequest(
                     currentSelection.accountId(),
@@ -216,6 +220,24 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
         }
 
         installLaunchSession(session);
+    }
+
+    /// Requests cancellation of the current ordinary launch preparation without affecting other launch paths.
+    @Override
+    public void cancelLaunch() {
+        @Nullable LaunchSession session;
+        synchronized (stateLock) {
+            requireOpen();
+            if (!launchInvocationPending
+                    && (currentLaunchSession == null || currentLaunchSession.status() != LaunchStatus.PREPARING)) {
+                return;
+            }
+            launchCancellationRequested = true;
+            session = currentLaunchSession;
+        }
+        if (session != null) {
+            session.cancel();
+        }
     }
 
     /// Captures stable selection IDs and delegates standalone script generation without changing launch-session state.
@@ -275,6 +297,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             }
             closed = true;
             launchInvocationPending = false;
+            launchCancellationRequested = false;
             launchScriptExportPending = false;
             statusSubscription = launchStatusSubscription;
             launchStatusSubscription = null;
@@ -314,15 +337,19 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     private void installLaunchSession(LaunchSession session) {
         @Nullable Subscription previousStatusSubscription;
         boolean rejectedByClose;
+        boolean cancelAfterInstall;
         synchronized (stateLock) {
             launchInvocationPending = false;
             rejectedByClose = closed;
             if (rejectedByClose) {
                 previousStatusSubscription = null;
+                cancelAfterInstall = false;
             } else {
                 previousStatusSubscription = launchStatusSubscription;
                 launchStatusSubscription = null;
                 currentLaunchSession = session;
+                cancelAfterInstall = launchCancellationRequested;
+                launchCancellationRequested = false;
             }
         }
 
@@ -362,6 +389,9 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 publicationFailure,
                 () -> publishLaunchSession(session));
         publicationFailure = attempt(publicationFailure, () -> reconcileLaunchSession(session));
+        if (cancelAfterInstall) {
+            publicationFailure = attempt(publicationFailure, session::cancel);
+        }
         rethrowFailure(publicationFailure);
     }
 
