@@ -199,17 +199,59 @@ public final class TaskManagerPanelLayoutTest {
                 log.getCaret().setSelectionVisible(true);
 
                 BufferedImage baseline = paint(log);
+                BufferedImage repaintSurface = copy(baseline);
                 int selectionEnd = Math.min(log.getDocument().getLength(), 24);
                 log.select(0, selectionEnd);
                 log.getCaret().setSelectionVisible(true);
-                BufferedImage selected = paint(log);
+                paint(log, repaintSurface);
+                BufferedImage selected = copy(repaintSurface);
                 log.select(0, 0);
                 log.getCaret().setSelectionVisible(false);
                 log.getCaret().setVisible(false);
-                BufferedImage cleared = paint(log);
+                paint(log, repaintSurface);
 
                 assertFalse(imagesEqual(baseline, selected));
-                assertTrue(imagesEqual(baseline, cleared));
+                assertTrue(imagesEqual(baseline, repaintSurface));
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Expanding a workflow preserves the target row's top edge in the outer list viewport.
+    @Test
+    public void expandingPreservesTargetRowViewportPosition() {
+        TaskExecutionSnapshot target = deepSnapshot();
+        @Unmodifiable List<TaskExecutionSnapshot> snapshots = surroundingSnapshots(target);
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        AtomicReference<@Nullable Integer> rowTopReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshots);
+            panel.setSize(new Dimension(640, 320));
+            layoutTree(panel);
+            JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JViewport viewport = listScroll.getViewport();
+            JPanel row = named(panel, "taskExecutionRow-" + target.id(), JPanel.class).get(0);
+            int maxBefore = Math.max(0, viewport.getView().getHeight() - viewport.getExtentSize().height);
+            int requestedViewY = Math.max(0, Math.min(maxBefore, row.getY() - viewport.getExtentSize().height / 3));
+            viewport.setViewPosition(new Point(0, requestedViewY));
+            layoutTree(panel);
+            rowTopReference.set(SwingUtilities.convertPoint(row, 0, 0, viewport).y);
+            named(row, "taskExecutionDisclosure", JButton.class).get(0).doClick();
+            layoutTree(panel);
+        });
+        EdtDispatcher.executeAndWait(() -> {
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JPanel row = named(panel, "taskExecutionRow-" + target.id(), JPanel.class).get(0);
+                JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+                int actualTop = SwingUtilities.convertPoint(row, 0, 0, listScroll.getViewport()).y;
+                assertEquals(Objects.requireNonNull(rowTopReference.get(), "row top"), actualTop);
             });
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
@@ -285,9 +327,9 @@ public final class TaskManagerPanelLayoutTest {
         }
     }
 
-    /// Keeps vertical detail scrolling on the outer lifecycle list and horizontal scrolling on the nearest detail view.
+    /// Keeps vertical scrolling inside an overflowing log while routing other detail wheels to the outer list.
     @Test
-    public void forwardsVerticalDetailsWheelToOuterList() {
+    public void routesDetailsWheelToLogAndOuterList() {
         TaskExecutionSnapshot target = deepSnapshot();
         @Unmodifiable List<TaskExecutionSnapshot> snapshots = surroundingSnapshots(target);
         AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
@@ -313,14 +355,21 @@ public final class TaskManagerPanelLayoutTest {
                 JTextArea timeline = named(timelineScroll, "", JTextArea.class).stream().findFirst().orElseThrow();
                 JScrollBar timelineVertical = timelineScroll.getVerticalScrollBar();
                 JScrollBar timelineHorizontal = timelineScroll.getHorizontalScrollBar();
+                assertTrue(timelineVertical.getMaximum() > timelineVertical.getVisibleAmount());
                 assertTrue(timelineHorizontal.getMaximum() > timelineHorizontal.getVisibleAmount());
                 listBar.setValue(0);
                 timelineVertical.setValue(0);
                 MouseWheelEvent vertical = wheel(timeline, false, 1);
                 dispatchWheel(timeline, vertical);
                 assertTrue(vertical.isConsumed());
+                assertEquals(0, listBar.getValue());
+                assertTrue(timelineVertical.getValue() > 0);
+
+                JTextArea taskName = named(panel, "taskDetailName", JTextArea.class).get(0);
+                MouseWheelEvent detailsVertical = wheel(taskName, false, 1);
+                dispatchWheel(taskName, detailsVertical);
+                assertTrue(detailsVertical.isConsumed());
                 assertTrue(listBar.getValue() > 0);
-                assertEquals(0, timelineVertical.getValue());
 
                 int listPosition = listBar.getValue();
                 timelineHorizontal.setValue(0);
@@ -369,19 +418,67 @@ public final class TaskManagerPanelLayoutTest {
                 "failure",
                 List.of(),
                 List.of());
+        TaskExecutionSnapshot automaticAborted = new TaskExecutionSnapshot(
+                UUID.nameUUIDFromBytes("automatic-aborted-action".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "Automatic aborted workflow",
+                TaskExecutionStatus.FAILED,
+                OptionalDouble.of(0.2D),
+                1.0D,
+                0.2D,
+                true,
+                false,
+                false,
+                timestamp.plusSeconds(4L),
+                timestamp.plusSeconds(5L),
+                "automatic failure",
+                List.of(),
+                List.of());
+        TaskExecutionSnapshot automaticCompleted = new TaskExecutionSnapshot(
+                UUID.nameUUIDFromBytes("automatic-completed-action".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "Automatic completed workflow",
+                TaskExecutionStatus.SUCCEEDED,
+                OptionalDouble.of(1.0D),
+                1.0D,
+                1.0D,
+                true,
+                false,
+                false,
+                timestamp.plusSeconds(6L),
+                timestamp.plusSeconds(7L),
+                null,
+                List.of(),
+                List.of());
         AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
             panelReference.set(panel);
-            publish(panel, List.of(completed, aborted));
+            publish(panel, List.of(completed, aborted, automaticAborted, automaticCompleted));
             panel.setSize(new Dimension(760, 480));
             layoutTree(panel);
         });
         TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
         try {
             EdtDispatcher.executeAndWait(() -> {
-                assertEquals(2, named(panel, "taskExecutionDelete", JButton.class).size());
-                assertEquals(1, named(panel, "taskExecutionRetry", JButton.class).size());
+                List<JButton> deleteButtons = named(panel, "taskExecutionDelete", JButton.class);
+                List<JButton> retryButtons = named(panel, "taskExecutionRetry", JButton.class);
+                assertEquals(3, deleteButtons.size());
+                assertEquals(1, retryButtons.size());
+                assertEquals(1, named(
+                        panel,
+                        "taskExecutionRow-" + completed.id(),
+                        JPanel.class).size());
+                assertTrue(named(
+                        panel,
+                        "taskExecutionRow-" + automaticCompleted.id(),
+                        JPanel.class).isEmpty());
+                for (JButton button : deleteButtons) {
+                    assertEquals("", button.getText());
+                    assertNotNull(button.getIcon());
+                    assertNotNull(button.getToolTipText());
+                }
+                assertEquals("", retryButtons.get(0).getText());
+                assertNotNull(retryButtons.get(0).getIcon());
+                assertNotNull(retryButtons.get(0).getToolTipText());
             });
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
@@ -635,6 +732,15 @@ public final class TaskManagerPanelLayoutTest {
                             + "with diagnostic details that must remain horizontally scrollable ".repeat(8)))));
             parent = id;
         }
+        List<TaskExecutionLogEntry> timelineLogs = new ArrayList<>();
+        for (int index = 0; index < 18; index++) {
+            timelineLogs.add(new TaskExecutionLogEntry(
+                    timestamp.plusMillis(index),
+                    null,
+                    "running",
+                    "Timeline event " + index + " with diagnostic details "
+                            + "that must remain horizontally scrollable ".repeat(8)));
+        }
         return new TaskExecutionSnapshot(
                 UUID.nameUUIDFromBytes("workflow".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
                 "A top-level workflow title that should wrap according to the window width",
@@ -649,8 +755,7 @@ public final class TaskManagerPanelLayoutTest {
                 null,
                 null,
                 tasks,
-                List.of(new TaskExecutionLogEntry(timestamp, null, "running", "A very long aggregate log line "
-                        + "with diagnostic details that must remain horizontally scrollable ".repeat(8))));
+                timelineLogs);
     }
 
     /// Lays out every nested Swing container after assigning a fixed test size.
@@ -674,13 +779,36 @@ public final class TaskManagerPanelLayoutTest {
                 Math.max(1, component.getWidth()),
                 Math.max(1, component.getHeight()),
                 BufferedImage.TYPE_INT_ARGB);
+        paint(component, image);
+        return image;
+    }
+
+    /// Paints a component onto an existing surface without clearing it first.
+    ///
+    /// @param component component to paint
+    /// @param image destination surface
+    private static void paint(Component component, BufferedImage image) {
         Graphics graphics = image.getGraphics();
         try {
             component.paint(graphics);
         } finally {
             graphics.dispose();
         }
-        return image;
+    }
+
+    /// Copies one rendered image so a subsequent repaint can be compared against the original pixels.
+    ///
+    /// @param source source image
+    /// @return independent image copy
+    private static BufferedImage copy(BufferedImage source) {
+        BufferedImage copy = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics graphics = copy.getGraphics();
+        try {
+            graphics.drawImage(source, 0, 0, null);
+        } finally {
+            graphics.dispose();
+        }
+        return copy;
     }
 
     /// Compares two rendered images pixel by pixel.

@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.tasks;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -125,6 +126,12 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Bottom inset separating the timeline log from the details scrollbar.
     private static final int DETAILS_BOTTOM_GAP = 10;
+
+    /// Maximum visible text rows in the aggregate timeline log before its own vertical scrollbar appears.
+    private static final int TIMELINE_LOG_MAX_ROWS = 8;
+
+    /// Maximum visible text rows in one actual-task log before its own vertical scrollbar appears.
+    private static final int TASK_LOG_MAX_ROWS = 4;
 
     /// Extra preferred height reserved for the details horizontal scrollbar and its visual gap.
     private static final int DETAILS_SCROLLBAR_GAP = 6;
@@ -461,10 +468,13 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             });
             actionPanel.add(cancel);
         }
-        if (snapshot.status() == TaskExecutionStatus.FAILED || snapshot.status() == TaskExecutionStatus.CANCELLED) {
-            JButton retry = new JButton(i18n("button.retry"));
-            retry.setName("taskExecutionRetry");
-            retry.setToolTipText(i18n("button.retry"));
+        if (snapshot.userVisible()
+                && (snapshot.status() == TaskExecutionStatus.FAILED
+                || snapshot.status() == TaskExecutionStatus.CANCELLED)) {
+            JButton retry = createIconButton(
+                    "taskExecutionRetry",
+                    "button.retry",
+                    "assets/swing/icons/refresh.svg");
             retry.addActionListener(event -> {
                 retry.setEnabled(false);
                 Schedulers.io().execute(() -> {
@@ -478,9 +488,10 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             actionPanel.add(retry);
         }
         if (snapshot.status().isTerminal()) {
-            JButton delete = new JButton(i18n("button.delete"));
-            delete.setName("taskExecutionDelete");
-            delete.setToolTipText(i18n("button.delete"));
+            JButton delete = createIconButton(
+                    "taskExecutionDelete",
+                    "button.delete",
+                    "assets/swing/icons/delete.svg");
             delete.addActionListener(event -> registry.remove(snapshot.id()));
             actionPanel.add(delete);
         }
@@ -650,7 +661,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JTextArea timelineArea = readOnlyLogArea(timeline.isBlank()
                 ? i18n("swing.task.details.no_log")
                 : timeline);
-        details.add(createLogScrollPane(timelineArea, logWidth));
+        details.add(createLogScrollPane(timelineArea, logWidth, TIMELINE_LOG_MAX_ROWS));
 
         JScrollPane scrollPane = new JScrollPane(details);
         installDetailsWheelForwarding(scrollPane);
@@ -675,9 +686,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Installs one shared wheel handler throughout an expanded details tree.
     ///
-    /// Deep log views receive the event before their own vertical viewport can consume it. The handler therefore
-    /// forwards ordinary vertical wheels to the enclosing lifecycle list while retaining horizontal wheels for the
-    /// nearest details or log viewport.
+    /// Log views keep ordinary vertical wheels for their own overflowing viewport. Other details descendants forward
+    /// ordinary vertical wheels to the enclosing lifecycle list, while horizontal wheels remain with the nearest
+    /// details or log viewport.
     ///
     /// @param component details subtree root
     private void installDetailsWheelForwarding(Component component) {
@@ -702,6 +713,10 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             }
             return;
         }
+        if (forwardLogVerticalWheel(event)) {
+            event.consume();
+            return;
+        }
         @Nullable JScrollPane listScroll = findTaskListScrollPane(event.getComponent());
         if (listScroll == null || event.getPreciseWheelRotation() == 0.0D) {
             return;
@@ -715,6 +730,33 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         long delta = (long) direction * Math.max(1, increment) * units;
         setScrollBarValue(scrollBar, delta);
         event.consume();
+    }
+
+    /// Forwards a vertical wheel to the nearest overflowing task-log viewport.
+    ///
+    /// Returning false at a scrollbar boundary lets the same event continue to the outer task list, so the user can
+    /// keep scrolling the page after reaching the beginning or end of a log.
+    ///
+    /// @param event vertical wheel event
+    /// @return whether the log viewport moved
+    private static boolean forwardLogVerticalWheel(MouseWheelEvent event) {
+        @Nullable JScrollPane logScroll = findLogScrollPane(event.getComponent());
+        if (logScroll == null || event.getPreciseWheelRotation() == 0.0D) {
+            return false;
+        }
+        JScrollBar scrollBar = logScroll.getVerticalScrollBar();
+        if (scrollBar.getMaximum() <= scrollBar.getVisibleAmount()) {
+            return false;
+        }
+        int previousValue = scrollBar.getValue();
+        int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
+        int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
+        int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
+                ? scrollBar.getBlockIncrement(direction)
+                : scrollBar.getUnitIncrement(direction);
+        long delta = (long) direction * Math.max(1, increment) * units;
+        setScrollBarValue(scrollBar, delta);
+        return scrollBar.getValue() != previousValue;
     }
 
     /// Forwards a horizontal (normally Shift-wheel) event to the nearest overflowing details viewport.
@@ -754,6 +796,23 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         @Nullable Container ancestor = component.getParent();
         while (ancestor != null) {
             if (ancestor instanceof JScrollPane scrollPane && isTaskListScrollPane(scrollPane)) {
+                return scrollPane;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
+    }
+
+    /// Finds the nearest task-log scroll pane owning one details descendant.
+    ///
+    /// @param component details descendant
+    /// @return enclosing log scroll pane, or null when detached or outside a log
+    private static @Nullable JScrollPane findLogScrollPane(Component component) {
+        @Nullable Container ancestor = component instanceof JScrollPane scrollPane
+                ? scrollPane
+                : component.getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JScrollPane scrollPane && "taskLogScroll".equals(scrollPane.getName())) {
                 return scrollPane;
             }
             ancestor = ancestor.getParent();
@@ -826,8 +885,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         }
         if (!taskLogText.isBlank()) {
             JTextArea log = readOnlyLogArea(taskLogText);
-            log.setRows(Math.min(4, Math.max(1, task.logs().size())));
-            panel.add(createLogScrollPane(log, logWidth));
+            panel.add(createLogScrollPane(log, logWidth, TASK_LOG_MAX_ROWS));
         }
         return panel;
     }
@@ -886,6 +944,45 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// @return constrained log viewport width
     private static int calculateLogWidth(int contentWidth) {
         return Math.max(MIN_LOG_WIDTH, contentWidth - DETAILS_LEFT_INSET - DETAILS_RIGHT_INSET);
+    }
+
+    /// Creates one compact icon-only action while retaining localized accessibility and hover text.
+    ///
+    /// @param name stable component name
+    /// @param labelKey localized command label key
+    /// @param iconResource classpath SVG resource
+    /// @return configured icon button
+    private static JButton createIconButton(String name, String labelKey, String iconResource) {
+        String label = i18n(Objects.requireNonNull(labelKey, "labelKey"));
+        JButton button = new JButton(themeIcon(iconResource));
+        button.setName(Objects.requireNonNull(name, "name"));
+        button.setText("");
+        button.setToolTipText(label);
+        button.getAccessibleContext().setAccessibleName(label);
+        button.getAccessibleContext().setAccessibleDescription(label);
+        button.setMargin(new Insets(2, 4, 2, 4));
+        return button;
+    }
+
+    /// Creates a bundled SVG icon that follows its button foreground in light and dark themes.
+    ///
+    /// @param iconResource classpath SVG resource
+    /// @return theme-aware icon
+    private static FlatSVGIcon themeIcon(String iconResource) {
+        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(iconResource, "iconResource"), 18, 18);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(TaskManagerPanel::resolveIconColor));
+        return icon;
+    }
+
+    /// Resolves an SVG color from its owning button's current foreground.
+    ///
+    /// @param component owning component, or null during standalone rendering
+    /// @param originalColor SVG fallback color
+    /// @return active component foreground or the authored fallback
+    private static Color resolveIconColor(@Nullable Component component, Color originalColor) {
+        Color fallback = Objects.requireNonNull(originalColor, "originalColor");
+        @Nullable Color foreground = component == null ? null : component.getForeground();
+        return foreground == null ? fallback : foreground;
     }
 
     /// Computes indentation levels from the flattened parent-ID task representation.
@@ -954,33 +1051,35 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     }
 
     /// Toggles one execution row and rerenders all lists using the latest immutable snapshots.
+    ///
+    /// The target row's viewport position is captured for both directions. Expanding a row must not move the row
+    /// that the user just opened, while collapsing keeps the existing clamp rules that avoid blank space at either
+    /// list boundary.
     private void toggleExpanded(UUID executionId) {
         long generation = ++collapseAdjustmentGeneration;
         boolean collapsing = expandedExecutions.contains(executionId);
-        @Nullable CollapseViewportState collapseState = collapsing
-                ? captureCollapseViewportState(executionId)
-                : null;
+        @Nullable CollapseViewportState viewportState = captureCollapseViewportState(executionId);
         if (collapsing) {
             expandedExecutions.remove(executionId);
         } else {
             expandedExecutions.add(executionId);
         }
         renderSnapshots(new TaskExecutionRegistry.Publication(displayedRevision, displayedSnapshots));
-        if (collapsing && collapseState != null) {
-            restoreCollapseViewport(executionId, collapseState);
+        if (viewportState != null) {
+            restoreToggleViewport(executionId, viewportState, collapsing);
             SwingUtilities.invokeLater(() -> {
                 if (!closed
                         && generation == collapseAdjustmentGeneration
-                        && !expandedExecutions.contains(executionId)) {
-                    restoreCollapseViewport(executionId, collapseState);
+                        && expandedExecutions.contains(executionId) != collapsing) {
+                    restoreToggleViewport(executionId, viewportState, collapsing);
                 }
             });
         }
     }
 
-    /// Captures the top-level list viewport before an expanded execution is collapsed.
+    /// Captures the top-level list viewport before an execution row is toggled.
     ///
-    /// @param executionId execution whose row is being collapsed
+    /// @param executionId execution whose row is being toggled
     /// @return viewport anchor, or null when the row is not currently attached to a list viewport
     private @Nullable CollapseViewportState captureCollapseViewportState(UUID executionId) {
         @Nullable JPanel row = findExecutionRow(executionId);
@@ -999,12 +1098,13 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                 viewPosition.x);
     }
 
-    /// Restores a collapsed row's viewport anchor after the rebuilt component tree has been laid out.
+    /// Restores a toggled row's viewport anchor after the rebuilt component tree has been laid out.
     ///
-    /// @param executionId execution whose row was collapsed
+    /// @param executionId execution whose row was toggled
     /// @param state anchor captured before collapse
-    private void restoreCollapseViewport(UUID executionId, CollapseViewportState state) {
-        if (closed || expandedExecutions.contains(executionId)) {
+    /// @param collapsing whether the operation removed the details section
+    private void restoreToggleViewport(UUID executionId, CollapseViewportState state, boolean collapsing) {
+        if (closed || expandedExecutions.contains(executionId) == collapsing) {
             return;
         }
         @Nullable JPanel row = findExecutionRow(executionId);
@@ -1032,7 +1132,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
         Point rowPoint = SwingUtilities.convertPoint(row, 0, 0, viewport);
         int newRowContentTop = rowPoint.y + viewport.getViewPosition().y;
-        int desiredRowTop = state.rowTopInViewport() < 0
+        int desiredRowTop = collapsing && state.rowTopInViewport() < 0
                 ? 0
                 : state.rowTopInViewport();
         int targetY = newRowContentTop - desiredRowTop;
@@ -1118,7 +1218,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
         area.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
         area.setColumns(LOG_COLUMNS);
-        area.setRows(Math.min(8, Math.max(2, text.split("\\R", -1).length)));
+        area.setRows(Math.max(2, text.split("\\R", -1).length));
         area.setCaretPosition(0);
         return area;
     }
@@ -1127,8 +1227,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     ///
     /// @param area selectable read-only log area
     /// @param width constrained log viewport width
+    /// @param maximumRows maximum visible text rows before vertical scrolling is required
     /// @return configured log scroll pane
-    private static JScrollPane createLogScrollPane(JTextArea area, int width) {
+    private static JScrollPane createLogScrollPane(JTextArea area, int width, int maximumRows) {
         JScrollPane scrollPane = new JScrollPane(Objects.requireNonNull(area, "area"));
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         scrollPane.setBorder(BorderFactory.createLineBorder(logBorderColor()));
@@ -1144,24 +1245,34 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
         Dimension measured = scrollPane.getPreferredSize();
         int resolvedWidth = Math.max(1, width);
-        Dimension fixedWidth = new Dimension(resolvedWidth, measured.height);
-        scrollPane.setMinimumSize(fixedWidth);
-        scrollPane.setPreferredSize(fixedWidth);
+        int lineHeight = Math.max(1, area.getFontMetrics(area.getFont()).getHeight());
+        Insets areaInsets = area.getInsets();
+        int maximumHeight = lineHeight * Math.max(1, maximumRows)
+                + areaInsets.top
+                + areaInsets.bottom
+                + scrollPane.getHorizontalScrollBar().getPreferredSize().height
+                + 2;
+        int resolvedHeight = Math.max(1, Math.min(measured.height, maximumHeight));
+        Dimension fixedSize = new Dimension(resolvedWidth, resolvedHeight);
+        scrollPane.setMinimumSize(fixedSize);
+        scrollPane.setPreferredSize(fixedSize);
         scrollPane.setMaximumSize(new Dimension(resolvedWidth, Integer.MAX_VALUE));
         scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         return scrollPane;
     }
 
-    /// Returns a translucent theme surface for log readability without hiding the launcher background.
+    /// Returns a repaint-safe theme surface for log readability without introducing a white or gray default panel.
     ///
-    /// @return panel background with controlled alpha
+        /// @return opaque theme surface color
     private static Color logSurfaceColor() {
         @Nullable Color base = UIManager.getColor("Panel.background");
         if (base == null) {
             base = UIManager.getColor("Button.background");
         }
         Color resolved = base == null ? new Color(32, 32, 32) : base;
-        return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 166);
+        // A text component must repaint an opaque surface: an alpha background would blend with the previous
+        // selection pixels when Swing repaints only the dirty glyph region, producing the reported ghosting.
+        return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue());
     }
 
     /// Resolves a foreground that remains readable against the current theme surface.
