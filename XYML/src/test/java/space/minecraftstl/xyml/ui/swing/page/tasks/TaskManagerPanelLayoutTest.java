@@ -186,6 +186,45 @@ public final class TaskManagerPanelLayoutTest {
         }
     }
 
+    /// Keeps a shallow details viewport free of false horizontal overflow when the outer list has many rows.
+    @Test
+    public void doesNotCreateFalseDetailsOverflowForVerticalListScrollbar() {
+        TaskExecutionSnapshot target = simpleSnapshot(
+                UUID.nameUUIDFromBytes("shallow-target".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                Instant.now(),
+                "Shallow target workflow");
+        @Unmodifiable List<TaskExecutionSnapshot> snapshots = surroundingSnapshots(target);
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshots);
+            panel.setSize(new Dimension(640, 320));
+            layoutTree(panel);
+            expand(panel, target.id());
+            layoutTree(panel);
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JScrollPane details = named(panel, "taskExecutionDetailsScroll", JScrollPane.class).stream()
+                        .filter(scroll -> scroll.getParent() != null)
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals(
+                        JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+                        details.getHorizontalScrollBarPolicy());
+                assertTrue(details.getHorizontalScrollBar().getMaximum()
+                        <= details.getHorizontalScrollBar().getVisibleAmount(),
+                        () -> "false details overflow: max=" + details.getHorizontalScrollBar().getMaximum()
+                                + ", visible=" + details.getHorizontalScrollBar().getVisibleAmount());
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
     /// Publishes a fixture through the page's private render boundary.
     ///
     /// @param panel task page under test
