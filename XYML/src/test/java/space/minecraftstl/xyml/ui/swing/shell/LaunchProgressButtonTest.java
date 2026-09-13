@@ -18,8 +18,11 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.UIManager;
+import java.awt.Color;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -27,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies the compact segmented progress state used by the ordinary launch button.
+/// Verifies the compact horizontal progress state used by the ordinary launch button.
 @NotNullByDefault
 public final class LaunchProgressButtonTest {
     /// The strip remains hidden until the ordinary launch command becomes active.
@@ -37,26 +40,50 @@ public final class LaunchProgressButtonTest {
 
         assertAll(
                 () -> assertFalse(button.isProgressVisible()),
-                () -> assertEquals(0, button.filledSegmentCount()));
+                () -> assertEquals(0, button.filledProgressWidth(100)));
 
         button.setProgressVisible(true);
         button.setProgress(OptionalDouble.of(0.5));
 
         assertAll(
                 () -> assertTrue(button.isProgressVisible()),
-                () -> assertEquals(4, button.filledSegmentCount()));
+                () -> assertEquals(50, button.filledProgressWidth(100)));
     }
 
-    /// Unknown progress still exposes an active gray block, while known progress fills left to right.
+    /// Indeterminate progress does not invent a fake fraction, while known progress fills left to right.
     @Test
     public void representsIndeterminateAndCompleteProgress() {
         LaunchProgressButton button = new LaunchProgressButton();
         button.setProgressVisible(true);
 
         button.setProgress(OptionalDouble.empty());
-        assertEquals(1, button.filledSegmentCount());
+        assertEquals(0, button.filledProgressWidth(100));
 
         button.setProgress(OptionalDouble.of(1.0));
-        assertEquals(LaunchProgressButton.SEGMENT_COUNT, button.filledSegmentCount());
+        assertEquals(100, button.filledProgressWidth(100));
     }
+
+    /// Uses black in a light theme and white in a dark theme for the translucent progress fill.
+    @Test
+    public void followsThemeBrightnessForProgressFill() {
+        @Nullable Color previousSurface = UIManager.getColor("Panel.background");
+        try {
+            UIManager.put("Panel.background", Color.WHITE);
+            Color lightFill = ShellNavigationButton.progressFillColor();
+            UIManager.put("Panel.background", Color.BLACK);
+            Color darkFill = ShellNavigationButton.progressFillColor();
+            assertAll(
+                    () -> assertEquals(Color.BLACK.getRGB() & 0x00FFFFFF, lightFill.getRGB() & 0x00FFFFFF),
+                    () -> assertEquals(Color.WHITE.getRGB() & 0x00FFFFFF, darkFill.getRGB() & 0x00FFFFFF),
+                    () -> assertEquals(72, lightFill.getAlpha()),
+                    () -> assertEquals(72, darkFill.getAlpha()));
+        } finally {
+            if (previousSurface == null) {
+                UIManager.getDefaults().remove("Panel.background");
+            } else {
+                UIManager.put("Panel.background", previousSurface);
+            }
+        }
+    }
+
 }

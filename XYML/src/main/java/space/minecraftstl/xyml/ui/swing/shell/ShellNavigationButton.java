@@ -147,21 +147,19 @@ final class ShellNavigationButton extends JToggleButton {
         }
     }
 
-    /// Returns a translucent fill color that is guaranteed to contrast with the current button surface.
+    /// Returns a translucent black or white fill that follows the active light or dark surface.
     ///
-    /// The foreground normally provides the theme's accent contrast. A luminance-based fallback handles custom
-    /// themes whose foreground and background are too close, ensuring that a non-zero progress value is visible.
-    ///
-    /// @return translucent progress fill color
-    private Color progressFillColor() {
-        @Nullable Color background = getBackground();
-        Color fill = themeAccentColor();
-        if (fill == null || background != null && colorDistance(fill, background) < 24) {
-            @Nullable Color foreground = getForeground();
-            fill = foreground == null
-                    ? background == null ? new Color(72, 126, 196) : contrastingColor(background)
-                    : foreground;
+    /// @return translucent black in light themes or white in dark themes
+    static Color progressFillColor() {
+        @Nullable Color surface = UIManager.getColor("Panel.background");
+        if (surface == null) {
+            surface = UIManager.getColor("List.background");
         }
+        Color resolvedSurface = surface == null ? new Color(32, 32, 32) : surface;
+        int luminance = resolvedSurface.getRed() * 299
+                + resolvedSurface.getGreen() * 587
+                + resolvedSurface.getBlue() * 114;
+        Color fill = luminance >= 128_000 ? Color.BLACK : Color.WHITE;
         return new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 72);
     }
 
@@ -200,28 +198,6 @@ final class ShellNavigationButton extends JToggleButton {
                 + background.getGreen() * 587
                 + background.getBlue() * 114;
         return luminance >= 160_000 ? Color.BLACK : Color.WHITE;
-    }
-
-    /// Chooses a blue accent with enough contrast for one background color.
-    ///
-    /// @param background button background
-    /// @return contrasting accent color
-    private static Color contrastingColor(Color background) {
-        int luminance = background.getRed() * 299
-                + background.getGreen() * 587
-                + background.getBlue() * 114;
-        return luminance >= 128_000 ? new Color(35, 95, 170) : new Color(185, 215, 250);
-    }
-
-    /// Computes a compact RGB distance for contrast fallback selection.
-    ///
-    /// @param first first color
-    /// @param second second color
-    /// @return absolute channel distance
-    private static int colorDistance(Color first, Color second) {
-        return Math.abs(first.getRed() - second.getRed())
-                + Math.abs(first.getGreen() - second.getGreen())
-                + Math.abs(first.getBlue() - second.getBlue());
     }
 
     /// Creates a theme-aware navigation icon for one destination.

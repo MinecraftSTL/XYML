@@ -20,24 +20,16 @@ package space.minecraftstl.xyml.ui.swing.shell;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import javax.swing.JButton;
-import java.awt.Color;
+import javax.swing.UIManager;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import java.util.OptionalDouble;
 
-/// Renders the ordinary launch command with a compact left-to-right segmented progress indicator.
+/// Renders the ordinary launch command with a compact left-to-right progress fill.
 @NotNullByDefault
 final class LaunchProgressButton extends JButton {
-    /// Number of gray progress blocks shown inside the launch command.
-    static final int SEGMENT_COUNT = 8;
-
-    /// Gray used for completed progress blocks.
-    private static final Color COMPLETED_BLOCK = new Color(128, 128, 128, 190);
-
-    /// Gray used for blocks that remain in the current launch task.
-    private static final Color REMAINING_BLOCK = new Color(128, 128, 128, 58);
-
     /// Whether the progress strip is currently visible.
     private boolean progressVisible;
 
@@ -46,7 +38,7 @@ final class LaunchProgressButton extends JButton {
 
     /// Updates whether this button represents an active ordinary launch task.
     ///
-    /// @param visible whether to show the segmented strip
+    /// @param visible whether to show the progress fill
     void setProgressVisible(boolean visible) {
         if (progressVisible == visible) {
             return;
@@ -55,14 +47,14 @@ final class LaunchProgressButton extends JButton {
         repaint();
     }
 
-    /// Returns whether the segmented strip is currently visible.
+    /// Returns whether the progress fill is currently visible.
     ///
     /// @return true while the ordinary launch task is active
     boolean isProgressVisible() {
         return progressVisible;
     }
 
-    /// Updates the normalized progress represented by the segmented strip.
+    /// Updates the normalized progress represented by the fill.
     ///
     /// @param replacement normalized progress, or empty for an indeterminate task
     void setProgress(OptionalDouble replacement) {
@@ -70,46 +62,47 @@ final class LaunchProgressButton extends JButton {
         repaint();
     }
 
-    /// Returns the number of completed blocks for focused rendering tests.
+    /// Returns the number of horizontal pixels filled by the current progress.
     ///
-    /// @return completed block count
-    int filledSegmentCount() {
-        if (!progressVisible) {
+    /// @param availableWidth width available inside the button in pixels
+    /// @return filled width, or zero while hidden or indeterminate
+    int filledProgressWidth(int availableWidth) {
+        if (progressVisible == false || progress.isEmpty()) {
             return 0;
         }
-        if (progress.isEmpty()) {
-            return 1;
-        }
-        return (int) Math.round(progress.orElseThrow() * SEGMENT_COUNT);
+        double fraction = Math.max(0.0D, Math.min(1.0D, progress.orElseThrow()));
+        return (int) Math.ceil(fraction * Math.max(0, availableWidth));
     }
 
-    /// Paints the native button first, then overlays a low-profile gray progress strip.
+    /// Paints the native button first, then overlays a translucent theme-contrast progress fill.
     ///
     /// @param graphics destination graphics
     @Override
     protected void paintComponent(Graphics graphics) {
         super.paintComponent(graphics);
-        if (!progressVisible || getWidth() <= 0 || getHeight() <= 0) {
+        if (progressVisible == false || getWidth() <= 0 || getHeight() <= 0 || progress.isEmpty()) {
             return;
         }
 
         Graphics2D copy = (Graphics2D) graphics.create();
         try {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            int left = Math.max(4, getInsets().left);
-            int right = Math.max(left, getWidth() - Math.max(4, getInsets().right));
-            int gap = 2;
-            int blockWidth = Math.max(1, (right - left - gap * (SEGMENT_COUNT - 1)) / SEGMENT_COUNT);
-            int blockHeight = 5;
-            int y = Math.max(0, getHeight() - blockHeight - 3);
-            int filled = filledSegmentCount();
-            for (int index = 0; index < SEGMENT_COUNT; index++) {
-                int x = left + index * (blockWidth + gap);
-                copy.setColor(index < filled ? COMPLETED_BLOCK : REMAINING_BLOCK);
-                copy.fillRoundRect(x, y, blockWidth, blockHeight, 3, 3);
+            int left = Math.max(0, getInsets().left);
+            int right = Math.max(left, getWidth() - Math.max(0, getInsets().right));
+            int availableWidth = right - left;
+            int filledWidth = filledProgressWidth(availableWidth);
+            if (filledWidth <= 0) {
+                return;
             }
+            int arc = Math.max(0, Math.min(
+                    Math.min(availableWidth, getHeight()),
+                    UIManager.getInt("Button.arc")));
+            copy.clip(new RoundRectangle2D.Double(left, 0, availableWidth, getHeight(), arc, arc));
+            copy.setColor(ShellNavigationButton.progressFillColor());
+            copy.fillRect(left, 0, filledWidth, getHeight());
         } finally {
             copy.dispose();
         }
     }
+
 }
