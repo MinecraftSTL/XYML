@@ -258,6 +258,53 @@ public final class TaskManagerPanelLayoutTest {
         }
     }
 
+    /// Expanding from a short list preserves the target row position before the new details overflow the viewport.
+    @Test
+    public void expandingShortListPreservesTargetRowViewportPosition() {
+        TaskExecutionSnapshot target = deepSnapshot();
+        Instant timestamp = target.startedAt();
+        @Unmodifiable List<TaskExecutionSnapshot> snapshots = List.of(
+                simpleSnapshot(
+                        UUID.nameUUIDFromBytes("short-before".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        timestamp.plusSeconds(2L),
+                        "Short list before"),
+                target,
+                simpleSnapshot(
+                        UUID.nameUUIDFromBytes("short-after".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        timestamp.minusSeconds(2L),
+                        "Short list after"));
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        AtomicReference<@Nullable Integer> rowTopReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshots);
+            panel.setSize(new Dimension(640, 720));
+            layoutTree(panel);
+            JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JViewport viewport = listScroll.getViewport();
+            JPanel row = named(panel, "taskExecutionRow-" + target.id(), JPanel.class).get(0);
+            assertTrue(viewport.getView().getHeight() <= viewport.getExtentSize().height);
+            rowTopReference.set(SwingUtilities.convertPoint(row, 0, 0, viewport).y);
+            named(row, "taskExecutionDisclosure", JButton.class).get(0).doClick();
+            layoutTree(panel);
+        });
+        EdtDispatcher.executeAndWait(() -> {
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JPanel row = named(panel, "taskExecutionRow-" + target.id(), JPanel.class).get(0);
+                JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+                int actualTop = SwingUtilities.convertPoint(row, 0, 0, listScroll.getViewport()).y;
+                assertEquals(Objects.requireNonNull(rowTopReference.get(), "row top"), actualTop);
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
     /// Collapsing from any part of an expanded row preserves its viewport anchor and never leaves invalid bounds.
     @Test
     public void collapsesFromFullHeightDisclosureWithoutLeavingBlankSpace() {

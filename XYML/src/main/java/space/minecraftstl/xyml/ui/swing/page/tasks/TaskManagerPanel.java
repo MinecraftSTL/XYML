@@ -142,6 +142,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Horizontal insets contributed by the task row border and padding.
     private static final int TASK_ROW_HORIZONTAL_INSETS = 26;
 
+    /// Extra deferred passes needed when expanding a short list causes its outer scrollbar to appear.
+    private static final int DEFERRED_TOGGLE_VIEWPORT_RESTORES = 2;
+
     /// Stable compact timestamp formatter for task timelines.
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter
             .ofLocalizedDateTime(FormatStyle.SHORT)
@@ -183,7 +186,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Prevents a width refresh from recursively rebuilding the component tree during layout.
     private boolean refreshingLayout;
 
-    /// Monotonic token used to discard stale deferred collapse-scroll adjustments.
+    /// Monotonic token used to discard stale deferred expand or collapse scroll adjustments.
     private long collapseAdjustmentGeneration;
 
     /// Registry listener owned by this page.
@@ -1067,14 +1070,49 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         renderSnapshots(new TaskExecutionRegistry.Publication(displayedRevision, displayedSnapshots));
         if (viewportState != null) {
             restoreToggleViewport(executionId, viewportState, collapsing);
-            SwingUtilities.invokeLater(() -> {
-                if (!closed
-                        && generation == collapseAdjustmentGeneration
-                        && expandedExecutions.contains(executionId) != collapsing) {
-                    restoreToggleViewport(executionId, viewportState, collapsing);
-                }
-            });
+            scheduleToggleViewportRestore(
+                    generation,
+                    executionId,
+                    viewportState,
+                    collapsing,
+                    DEFERRED_TOGGLE_VIEWPORT_RESTORES);
         }
+    }
+
+    /// Reapplies a toggle anchor after Swing has completed one of its deferred validation passes.
+    ///
+    /// A short list can be considered bottom-aligned while its view is smaller than the viewport. When expansion
+    /// makes that view taller, the scrollbar model may enqueue another validation that restores the new bottom
+    /// position. Two deferred passes cover the scrollbar and viewport validations without affecting later user
+    /// scrolling; the generation guard discards callbacks from older toggles.
+    ///
+    /// @param generation toggle generation to validate
+    /// @param executionId execution whose row was toggled
+    /// @param state captured viewport anchor
+    /// @param collapsing whether the operation removed the details section
+    /// @param remainingPasses deferred passes still to schedule
+    private void scheduleToggleViewportRestore(
+            long generation,
+            UUID executionId,
+            CollapseViewportState state,
+            boolean collapsing,
+            int remainingPasses) {
+        SwingUtilities.invokeLater(() -> {
+            if (closed
+                    || generation != collapseAdjustmentGeneration
+                    || expandedExecutions.contains(executionId) == collapsing) {
+                return;
+            }
+            restoreToggleViewport(executionId, state, collapsing);
+            if (remainingPasses > 1) {
+                scheduleToggleViewportRestore(
+                        generation,
+                        executionId,
+                        state,
+                        collapsing,
+                        remainingPasses - 1);
+            }
+        });
     }
 
     /// Captures the top-level list viewport before an execution row is toggled.
