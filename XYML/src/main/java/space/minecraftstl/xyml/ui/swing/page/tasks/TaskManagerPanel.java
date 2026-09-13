@@ -53,6 +53,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.RepaintManager;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -65,6 +66,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -74,6 +76,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.awt.image.BufferedImage;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -160,7 +163,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     private final JPanel abortedList = createListPanel();
 
     /// Tab container for the three top-level lifecycle views.
-    private final JTabbedPane tabs = new JTabbedPane();
+    private final TaskManagerTabPane tabs = new TaskManagerTabPane();
 
     /// Expanded state retained by execution ID while snapshots are refreshed.
     private final Set<UUID> expandedExecutions = new HashSet<>();
@@ -188,6 +191,18 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Monotonic token used to discard stale deferred expand or collapse scroll adjustments.
     private long collapseAdjustmentGeneration;
+
+    /// Whether a toggle is currently waiting for its final viewport anchor restoration before painting.
+    private boolean toggleRepaintSuppressed;
+
+    /// Whether a repaint was requested while toggle painting was suppressed.
+    private boolean toggleRepaintPending;
+
+    /// Generation owning the current toggle repaint suppression.
+    private long toggleRepaintGeneration;
+
+    /// Whether release of the current toggle frame has already been queued for the next EDT turn.
+    private boolean toggleRepaintReleaseQueued;
 
     /// Registry listener owned by this page.
     private final Subscription registrySubscription;
@@ -221,6 +236,10 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         closed = true;
         registrySubscription.unsubscribe();
         EdtDispatcher.execute(() -> {
+            toggleRepaintSuppressed = false;
+            toggleRepaintPending = false;
+            toggleRepaintReleaseQueued = false;
+            tabs.releasePainting();
             removeAll();
             revalidate();
             repaint();
@@ -391,7 +410,11 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         tabs.setTitleAt(1, tabTitle("swing.task.tab.completed", completed.size()));
         tabs.setTitleAt(2, tabTitle("swing.task.tab.aborted", aborted.size()));
         revalidate();
-        repaint();
+        if (toggleRepaintSuppressed) {
+            toggleRepaintPending = true;
+        } else {
+            repaint();
+        }
     }
 
     /// Renders one category without creating rows for internal tasks.
@@ -1062,6 +1085,14 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         long generation = ++collapseAdjustmentGeneration;
         boolean collapsing = expandedExecutions.contains(executionId);
         @Nullable CollapseViewportState viewportState = captureCollapseViewportState(executionId);
+        if (viewportState == null && toggleRepaintSuppressed) {
+            tabs.releasePainting();
+        }
+        toggleRepaintGeneration = generation;
+        toggleRepaintSuppressed = viewportState != null
+                && (toggleRepaintSuppressed || tabs.freezePainting());
+        toggleRepaintPending = false;
+        toggleRepaintReleaseQueued = false;
         if (collapsing) {
             expandedExecutions.remove(executionId);
         } else {
@@ -1076,6 +1107,8 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                     viewportState,
                     collapsing,
                     DEFERRED_TOGGLE_VIEWPORT_RESTORES);
+        } else {
+            finishToggleRepaint(generation);
         }
     }
 
@@ -1097,10 +1130,14 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             CollapseViewportState state,
             boolean collapsing,
             int remainingPasses) {
-        SwingUtilities.invokeLater(() -> {
+        EdtDispatcher.executeLater(() -> {
+            if (generation != toggleRepaintGeneration) {
+                return;
+            }
             if (closed
                     || generation != collapseAdjustmentGeneration
                     || expandedExecutions.contains(executionId) == collapsing) {
+                finishToggleRepaint(generation);
                 return;
             }
             restoreToggleViewport(executionId, state, collapsing);
@@ -1111,8 +1148,44 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                         state,
                         collapsing,
                         remainingPasses - 1);
+            } else {
+                queueToggleRepaintRelease(generation);
             }
         });
+    }
+
+    /// Queues repaint release after the final viewport correction has yielded once to Swing validation.
+    ///
+    /// @param generation toggle generation whose repaint may be released
+    private void queueToggleRepaintRelease(long generation) {
+        if (generation != toggleRepaintGeneration || toggleRepaintReleaseQueued) {
+            return;
+        }
+        toggleRepaintReleaseQueued = true;
+        EdtDispatcher.executeLater(() -> {
+            if (generation != toggleRepaintGeneration) {
+                return;
+            }
+            toggleRepaintReleaseQueued = false;
+            finishToggleRepaint(generation);
+        });
+    }
+
+    /// Releases the repaint held during a toggle after its final viewport correction.
+    ///
+    /// @param generation toggle generation whose repaint may be released
+    private void finishToggleRepaint(long generation) {
+        if (generation != toggleRepaintGeneration) {
+            return;
+        }
+        toggleRepaintSuppressed = false;
+        tabs.releasePainting();
+        if (toggleRepaintPending) {
+            toggleRepaintPending = false;
+            if (!closed) {
+                repaint();
+            }
+        }
     }
 
     /// Captures the top-level list viewport before an execution row is toggled.
@@ -1428,6 +1501,70 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         }
         Color resolved = border == null ? new Color(128, 128, 128) : border;
         return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 150);
+    }
+
+    /// Tab host that can hold one already-painted frame while a row layout transaction settles.
+    ///
+    /// Swing may validate a scroll pane more than once after a preferred-size change. Keeping the old tab frame at
+    /// the actual paint entry prevents those intermediate viewport positions from reaching the window. The frame is
+    /// always released on the EDT after the final anchor correction.
+    @NotNullByDefault
+    private static final class TaskManagerTabPane extends JTabbedPane {
+        /// Cached tab surface shown while a toggle transaction is settling, or null when live children are painted.
+        private @Nullable BufferedImage frozenFrame;
+
+        /// Captures the current tab surface before its children are rebuilt.
+        ///
+        /// @return true when a frame is available for the current tab dimensions
+        private boolean freezePainting() {
+            if (frozenFrame != null) {
+                return true;
+            }
+            int width = getWidth();
+            int height = getHeight();
+            if (width <= 0 || height <= 0) {
+                return false;
+            }
+            BufferedImage frame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            Graphics graphics = frame.getGraphics();
+            RepaintManager repaintManager = RepaintManager.currentManager(this);
+            boolean doubleBufferingEnabled = repaintManager.isDoubleBufferingEnabled();
+            try {
+                repaintManager.setDoubleBufferingEnabled(false);
+                super.paint(graphics);
+            } finally {
+                repaintManager.setDoubleBufferingEnabled(doubleBufferingEnabled);
+                graphics.dispose();
+            }
+            frozenFrame = frame;
+            return true;
+        }
+
+        /// Drops the cached tab surface and asks Swing to paint the settled live tree.
+        private void releasePainting() {
+            if (frozenFrame != null) {
+                frozenFrame = null;
+                repaint();
+            }
+        }
+
+        /// Paints the cached pre-toggle surface until the viewport transaction is complete.
+        ///
+        /// @param graphics destination graphics supplied by Swing
+        @Override
+        public void paint(Graphics graphics) {
+            @Nullable BufferedImage frame = frozenFrame;
+            if (frame == null) {
+                super.paint(graphics);
+                return;
+            }
+            Graphics frameGraphics = graphics.create();
+            try {
+                frameGraphics.drawImage(frame, 0, 0, getWidth(), getHeight(), null);
+            } finally {
+                frameGraphics.dispose();
+            }
+        }
     }
 
     /// Scrollable details content that fills the viewport until nested indentation needs extra width.

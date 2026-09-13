@@ -46,6 +46,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.awt.image.BufferedImage;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
@@ -59,6 +60,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the task page's bounded log and horizontally scrollable detail layout.
@@ -299,6 +301,42 @@ public final class TaskManagerPanelLayoutTest {
                 JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
                 int actualTop = SwingUtilities.convertPoint(row, 0, 0, listScroll.getViewport()).y;
                 assertEquals(Objects.requireNonNull(rowTopReference.get(), "row top"), actualTop);
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Keeps a cached tab frame visible until deferred viewport correction has completed.
+    @Test
+    public void toggleKeepsCachedFrameUntilViewportSettles() {
+        TaskExecutionSnapshot snapshot = deepSnapshot();
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshot);
+            panel.setSize(new Dimension(640, 320));
+            layoutTree(panel);
+            toggleExpandedWithoutButtonPress(panel, snapshot.id());
+
+            javax.swing.JTabbedPane tabs = named(panel, "taskManagerTabs", javax.swing.JTabbedPane.class).get(0);
+            Field frozenFrame = declaredField(tabs, "frozenFrame");
+            assertNotNull(readField(frozenFrame, tabs));
+            assertTrue(imagesEqual(paint(panel), paint(panel)));
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                // Flush the deferred viewport corrections and release the cached frame.
+            });
+            EdtDispatcher.executeAndWait(() -> {
+                // Flush the second deferred correction.
+            });
+            EdtDispatcher.executeAndWait(() -> {
+                javax.swing.JTabbedPane tabs = named(panel, "taskManagerTabs", javax.swing.JTabbedPane.class).get(0);
+                assertNull(readField(declaredField(tabs, "frozenFrame"), tabs));
             });
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
@@ -613,6 +651,55 @@ public final class TaskManagerPanelLayoutTest {
     private static void expand(TaskManagerPanel panel, UUID executionId) {
         JPanel row = named(panel, "taskExecutionRow-" + executionId, JPanel.class).get(0);
         named(row, "taskExecutionDisclosure", JButton.class).get(0).doClick();
+    }
+
+    /// Expands a row without changing the disclosure button model before the frame is captured.
+    ///
+    /// @param panel task page under test
+    /// @param executionId execution whose details should be expanded
+    private static void toggleExpandedWithoutButtonPress(TaskManagerPanel panel, UUID executionId) {
+        try {
+            Method toggle = TaskManagerPanel.class.getDeclaredMethod("toggleExpanded", UUID.class);
+            if (!toggle.trySetAccessible()) {
+                throw new AssertionError("task toggle method is not accessible");
+            }
+            toggle.invoke(panel, executionId);
+        } catch (ReflectiveOperationException failure) {
+            Throwable cause = failure instanceof InvocationTargetException invocation
+                    ? invocation.getCause()
+                    : failure;
+            throw new AssertionError("failed to toggle task details", cause);
+        }
+    }
+
+    /// Resolves and opens one private field for a layout regression assertion.
+    ///
+    /// @param target object declaring the field
+    /// @param name field name
+    /// @return accessible field handle
+    private static Field declaredField(Object target, String name) {
+        try {
+            Field field = target.getClass().getDeclaredField(name);
+            if (!field.trySetAccessible()) {
+                throw new AssertionError("field is not accessible: " + name);
+            }
+            return field;
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("failed to resolve field: " + name, failure);
+        }
+    }
+
+    /// Reads one private field for a layout regression assertion.
+    ///
+    /// @param field accessible field handle
+    /// @param target object containing the field
+    /// @return field value, possibly null
+    private static @Nullable Object readField(Field field, Object target) {
+        try {
+            return field.get(target);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("failed to read field: " + field.getName(), failure);
+        }
     }
 
     /// Exercises one pre-collapse placement and verifies the resulting clamped viewport anchor.
