@@ -40,10 +40,12 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
+import java.awt.image.BufferedImage;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
@@ -56,6 +58,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the task page's bounded log and horizontally scrollable detail layout.
@@ -112,6 +115,10 @@ public final class TaskManagerPanelLayoutTest {
                             logScroll.getHorizontalScrollBarPolicy());
                     JTextArea log = named(logScroll, "", JTextArea.class).stream().findFirst().orElseThrow();
                     assertFalse(log.getLineWrap());
+                    assertTrue(log.isOpaque());
+                    assertFalse(logScroll.getViewport().isOpaque());
+                    assertNotNull(log.getSelectionColor());
+                    assertNotNull(log.getSelectedTextColor());
                     assertEquals(logWidth, logScroll.getPreferredSize().width);
                     assertEquals(renderedLogWidth, logScroll.getWidth());
                 }
@@ -138,6 +145,10 @@ public final class TaskManagerPanelLayoutTest {
 
                 JPanel row = named(panel, "taskExecutionRow-" + snapshot.id(), JPanel.class).get(0);
                 JButton disclosure = named(row, "taskExecutionDisclosure", JButton.class).get(0);
+                assertTrue(disclosure.isContentAreaFilled());
+                assertTrue(disclosure.isBorderPainted());
+                assertTrue(disclosure.isFocusPainted());
+                assertTrue(disclosure.isRolloverEnabled());
                 assertTrue(disclosure.getHeight()
                         >= row.getHeight() - row.getInsets().top - row.getInsets().bottom);
 
@@ -156,6 +167,49 @@ public final class TaskManagerPanelLayoutTest {
                 panel.setSize(new Dimension(1_020, 900));
                 layoutTree(panel);
                 assertTrue(named(panel, "taskExecutionTitle", JTextArea.class).get(0).getWidth() > titleWidth);
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Clearing a log selection repaints the previous selection area instead of leaving a stale highlight or glyph.
+    @Test
+    public void clearsLogSelectionWithoutLeavingPaintedResidue() {
+        TaskExecutionSnapshot snapshot = deepSnapshot();
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshot);
+            panel.setSize(new Dimension(760, 900));
+            layoutTree(panel);
+            expand(panel, snapshot.id());
+            layoutTree(panel);
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JScrollPane logScroll = named(panel, "taskLogScroll", JScrollPane.class).get(0);
+                JTextArea log = named(logScroll, "", JTextArea.class).stream().findFirst().orElseThrow();
+                Dimension preferredSize = log.getPreferredSize();
+                log.setSize(Math.max(1, preferredSize.width), Math.max(1, preferredSize.height));
+                log.getCaret().setVisible(false);
+                log.getCaret().setSelectionVisible(true);
+
+                BufferedImage baseline = paint(log);
+                int selectionEnd = Math.min(log.getDocument().getLength(), 24);
+                log.select(0, selectionEnd);
+                log.getCaret().setSelectionVisible(true);
+                BufferedImage selected = paint(log);
+                log.select(0, 0);
+                log.getCaret().setSelectionVisible(false);
+                log.getCaret().setVisible(false);
+                BufferedImage cleared = paint(log);
+
+                assertFalse(imagesEqual(baseline, selected));
+                assertTrue(imagesEqual(baseline, cleared));
             });
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
@@ -609,6 +663,43 @@ public final class TaskManagerPanelLayoutTest {
                 layoutTree(nested);
             }
         }
+    }
+
+    /// Paints a component into an isolated image for deterministic visual assertions.
+    ///
+    /// @param component component to paint
+    /// @return rendered component image
+    private static BufferedImage paint(Component component) {
+        BufferedImage image = new BufferedImage(
+                Math.max(1, component.getWidth()),
+                Math.max(1, component.getHeight()),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics graphics = image.getGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    /// Compares two rendered images pixel by pixel.
+    ///
+    /// @param first first rendered image
+    /// @param second second rendered image
+    /// @return whether dimensions and every pixel match
+    private static boolean imagesEqual(BufferedImage first, BufferedImage second) {
+        if (first.getWidth() != second.getWidth() || first.getHeight() != second.getHeight()) {
+            return false;
+        }
+        for (int y = 0; y < first.getHeight(); y++) {
+            for (int x = 0; x < first.getWidth(); x++) {
+                if (first.getRGB(x, y) != second.getRGB(x, y)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /// Returns every named component of one type in a component subtree.

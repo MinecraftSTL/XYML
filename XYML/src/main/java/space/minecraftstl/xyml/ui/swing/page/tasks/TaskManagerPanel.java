@@ -437,11 +437,11 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         disclosure.setVerticalAlignment(SwingConstants.TOP);
         disclosure.setHorizontalAlignment(SwingConstants.CENTER);
         disclosure.putClientProperty(SwingButtonRippleSupport.RIPPLE_DISABLED_PROPERTY, Boolean.TRUE);
-        disclosure.setContentAreaFilled(false);
-        disclosure.setBorderPainted(false);
-        disclosure.setFocusPainted(false);
-        disclosure.setRolloverEnabled(false);
-        disclosure.setOpaque(false);
+        disclosure.setContentAreaFilled(true);
+        disclosure.setBorderPainted(true);
+        disclosure.setFocusPainted(true);
+        disclosure.setRolloverEnabled(true);
+        disclosure.setOpaque(true);
         disclosure.addActionListener(event -> toggleExpanded(snapshot.id()));
         Dimension disclosurePreferredSize = disclosure.getPreferredSize();
         disclosure.setMaximumSize(new Dimension(disclosurePreferredSize.width, Integer.MAX_VALUE));
@@ -1090,16 +1090,31 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return output.toString();
     }
 
-    /// Creates a compact read-only log viewer that preserves selectable text.
+    /// Creates a compact read-only log viewer that preserves selectable text and clears its own dirty regions.
     private static JTextArea readOnlyLogArea(String text) {
         JTextArea area = new JTextArea(text);
         area.setEditable(false);
         area.setFocusable(true);
         area.setLineWrap(false);
         area.setWrapStyleWord(false);
-        area.setOpaque(false);
+        area.setOpaque(true);
         area.setBackground(logSurfaceColor());
         area.setForeground(logTextColor());
+        @Nullable Color selectionBackground = UIManager.getColor("TextArea.selectionBackground");
+        if (selectionBackground == null) {
+            selectionBackground = UIManager.getColor("TextComponent.selectionBackground");
+        }
+        if (selectionBackground != null) {
+            area.setSelectionColor(selectionBackground);
+        }
+        @Nullable Color selectionForeground = UIManager.getColor("TextArea.selectionForeground");
+        if (selectionForeground == null) {
+            selectionForeground = UIManager.getColor("TextComponent.selectionForeground");
+        }
+        if (selectionForeground != null) {
+            area.setSelectedTextColor(selectionForeground);
+        }
+        area.addCaretListener(event -> area.repaint());
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
         area.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
         area.setColumns(LOG_COLUMNS);
@@ -1108,7 +1123,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return area;
     }
 
-    /// Wraps one log area in a transparent scroll surface with a themed translucent viewport.
+    /// Wraps one log area in a transparent scroll surface while leaving the text area as the sole painted surface.
     ///
     /// @param area selectable read-only log area
     /// @param width constrained log viewport width
@@ -1122,7 +1137,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         JViewport viewport = scrollPane.getViewport();
-        viewport.setOpaque(true);
+        viewport.setOpaque(false);
         viewport.setBackground(logSurfaceColor());
         scrollPane.getVerticalScrollBar().setOpaque(false);
         scrollPane.getHorizontalScrollBar().setOpaque(false);
