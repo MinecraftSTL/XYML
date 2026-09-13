@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
 import javax.swing.JPanel;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JViewport;
@@ -40,6 +41,9 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Point;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.event.MouseWheelListener;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
@@ -219,9 +223,145 @@ public final class TaskManagerPanelLayoutTest {
                         <= details.getHorizontalScrollBar().getVisibleAmount(),
                         () -> "false details overflow: max=" + details.getHorizontalScrollBar().getMaximum()
                                 + ", visible=" + details.getHorizontalScrollBar().getVisibleAmount());
+                assertTrue(details.getPreferredSize().height
+                        <= details.getViewport().getView().getPreferredSize().height + 1);
             });
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Keeps vertical detail scrolling on the outer lifecycle list and horizontal scrolling on the nearest detail view.
+    @Test
+    public void forwardsVerticalDetailsWheelToOuterList() {
+        TaskExecutionSnapshot target = deepSnapshot();
+        @Unmodifiable List<TaskExecutionSnapshot> snapshots = surroundingSnapshots(target);
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, snapshots);
+            panel.setSize(new Dimension(640, 320));
+            layoutTree(panel);
+            expand(panel, target.id());
+            layoutTree(panel);
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JScrollPane listScroll = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+                JScrollBar listBar = listScroll.getVerticalScrollBar();
+                assertTrue(listBar.getMaximum() > listBar.getVisibleAmount());
+                JScrollPane timelineScroll = named(panel, "taskLogScroll", JScrollPane.class).stream()
+                        .reduce((first, second) -> second)
+                        .orElseThrow();
+                JTextArea timeline = named(timelineScroll, "", JTextArea.class).stream().findFirst().orElseThrow();
+                JScrollBar timelineVertical = timelineScroll.getVerticalScrollBar();
+                JScrollBar timelineHorizontal = timelineScroll.getHorizontalScrollBar();
+                assertTrue(timelineHorizontal.getMaximum() > timelineHorizontal.getVisibleAmount());
+                listBar.setValue(0);
+                timelineVertical.setValue(0);
+                MouseWheelEvent vertical = wheel(timeline, false, 1);
+                dispatchWheel(timeline, vertical);
+                assertTrue(vertical.isConsumed());
+                assertTrue(listBar.getValue() > 0);
+                assertEquals(0, timelineVertical.getValue());
+
+                int listPosition = listBar.getValue();
+                timelineHorizontal.setValue(0);
+                MouseWheelEvent horizontal = wheel(timeline, true, 1);
+                dispatchWheel(timeline, horizontal);
+                assertTrue(horizontal.isConsumed());
+                assertEquals(listPosition, listBar.getValue());
+                assertTrue(timelineHorizontal.getValue() > 0);
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Exposes terminal-row actions without turning them into additional top-level records.
+    @Test
+    public void terminalRowsExposeDeleteAndAbortedRetryActions() {
+        Instant timestamp = Instant.now();
+        TaskExecutionSnapshot completed = new TaskExecutionSnapshot(
+                UUID.nameUUIDFromBytes("completed-action".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "Completed workflow",
+                TaskExecutionStatus.SUCCEEDED,
+                OptionalDouble.of(1.0D),
+                1.0D,
+                1.0D,
+                true,
+                true,
+                false,
+                timestamp,
+                timestamp.plusSeconds(1L),
+                null,
+                List.of(),
+                List.of());
+        TaskExecutionSnapshot aborted = new TaskExecutionSnapshot(
+                UUID.nameUUIDFromBytes("aborted-action".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "Aborted workflow",
+                TaskExecutionStatus.FAILED,
+                OptionalDouble.of(0.4D),
+                1.0D,
+                0.4D,
+                true,
+                true,
+                false,
+                timestamp.plusSeconds(2L),
+                timestamp.plusSeconds(3L),
+                "failure",
+                List.of(),
+                List.of());
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, List.of(completed, aborted));
+            panel.setSize(new Dimension(760, 480));
+            layoutTree(panel);
+        });
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                assertEquals(2, named(panel, "taskExecutionDelete", JButton.class).size());
+                assertEquals(1, named(panel, "taskExecutionRetry", JButton.class).size());
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
+
+    /// Creates one unit-scroll wheel event for a details component.
+    ///
+    /// @param component event source
+    /// @param horizontal whether Shift should request horizontal scrolling
+    /// @param rotation signed wheel rotation
+    /// @return synthetic wheel event
+    private static MouseWheelEvent wheel(Component component, boolean horizontal, int rotation) {
+        return new MouseWheelEvent(
+                component,
+                MouseEvent.MOUSE_WHEEL,
+                System.currentTimeMillis(),
+                horizontal ? MouseEvent.SHIFT_DOWN_MASK : 0,
+                4,
+                4,
+                0,
+                false,
+                MouseWheelEvent.WHEEL_UNIT_SCROLL,
+                3,
+                rotation);
+    }
+
+    /// Delivers one synthetic event to the listeners installed on a details component.
+    ///
+    /// @param component details component receiving the event
+    /// @param event wheel event
+    private static void dispatchWheel(Component component, MouseWheelEvent event) {
+        for (MouseWheelListener listener : component.getMouseWheelListeners()) {
+            listener.mouseWheelMoved(event);
         }
     }
 

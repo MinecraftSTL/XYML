@@ -30,6 +30,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies top-level execution aggregation and actual-task detail ownership.
@@ -366,6 +368,45 @@ public final class TaskExecutionRegistryTest {
         assertEquals(TaskExecutionRegistry.TERMINAL_HISTORY_LIMIT, registry.snapshots().size());
     }
 
+    /// Removes only terminal records and leaves active records available to their lifecycle callbacks.
+    @Test
+    public void removeRejectsActiveExecutionAndRemovesTerminalRecord() {
+        Task<?> root = Task.runAsync("remove", () -> { });
+        TaskExecutionRegistry registry = new TaskExecutionRegistry();
+        TaskExecutionRegistry.Execution execution = registry.begin(
+                new ProbeExecutor(root),
+                "Removable workflow",
+                true);
+
+        assertFalse(registry.remove(execution.id()));
+        assertNotNull(registry.snapshot(execution.id()));
+
+        execution.stopped(true, null);
+        assertTrue(registry.remove(execution.id()));
+        assertNull(registry.snapshot(execution.id()));
+        assertFalse(registry.remove(execution.id()));
+    }
+
+    /// Retries preserve the aborted history row while the executor creates a fresh top-level execution ID.
+    @Test
+    public void retryCreatesNewExecutionAndRejectsSuccessfulHistory() {
+        Task<?> root = Task.runAsync("retry", () -> { });
+        TaskExecutionRegistry registry = new TaskExecutionRegistry();
+        RetryableProbeExecutor executor = new RetryableProbeExecutor(registry, root);
+        TaskExecutionRegistry.Execution first = registry.begin(executor, "Retryable workflow", true);
+        first.started();
+        first.stopped(false, new IllegalStateException("first attempt failed"));
+
+        assertTrue(registry.retry(first.id()));
+        assertEquals(1, executor.starts.get());
+        assertEquals(2, registry.snapshots().size());
+        TaskExecutionSnapshot second = registry.snapshots().get(1);
+        assertNotEquals(first.id(), second.id());
+        assertEquals(TaskExecutionStatus.SUCCEEDED, second.status());
+        assertFalse(registry.retry(second.id()));
+        assertTrue(registry.remove(first.id()));
+    }
+
     /// Returns the only retained execution from an isolated registry.
     ///
     /// @param registry isolated registry
@@ -393,6 +434,44 @@ public final class TaskExecutionRegistryTest {
         }
 
         /// Reports a successful no-op result.
+        @Override
+        public boolean test() {
+            return true;
+        }
+
+        /// Records a cooperative cancellation request.
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+    }
+
+    /// Probe executor that materializes a successful fresh registry execution for retry assertions.
+    @NotNullByDefault
+    private static final class RetryableProbeExecutor extends TaskExecutor {
+        /// Registry receiving each fresh retry invocation.
+        private final TaskExecutionRegistry registry;
+
+        /// Number of starts requested by the registry.
+        private final AtomicInteger starts = new AtomicInteger();
+
+        /// Creates a retry-aware probe.
+        private RetryableProbeExecutor(TaskExecutionRegistry registry, Task<?> task) {
+            super(task);
+            this.registry = registry;
+        }
+
+        /// Registers and completes one fresh top-level invocation.
+        @Override
+        public TaskExecutor start() {
+            starts.incrementAndGet();
+            TaskExecutionRegistry.Execution execution = registry.begin(this, "Retryable workflow", true);
+            execution.started();
+            execution.stopped(true, null);
+            return this;
+        }
+
+        /// Reports a successful probe result.
         @Override
         public boolean test() {
             return true;
