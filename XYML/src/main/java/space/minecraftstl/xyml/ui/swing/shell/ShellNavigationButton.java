@@ -136,9 +136,10 @@ final class ShellNavigationButton extends JToggleButton {
                 int badgeHeight = 16;
                 int x = Math.max(1, getWidth() - badgeWidth - 2);
                 int y = 2;
-                copy.setColor(new Color(190, 55, 55));
+                Color badgeColor = taskBadgeColor();
+                copy.setColor(badgeColor);
                 copy.fillRoundRect(x, y, badgeWidth, badgeHeight, badgeHeight, badgeHeight);
-                copy.setColor(Color.WHITE);
+                copy.setColor(badgeTextColor(badgeColor));
                 copy.drawString(text, x + (badgeWidth - textWidth) / 2, y + 12);
             }
         } finally {
@@ -154,12 +155,51 @@ final class ShellNavigationButton extends JToggleButton {
     /// @return translucent progress fill color
     private Color progressFillColor() {
         @Nullable Color background = getBackground();
-        @Nullable Color foreground = getForeground();
-        Color fill = foreground;
+        Color fill = themeAccentColor();
         if (fill == null || background != null && colorDistance(fill, background) < 24) {
-            fill = background == null ? new Color(72, 126, 196) : contrastingColor(background);
+            @Nullable Color foreground = getForeground();
+            fill = foreground == null
+                    ? background == null ? new Color(72, 126, 196) : contrastingColor(background)
+                    : foreground;
         }
         return new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 72);
+    }
+
+    /// Resolves the current FlatLaf accent used for task progress and count badges.
+    ///
+    /// @return theme accent, or null when the look and feel does not expose one
+    private static @Nullable Color themeAccentColor() {
+        @Nullable Color accent = UIManager.getColor("Component.accentColor");
+        if (accent != null) {
+            return accent;
+        }
+        accent = UIManager.getColor("Button.default.background");
+        if (accent != null) {
+            return accent;
+        }
+        return UIManager.getColor("ToggleButton.selectedBackground");
+    }
+
+    /// Returns a themed, opaque badge color with enough alpha to stay legible over the button surface.
+    ///
+    /// @return badge background color
+    private static Color taskBadgeColor() {
+        @Nullable Color accent = themeAccentColor();
+        if (accent == null) {
+            accent = UIManager.getColor("Button.background");
+        }
+        return accent == null ? new Color(72, 126, 196) : accent;
+    }
+
+    /// Selects black or white badge text according to the resolved theme color's luminance.
+    ///
+    /// @param background badge background color
+    /// @return high-contrast badge text color
+    private static Color badgeTextColor(Color background) {
+        int luminance = background.getRed() * 299
+                + background.getGreen() * 587
+                + background.getBlue() * 114;
+        return luminance >= 160_000 ? Color.BLACK : Color.WHITE;
     }
 
     /// Chooses a blue accent with enough contrast for one background color.
@@ -213,7 +253,7 @@ final class ShellNavigationButton extends JToggleButton {
         return switch (Objects.requireNonNull(page, "page")) {
             case INSTANCES -> "assets/swing/icons/nav-instances.svg";
             case DOWNLOADS -> "assets/swing/icons/nav-downloads.svg";
-            case TASKS -> "assets/swing/icons/format-list-bulleted.svg";
+            case TASKS -> "assets/swing/icons/task-manager.svg";
             case ACCOUNTS -> "assets/swing/icons/nav-accounts.svg";
             case SETTINGS -> "assets/swing/icons/nav-settings.svg";
         };

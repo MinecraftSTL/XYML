@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.task.TaskExecutionTaskStatus;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.AbstractAction;
@@ -46,7 +47,9 @@ import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
+import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.UIManager;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -161,9 +164,16 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         headingPanel.add(heading, BorderLayout.WEST);
 
         tabs.setName("taskManagerTabs");
-        tabs.addTab(i18n("swing.task.tab.running"), new JScrollPane(runningList));
-        tabs.addTab(i18n("swing.task.tab.completed"), new JScrollPane(completedList));
-        tabs.addTab(i18n("swing.task.tab.aborted"), new JScrollPane(abortedList));
+        SwingTransparency.revealBackgroundThroughTabs(tabs);
+        tabs.addTab(
+                i18n("swing.task.tab.running"),
+                createListScrollPane(runningList, "taskManagerRunningScroll"));
+        tabs.addTab(
+                i18n("swing.task.tab.completed"),
+                createListScrollPane(completedList, "taskManagerCompletedScroll"));
+        tabs.addTab(
+                i18n("swing.task.tab.aborted"),
+                createListScrollPane(abortedList, "taskManagerAbortedScroll"));
         tabs.getAccessibleContext().setAccessibleName(i18n("swing.task.manager"));
 
         add(headingPanel, BorderLayout.NORTH);
@@ -177,6 +187,21 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         list.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         list.setOpaque(false);
         return list;
+    }
+
+    /// Creates a borderless list scroll surface that reveals the launcher background.
+    ///
+    /// @param list transparent list content
+    /// @param name stable component name
+    /// @return transparent list scroll pane
+    private static JScrollPane createListScrollPane(JPanel list, String name) {
+        JScrollPane scrollPane = new JScrollPane(Objects.requireNonNull(list, "list"));
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
+        scrollPane.setName(Objects.requireNonNull(name, "name"));
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.getVerticalScrollBar().setOpaque(false);
+        return scrollPane;
     }
 
     /// Routes one complete registry publication to Swing without splitting one event into internal rows.
@@ -258,8 +283,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         boolean expanded = expandedExecutions.contains(snapshot.id());
         JPanel row = new JPanel(new BorderLayout(0, 8));
         row.setName("taskExecutionRow-" + snapshot.id());
-        row.setOpaque(true);
-        row.setBackground(rowBackground(snapshot.status()));
+        row.setOpaque(false);
         row.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(rowBorder(snapshot.status())),
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)));
@@ -398,7 +422,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JTextArea timelineArea = readOnlyLogArea(timeline.isBlank()
                 ? i18n("swing.task.details.no_log")
                 : timeline);
-        details.add(new JScrollPane(timelineArea));
+        details.add(createLogScrollPane(timelineArea));
         return details;
     }
 
@@ -434,7 +458,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         if (!taskLogText.isBlank()) {
             JTextArea log = readOnlyLogArea(taskLogText);
             log.setRows(Math.min(4, Math.max(1, task.logs().size())));
-            panel.add(new JScrollPane(log), BorderLayout.SOUTH);
+            panel.add(createLogScrollPane(log), BorderLayout.SOUTH);
         }
         return panel;
     }
@@ -466,6 +490,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JProgressBar progress = new JProgressBar(0, PROGRESS_MAXIMUM);
         progress.setName("taskExecutionProgress");
         progress.setPreferredSize(new Dimension(120, 14));
+        progress.setOpaque(false);
         if (snapshot.progress().isPresent()) {
             progress.setValue(toProgressValue(snapshot.progress().getAsDouble()));
             progress.setIndeterminate(false);
@@ -481,6 +506,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     private static JProgressBar createTaskProgressBar(TaskExecutionTaskSnapshot task) {
         JProgressBar progress = new JProgressBar(0, PROGRESS_MAXIMUM);
         progress.setPreferredSize(new Dimension(90, 12));
+        progress.setOpaque(false);
         if (task.progress().isPresent()) {
             progress.setValue(toProgressValue(task.progress().getAsDouble()));
         } else {
@@ -530,12 +556,99 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     private static JTextArea readOnlyLogArea(String text) {
         JTextArea area = new JTextArea(text);
         area.setEditable(false);
+        area.setFocusable(true);
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
-        area.setRows(Math.min(8, Math.max(2, text.split("\\R", -1).length)));
+        area.setOpaque(false);
+        area.setBackground(logSurfaceColor());
+        area.setForeground(logTextColor());
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
         area.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+        area.setRows(Math.min(8, Math.max(2, text.split("\\R", -1).length)));
+        area.setCaretPosition(0);
         return area;
+    }
+
+    /// Wraps one log area in a transparent scroll surface with a themed translucent viewport.
+    ///
+    /// @param area selectable read-only log area
+    /// @return configured log scroll pane
+    private static JScrollPane createLogScrollPane(JTextArea area) {
+        JScrollPane scrollPane = new JScrollPane(Objects.requireNonNull(area, "area"));
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
+        scrollPane.setBorder(BorderFactory.createLineBorder(logBorderColor()));
+        scrollPane.setOpaque(false);
+        JViewport viewport = scrollPane.getViewport();
+        viewport.setOpaque(true);
+        viewport.setBackground(logSurfaceColor());
+        scrollPane.getVerticalScrollBar().setOpaque(false);
+        scrollPane.getHorizontalScrollBar().setOpaque(false);
+        return scrollPane;
+    }
+
+    /// Returns a translucent theme surface for log readability without hiding the launcher background.
+    ///
+    /// @return panel background with controlled alpha
+    private static Color logSurfaceColor() {
+        @Nullable Color base = UIManager.getColor("Panel.background");
+        if (base == null) {
+            base = UIManager.getColor("Button.background");
+        }
+        Color resolved = base == null ? new Color(32, 32, 32) : base;
+        return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 166);
+    }
+
+    /// Resolves a foreground that remains readable against the current theme surface.
+    ///
+    /// @return theme-aware log text color
+    private static Color logTextColor() {
+        @Nullable Color surface = UIManager.getColor("Panel.background");
+        if (surface == null) {
+            surface = UIManager.getColor("Button.background");
+        }
+        Color resolvedSurface = surface == null ? new Color(32, 32, 32) : surface;
+        @Nullable Color foreground = UIManager.getColor("TextArea.foreground");
+        if (foreground == null) {
+            foreground = UIManager.getColor("Label.foreground");
+        }
+        if (foreground == null || colorDistance(foreground, resolvedSurface) < 90) {
+            return contrastingTextColor(resolvedSurface);
+        }
+        return foreground;
+    }
+
+    /// Chooses a subtle themed border for the translucent log surface.
+    ///
+    /// @return translucent border color
+    private static Color logBorderColor() {
+        @Nullable Color border = UIManager.getColor("Component.borderColor");
+        if (border == null) {
+            border = UIManager.getColor("Separator.foreground");
+        }
+        Color resolved = border == null ? new Color(128, 128, 128) : border;
+        return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 120);
+    }
+
+    /// Computes a compact RGB distance used to guard against low-contrast theme combinations.
+    ///
+    /// @param first first color
+    /// @param second second color
+    /// @return sum of absolute RGB channel differences
+    private static int colorDistance(Color first, Color second) {
+        return Math.abs(first.getRed() - second.getRed())
+                + Math.abs(first.getGreen() - second.getGreen())
+                + Math.abs(first.getBlue() - second.getBlue());
+    }
+
+    /// Selects a high-contrast text color for one theme surface.
+    ///
+    /// @param surface surface color
+    /// @return black or white text color
+    private static Color contrastingTextColor(Color surface) {
+        int luminance = surface.getRed() * 299
+                + surface.getGreen() * 587
+                + surface.getBlue() * 114;
+        return luminance >= 128_000 ? Color.BLACK : Color.WHITE;
     }
 
     /// Returns a localized top-level state label.
@@ -581,21 +694,24 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return snapshot.endedAt() == null ? snapshot.startedAt() : snapshot.endedAt();
     }
 
-    /// Selects a restrained background for one aggregate state.
-    private static Color rowBackground(TaskExecutionStatus status) {
-        return switch (status) {
-            case FAILED, CANCELLED -> new Color(255, 242, 242);
-            case SUCCEEDED -> new Color(242, 250, 242);
-            default -> new Color(248, 249, 252);
-        };
-    }
-
-    /// Selects a matching border accent for one aggregate state.
+    /// Selects a themed translucent border accent for one aggregate state.
+    ///
+    /// The row itself remains transparent so the launcher background stays visible; only this narrow state cue is
+    /// painted around the record.
+    ///
+    /// @param status top-level execution state
+    /// @return themed translucent border color
     private static Color rowBorder(TaskExecutionStatus status) {
-        return switch (status) {
-            case FAILED, CANCELLED -> new Color(220, 150, 150);
-            case SUCCEEDED -> new Color(150, 205, 155);
-            default -> new Color(190, 198, 210);
+        String key = switch (status) {
+            case FAILED, CANCELLED -> "Actions.Red";
+            case SUCCEEDED -> "Actions.Green";
+            default -> "Component.borderColor";
         };
+        @Nullable Color border = UIManager.getColor(key);
+        if (border == null) {
+            border = UIManager.getColor("Separator.foreground");
+        }
+        Color resolved = border == null ? new Color(128, 128, 128) : border;
+        return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 150);
     }
 }
