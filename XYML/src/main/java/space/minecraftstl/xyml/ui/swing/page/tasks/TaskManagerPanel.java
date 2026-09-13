@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
@@ -49,13 +50,20 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.Scrollable;
+import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -85,6 +93,27 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Progress-bar maximum used by Swing's integer progress model.
     private static final int PROGRESS_MAXIMUM = 1000;
 
+    /// Horizontal indentation applied to every nested task level.
+    private static final int TASK_INDENT = 18;
+
+    /// Smallest readable title-column width before the details viewport must scroll horizontally.
+    private static final int MIN_TASK_TITLE_WIDTH = 180;
+
+    /// Fallback title-column width used before the page receives its first real window allocation.
+    private static final int DEFAULT_TASK_TITLE_WIDTH = 360;
+
+    /// Smallest log viewport width retained for short windows and narrow themes.
+    private static final int MIN_LOG_WIDTH = 260;
+
+    /// Maximum log viewport width so long lines remain inspectable without dominating the task row.
+    private static final int MAX_LOG_WIDTH = 520;
+
+    /// Approximate monospaced columns used to keep a log's natural size bounded before scrolling.
+    private static final int LOG_COLUMNS = 72;
+
+    /// Horizontal space consumed by list and row insets when deriving the title column from the page width.
+    private static final int TASK_CONTENT_INSETS = 44;
+
     /// Stable compact timestamp formatter for task timelines.
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter
             .ofLocalizedDateTime(FormatStyle.SHORT)
@@ -110,6 +139,12 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Last registry publication revision rendered on the event dispatch thread.
     private long displayedRevision = -1L;
+
+    /// Page width used by the most recent title-column calculation.
+    private int renderedLayoutWidth = -1;
+
+    /// Prevents a width refresh from recursively rebuilding the component tree during layout.
+    private boolean refreshingLayout;
 
     /// Registry listener owned by this page.
     private final Subscription registrySubscription;
@@ -178,11 +213,18 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
         add(headingPanel, BorderLayout.NORTH);
         add(tabs, BorderLayout.CENTER);
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent event) {
+                refreshLayoutForWidth();
+            }
+        });
     }
 
     /// Creates one transparent vertical list that grows with its rows.
     private static JPanel createListPanel() {
-        JPanel list = new JPanel();
+        JPanel list = new ViewportTrackingPanel(new BorderLayout());
+        // BoxLayout needs the final panel instance as its target, so install it after the scroll-aware panel exists.
         list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
         list.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         list.setOpaque(false);
@@ -202,6 +244,35 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.getVerticalScrollBar().setOpaque(false);
         return scrollPane;
+    }
+
+    /// Rebuilds title columns after the task page receives a new window width.
+    private void refreshLayoutForWidth() {
+        EdtDispatcher.requireEventDispatchThread();
+        int width = getWidth();
+        if (refreshingLayout || closed || displayedRevision < 0L || width <= 0 || width == renderedLayoutWidth) {
+            return;
+        }
+        renderedLayoutWidth = width;
+        refreshingLayout = true;
+        try {
+            renderSnapshots(new TaskExecutionRegistry.Publication(displayedRevision, displayedSnapshots));
+        } finally {
+            refreshingLayout = false;
+        }
+    }
+
+    /// Lays out the page and refreshes title columns when a parent assigns a new size without a peer event.
+    @Override
+    public void doLayout() {
+        super.doLayout();
+        if (!refreshingLayout) {
+            int width = getWidth();
+            if (width > 0 && width != renderedLayoutWidth) {
+                refreshLayoutForWidth();
+                super.doLayout();
+            }
+        }
     }
 
     /// Routes one complete registry publication to Swing without splitting one event into internal rows.
@@ -283,6 +354,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         boolean expanded = expandedExecutions.contains(snapshot.id());
         JPanel row = new JPanel(new BorderLayout(0, 8));
         row.setName("taskExecutionRow-" + snapshot.id());
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setOpaque(false);
         row.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(rowBorder(snapshot.status())),
@@ -298,35 +370,15 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             }
         });
 
-        JPanel header = new JPanel(new BorderLayout(10, 0));
-        header.setOpaque(false);
-        // Treat unused header space as part of the top-level disclosure target. Child controls keep their own
-        // handlers, so a click on the disclosure or cancellation button is not toggled a second time.
-        header.addMouseListener(toggleOnClick(snapshot.id()));
         JButton disclosure = new JButton(expanded ? "v" : ">");
         disclosure.setName("taskExecutionDisclosure");
         disclosure.setToolTipText(expanded
                 ? i18n("swing.task.hide_details")
                 : i18n("swing.task.show_details"));
-        disclosure.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        disclosure.setMargin(new Insets(0, 4, 0, 4));
         disclosure.addActionListener(event -> toggleExpanded(snapshot.id()));
-        header.add(disclosure, BorderLayout.WEST);
-
-        JPanel titlePanel = new JPanel();
-        titlePanel.setOpaque(false);
-        titlePanel.setLayout(new BoxLayout(titlePanel, BoxLayout.Y_AXIS));
-        configureDetailsToggle(titlePanel, snapshot.id(), snapshot.title());
-        JLabel title = new JLabel(snapshot.title());
-        title.setName("taskExecutionTitle");
-        title.setFont(title.getFont().deriveFont(Font.BOLD));
-        JLabel status = new JLabel(statusText(snapshot.status()));
-        status.setName("taskExecutionStatus");
-        MouseAdapter toggleOnClick = toggleOnClick(snapshot.id());
-        title.addMouseListener(toggleOnClick);
-        status.addMouseListener(toggleOnClick);
-        titlePanel.add(title);
-        titlePanel.add(status);
-        header.add(titlePanel, BorderLayout.CENTER);
+        Dimension disclosurePreferredSize = disclosure.getPreferredSize();
+        disclosure.setMaximumSize(new Dimension(disclosurePreferredSize.width, Integer.MAX_VALUE));
 
         JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
         actionPanel.setOpaque(false);
@@ -343,13 +395,63 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             });
             actionPanel.add(cancel);
         }
-        header.add(actionPanel, BorderLayout.EAST);
+        Dimension actionPreferredSize = actionPanel.getPreferredSize();
+        actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
+
+        int titleWidth = calculateTaskTitleWidth(disclosure.getPreferredSize().width, actionPreferredSize.width);
+        JPanel header = new JPanel();
+        header.setLayout(new BoxLayout(header, BoxLayout.X_AXIS));
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setOpaque(false);
+        // Treat unused header space as part of the top-level disclosure target. Child controls keep their own
+        // handlers, so a click on the disclosure or cancellation button is not toggled a second time.
+        header.addMouseListener(toggleOnClick(snapshot.id()));
+        header.add(disclosure);
+        header.add(Box.createHorizontalStrut(10));
+
+        JPanel titlePanel = new JPanel();
+        titlePanel.setOpaque(false);
+        titlePanel.setLayout(new BoxLayout(titlePanel, BoxLayout.Y_AXIS));
+        titlePanel.setAlignmentY(Component.TOP_ALIGNMENT);
+        configureDetailsToggle(titlePanel, snapshot.id(), snapshot.title());
+        JTextArea title = createWrappedTitleArea(snapshot.title(), titleWidth, "taskExecutionTitle");
+        title.setFont(title.getFont().deriveFont(Font.BOLD));
+        setWrappedTitleSize(title, titleWidth);
+        JLabel status = new JLabel(statusText(snapshot.status()));
+        status.setName("taskExecutionStatus");
+        status.setMaximumSize(new Dimension(titleWidth, status.getPreferredSize().height));
+        MouseAdapter toggleOnClick = toggleOnClick(snapshot.id());
+        title.addMouseListener(toggleOnClick);
+        status.addMouseListener(toggleOnClick);
+        titlePanel.add(title);
+        titlePanel.add(status);
+        setFixedWidth(titlePanel, titleWidth);
+        header.add(titlePanel);
+        header.add(Box.createHorizontalGlue());
+        actionPanel.setAlignmentY(Component.TOP_ALIGNMENT);
+        header.add(actionPanel);
         row.add(header, BorderLayout.NORTH);
 
         if (expanded) {
-            row.add(createDetails(snapshot), BorderLayout.CENTER);
+            row.add(createDetails(snapshot, titleWidth), BorderLayout.CENTER);
         }
         return row;
+    }
+
+    /// Computes the main title column from the currently allocated task-page width.
+    ///
+    /// @param disclosureWidth disclosure control width
+    /// @param actionWidth progress and cancellation control width
+    /// @return stable title width shared by the workflow and its actual tasks
+    private int calculateTaskTitleWidth(int disclosureWidth, int actionWidth) {
+        int pageWidth = getWidth() > 0 ? getWidth() : tabs.getWidth();
+        if (pageWidth <= 0) {
+            return DEFAULT_TASK_TITLE_WIDTH;
+        }
+        Insets panelInsets = getInsets();
+        int availableWidth = pageWidth - panelInsets.left - panelInsets.right - TASK_CONTENT_INSETS;
+        int calculatedWidth = availableWidth - disclosureWidth - actionWidth - 10;
+        return calculatedWidth > 0 ? calculatedWidth : MIN_TASK_TITLE_WIDTH;
     }
 
     /// Makes one title region a mouse and keyboard-accessible details toggle.
@@ -392,18 +494,18 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     }
 
     /// Builds the actual task list and top-level timeline for one expanded workflow.
-    private JPanel createDetails(TaskExecutionSnapshot snapshot) {
-        JPanel details = new JPanel();
-        details.setOpaque(false);
-        details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
+    private JScrollPane createDetails(TaskExecutionSnapshot snapshot, int titleWidth) {
+        TaskDetailsContentPanel details = new TaskDetailsContentPanel();
+        details.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.setBorder(BorderFactory.createEmptyBorder(4, 34, 0, 0));
 
         JLabel tasksHeading = new JLabel(i18n("swing.task.details.tasks"));
         tasksHeading.setFont(tasksHeading.getFont().deriveFont(Font.BOLD));
+        tasksHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(tasksHeading);
         Map<UUID, Integer> depths = taskDepths(snapshot.tasks());
         for (TaskExecutionTaskSnapshot task : snapshot.tasks()) {
-            details.add(createTaskDetail(task, depths.getOrDefault(task.id(), 0)));
+            details.add(createTaskDetail(task, depths.getOrDefault(task.id(), 0), titleWidth));
             details.add(Box.createVerticalStrut(4));
         }
         if (snapshot.tasks().isEmpty()) {
@@ -413,6 +515,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JLabel timelineHeading = new JLabel(i18n("swing.task.details.timeline"));
         timelineHeading.setFont(timelineHeading.getFont().deriveFont(Font.BOLD));
         timelineHeading.setBorder(BorderFactory.createEmptyBorder(8, 0, 4, 0));
+        timelineHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(timelineHeading);
         String timeline = formatLogs(snapshot.logs());
         if (snapshot.failure() != null && !snapshot.failure().isBlank()) {
@@ -422,33 +525,59 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JTextArea timelineArea = readOnlyLogArea(timeline.isBlank()
                 ? i18n("swing.task.details.no_log")
                 : timeline);
-        details.add(createLogScrollPane(timelineArea));
-        return details;
+        details.add(createLogScrollPane(timelineArea, logWidth(titleWidth)));
+
+        JScrollPane scrollPane = new JScrollPane(details);
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
+        scrollPane.setName("taskExecutionDetailsScroll");
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scrollPane.getHorizontalScrollBar().setOpaque(false);
+        scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
+        Dimension detailsPreferredSize = details.getPreferredSize();
+        scrollPane.setPreferredSize(new Dimension(
+                Math.max(1, titleWidth),
+                Math.max(1, detailsPreferredSize.height)));
+        scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return scrollPane;
     }
 
     /// Creates one actual-task detail row, indented according to its parent task.
-    private JPanel createTaskDetail(TaskExecutionTaskSnapshot task, int depth) {
-        JPanel panel = new JPanel(new BorderLayout(8, 2));
+    private JPanel createTaskDetail(TaskExecutionTaskSnapshot task, int depth, int titleWidth) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(2, depth * 18, 2, 0));
+        panel.setBorder(BorderFactory.createEmptyBorder(2, depth * TASK_INDENT, 2, 0));
 
+        JPanel summary = new JPanel();
+        summary.setLayout(new BoxLayout(summary, BoxLayout.X_AXIS));
+        summary.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summary.setOpaque(false);
         JPanel labels = new JPanel();
         labels.setOpaque(false);
         labels.setLayout(new BoxLayout(labels, BoxLayout.Y_AXIS));
-        JLabel name = new JLabel(task.name());
-        name.setName("taskDetailName");
+        labels.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JTextArea name = createWrappedTitleArea(task.name(), titleWidth, "taskDetailName");
         JLabel phase = new JLabel(taskStageText(task));
         phase.setName("taskDetailStage");
         labels.add(name);
         labels.add(phase);
-        panel.add(labels, BorderLayout.CENTER);
+        setFixedWidth(labels, titleWidth);
+        summary.add(labels);
+        summary.add(Box.createHorizontalGlue());
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.TRAILING, 6, 0));
         right.setOpaque(false);
+        right.setAlignmentY(Component.TOP_ALIGNMENT);
         JProgressBar progress = createTaskProgressBar(task);
         right.add(progress);
         right.add(new JLabel(taskStatusText(task.status())));
-        panel.add(right, BorderLayout.EAST);
+        Dimension rightPreferredSize = right.getPreferredSize();
+        right.setMaximumSize(new Dimension(rightPreferredSize.width, Integer.MAX_VALUE));
+        summary.add(right);
+        panel.add(summary);
 
         String taskLogText = formatLogs(task.logs());
         if (task.failure() != null && !task.failure().isBlank()) {
@@ -458,9 +587,65 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         if (!taskLogText.isBlank()) {
             JTextArea log = readOnlyLogArea(taskLogText);
             log.setRows(Math.min(4, Math.max(1, task.logs().size())));
-            panel.add(createLogScrollPane(log), BorderLayout.SOUTH);
+            panel.add(createLogScrollPane(log, logWidth(titleWidth)));
         }
         return panel;
+    }
+
+    /// Creates one transparent, fixed-width title area that wraps only at word boundaries.
+    ///
+    /// @param text title text
+    /// @param width shared title-column width
+    /// @param name stable component name
+    /// @return wrapped title text component
+    private static JTextArea createWrappedTitleArea(String text, int width, String name) {
+        JTextArea area = new JTextArea(Objects.requireNonNull(text, "text"));
+        area.setName(Objects.requireNonNull(name, "name"));
+        area.setEditable(false);
+        area.setFocusable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setOpaque(false);
+        area.setBorder(BorderFactory.createEmptyBorder());
+        area.setRows(0);
+        area.setColumns(0);
+        setWrappedTitleSize(area, width);
+        return area;
+    }
+
+    /// Re-measures one wrapped title after its font or width changes.
+    ///
+    /// @param area wrapped title text area
+    /// @param width shared title-column width
+    private static void setWrappedTitleSize(JTextArea area, int width) {
+        int resolvedWidth = Math.max(1, width);
+        area.setSize(resolvedWidth, Short.MAX_VALUE);
+        Dimension measured = area.getPreferredSize();
+        int resolvedHeight = Math.max(1, measured.height);
+        Dimension fixedSize = new Dimension(resolvedWidth, resolvedHeight);
+        area.setMinimumSize(fixedSize);
+        area.setPreferredSize(fixedSize);
+        area.setMaximumSize(fixedSize);
+    }
+
+    /// Constrains a title column to a stable width while preserving its measured height.
+    ///
+    /// @param component title column to constrain
+    /// @param width desired width
+    private static void setFixedWidth(JComponent component, int width) {
+        Dimension measured = component.getPreferredSize();
+        Dimension minimum = new Dimension(Math.max(1, width), measured.height);
+        component.setMinimumSize(minimum);
+        component.setPreferredSize(minimum);
+        component.setMaximumSize(new Dimension(Math.max(1, width), Integer.MAX_VALUE));
+    }
+
+    /// Keeps logs narrower than the task title while retaining a usable minimum viewport.
+    ///
+    /// @param titleWidth shared task title width
+    /// @return constrained log viewport width
+    private static int logWidth(int titleWidth) {
+        return Math.max(MIN_LOG_WIDTH, Math.min(MAX_LOG_WIDTH, Math.max(1, titleWidth - 24)));
     }
 
     /// Computes indentation levels from the flattened parent-ID task representation.
@@ -557,13 +742,14 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JTextArea area = new JTextArea(text);
         area.setEditable(false);
         area.setFocusable(true);
-        area.setLineWrap(true);
-        area.setWrapStyleWord(true);
+        area.setLineWrap(false);
+        area.setWrapStyleWord(false);
         area.setOpaque(false);
         area.setBackground(logSurfaceColor());
         area.setForeground(logTextColor());
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
         area.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+        area.setColumns(LOG_COLUMNS);
         area.setRows(Math.min(8, Math.max(2, text.split("\\R", -1).length)));
         area.setCaretPosition(0);
         return area;
@@ -572,17 +758,28 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Wraps one log area in a transparent scroll surface with a themed translucent viewport.
     ///
     /// @param area selectable read-only log area
+    /// @param width constrained log viewport width
     /// @return configured log scroll pane
-    private static JScrollPane createLogScrollPane(JTextArea area) {
+    private static JScrollPane createLogScrollPane(JTextArea area, int width) {
         JScrollPane scrollPane = new JScrollPane(Objects.requireNonNull(area, "area"));
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         scrollPane.setBorder(BorderFactory.createLineBorder(logBorderColor()));
+        scrollPane.setName("taskLogScroll");
         scrollPane.setOpaque(false);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         JViewport viewport = scrollPane.getViewport();
         viewport.setOpaque(true);
         viewport.setBackground(logSurfaceColor());
         scrollPane.getVerticalScrollBar().setOpaque(false);
         scrollPane.getHorizontalScrollBar().setOpaque(false);
+        scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
+        Dimension measured = scrollPane.getPreferredSize();
+        int resolvedWidth = Math.max(1, width);
+        scrollPane.setMinimumSize(new Dimension(Math.min(MIN_LOG_WIDTH, resolvedWidth), measured.height));
+        scrollPane.setPreferredSize(new Dimension(resolvedWidth, measured.height));
+        scrollPane.setMaximumSize(new Dimension(resolvedWidth, Integer.MAX_VALUE));
+        scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         return scrollPane;
     }
 
@@ -713,5 +910,70 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         }
         Color resolved = border == null ? new Color(128, 128, 128) : border;
         return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 150);
+    }
+
+    /// Scrollable details content that fills the viewport until nested indentation needs extra width.
+    @NotNullByDefault
+    private static final class TaskDetailsContentPanel extends JPanel implements Scrollable {
+        /// Creates transparent vertically stacked task details.
+        private TaskDetailsContentPanel() {
+            super();
+            setOpaque(false);
+            setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        }
+
+        /// Returns the natural content size for the enclosing details viewport.
+        ///
+        /// @return preferred scrollable viewport size
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        /// Returns a compact horizontal or vertical scroll increment.
+        ///
+        /// @param visibleRect current viewport rectangle
+        /// @param orientation scroll orientation
+        /// @param direction scroll direction
+        /// @return positive unit increment
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            Objects.requireNonNull(visibleRect, "visibleRect");
+            return orientation == SwingConstants.HORIZONTAL ? TASK_INDENT : 18;
+        }
+
+        /// Returns one viewport-relative block increment.
+        ///
+        /// @param visibleRect current viewport rectangle
+        /// @param orientation scroll orientation
+        /// @param direction scroll direction
+        /// @return positive block increment
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            Objects.requireNonNull(visibleRect, "visibleRect");
+            int extent = orientation == SwingConstants.HORIZONTAL
+                    ? visibleRect.width
+                    : visibleRect.height;
+            return Math.max(18, extent - 18);
+        }
+
+        /// Fills the details viewport while no nested task requires horizontal overflow.
+        ///
+        /// @return whether the content fits the viewport width
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            if (!(getParent() instanceof JViewport viewport)) {
+                return false;
+            }
+            return getPreferredSize().width <= viewport.getWidth();
+        }
+
+        /// Leaves vertical growth to the outer task-list scrollbar.
+        ///
+        /// @return always false
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }
