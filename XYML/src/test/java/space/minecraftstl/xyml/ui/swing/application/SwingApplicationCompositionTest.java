@@ -699,7 +699,8 @@ class SwingApplicationCompositionTest {
                 "XYML test",
                 ShellPagePresentations.englishFallback(),
                 new HomeStrings(
-                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching", "Back"),
+                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching",
+                        "Cancel launch", "Back"),
                 new HomeStatusStrings("Ready", "Select account", "Select instance", "Exporting"),
                 new InstancesStrings(
                         "Instances", "Search", "Refresh", "Refreshing", "Add", "Manage", "Empty", "No matches"),

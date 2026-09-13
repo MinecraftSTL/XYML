@@ -22,8 +22,10 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
+import space.minecraftstl.xyml.task.presentation.TaskSnapshot;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
@@ -41,6 +43,8 @@ import javax.swing.JPanel;
 import java.awt.Cursor;
 import java.awt.Font;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -64,7 +68,13 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     private final LazyInstanceSelector instanceSelector;
 
     /// Primary game launch command immediately preceding native window buttons.
-    private final JButton launchButton = new JButton();
+    private final LaunchProgressButton launchButton = new LaunchProgressButton();
+
+    /// Icon shown while the ordinary launch command can start a game.
+    private final FlatSVGIcon launchIcon = new FlatSVGIcon("assets/swing/icons/rocket-launch.svg", 18, 18);
+
+    /// Stop icon shown while the ordinary launch command can be cancelled.
+    private final FlatSVGIcon cancelLaunchIcon = new FlatSVGIcon("assets/swing/icons/stop.svg", 18, 18);
 
     /// macOS native traffic-light button placeholder at the platform-defined leading side.
     private final JPanel macWindowButtonsPlaceholder = new JPanel();
@@ -86,6 +96,15 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
 
     /// Owned directory-state subscription.
     private final Subscription gameDirectorySubscription;
+
+    /// Owned launch-session identity subscription.
+    private final Subscription launchSessionSubscription;
+
+    /// Owned progress subscription for the session currently represented by the toolbar button.
+    private @Nullable Subscription launchTaskSubscription;
+
+    /// Session currently represented by the toolbar button's progress strip.
+    private @Nullable LaunchSession displayedLaunchSession;
 
     /// Whether owned subscriptions and selector popups have been released.
     private boolean closed;
@@ -157,8 +176,10 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         configureComponents(Objects.requireNonNull(windowTitle, "windowTitle"));
         homeSubscription = homeModel.subscribe(this::homeChanged);
         gameDirectorySubscription = gameDirectories.subscribe(this::gameDirectoriesChanged);
+        launchSessionSubscription = homeModel.launchSessionProperty().subscribe(this::launchSessionChanged);
         applyHomeSnapshot(homeModel.snapshot());
         applyGameDirectories(gameDirectories.snapshot());
+        applyLaunchSession(readLaunchSession());
     }
 
     /// Marks the account-management footer while its side page is active.
@@ -228,6 +249,10 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             closed = true;
             homeSubscription.unsubscribe();
             gameDirectorySubscription.unsubscribe();
+            launchSessionSubscription.unsubscribe();
+            unsubscribe(launchTaskSubscription);
+            launchTaskSubscription = null;
+            displayedLaunchSession = null;
             gameDirectorySelector.close();
             accountSelector.close();
             instanceSelector.close();
@@ -260,12 +285,16 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         add(instanceSelector, "grow, h 36!");
 
         launchButton.setName("shellLaunch");
-        launchButton.setIcon(new FlatSVGIcon("assets/swing/icons/rocket-launch.svg", 18, 18));
+        launchButton.setIcon(launchIcon);
         launchButton.setIconTextGap(8);
         launchButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         launchButton.addActionListener(event -> {
             if (!closed) {
-                homeModel.launch();
+                if (homeModel.snapshot().launching()) {
+                    homeModel.cancelLaunch();
+                } else {
+                    homeModel.launch();
+                }
             }
         });
         launchButton.getAccessibleContext().setAccessibleName(homeStrings.launchAction());
@@ -307,11 +336,81 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 : state.instanceName();
         instanceSelector.setSelectedText(instanceName, state.instanceDetail());
 
-        launchButton.setText(state.launching()
-                ? homeStrings.launchingAction()
+        boolean cancelling = state.launching();
+        launchButton.setText(cancelling
+                ? homeStrings.cancelLaunchAction()
                 : homeStrings.launchAction());
-        launchButton.setToolTipText(state.statusText());
-        launchButton.setEnabled(state.launchEnabled());
+        launchButton.setIcon(cancelling ? cancelLaunchIcon : launchIcon);
+        launchButton.setToolTipText(cancelling ? homeStrings.cancelLaunchAction() : state.statusText());
+        launchButton.getAccessibleContext().setAccessibleName(cancelling
+                ? homeStrings.cancelLaunchAction()
+                : homeStrings.launchAction());
+        launchButton.setProgressVisible(cancelling);
+        launchButton.setEnabled(cancelling || state.launchEnabled());
+    }
+
+    /// Applies the latest launch-session identity and binds its task progress to the toolbar button.
+    ///
+    /// @param launchSession latest optional ordinary launch session
+    private void applyLaunchSession(Optional<LaunchSession> launchSession) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable LaunchSession replacement = Objects.requireNonNull(launchSession, "launchSession").orElse(null);
+        if (replacement == displayedLaunchSession) {
+            if (replacement != null) {
+                launchButton.setProgress(replacement.snapshot().progress());
+            }
+            return;
+        }
+        unsubscribe(launchTaskSubscription);
+        launchTaskSubscription = null;
+        displayedLaunchSession = replacement;
+        if (replacement == null) {
+            launchButton.setProgress(OptionalDouble.empty());
+        } else {
+            launchButton.setProgress(replacement.snapshot().progress());
+            launchTaskSubscription = replacement.subscribe(this::launchTaskChanged);
+        }
+    }
+
+    /// Routes task progress changes to the EDT without trusting a stale event payload.
+    ///
+    /// @param change task presentation transition
+    private void launchTaskChanged(ValueChange<TaskSnapshot> change) {
+        Objects.requireNonNull(change, "change");
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (!closed && displayedLaunchSession != null) {
+                launchButton.setProgress(displayedLaunchSession.snapshot().progress());
+            }
+        });
+    }
+
+    /// Coalesces launch-session identity changes onto the EDT.
+    ///
+    /// @param change launch-session identity transition
+    private void launchSessionChanged(ValueChange<Optional<LaunchSession>> change) {
+        Objects.requireNonNull(change, "change");
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (!closed) {
+                applyLaunchSession(readLaunchSession());
+            }
+        });
+    }
+
+    /// Reads the optional launch session with an explicit non-null property contract.
+    ///
+    /// @return latest optional launch session
+    private Optional<LaunchSession> readLaunchSession() {
+        @Nullable Optional<LaunchSession> value = homeModel.launchSessionProperty().getValue();
+        return Objects.requireNonNull(value, "launch-session property value");
+    }
+
+    /// Unsubscribes one optional launch-task registration.
+    ///
+    /// @param subscription registration to release, or null when none is installed
+    private static void unsubscribe(@Nullable Subscription subscription) {
+        if (subscription != null) {
+            subscription.unsubscribe();
+        }
     }
 
     /// Receives one configured-directory transition and coalesces it onto the EDT.
