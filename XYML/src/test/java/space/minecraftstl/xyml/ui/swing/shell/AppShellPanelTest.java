@@ -1097,6 +1097,7 @@ public final class AppShellPanelTest {
                 "Generate launch script",
                 "Launch game",
                 "Launching",
+                "Cancel launch",
                 "Back");
     }
 
