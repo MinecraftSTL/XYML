@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.task.TaskExecutionTaskStatus;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
@@ -45,6 +46,7 @@ import javax.swing.InputMap;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
@@ -70,6 +72,7 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -433,6 +436,12 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         disclosure.setMargin(new Insets(0, 4, 0, 4));
         disclosure.setVerticalAlignment(SwingConstants.TOP);
         disclosure.setHorizontalAlignment(SwingConstants.CENTER);
+        disclosure.putClientProperty(SwingButtonRippleSupport.RIPPLE_DISABLED_PROPERTY, Boolean.TRUE);
+        disclosure.setContentAreaFilled(false);
+        disclosure.setBorderPainted(false);
+        disclosure.setFocusPainted(false);
+        disclosure.setRolloverEnabled(false);
+        disclosure.setOpaque(false);
         disclosure.addActionListener(event -> toggleExpanded(snapshot.id()));
         Dimension disclosurePreferredSize = disclosure.getPreferredSize();
         disclosure.setMaximumSize(new Dimension(disclosurePreferredSize.width, Integer.MAX_VALUE));
@@ -451,6 +460,29 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                 Schedulers.io().execute(() -> registry.requestCancellation(snapshot.id()));
             });
             actionPanel.add(cancel);
+        }
+        if (snapshot.status() == TaskExecutionStatus.FAILED || snapshot.status() == TaskExecutionStatus.CANCELLED) {
+            JButton retry = new JButton(i18n("button.retry"));
+            retry.setName("taskExecutionRetry");
+            retry.setToolTipText(i18n("button.retry"));
+            retry.addActionListener(event -> {
+                retry.setEnabled(false);
+                Schedulers.io().execute(() -> {
+                    try {
+                        registry.retry(snapshot.id());
+                    } finally {
+                        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> retry.setEnabled(true));
+                    }
+                });
+            });
+            actionPanel.add(retry);
+        }
+        if (snapshot.status().isTerminal()) {
+            JButton delete = new JButton(i18n("button.delete"));
+            delete.setName("taskExecutionDelete");
+            delete.setToolTipText(i18n("button.delete"));
+            delete.addActionListener(event -> registry.remove(snapshot.id()));
+            actionPanel.add(delete);
         }
         Dimension actionPreferredSize = actionPanel.getPreferredSize();
         actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
@@ -621,6 +653,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         details.add(createLogScrollPane(timelineArea, logWidth));
 
         JScrollPane scrollPane = new JScrollPane(details);
+        installDetailsWheelForwarding(scrollPane);
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         scrollPane.setName("taskExecutionDetailsScroll");
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -629,12 +662,125 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.getHorizontalScrollBar().setOpaque(false);
         scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
         Dimension detailsPreferredSize = details.getPreferredSize();
-        Dimension horizontalScrollBarSize = scrollPane.getHorizontalScrollBar().getPreferredSize();
+        boolean needsHorizontalScroll = detailsPreferredSize.width > Math.max(1, contentWidth);
+        int horizontalScrollBarHeight = needsHorizontalScroll
+                ? scrollPane.getHorizontalScrollBar().getPreferredSize().height + DETAILS_SCROLLBAR_GAP
+                : 0;
         scrollPane.setPreferredSize(new Dimension(
                 Math.max(1, contentWidth),
-                Math.max(1, detailsPreferredSize.height + horizontalScrollBarSize.height + DETAILS_SCROLLBAR_GAP)));
+                Math.max(1, detailsPreferredSize.height + horizontalScrollBarHeight)));
         scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         return scrollPane;
+    }
+
+    /// Installs one shared wheel handler throughout an expanded details tree.
+    ///
+    /// Deep log views receive the event before their own vertical viewport can consume it. The handler therefore
+    /// forwards ordinary vertical wheels to the enclosing lifecycle list while retaining horizontal wheels for the
+    /// nearest details or log viewport.
+    ///
+    /// @param component details subtree root
+    private void installDetailsWheelForwarding(Component component) {
+        component.addMouseWheelListener(this::forwardDetailsWheel);
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                installDetailsWheelForwarding(child);
+            }
+        }
+    }
+
+    /// Routes one expanded-details wheel event to the appropriate viewport.
+    ///
+    /// @param event wheel event delivered by a details descendant
+    private void forwardDetailsWheel(MouseWheelEvent event) {
+        if (event.isConsumed()) {
+            return;
+        }
+        if (event.isShiftDown()) {
+            if (forwardHorizontalWheel(event)) {
+                event.consume();
+            }
+            return;
+        }
+        @Nullable JScrollPane listScroll = findTaskListScrollPane(event.getComponent());
+        if (listScroll == null || event.getPreciseWheelRotation() == 0.0D) {
+            return;
+        }
+        JScrollBar scrollBar = listScroll.getVerticalScrollBar();
+        int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
+        int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
+        int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
+                ? scrollBar.getBlockIncrement(direction)
+                : scrollBar.getUnitIncrement(direction);
+        long delta = (long) direction * Math.max(1, increment) * units;
+        setScrollBarValue(scrollBar, delta);
+        event.consume();
+    }
+
+    /// Forwards a horizontal (normally Shift-wheel) event to the nearest overflowing details viewport.
+    ///
+    /// @param event horizontal wheel event
+    /// @return whether a horizontal viewport accepted the event
+    private static boolean forwardHorizontalWheel(MouseWheelEvent event) {
+        @Nullable Container ancestor = event.getComponent() instanceof JScrollPane scrollPane
+                ? scrollPane
+                : event.getComponent().getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JScrollPane scrollPane
+                    && !isTaskListScrollPane(scrollPane)
+                    && scrollPane.getHorizontalScrollBarPolicy() != JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
+                JScrollBar scrollBar = scrollPane.getHorizontalScrollBar();
+                if (scrollBar.getMaximum() > scrollBar.getVisibleAmount()) {
+                    int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
+                    int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
+                    int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
+                            ? scrollBar.getBlockIncrement(direction)
+                            : scrollBar.getUnitIncrement(direction);
+                    long delta = (long) direction * Math.max(1, increment) * units;
+                    setScrollBarValue(scrollBar, delta);
+                    return true;
+                }
+            }
+            ancestor = ancestor.getParent();
+        }
+        return false;
+    }
+
+    /// Finds the lifecycle list scroll pane owning one details descendant.
+    ///
+    /// @param component details descendant
+    /// @return enclosing task-list scroll pane, or null when detached
+    private static @Nullable JScrollPane findTaskListScrollPane(Component component) {
+        @Nullable Container ancestor = component.getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JScrollPane scrollPane && isTaskListScrollPane(scrollPane)) {
+                return scrollPane;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
+    }
+
+    /// Recognizes the three outer lifecycle-list scroll panes.
+    ///
+    /// @param scrollPane candidate scroll pane
+    /// @return whether the candidate owns a top-level task list
+    private static boolean isTaskListScrollPane(JScrollPane scrollPane) {
+        @Nullable String name = scrollPane.getName();
+        return "taskManagerRunningScroll".equals(name)
+                || "taskManagerCompletedScroll".equals(name)
+                || "taskManagerAbortedScroll".equals(name);
+    }
+
+    /// Applies one bounded wheel delta to a Swing scrollbar.
+    ///
+    /// @param scrollBar target scrollbar
+    /// @param delta signed pixel-like increment
+    private static void setScrollBarValue(JScrollBar scrollBar, long delta) {
+        int minimum = scrollBar.getMinimum();
+        int maximum = Math.max(minimum, scrollBar.getMaximum() - scrollBar.getVisibleAmount());
+        long target = (long) scrollBar.getValue() + delta;
+        scrollBar.setValue((int) Math.max(minimum, Math.min(maximum, target)));
     }
 
     /// Creates one actual-task detail row, indented according to its parent task.
