@@ -52,15 +52,18 @@ import javax.swing.JViewport;
 import javax.swing.KeyStroke;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Insets;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -99,19 +102,31 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Smallest readable title-column width before the details viewport must scroll horizontally.
     private static final int MIN_TASK_TITLE_WIDTH = 180;
 
-    /// Fallback title-column width used before the page receives its first real window allocation.
-    private static final int DEFAULT_TASK_TITLE_WIDTH = 360;
-
     /// Smallest log viewport width retained for short windows and narrow themes.
     private static final int MIN_LOG_WIDTH = 260;
-
-    /// Maximum log viewport width so long lines remain inspectable without dominating the task row.
-    private static final int MAX_LOG_WIDTH = 520;
 
     /// Approximate monospaced columns used to keep a log's natural size bounded before scrolling.
     private static final int LOG_COLUMNS = 72;
 
-    /// Horizontal space consumed by list and row insets when deriving the title column from the page width.
+    /// Fallback task-frame width used before the page receives its first real window allocation.
+    private static final int DEFAULT_TASK_FRAME_WIDTH = 700;
+
+    /// Horizontal gap between the full-height disclosure strip and the task content.
+    private static final int TASK_ROW_GAP = 8;
+
+    /// Left inset separating task details from the full-height disclosure strip.
+    private static final int DETAILS_LEFT_INSET = 34;
+
+    /// Right inset keeping wide log surfaces inside the task frame.
+    private static final int DETAILS_RIGHT_INSET = 10;
+
+    /// Bottom inset separating the timeline log from the details scrollbar.
+    private static final int DETAILS_BOTTOM_GAP = 10;
+
+    /// Extra preferred height reserved for the details horizontal scrollbar and its visual gap.
+    private static final int DETAILS_SCROLLBAR_GAP = 6;
+
+    /// Horizontal space consumed by list and row insets when deriving the task frame width from the page width.
     private static final int TASK_CONTENT_INSETS = 44;
 
     /// Stable compact timestamp formatter for task timelines.
@@ -145,6 +160,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Prevents a width refresh from recursively rebuilding the component tree during layout.
     private boolean refreshingLayout;
+
+    /// Monotonic token used to discard stale deferred collapse-scroll adjustments.
+    private long collapseAdjustmentGeneration;
 
     /// Registry listener owned by this page.
     private final Subscription registrySubscription;
@@ -352,7 +370,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Creates one expandable top-level execution row.
     private JPanel createExecutionRow(TaskExecutionSnapshot snapshot) {
         boolean expanded = expandedExecutions.contains(snapshot.id());
-        JPanel row = new JPanel(new BorderLayout(0, 8));
+        JPanel row = new JPanel(new BorderLayout(TASK_ROW_GAP, 0));
         row.setName("taskExecutionRow-" + snapshot.id());
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setOpaque(false);
@@ -376,6 +394,8 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                 ? i18n("swing.task.hide_details")
                 : i18n("swing.task.show_details"));
         disclosure.setMargin(new Insets(0, 4, 0, 4));
+        disclosure.setVerticalAlignment(SwingConstants.TOP);
+        disclosure.setHorizontalAlignment(SwingConstants.CENTER);
         disclosure.addActionListener(event -> toggleExpanded(snapshot.id()));
         Dimension disclosurePreferredSize = disclosure.getPreferredSize();
         disclosure.setMaximumSize(new Dimension(disclosurePreferredSize.width, Integer.MAX_VALUE));
@@ -398,16 +418,15 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         Dimension actionPreferredSize = actionPanel.getPreferredSize();
         actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
 
-        int titleWidth = calculateTaskTitleWidth(disclosure.getPreferredSize().width, actionPreferredSize.width);
+        int taskFrameWidth = calculateTaskFrameWidth();
+        int contentWidth = calculateTaskContentWidth(taskFrameWidth, disclosurePreferredSize.width);
+        int titleWidth = calculateTaskTitleWidth(contentWidth, actionPreferredSize.width);
         JPanel header = new JPanel();
         header.setLayout(new BoxLayout(header, BoxLayout.X_AXIS));
         header.setAlignmentX(Component.LEFT_ALIGNMENT);
         header.setOpaque(false);
-        // Treat unused header space as part of the top-level disclosure target. Child controls keep their own
-        // handlers, so a click on the disclosure or cancellation button is not toggled a second time.
+        // Keep the title/action header clickable while the full-height disclosure button owns the left strip.
         header.addMouseListener(toggleOnClick(snapshot.id()));
-        header.add(disclosure);
-        header.add(Box.createHorizontalStrut(10));
 
         JPanel titlePanel = new JPanel();
         titlePanel.setOpaque(false);
@@ -430,27 +449,47 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         header.add(Box.createHorizontalGlue());
         actionPanel.setAlignmentY(Component.TOP_ALIGNMENT);
         header.add(actionPanel);
-        row.add(header, BorderLayout.NORTH);
 
+        JPanel content = new JPanel(new BorderLayout(0, TASK_ROW_GAP));
+        content.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.setOpaque(false);
+        content.add(header, BorderLayout.NORTH);
         if (expanded) {
-            row.add(createDetails(snapshot, titleWidth), BorderLayout.CENTER);
+            content.add(createDetails(snapshot, contentWidth, titleWidth), BorderLayout.CENTER);
         }
+        row.add(disclosure, BorderLayout.WEST);
+        row.add(content, BorderLayout.CENTER);
         return row;
     }
 
-    /// Computes the main title column from the currently allocated task-page width.
+    /// Computes the task frame width from the currently allocated task-page width.
     ///
-    /// @param disclosureWidth disclosure control width
-    /// @param actionWidth progress and cancellation control width
-    /// @return stable title width shared by the workflow and its actual tasks
-    private int calculateTaskTitleWidth(int disclosureWidth, int actionWidth) {
+    /// @return width available inside one top-level task frame
+    private int calculateTaskFrameWidth() {
         int pageWidth = getWidth() > 0 ? getWidth() : tabs.getWidth();
         if (pageWidth <= 0) {
-            return DEFAULT_TASK_TITLE_WIDTH;
+            return DEFAULT_TASK_FRAME_WIDTH;
         }
         Insets panelInsets = getInsets();
-        int availableWidth = pageWidth - panelInsets.left - panelInsets.right - TASK_CONTENT_INSETS;
-        int calculatedWidth = availableWidth - disclosureWidth - actionWidth - 10;
+        return Math.max(1, pageWidth - panelInsets.left - panelInsets.right - TASK_CONTENT_INSETS);
+    }
+
+    /// Computes the horizontal content area left after the full-height disclosure strip.
+    ///
+    /// @param taskFrameWidth width available inside the task frame
+    /// @param disclosureWidth full-height disclosure strip width
+    /// @return width available to the title, actions, and details viewport
+    private static int calculateTaskContentWidth(int taskFrameWidth, int disclosureWidth) {
+        return Math.max(1, taskFrameWidth - disclosureWidth - TASK_ROW_GAP);
+    }
+
+    /// Computes the main title column from the task content width.
+    ///
+    /// @param contentWidth width available after the disclosure strip
+    /// @param actionWidth progress and cancellation control width
+    /// @return stable title width shared by the workflow and its actual tasks
+    private static int calculateTaskTitleWidth(int contentWidth, int actionWidth) {
+        int calculatedWidth = contentWidth - actionWidth - 10;
         return calculatedWidth > 0 ? calculatedWidth : MIN_TASK_TITLE_WIDTH;
     }
 
@@ -494,10 +533,15 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     }
 
     /// Builds the actual task list and top-level timeline for one expanded workflow.
-    private JScrollPane createDetails(TaskExecutionSnapshot snapshot, int titleWidth) {
+    private JScrollPane createDetails(TaskExecutionSnapshot snapshot, int contentWidth, int titleWidth) {
         TaskDetailsContentPanel details = new TaskDetailsContentPanel();
         details.setAlignmentX(Component.LEFT_ALIGNMENT);
-        details.setBorder(BorderFactory.createEmptyBorder(4, 34, 0, 0));
+        details.setBorder(BorderFactory.createEmptyBorder(
+                4,
+                DETAILS_LEFT_INSET,
+                DETAILS_BOTTOM_GAP,
+                DETAILS_RIGHT_INSET));
+        int logWidth = calculateLogWidth(contentWidth);
 
         JLabel tasksHeading = new JLabel(i18n("swing.task.details.tasks"));
         tasksHeading.setFont(tasksHeading.getFont().deriveFont(Font.BOLD));
@@ -505,7 +549,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         details.add(tasksHeading);
         Map<UUID, Integer> depths = taskDepths(snapshot.tasks());
         for (TaskExecutionTaskSnapshot task : snapshot.tasks()) {
-            details.add(createTaskDetail(task, depths.getOrDefault(task.id(), 0), titleWidth));
+            details.add(createTaskDetail(task, depths.getOrDefault(task.id(), 0), titleWidth, logWidth));
             details.add(Box.createVerticalStrut(4));
         }
         if (snapshot.tasks().isEmpty()) {
@@ -525,7 +569,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         JTextArea timelineArea = readOnlyLogArea(timeline.isBlank()
                 ? i18n("swing.task.details.no_log")
                 : timeline);
-        details.add(createLogScrollPane(timelineArea, logWidth(titleWidth)));
+        details.add(createLogScrollPane(timelineArea, logWidth));
 
         JScrollPane scrollPane = new JScrollPane(details);
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
@@ -536,15 +580,16 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.getHorizontalScrollBar().setOpaque(false);
         scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
         Dimension detailsPreferredSize = details.getPreferredSize();
+        Dimension horizontalScrollBarSize = scrollPane.getHorizontalScrollBar().getPreferredSize();
         scrollPane.setPreferredSize(new Dimension(
-                Math.max(1, titleWidth),
-                Math.max(1, detailsPreferredSize.height)));
+                Math.max(1, contentWidth),
+                Math.max(1, detailsPreferredSize.height + horizontalScrollBarSize.height + DETAILS_SCROLLBAR_GAP)));
         scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         return scrollPane;
     }
 
     /// Creates one actual-task detail row, indented according to its parent task.
-    private JPanel createTaskDetail(TaskExecutionTaskSnapshot task, int depth, int titleWidth) {
+    private JPanel createTaskDetail(TaskExecutionTaskSnapshot task, int depth, int titleWidth, int logWidth) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -587,7 +632,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         if (!taskLogText.isBlank()) {
             JTextArea log = readOnlyLogArea(taskLogText);
             log.setRows(Math.min(4, Math.max(1, task.logs().size())));
-            panel.add(createLogScrollPane(log, logWidth(titleWidth)));
+            panel.add(createLogScrollPane(log, logWidth));
         }
         return panel;
     }
@@ -640,12 +685,12 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         component.setMaximumSize(new Dimension(Math.max(1, width), Integer.MAX_VALUE));
     }
 
-    /// Keeps logs narrower than the task title while retaining a usable minimum viewport.
+    /// Makes every log viewport fill the task content width while retaining a usable minimum viewport.
     ///
-    /// @param titleWidth shared task title width
+    /// @param contentWidth width available after the disclosure strip
     /// @return constrained log viewport width
-    private static int logWidth(int titleWidth) {
-        return Math.max(MIN_LOG_WIDTH, Math.min(MAX_LOG_WIDTH, Math.max(1, titleWidth - 24)));
+    private static int calculateLogWidth(int contentWidth) {
+        return Math.max(MIN_LOG_WIDTH, contentWidth - DETAILS_LEFT_INSET - DETAILS_RIGHT_INSET);
     }
 
     /// Computes indentation levels from the flattened parent-ID task representation.
@@ -715,10 +760,123 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Toggles one execution row and rerenders all lists using the latest immutable snapshots.
     private void toggleExpanded(UUID executionId) {
-        if (!expandedExecutions.add(executionId)) {
+        long generation = ++collapseAdjustmentGeneration;
+        boolean collapsing = expandedExecutions.contains(executionId);
+        @Nullable CollapseViewportState collapseState = collapsing
+                ? captureCollapseViewportState(executionId)
+                : null;
+        if (collapsing) {
             expandedExecutions.remove(executionId);
+        } else {
+            expandedExecutions.add(executionId);
         }
         renderSnapshots(new TaskExecutionRegistry.Publication(displayedRevision, displayedSnapshots));
+        if (collapsing && collapseState != null) {
+            restoreCollapseViewport(executionId, collapseState);
+            SwingUtilities.invokeLater(() -> {
+                if (!closed
+                        && generation == collapseAdjustmentGeneration
+                        && !expandedExecutions.contains(executionId)) {
+                    restoreCollapseViewport(executionId, collapseState);
+                }
+            });
+        }
+    }
+
+    /// Captures the top-level list viewport before an expanded execution is collapsed.
+    ///
+    /// @param executionId execution whose row is being collapsed
+    /// @return viewport anchor, or null when the row is not currently attached to a list viewport
+    private @Nullable CollapseViewportState captureCollapseViewportState(UUID executionId) {
+        @Nullable JPanel row = findExecutionRow(executionId);
+        if (row == null) {
+            return null;
+        }
+        @Nullable JViewport viewport = findAncestorViewport(row);
+        if (viewport == null) {
+            return null;
+        }
+        Point rowPoint = SwingUtilities.convertPoint(row, 0, 0, viewport);
+        Point viewPosition = viewport.getViewPosition();
+        return new CollapseViewportState(
+                viewport,
+                rowPoint.y,
+                viewPosition.x);
+    }
+
+    /// Restores a collapsed row's viewport anchor after the rebuilt component tree has been laid out.
+    ///
+    /// @param executionId execution whose row was collapsed
+    /// @param state anchor captured before collapse
+    private void restoreCollapseViewport(UUID executionId, CollapseViewportState state) {
+        if (closed || expandedExecutions.contains(executionId)) {
+            return;
+        }
+        @Nullable JPanel row = findExecutionRow(executionId);
+        if (row == null) {
+            return;
+        }
+        @Nullable JViewport viewport = findAncestorViewport(row);
+        if (viewport == null || viewport != state.viewport()) {
+            return;
+        }
+        Component view = viewport.getView();
+        if (view == null) {
+            return;
+        }
+        view.revalidate();
+        if (view instanceof Container container) {
+            container.doLayout();
+        }
+        if (viewport.getParent() instanceof JScrollPane scrollPane) {
+            scrollPane.revalidate();
+            scrollPane.doLayout();
+        }
+        viewport.revalidate();
+        viewport.doLayout();
+
+        Point rowPoint = SwingUtilities.convertPoint(row, 0, 0, viewport);
+        int newRowContentTop = rowPoint.y + viewport.getViewPosition().y;
+        int desiredRowTop = state.rowTopInViewport() < 0
+                ? 0
+                : state.rowTopInViewport();
+        int targetY = newRowContentTop - desiredRowTop;
+        int maxY = Math.max(0, view.getHeight() - viewport.getExtentSize().height);
+        targetY = Math.max(0, Math.min(maxY, targetY));
+        int maxX = Math.max(0, view.getWidth() - viewport.getExtentSize().width);
+        int targetX = Math.max(0, Math.min(maxX, state.viewPositionX()));
+        viewport.setViewPosition(new Point(targetX, targetY));
+    }
+
+    /// Finds one top-level execution row in the three lifecycle lists.
+    ///
+    /// @param executionId execution identifier encoded in the row name
+    /// @return matching row, or null when it is not rendered
+    private @Nullable JPanel findExecutionRow(UUID executionId) {
+        String rowName = "taskExecutionRow-" + executionId;
+        for (JPanel list : List.of(runningList, completedList, abortedList)) {
+            for (Component child : list.getComponents()) {
+                if (child instanceof JPanel row && rowName.equals(row.getName())) {
+                    return row;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Finds the outer lifecycle-list viewport containing a top-level row.
+    ///
+    /// @param component row or descendant component
+    /// @return nearest ancestor viewport, or null when detached
+    private static @Nullable JViewport findAncestorViewport(Component component) {
+        @Nullable Container ancestor = component.getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JViewport viewport) {
+                return viewport;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
     }
 
     /// Formats one timeline as timestamp, event, and already-redacted message lines.
@@ -776,8 +934,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         scrollPane.getHorizontalScrollBar().setUnitIncrement(18);
         Dimension measured = scrollPane.getPreferredSize();
         int resolvedWidth = Math.max(1, width);
-        scrollPane.setMinimumSize(new Dimension(Math.min(MIN_LOG_WIDTH, resolvedWidth), measured.height));
-        scrollPane.setPreferredSize(new Dimension(resolvedWidth, measured.height));
+        Dimension fixedWidth = new Dimension(resolvedWidth, measured.height);
+        scrollPane.setMinimumSize(fixedWidth);
+        scrollPane.setPreferredSize(fixedWidth);
         scrollPane.setMaximumSize(new Dimension(resolvedWidth, Integer.MAX_VALUE));
         scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         return scrollPane;
@@ -974,6 +1133,51 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         @Override
         public boolean getScrollableTracksViewportHeight() {
             return false;
+        }
+    }
+
+    /// Immutable viewport anchor retained while one expanded top-level row is collapsed.
+    @NotNullByDefault
+    private static final class CollapseViewportState {
+        /// Outer lifecycle-list viewport that owned the row before collapse.
+        private final JViewport viewport;
+
+        /// Row top relative to the outer list viewport before the collapse.
+        private final int rowTopInViewport;
+
+        /// Horizontal view position retained while restoring the list viewport.
+        private final int viewPositionX;
+
+        /// Creates a viewport anchor.
+        ///
+        /// @param viewport outer lifecycle-list viewport
+        /// @param rowTopInViewport row top relative to the viewport
+        /// @param viewPositionX horizontal viewport position
+        private CollapseViewportState(JViewport viewport, int rowTopInViewport, int viewPositionX) {
+            this.viewport = viewport;
+            this.rowTopInViewport = rowTopInViewport;
+            this.viewPositionX = viewPositionX;
+        }
+
+        /// Returns the outer viewport captured before collapse.
+        ///
+        /// @return original lifecycle-list viewport
+        private JViewport viewport() {
+            return viewport;
+        }
+
+        /// Returns the captured row top relative to the viewport.
+        ///
+        /// @return row top coordinate
+        private int rowTopInViewport() {
+            return rowTopInViewport;
+        }
+
+        /// Returns the captured horizontal viewport position.
+        ///
+        /// @return horizontal view position
+        private int viewPositionX() {
+            return viewPositionX;
         }
     }
 }
