@@ -152,6 +152,68 @@ public final class TaskExecutionRegistry {
         return true;
     }
 
+    /// Removes one terminal execution record from this in-memory session.
+    ///
+    /// Active and cancelling executions are retained because removing them would make late lifecycle callbacks
+    /// unobservable and could leave their resource leases unmanaged. A record being retried is also retained until
+    /// the retry invocation has handed off to its new execution instance.
+    ///
+    /// @param executionId top-level execution ID
+    /// @return whether a terminal record was removed
+    public boolean remove(UUID executionId) {
+        Objects.requireNonNull(executionId, "executionId");
+        synchronized (stateLock) {
+            MutableExecution execution = executions.get(executionId);
+            if (execution == null || !execution.status.isTerminal() || execution.retrying) {
+                return false;
+            }
+            executions.remove(executionId);
+        }
+        publish();
+        return true;
+    }
+
+    /// Retries one failed or cancelled top-level execution using its original executor.
+    ///
+    /// The original terminal record remains available for history while [TaskExecutor#start()] creates a fresh
+    /// execution record with a new ID. Only one retry may be handed off at a time for a given record. The executor is
+    /// invoked outside the registry lock so its synchronous startup callbacks can safely publish new snapshots.
+    ///
+    /// @param executionId failed or cancelled top-level execution ID
+    /// @return whether a retry was accepted and started
+    public boolean retry(UUID executionId) {
+        Objects.requireNonNull(executionId, "executionId");
+        MutableExecution execution;
+        TaskExecutor executor;
+        synchronized (stateLock) {
+            execution = executions.get(executionId);
+            if (execution == null
+                    || !execution.status.isTerminal()
+                    || execution.status == TaskExecutionStatus.SUCCEEDED
+                    || execution.retrying) {
+                return false;
+            }
+            execution.retrying = true;
+            executor = execution.executor;
+        }
+        try {
+            executor.start();
+            return true;
+        } catch (RuntimeException | Error failure) {
+            synchronized (stateLock) {
+                if (executions.get(executionId) == execution) {
+                    execution.appendLogLocked(null, "retry-failed", renderThrowable(failure));
+                }
+            }
+            publish();
+            throw failure;
+        } finally {
+            synchronized (stateLock) {
+                execution.retrying = false;
+            }
+        }
+    }
+
     /// Marks one execution as cancelling without invoking its executor callback.
     ///
     /// This is used by the legacy direct [AsyncTaskExecutor#cancel()] entry point. The callback must remain outside
@@ -208,6 +270,7 @@ public final class TaskExecutionRegistry {
         MutableExecution mutable = new MutableExecution(
                 this,
                 UUID.randomUUID(),
+                executor,
                 title,
                 userVisible,
                 Instant.now());
@@ -682,6 +745,9 @@ public final class TaskExecutionRegistry {
         /// Stable invocation ID.
         private final UUID id;
 
+        /// Executor that can create a fresh invocation when this record is retried.
+        private final TaskExecutor executor;
+
         /// Top-level title.
         private final String title;
 
@@ -736,15 +802,20 @@ public final class TaskExecutionRegistry {
         /// Whether the one cancellation callback has already been claimed by a request path.
         private boolean cancellationCallbackClaimed;
 
+        /// Whether a retry has claimed this terminal record and is handing off to the executor.
+        private boolean retrying;
+
         /// Creates one mutable invocation state.
         private MutableExecution(
                 TaskExecutionRegistry registry,
                 UUID id,
+                TaskExecutor executor,
                 String title,
                 boolean userVisible,
                 Instant startedAt) {
             this.registry = registry;
             this.id = id;
+            this.executor = executor;
             this.title = title;
             this.userVisible = userVisible;
             this.startedAt = startedAt;

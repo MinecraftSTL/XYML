@@ -111,6 +111,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         synchronized (this) {
             exception = null;
             failure = null;
+            // A terminal record may be retried with this executor instance. The resource domains below carry the
+            // authoritative invocation-local cancellation state, so reset the legacy aggregate flag for the new run.
+            cancelled = false;
             started = true;
             resourceExecution = resourceLockManager.createExecution();
             resourceExecutions.add(resourceExecution);
