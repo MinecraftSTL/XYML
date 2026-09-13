@@ -75,6 +75,41 @@ public final class TaskExecutionRegistryTest {
         assertEquals(rootSnapshot.id(), childSnapshot.parentId());
     }
 
+    /// An automatic moderate orchestration with a major child stays out of active/success history and is retained
+    /// only when its top-level outcome is aborted.
+    @Test
+    public void automaticOrchestrationIsNotPromotedByMajorChild() {
+        Task<?> root = Task.runAsync("automatic-root", () -> { })
+                .setSignificance(Task.TaskSignificance.MODERATE);
+        Task<?> child = Task.runAsync("automatic-child", () -> { });
+        TaskExecutionRegistry registry = new TaskExecutionRegistry();
+        TaskExecutionRegistry.Execution execution = registry.begin(
+                new ProbeExecutor(root),
+                "Automatic workflow",
+                false);
+
+        execution.started();
+        execution.taskReady(null, root);
+        execution.taskRunning(null, root);
+        execution.taskReady(root, child);
+        execution.taskRunning(root, child);
+        assertFalse(singleSnapshot(registry).userVisible());
+        execution.taskFinished(root, child);
+        execution.taskFinished(null, root);
+        execution.stopped(true, null);
+        assertTrue(registry.snapshots().isEmpty());
+
+        TaskExecutionRegistry.Execution failedExecution = registry.begin(
+                new ProbeExecutor(root),
+                "Automatic failed workflow",
+                false);
+        failedExecution.started();
+        failedExecution.stopped(false, new IllegalStateException("automatic failure"));
+        TaskExecutionSnapshot failed = singleSnapshot(registry);
+        assertEquals(TaskExecutionStatus.FAILED, failed.status());
+        assertFalse(failed.userVisible());
+    }
+
     /// Cancellation is scoped to one execution and becomes an aborted terminal state.
     @Test
     public void cancellationPublishesCancellingThenCancelled() {

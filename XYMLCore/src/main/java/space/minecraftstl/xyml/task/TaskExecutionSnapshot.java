@@ -39,7 +39,8 @@ import java.util.UUID;
 /// @param totalProgressWeight aggregate work weight, or zero when no task contributes progress
 /// @param completedProgressWeight completed portion of the aggregate work weight
 /// @param everRunning whether at least one actual task has entered the running state
-/// @param userVisible whether this execution is eligible for active/success lists
+/// @param userVisible whether this execution has a top-level user-visible presentation contract; internal task
+/// significance does not promote an automatic workflow into active or successful history
 /// @param cancelable whether cancellation is currently accepted
 /// @param startedAt invocation start timestamp
 /// @param endedAt terminal timestamp, or null while active

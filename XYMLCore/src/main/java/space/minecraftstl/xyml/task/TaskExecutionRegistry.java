@@ -717,9 +717,6 @@ public final class TaskExecutionRegistry {
                             event,
                             failure == null ? task.getName() : task.getName() + ": " + renderThrowable(failure));
                 }
-                if (task.getSignificance().shouldShow()) {
-                    mutable.userVisible = true;
-                }
                 if (stageChanged || progressChanged || weightChanged) {
                     mutableTask.loggedStage = stage;
                     mutableTask.loggedProgress = progress;
@@ -781,7 +778,10 @@ public final class TaskExecutionRegistry {
         /// Completed work weight represented by the aggregate contribution set.
         private double completedProgressWeight;
 
-        /// Whether active/success presentation is allowed.
+        /// Whether this execution has an explicit top-level user-visible presentation contract.
+        ///
+        /// Internal task significance is intentionally not promoted here. A moderate orchestration task can contain
+        /// major children and still be an automatic workflow whose successful run should disappear from history.
         private boolean userVisible;
 
         /// Whether cancellation remains accepted.
