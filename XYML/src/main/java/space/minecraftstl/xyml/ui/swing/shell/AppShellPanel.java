@@ -56,7 +56,7 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Renders a title-bar workflow above persistent instance management and lazy overlay pages.
+/// Renders a title-bar workflow above persistent instance management and lazy application pages.
 @NotNullByDefault
 public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Minimum shell width that preserves page and navigation readability.
@@ -82,6 +82,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             ShellPageId.ACCOUNTS,
             ShellPageId.INSTANCES,
             ShellPageId.DOWNLOADS,
+            ShellPageId.TASKS,
             ShellPageId.SETTINGS);
 
     /// Toolkit-neutral selected-destination state.
@@ -93,7 +94,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Stable instance-management page retained across every top-level transition.
     private final JComponent instancesPage;
 
-    /// Unified page deck for instance management, accounts, downloads, and settings.
+    /// Unified page deck for instance management, accounts, downloads, tasks, and settings.
     private final ShellPageDeck pageDeck;
 
     /// Full-window-content title-bar workflow controls.
@@ -101,12 +102,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Icon-only navigation for transient pages beside persistent instance management.
     private final ShellNavigationRail navigationRail;
-
-    /// Launch progress temporarily covering both base and top-level overlays.
-    private final LaunchTaskOverlayPanel launchTaskOverlay;
-
-    /// Layered workspace retaining the page deck and launch-task overlay.
-    private final ShellWorkspace workspace;
 
     /// Root-level click-origin feedback shared by every current and lazily added button.
     private final SwingButtonRippleSupport buttonRippleSupport;
@@ -227,14 +222,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 this::navigateTo,
                 this::openGameDirectoryManagement,
                 this::showDefaultPage);
-        launchTaskOverlay = new LaunchTaskOverlayPanel(
-                toolbarModels.home(),
-                homeStrings,
-                taskProgressStrings,
-                animator,
-                progressAnimationDuration);
-        workspace = new ShellWorkspace(pageDeck, launchTaskOverlay);
-
         setLayout(new MigLayout(
                 "insets 0, fill",
                 "[52!][grow,fill]",
@@ -248,7 +235,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
         add(toolbar, "cell 0 0 2 1, grow");
         add(navigationRail, "cell 0 1, grow");
-        add(workspace, "cell 1 1, grow, gap 18 20 18 18");
+        add(pageDeck, "cell 1 1, grow, gap 18 20 18 18");
         showInstanceManagement();
         pageDeck.showPage(instancesPage, false);
         updateSelection(null);
@@ -602,7 +589,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 @Nullable Throwable failure = null;
                 failure = attemptClose(failure, toolbar);
                 navigationRail.disableNavigation();
-                failure = attemptClose(failure, launchTaskOverlay);
                 failure = attemptClose(failure, buttonRippleSupport);
                 failure = attemptClose(failure, pageCache);
                 if (failure instanceof RuntimeException runtimeException) {
@@ -647,14 +633,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return toolbar;
     }
 
-    /// Returns the launch task overlay for focused lifecycle verification.
-    ///
-    /// @return stable launch task overlay
-    LaunchTaskOverlayPanel launchTaskOverlay() {
-        return launchTaskOverlay;
-    }
-
-    /// Synchronizes title-bar navigation state after a base or overlay change.
+    /// Synchronizes title-bar navigation state after a base or application-page change.
     ///
     /// @param page the newly selected side destination, or `null` for persistent instance management
     private void updateSelection(@Nullable ShellPageId page) {
@@ -695,39 +674,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 previous.addSuppressed(failure);
             }
             return previous;
-        }
-    }
-
-    /// Fixed-bounds layered workspace keeping page transitions below the launch-task overlay.
-    @NotNullByDefault
-    private static final class ShellWorkspace extends JPanel {
-        /// Creates the page and launch-overlay layers in input-facing z-order.
-        ///
-        /// @param pageDeck all persistent and lazy top-level pages
-        /// @param launchOverlay current launch-task surface
-        private ShellWorkspace(
-                ShellPageDeck pageDeck,
-                LaunchTaskOverlayPanel launchOverlay) {
-            super(null);
-            setOpaque(false);
-            add(Objects.requireNonNull(pageDeck, "pageDeck"));
-            add(Objects.requireNonNull(launchOverlay, "launchOverlay"), 0);
-        }
-
-        /// Keeps all layers on identical stable content bounds.
-        @Override
-        public void doLayout() {
-            for (Component child : getComponents()) {
-                child.setBounds(0, 0, getWidth(), getHeight());
-            }
-        }
-
-        /// Reports overlap because hidden or visible overlays share base bounds.
-        ///
-        /// @return always false for layered child painting
-        @Override
-        public boolean isOptimizedDrawingEnabled() {
-            return false;
         }
     }
 

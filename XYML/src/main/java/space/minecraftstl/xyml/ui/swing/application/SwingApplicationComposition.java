@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.task.TaskExecutionRegistry;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
 import space.minecraftstl.xyml.theme.LocalThemePackRepository;
 import space.minecraftstl.xyml.theme.ResolvedTheme;
@@ -91,6 +92,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementM
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.tasks.TaskManagerPanel;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
@@ -425,6 +427,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         failure = runCollecting(animator::cancelAll, failure);
         failure = closeCollecting(pageModels, failure);
         failure = runCollecting(applicationCloseCommand, failure);
+        failure = runCollecting(TaskExecutionRegistry.global()::clear, failure);
         rethrowFailure(failure);
     }
 
@@ -456,6 +459,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         animator,
                         presentation.taskProgressAnimationDuration(),
                         models.instances()));
+        factories.put(ShellPageId.TASKS, TaskManagerPanel::new);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,

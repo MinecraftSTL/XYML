@@ -15,25 +15,25 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.shell;
+package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Identifies the persistent instance workspace and its top-level destinations.
+/// Lifecycle state of one actual task inside a top-level execution.
 @NotNullByDefault
-public enum ShellPageId {
-    /// The persistent installed-instance management workspace.
-    INSTANCES,
+public enum TaskExecutionTaskStatus {
+    /// The task is waiting for its resource lease or prerequisites.
+    WAITING,
 
-    /// The game and mod download destination.
-    DOWNLOADS,
+    /// The task body is running.
+    RUNNING,
 
-    /// The session task-management destination.
-    TASKS,
+    /// The task completed successfully.
+    SUCCEEDED,
 
-    /// The authenticated player account destination.
-    ACCOUNTS,
+    /// The task failed.
+    FAILED,
 
-    /// The launcher preference destination.
-    SETTINGS
+    /// The task was cancelled before successful completion.
+    CANCELLED
 }

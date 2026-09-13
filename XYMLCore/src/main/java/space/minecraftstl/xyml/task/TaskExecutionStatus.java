@@ -15,25 +15,33 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.shell;
+package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Identifies the persistent instance workspace and its top-level destinations.
+/// Terminal and non-terminal states exposed for one top-level task execution.
 @NotNullByDefault
-public enum ShellPageId {
-    /// The persistent installed-instance management workspace.
-    INSTANCES,
+public enum TaskExecutionStatus {
+    /// The top-level task is queued or waiting for a resource lease.
+    WAITING,
 
-    /// The game and mod download destination.
-    DOWNLOADS,
+    /// At least one task in the execution is running.
+    RUNNING,
 
-    /// The session task-management destination.
-    TASKS,
+    /// Cancellation was requested and the execution has not stopped yet.
+    CANCELLING,
 
-    /// The authenticated player account destination.
-    ACCOUNTS,
+    /// The complete top-level task graph succeeded.
+    SUCCEEDED,
 
-    /// The launcher preference destination.
-    SETTINGS
+    /// The complete top-level task graph failed.
+    FAILED,
+
+    /// The complete top-level task graph was cancelled.
+    CANCELLED;
+
+    /// Returns whether this state is terminal.
+    public boolean isTerminal() {
+        return this == SUCCEEDED || this == FAILED || this == CANCELLED;
+    }
 }

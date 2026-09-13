@@ -161,6 +161,7 @@ public final class AppShellPanelTest {
                                     ShellPageId.INSTANCES,
                                     ShellPageId.ACCOUNTS,
                                     ShellPageId.DOWNLOADS,
+                                    ShellPageId.TASKS,
                                     ShellPageId.SETTINGS),
                             creationOrder),
                     () -> assertEquals(ShellPageId.values().length, panel.cachedPageCount()),
@@ -271,6 +272,7 @@ public final class AppShellPanelTest {
                 for (ShellPageId overlay : List.of(
                         ShellPageId.ACCOUNTS,
                         ShellPageId.DOWNLOADS,
+                        ShellPageId.TASKS,
                         ShellPageId.SETTINGS)) {
                     panel.navigateTo(overlay);
                     assertAll(
@@ -1300,7 +1302,7 @@ public final class AppShellPanelTest {
     /// Minimal enabled launcher model for title-bar and frame tests.
     @NotNullByDefault
     private static final class TestHomeModel implements HomeModel {
-        /// Observable empty launch-session property required by the task overlay.
+        /// Observable empty launch-session property required by the title-bar launch controls.
         private final SimpleObjectProperty<Optional<LaunchSession>> launchSession =
                 new SimpleObjectProperty<>(this, "launchSession", Optional.empty());
 
