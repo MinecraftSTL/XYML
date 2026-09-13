@@ -114,8 +114,8 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Horizontal gap between the full-height disclosure strip and the task content.
     private static final int TASK_ROW_GAP = 8;
 
-    /// Left inset separating task details from the full-height disclosure strip.
-    private static final int DETAILS_LEFT_INSET = 34;
+    /// No additional left inset is needed after the disclosure strip moves outside the task content.
+    private static final int DETAILS_LEFT_INSET = 0;
 
     /// Right inset keeping wide log surfaces inside the task frame.
     private static final int DETAILS_RIGHT_INSET = 10;
@@ -128,6 +128,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Horizontal space consumed by list and row insets when deriving the task frame width from the page width.
     private static final int TASK_CONTENT_INSETS = 44;
+
+    /// Horizontal insets contributed by the task row border and padding.
+    private static final int TASK_ROW_HORIZONTAL_INSETS = 26;
 
     /// Stable compact timestamp formatter for task timelines.
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter
@@ -157,6 +160,15 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Page width used by the most recent title-column calculation.
     private int renderedLayoutWidth = -1;
+
+    /// Task frame width used for the most recent running-list render.
+    private int renderedRunningFrameWidth = -1;
+
+    /// Task frame width used for the most recent completed-list render.
+    private int renderedCompletedFrameWidth = -1;
+
+    /// Task frame width used for the most recent aborted-list render.
+    private int renderedAbortedFrameWidth = -1;
 
     /// Prevents a width refresh from recursively rebuilding the component tree during layout.
     private boolean refreshingLayout;
@@ -264,12 +276,19 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return scrollPane;
     }
 
-    /// Rebuilds title columns after the task page receives a new window width.
-    private void refreshLayoutForWidth() {
+    /// Rebuilds title columns after the task page or one list viewport changes width.
+    private boolean refreshLayoutForWidth() {
         EdtDispatcher.requireEventDispatchThread();
         int width = getWidth();
-        if (refreshingLayout || closed || displayedRevision < 0L || width <= 0 || width == renderedLayoutWidth) {
-            return;
+        int runningFrameWidth = calculateTaskFrameWidth(runningList);
+        int completedFrameWidth = calculateTaskFrameWidth(completedList);
+        int abortedFrameWidth = calculateTaskFrameWidth(abortedList);
+        if (refreshingLayout || closed || displayedRevision < 0L || width <= 0
+                || (width == renderedLayoutWidth
+                && runningFrameWidth == renderedRunningFrameWidth
+                && completedFrameWidth == renderedCompletedFrameWidth
+                && abortedFrameWidth == renderedAbortedFrameWidth)) {
+            return false;
         }
         renderedLayoutWidth = width;
         refreshingLayout = true;
@@ -278,17 +297,31 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         } finally {
             refreshingLayout = false;
         }
+        return true;
     }
 
     /// Lays out the page and refreshes title columns when a parent assigns a new size without a peer event.
     @Override
     public void doLayout() {
         super.doLayout();
-        if (!refreshingLayout) {
-            int width = getWidth();
-            if (width > 0 && width != renderedLayoutWidth) {
-                refreshLayoutForWidth();
-                super.doLayout();
+        layoutListViewports();
+        if (!refreshingLayout && refreshLayoutForWidth()) {
+            super.doLayout();
+            layoutListViewports();
+        }
+    }
+
+    /// Updates the three list viewports before measuring their row content widths.
+    private void layoutListViewports() {
+        tabs.doLayout();
+        for (Component child : tabs.getComponents()) {
+            if (child instanceof JScrollPane scrollPane) {
+                scrollPane.doLayout();
+                scrollPane.getViewport().doLayout();
+                Component view = scrollPane.getViewport().getView();
+                if (view instanceof Container container) {
+                    container.doLayout();
+                }
             }
         }
     }
@@ -337,6 +370,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         renderList(runningList, running, "swing.task.empty.running", retainedIds);
         renderList(completedList, completed, "swing.task.empty.completed", retainedIds);
         renderList(abortedList, aborted, "swing.task.empty.aborted", retainedIds);
+        renderedRunningFrameWidth = calculateTaskFrameWidth(runningList);
+        renderedCompletedFrameWidth = calculateTaskFrameWidth(completedList);
+        renderedAbortedFrameWidth = calculateTaskFrameWidth(abortedList);
         expandedExecutions.retainAll(retainedIds);
         tabs.setTitleAt(0, tabTitle("swing.task.tab.running", running.size()));
         tabs.setTitleAt(1, tabTitle("swing.task.tab.completed", completed.size()));
@@ -359,16 +395,17 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             list.add(empty);
             return;
         }
+        int taskFrameWidth = calculateTaskFrameWidth(list);
         for (TaskExecutionSnapshot snapshot : snapshots) {
             retainedIds.add(snapshot.id());
-            list.add(createExecutionRow(snapshot));
+            list.add(createExecutionRow(snapshot, taskFrameWidth));
             list.add(Box.createVerticalStrut(8));
         }
         list.add(Box.createVerticalGlue());
     }
 
     /// Creates one expandable top-level execution row.
-    private JPanel createExecutionRow(TaskExecutionSnapshot snapshot) {
+    private JPanel createExecutionRow(TaskExecutionSnapshot snapshot, int taskFrameWidth) {
         boolean expanded = expandedExecutions.contains(snapshot.id());
         JPanel row = new JPanel(new BorderLayout(TASK_ROW_GAP, 0));
         row.setName("taskExecutionRow-" + snapshot.id());
@@ -418,7 +455,6 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         Dimension actionPreferredSize = actionPanel.getPreferredSize();
         actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
 
-        int taskFrameWidth = calculateTaskFrameWidth();
         int contentWidth = calculateTaskContentWidth(taskFrameWidth, disclosurePreferredSize.width);
         int titleWidth = calculateTaskTitleWidth(contentWidth, actionPreferredSize.width);
         JPanel header = new JPanel();
@@ -462,10 +498,23 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return row;
     }
 
-    /// Computes the task frame width from the currently allocated task-page width.
+    /// Computes the task frame width from the currently allocated list width.
+    ///
+    /// @param list list whose viewport supplies the row width
+    /// @return width available inside one top-level task frame
+    private int calculateTaskFrameWidth(JPanel list) {
+        int listWidth = list.getWidth();
+        if (listWidth > 0) {
+            Insets listInsets = list.getInsets();
+            return Math.max(1, listWidth - listInsets.left - listInsets.right - TASK_ROW_HORIZONTAL_INSETS);
+        }
+        return calculateFallbackTaskFrameWidth();
+    }
+
+    /// Computes a task frame width before a list receives its first layout pass.
     ///
     /// @return width available inside one top-level task frame
-    private int calculateTaskFrameWidth() {
+    private int calculateFallbackTaskFrameWidth() {
         int pageWidth = getWidth() > 0 ? getWidth() : tabs.getWidth();
         if (pageWidth <= 0) {
             return DEFAULT_TASK_FRAME_WIDTH;
