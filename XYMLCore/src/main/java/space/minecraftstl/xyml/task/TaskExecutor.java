@@ -25,7 +25,6 @@ import space.minecraftstl.xyml.util.Lang;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.OptionalDouble;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -181,26 +180,14 @@ public abstract class TaskExecutor {
         }
     }
 
-    /// Returns the cumulative progress of the latest top-level execution.
+    /// Returns a handle bound to this executor's exact top-level invocation.
     ///
-    /// The default executor has no registry-backed aggregate and therefore reports an unknown value. Specialized
-    /// executors may override this method when their task registry exposes the same aggregate used by task surfaces.
+    /// The default executor has no registry-backed aggregate and therefore returns an inert handle. Specialized
+    /// executors may override this method with an invocation-scoped handle.
     ///
-    /// @return normalized cumulative progress, or empty when unavailable
-    public OptionalDouble taskExecutionProgress() {
-        return OptionalDouble.empty();
-    }
-
-    /// Registers a callback for cumulative top-level execution progress changes.
-    ///
-    /// The default executor has no aggregate event source, so it returns an inert subscription. Specialized
-    /// executors may override this method; callbacks are invoked on the publisher's thread.
-    ///
-    /// @param listener invalidation callback
-    /// @return independently cancellable subscription
-    public Subscription subscribeTaskExecutionProgress(Runnable listener) {
-        Objects.requireNonNull(listener, "listener");
-        return Subscription.create(() -> { });
+    /// @return exact invocation progress handle
+    public TaskExecutionProgressHandle taskExecutionProgressHandle() {
+        return TaskExecutionProgressHandle.unavailable();
     }
 
     /// Returns immutable stage metadata for progress presentation.

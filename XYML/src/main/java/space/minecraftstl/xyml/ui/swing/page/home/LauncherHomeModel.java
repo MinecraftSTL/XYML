@@ -226,15 +226,19 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     @Override
     public void cancelLaunch() {
         @Nullable LaunchSession session;
+        @Nullable SnapshotTransition transition;
         synchronized (stateLock) {
             requireOpen();
-            if (!launchInvocationPending
+            if (launchCancellationRequested
+                    || !launchInvocationPending
                     && (currentLaunchSession == null || currentLaunchSession.status() != LaunchStatus.PREPARING)) {
                 return;
             }
             launchCancellationRequested = true;
             session = currentLaunchSession;
+            transition = replaceSnapshotLocked(map(currentSelection));
         }
+        publishTransition(transition);
         if (session != null) {
             session.cancel();
         }
@@ -349,7 +353,6 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 launchStatusSubscription = null;
                 currentLaunchSession = session;
                 cancelAfterInstall = launchCancellationRequested;
-                launchCancellationRequested = false;
             }
         }
 
@@ -434,6 +437,9 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             if (closed || currentLaunchSession != session) {
                 return;
             }
+            if (session.status() != LaunchStatus.PREPARING) {
+                launchCancellationRequested = false;
+            }
             transition = replaceSnapshotLocked(map(currentSelection));
             if (session.status() != LaunchStatus.PREPARING) {
                 terminalSubscription = launchStatusSubscription;
@@ -460,6 +466,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 return null;
             }
             launchInvocationPending = false;
+            launchCancellationRequested = false;
             return closed ? null : replaceSnapshotLocked(map(currentSelection));
         }
     }
@@ -559,6 +566,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 status,
                 hasAccount && hasInstance && !preparing,
                 preparingLaunch,
+                launchCancellationRequested,
                 !preparing);
     }
 

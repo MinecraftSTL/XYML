@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutionProgressHandle;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
@@ -92,6 +93,9 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Executor after task construction, or null while the factory is running or after terminal cleanup.
     private @Nullable TaskExecutor executor;
+
+    /// Exact top-level execution progress handle owned by this launch session.
+    private @Nullable TaskExecutionProgressHandle executionProgressHandle;
 
     /// Owned completion-listener subscription, or null outside active executor preparation.
     private @Nullable Subscription executorSubscription;
@@ -191,6 +195,7 @@ public final class DefaultLaunchSession implements LaunchSession {
                 executorSubscription = preparedExecution.completionSubscription();
                 presentationSubscription = preparedExecution.presentationSubscription();
                 executionProgressSubscription = preparedExecution.executionProgressSubscription();
+                executionProgressHandle = preparedExecution.executionProgressHandle();
                 executorPresentation = preparedExecution.presentation();
                 executorStartPending = true;
             }
@@ -264,16 +269,18 @@ public final class DefaultLaunchSession implements LaunchSession {
         @Nullable Subscription taskPresentationSubscription = null;
         @Nullable Subscription executionProgressSubscription = null;
         try {
+            TaskExecutionProgressHandle progressHandle = taskExecutor.taskExecutionProgressHandle();
             taskCompletionSubscription = taskExecutor.subscribeTaskListener(new CompletionListener(task));
             TaskExecutorPresentationModel createdPresentation =
                     new TaskExecutorPresentationModel(taskExecutor, presentationTitle, waitingPhase);
             taskPresentation = createdPresentation;
             taskPresentationSubscription = createdPresentation.subscribe(
                     ignored -> presentationChanged(createdPresentation));
-            executionProgressSubscription = taskExecutor.subscribeTaskExecutionProgress(
-                    () -> executionProgressChanged(taskExecutor));
+            executionProgressSubscription = progressHandle.subscribe(
+                    () -> executionProgressChanged(progressHandle));
             return new PreparedExecution(
                     taskExecutor,
+                    progressHandle,
                     createdPresentation,
                     taskPresentationSubscription,
                     executionProgressSubscription,
@@ -456,11 +463,11 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// @return snapshot with cumulative execution progress, or the original snapshot when unavailable
     private TaskSnapshot withTaskExecutionProgress(TaskSnapshot snapshot) {
         Objects.requireNonNull(snapshot, "snapshot");
-        @Nullable TaskExecutor activeExecutor = executor;
-        if (activeExecutor == null) {
+        @Nullable TaskExecutionProgressHandle activeProgressHandle = executionProgressHandle;
+        if (activeProgressHandle == null) {
             return snapshot;
         }
-        OptionalDouble progress = activeExecutor.taskExecutionProgress();
+        OptionalDouble progress = activeProgressHandle.progress();
         if (progress.isEmpty() || progress.equals(snapshot.progress())) {
             return snapshot;
         }
@@ -476,14 +483,14 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// Publishes a cumulative registry progress transition for the owning executor.
     ///
     /// @param sourceExecutor executor whose registry progress changed
-    private void executionProgressChanged(TaskExecutor sourceExecutor) {
-        OptionalDouble progress = sourceExecutor.taskExecutionProgress();
+    private void executionProgressChanged(TaskExecutionProgressHandle sourceProgressHandle) {
+        OptionalDouble progress = sourceProgressHandle.progress();
         if (progress.isEmpty()) {
             return;
         }
         @Nullable PresentationTransition transition;
         synchronized (stateLock) {
-            if (status != LaunchStatus.PREPARING || executor != sourceExecutor) {
+            if (status != LaunchStatus.PREPARING || executionProgressHandle != sourceProgressHandle) {
                 return;
             }
             TaskSnapshot current = presentationSnapshot;
@@ -603,6 +610,7 @@ public final class DefaultLaunchSession implements LaunchSession {
             failure = terminalFailure;
             terminalPresentationTransition = replacePresentationSnapshotLocked(terminalPresentation);
             executor = null;
+            executionProgressHandle = null;
             executorStartPending = false;
             completionSubscription = executorSubscription;
             executorSubscription = null;
@@ -787,6 +795,7 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// Owns the complete local resource set prepared before executor startup.
     ///
     /// @param executor stopped task executor
+    /// @param executionProgressHandle exact top-level execution progress handle
     /// @param presentation executor presentation adapter
     /// @param presentationSubscription bridge into the stable session presentation
     /// @param executionProgressSubscription bridge into cumulative registry progress
@@ -794,6 +803,7 @@ public final class DefaultLaunchSession implements LaunchSession {
     @NotNullByDefault
     private record PreparedExecution(
             TaskExecutor executor,
+            TaskExecutionProgressHandle executionProgressHandle,
             TaskExecutorPresentationModel presentation,
             Subscription presentationSubscription,
             Subscription executionProgressSubscription,
@@ -801,6 +811,7 @@ public final class DefaultLaunchSession implements LaunchSession {
         /// Validates one complete prepared execution bundle.
         private PreparedExecution {
             Objects.requireNonNull(executor, "executor");
+            Objects.requireNonNull(executionProgressHandle, "executionProgressHandle");
             Objects.requireNonNull(presentation, "presentation");
             Objects.requireNonNull(presentationSubscription, "presentationSubscription");
             Objects.requireNonNull(executionProgressSubscription, "executionProgressSubscription");
