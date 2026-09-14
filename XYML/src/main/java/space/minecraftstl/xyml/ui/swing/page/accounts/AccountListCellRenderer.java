@@ -54,9 +54,6 @@ public final class AccountListCellRenderer extends JPanel
     /// Failed-state icon occupying the stable avatar slot.
     private static final Icon ERROR_ICON = new AccountStateIcon(true);
 
-    /// Neutral gray replacing the theme accent for the selected player row.
-    private static final Color SELECTED_BACKGROUND = Color.GRAY;
-
     /// Asynchronous shared account-avatar cache.
     private final AccountAvatarIconCache avatarCache = new AccountAvatarIconCache();
 
@@ -199,7 +196,11 @@ public final class AccountListCellRenderer extends JPanel
             JList<? extends ChoiceListEntry<AccountListItem>> list,
             boolean selected) {
         setOpaque(false);
-        Color background = selected ? SELECTED_BACKGROUND : list.getBackground();
+        Color selectionBackground = themeAccentColor(list);
+        if (selected) {
+            list.setSelectionBackground(selectionBackground);
+        }
+        Color background = selected ? selectionBackground : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);
         setForeground(foreground);
@@ -208,6 +209,23 @@ public final class AccountListCellRenderer extends JPanel
         setBorder(BorderFactory.createCompoundBorder(
                 RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
+    }
+
+    /// Resolves the active theme accent used by the account selection surface.
+    ///
+    /// @param list owning list whose native selection color is the final fallback
+    /// @return current theme accent
+    private static Color themeAccentColor(JList<?> list) {
+        @Nullable Color accent = UIManager.getColor("Component.accentColor");
+        if (accent != null) {
+            return accent;
+        }
+        accent = UIManager.getColor("Button.default.background");
+        if (accent != null) {
+            return accent;
+        }
+        accent = UIManager.getColor("ToggleButton.selectedBackground");
+        return accent == null ? list.getSelectionBackground() : accent;
     }
 
     /// Fixed theme-aware placeholder for account avatar loading and failure states.
