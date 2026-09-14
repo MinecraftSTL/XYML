@@ -18,12 +18,10 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 
-import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -92,24 +90,16 @@ public final class LaunchProgressButtonTest {
     /// Uses black in a light theme and white in a dark theme for the translucent progress fill.
     @Test
     public void followsThemeBrightnessForProgressFill() {
-        @Nullable Color previousSurface = UIManager.getColor("Panel.background");
-        try {
-            UIManager.put("Panel.background", Color.WHITE);
-            Color lightFill = ShellNavigationButton.progressFillColor();
-            UIManager.put("Panel.background", Color.BLACK);
-            Color darkFill = ShellNavigationButton.progressFillColor();
-            assertAll(
-                    () -> assertEquals(Color.BLACK.getRGB() & 0x00FFFFFF, lightFill.getRGB() & 0x00FFFFFF),
-                    () -> assertEquals(Color.WHITE.getRGB() & 0x00FFFFFF, darkFill.getRGB() & 0x00FFFFFF),
-                    () -> assertEquals(72, lightFill.getAlpha()),
-                    () -> assertEquals(72, darkFill.getAlpha()));
-        } finally {
-            if (previousSurface == null) {
-                UIManager.getDefaults().remove("Panel.background");
-            } else {
-                UIManager.put("Panel.background", previousSurface);
-            }
-        }
+        LaunchProgressButton button = new LaunchProgressButton();
+        button.setBackground(Color.WHITE);
+        Color lightFill = ProgressOverlayColors.fillColor(button);
+        button.setBackground(Color.BLACK);
+        Color darkFill = ProgressOverlayColors.fillColor(button);
+        assertAll(
+                () -> assertEquals(Color.BLACK.getRGB() & 0x00FFFFFF, lightFill.getRGB() & 0x00FFFFFF),
+                () -> assertEquals(Color.WHITE.getRGB() & 0x00FFFFFF, darkFill.getRGB() & 0x00FFFFFF),
+                () -> assertEquals(72, lightFill.getAlpha()),
+                () -> assertEquals(72, darkFill.getAlpha()));
     }
 
 }

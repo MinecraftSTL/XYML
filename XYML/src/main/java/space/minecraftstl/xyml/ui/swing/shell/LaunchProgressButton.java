@@ -96,7 +96,7 @@ final class LaunchProgressButton extends JButton {
                     Math.min(availableWidth, getHeight()),
                     UIManager.getInt("Button.arc")));
             copy.clip(new RoundRectangle2D.Double(0, 0, availableWidth, getHeight(), arc, arc));
-            copy.setColor(ShellNavigationButton.progressFillColor());
+            copy.setColor(ProgressOverlayColors.fillColor(this));
             copy.fillRect(0, 0, filledWidth, getHeight());
         } finally {
             copy.dispose();

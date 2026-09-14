@@ -120,7 +120,7 @@ final class ShellNavigationButton extends JToggleButton {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             if (activeTaskProgress.isPresent() && getWidth() > 0 && getHeight() > 0) {
                 double fraction = Math.max(0.0D, Math.min(1.0D, activeTaskProgress.getAsDouble()));
-                copy.setColor(progressFillColor());
+                copy.setColor(ProgressOverlayColors.fillColor(this));
                 int arc = Math.max(0, Math.min(
                         Math.min(getWidth(), getHeight()),
                         UIManager.getInt("Button.arc")));
@@ -145,22 +145,6 @@ final class ShellNavigationButton extends JToggleButton {
         } finally {
             copy.dispose();
         }
-    }
-
-    /// Returns a translucent black or white fill that follows the active light or dark surface.
-    ///
-    /// @return translucent black in light themes or white in dark themes
-    static Color progressFillColor() {
-        @Nullable Color surface = UIManager.getColor("Panel.background");
-        if (surface == null) {
-            surface = UIManager.getColor("List.background");
-        }
-        Color resolvedSurface = surface == null ? new Color(32, 32, 32) : surface;
-        int luminance = resolvedSurface.getRed() * 299
-                + resolvedSurface.getGreen() * 587
-                + resolvedSurface.getBlue() * 114;
-        Color fill = luminance >= 128_000 ? Color.BLACK : Color.WHITE;
-        return new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 72);
     }
 
     /// Resolves the current FlatLaf accent used for task progress and count badges.
