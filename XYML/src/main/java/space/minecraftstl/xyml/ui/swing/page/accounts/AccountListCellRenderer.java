@@ -196,11 +196,7 @@ public final class AccountListCellRenderer extends JPanel
             JList<? extends ChoiceListEntry<AccountListItem>> list,
             boolean selected) {
         setOpaque(false);
-        Color selectionBackground = themeAccentColor(list);
-        if (selected) {
-            list.setSelectionBackground(selectionBackground);
-        }
-        Color background = selected ? selectionBackground : list.getBackground();
+        Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);
         setForeground(foreground);
@@ -209,23 +205,6 @@ public final class AccountListCellRenderer extends JPanel
         setBorder(BorderFactory.createCompoundBorder(
                 RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
-    }
-
-    /// Resolves the active theme accent used by the account selection surface.
-    ///
-    /// @param list owning list whose native selection color is the final fallback
-    /// @return current theme accent
-    private static Color themeAccentColor(JList<?> list) {
-        @Nullable Color accent = UIManager.getColor("Component.accentColor");
-        if (accent != null) {
-            return accent;
-        }
-        accent = UIManager.getColor("Button.default.background");
-        if (accent != null) {
-            return accent;
-        }
-        accent = UIManager.getColor("ToggleButton.selectedBackground");
-        return accent == null ? list.getSelectionBackground() : accent;
     }
 
     /// Fixed theme-aware placeholder for account avatar loading and failure states.

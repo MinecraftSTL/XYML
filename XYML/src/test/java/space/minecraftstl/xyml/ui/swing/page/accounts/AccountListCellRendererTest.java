@@ -150,48 +150,35 @@ public final class AccountListCellRendererTest {
             assertTrue(FlatLightLaf.setup());
             new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
             SwingUtilities.updateComponentTreeUI(list);
-            Color accent = new Color(57, 112, 184);
-            @Nullable Object previousAccent = UIManager.get("Component.accentColor");
-            try {
-                UIManager.put("Component.accentColor", accent);
-                list.setSelectionBackground(Color.WHITE);
-                Component selected = renderer.getListCellRendererComponent(
-                        list,
-                        ChoiceListEntry.loading(0),
-                        0,
-                        true,
-                        true);
-                selected.setSize(320, AccountListCellRenderer.ROW_HEIGHT);
-                layoutRecursively((Container) selected);
-                BufferedImage rendered = render((javax.swing.JComponent) selected);
-                assertAll(
-                        () -> assertFalse(((javax.swing.JComponent) selected).isOpaque()),
-                        () -> assertEquals(accent, list.getSelectionBackground()),
-                        () -> assertEquals(accent, selected.getBackground()),
-                        () -> assertEquals(0, rendered.getRGB(0, 0) >>> 24),
-                        () -> assertEquals(0, rendered.getRGB(rendered.getWidth() - 1, 0) >>> 24),
-                        () -> assertEquals(
-                                Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
-                                rendered.getRGB(0, rendered.getHeight() / 2)),
-                        () -> assertEquals(
-                                accent.getRGB(),
-                                rendered.getRGB(rendered.getWidth() - 2, rendered.getHeight() / 2)),
-                        () -> assertFalse(containsComponentType(renderer, JRadioButton.class)));
+            Component selected = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    true,
+                    true);
+            selected.setSize(320, AccountListCellRenderer.ROW_HEIGHT);
+            layoutRecursively((Container) selected);
+            BufferedImage rendered = render((javax.swing.JComponent) selected);
+            assertAll(
+                    () -> assertFalse(((javax.swing.JComponent) selected).isOpaque()),
+                    () -> assertEquals(list.getSelectionBackground(), selected.getBackground()),
+                    () -> assertEquals(0, rendered.getRGB(0, 0) >>> 24),
+                    () -> assertEquals(0, rendered.getRGB(rendered.getWidth() - 1, 0) >>> 24),
+                    () -> assertEquals(
+                            Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                            rendered.getRGB(0, rendered.getHeight() / 2)),
+                    () -> assertEquals(
+                            list.getSelectionBackground().getRGB(),
+                            rendered.getRGB(rendered.getWidth() - 2, rendered.getHeight() / 2)),
+                    () -> assertFalse(containsComponentType(renderer, JRadioButton.class)));
 
-                Component unselected = renderer.getListCellRendererComponent(
-                        list,
-                        ChoiceListEntry.loading(0),
-                        0,
-                        false,
-                        false);
-                assertFalse(((javax.swing.JComponent) unselected).isOpaque());
-            } finally {
-                if (previousAccent == null) {
-                    UIManager.getDefaults().remove("Component.accentColor");
-                } else {
-                    UIManager.put("Component.accentColor", previousAccent);
-                }
-            }
+            Component unselected = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    false,
+                    false);
+            assertFalse(((javax.swing.JComponent) unselected).isOpaque());
         });
     }
 
