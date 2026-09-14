@@ -87,9 +87,7 @@ final class LaunchProgressButton extends JButton {
         Graphics2D copy = (Graphics2D) graphics.create();
         try {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            int left = Math.max(0, getInsets().left);
-            int right = Math.max(left, getWidth() - Math.max(0, getInsets().right));
-            int availableWidth = right - left;
+            int availableWidth = getWidth();
             int filledWidth = filledProgressWidth(availableWidth);
             if (filledWidth <= 0) {
                 return;
@@ -97,9 +95,9 @@ final class LaunchProgressButton extends JButton {
             int arc = Math.max(0, Math.min(
                     Math.min(availableWidth, getHeight()),
                     UIManager.getInt("Button.arc")));
-            copy.clip(new RoundRectangle2D.Double(left, 0, availableWidth, getHeight(), arc, arc));
+            copy.clip(new RoundRectangle2D.Double(0, 0, availableWidth, getHeight(), arc, arc));
             copy.setColor(ShellNavigationButton.progressFillColor());
-            copy.fillRect(left, 0, filledWidth, getHeight());
+            copy.fillRect(0, 0, filledWidth, getHeight());
         } finally {
             copy.dispose();
         }

@@ -21,8 +21,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import com.formdev.flatlaf.FlatDarkLaf;
+
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -61,6 +65,28 @@ public final class LaunchProgressButtonTest {
 
         button.setProgress(OptionalDouble.of(1.0));
         assertEquals(100, button.filledProgressWidth(100));
+    }
+
+    /// Paints a visible white fill from the left edge toward the right in dark mode.
+    @Test
+    public void paintsLeftToRightFillInDarkTheme() {
+        assertTrue(FlatDarkLaf.setup());
+        LaunchProgressButton button = new LaunchProgressButton();
+        button.setSize(200, 36);
+        button.setProgressVisible(true);
+        button.setProgress(OptionalDouble.of(0.5));
+
+        BufferedImage rendered = new BufferedImage(200, 36, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = rendered.createGraphics();
+        try {
+            button.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+
+        assertAll(
+                () -> assertTrue(button.filledProgressWidth(200) > 0),
+                () -> assertTrue(rendered.getRGB(160, 18) != rendered.getRGB(40, 18)));
     }
 
     /// Uses black in a light theme and white in a dark theme for the translucent progress fill.
