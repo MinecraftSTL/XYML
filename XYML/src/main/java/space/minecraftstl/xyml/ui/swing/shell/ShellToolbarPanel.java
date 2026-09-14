@@ -337,6 +337,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         instanceSelector.setSelectedText(instanceName, state.instanceDetail());
 
         boolean cancelling = state.launching();
+        boolean cancellationRequested = state.launchCancellationRequested();
         launchButton.setText(cancelling
                 ? homeStrings.cancelLaunchAction()
                 : homeStrings.launchAction());
@@ -346,7 +347,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 ? homeStrings.cancelLaunchAction()
                 : homeStrings.launchAction());
         launchButton.setProgressVisible(cancelling);
-        launchButton.setEnabled(cancelling || state.launchEnabled());
+        launchButton.setEnabled(state.launchEnabled() || cancelling && !cancellationRequested);
     }
 
     /// Applies the latest launch-session identity and binds its task progress to the toolbar button.
