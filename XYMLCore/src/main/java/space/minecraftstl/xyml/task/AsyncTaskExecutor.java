@@ -21,6 +21,7 @@ import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.util.Lang;
 
 import java.util.ArrayList;
@@ -30,6 +31,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.OptionalDouble;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -52,6 +55,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
     /// Registry receiving one immutable top-level execution stream.
     private final TaskExecutionRegistry taskExecutionRegistry;
+
+    /// Latest registry invocation ID created by this executor, or null before its first start.
+    private volatile @Nullable UUID latestTaskExecutionId;
 
     /// Live cancellation domains belonging to repeated starts of this executor.
     private final Set<TaskResourceLockManager.Execution> resourceExecutions = ConcurrentHashMap.newKeySet();
@@ -98,6 +104,40 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         this.taskExecutionRegistry = Objects.requireNonNull(taskExecutionRegistry, "taskExecutionRegistry");
     }
 
+    /// Returns the cumulative progress of the latest registry-backed execution.
+    ///
+    /// @return the same aggregate progress used by the task navigation indicator, or empty before registration
+    @Override
+    public OptionalDouble taskExecutionProgress() {
+        @Nullable UUID executionId = latestTaskExecutionId;
+        if (executionId == null) {
+            return OptionalDouble.empty();
+        }
+        @Nullable TaskExecutionSnapshot snapshot = taskExecutionRegistry.snapshot(executionId);
+        return snapshot == null ? OptionalDouble.empty() : snapshot.progress();
+    }
+
+    /// Registers an invalidation callback for the latest registry-backed execution.
+    ///
+    /// @param listener callback invoked when the latest execution publishes a snapshot
+    /// @return independently cancellable registry subscription
+    @Override
+    public Subscription subscribeTaskExecutionProgress(Runnable listener) {
+        Objects.requireNonNull(listener, "listener");
+        return taskExecutionRegistry.subscribeVersioned(publication -> {
+            @Nullable UUID executionId = latestTaskExecutionId;
+            if (executionId == null) {
+                return;
+            }
+            for (TaskExecutionSnapshot snapshot : publication.snapshots()) {
+                if (snapshot.id().equals(executionId)) {
+                    listener.run();
+                    return;
+                }
+            }
+        });
+    }
+
     /// Starts one execution chain and returns this executor.
     ///
     /// The started flag is published before any listener notification so synchronous listener cancellation is valid.
@@ -121,6 +161,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     this,
                     taskExecutionTitle(),
                     taskExecutionUserVisible());
+            latestTaskExecutionId = monitoredExecution.id();
             monitoredExecutions.put(resourceExecution, monitoredExecution);
             // A direct cancel can re-enter from the registry's initial publication before the monitoring map exists.
             // Handoff the cancellation marker after installing the handle so that invocation history cannot miss it.

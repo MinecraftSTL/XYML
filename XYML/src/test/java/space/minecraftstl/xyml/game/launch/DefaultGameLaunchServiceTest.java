@@ -92,7 +92,7 @@ final class DefaultGameLaunchServiceTest {
             assertEquals("Test launch", winningSession.snapshot().title());
             assertEquals("Preparing concurrent launch", winningSession.snapshot().phase());
             assertEquals(TaskStatus.RUNNING, winningSession.snapshot().status());
-            assertTrue(winningSession.snapshot().progress().isEmpty());
+            assertEquals(0.0, winningSession.snapshot().progress().orElseThrow());
             taskRelease.countDown();
             assertSame(process, winningSession.completion().toCompletableFuture().get(5, TimeUnit.SECONDS));
             assertEquals(LaunchStatus.PROCESS_CREATED, winningSession.status());

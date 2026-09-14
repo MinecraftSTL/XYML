@@ -99,6 +99,9 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// Owned bridge from the executor presentation adapter, or null outside active executor preparation.
     private @Nullable Subscription presentationSubscription;
 
+    /// Owned bridge from the top-level task registry's cumulative progress, or null outside active preparation.
+    private @Nullable Subscription executionProgressSubscription;
+
     /// Executor presentation adapter created before start, or null before creation and after terminal cleanup.
     private @Nullable TaskExecutorPresentationModel executorPresentation;
 
@@ -187,6 +190,7 @@ public final class DefaultLaunchSession implements LaunchSession {
                 executor = preparedExecution.executor();
                 executorSubscription = preparedExecution.completionSubscription();
                 presentationSubscription = preparedExecution.presentationSubscription();
+                executionProgressSubscription = preparedExecution.executionProgressSubscription();
                 executorPresentation = preparedExecution.presentation();
                 executorStartPending = true;
             }
@@ -258,6 +262,7 @@ public final class DefaultLaunchSession implements LaunchSession {
         @Nullable Subscription taskCompletionSubscription = null;
         @Nullable TaskExecutorPresentationModel taskPresentation = null;
         @Nullable Subscription taskPresentationSubscription = null;
+        @Nullable Subscription executionProgressSubscription = null;
         try {
             taskCompletionSubscription = taskExecutor.subscribeTaskListener(new CompletionListener(task));
             TaskExecutorPresentationModel createdPresentation =
@@ -265,15 +270,19 @@ public final class DefaultLaunchSession implements LaunchSession {
             taskPresentation = createdPresentation;
             taskPresentationSubscription = createdPresentation.subscribe(
                     ignored -> presentationChanged(createdPresentation));
+            executionProgressSubscription = taskExecutor.subscribeTaskExecutionProgress(
+                    () -> executionProgressChanged(taskExecutor));
             return new PreparedExecution(
                     taskExecutor,
                     createdPresentation,
                     taskPresentationSubscription,
+                    executionProgressSubscription,
                     taskCompletionSubscription);
         } catch (RuntimeException | Error creationFailure) {
             @Nullable Throwable cleanupFailure = releaseDetachedExecution(
                     taskCompletionSubscription,
                     taskPresentationSubscription,
+                    executionProgressSubscription,
                     taskPresentation);
             if (cleanupFailure != null && cleanupFailure != creationFailure) {
                 creationFailure.addSuppressed(cleanupFailure);
@@ -290,6 +299,7 @@ public final class DefaultLaunchSession implements LaunchSession {
         return releaseDetachedExecution(
                 preparedExecution.completionSubscription(),
                 preparedExecution.presentationSubscription(),
+                preparedExecution.executionProgressSubscription(),
                 preparedExecution.presentation());
     }
 
@@ -302,10 +312,12 @@ public final class DefaultLaunchSession implements LaunchSession {
     private static @Nullable Throwable releaseDetachedExecution(
             @Nullable Subscription completionSubscription,
             @Nullable Subscription taskPresentationSubscription,
+            @Nullable Subscription executionProgressSubscription,
             @Nullable TaskExecutorPresentationModel taskPresentation) {
         @Nullable Throwable cleanupFailure = null;
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(completionSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(taskPresentationSubscription));
+        cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(executionProgressSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> closePresentation(taskPresentation));
         return cleanupFailure;
     }
@@ -429,11 +441,59 @@ public final class DefaultLaunchSession implements LaunchSession {
             if (status != LaunchStatus.PREPARING || executorPresentation != sourcePresentation) {
                 return;
             }
-            TaskSnapshot replacement = sourcePresentation.snapshot();
+            TaskSnapshot replacement = withTaskExecutionProgress(sourcePresentation.snapshot());
             if (cancellationRequested) {
                 replacement = withCancellationDisabled(replacement);
             }
             transition = replacePresentationSnapshotLocked(replacement);
+        }
+        reportCleanupFailure(notifyPresentationTransition(transition));
+    }
+
+    /// Applies the top-level registry aggregate to a task presentation snapshot when available.
+    ///
+    /// @param snapshot current phase and lifecycle presentation
+    /// @return snapshot with cumulative execution progress, or the original snapshot when unavailable
+    private TaskSnapshot withTaskExecutionProgress(TaskSnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        @Nullable TaskExecutor activeExecutor = executor;
+        if (activeExecutor == null) {
+            return snapshot;
+        }
+        OptionalDouble progress = activeExecutor.taskExecutionProgress();
+        if (progress.isEmpty() || progress.equals(snapshot.progress())) {
+            return snapshot;
+        }
+        return new TaskSnapshot(
+                snapshot.title(),
+                snapshot.phase(),
+                progress,
+                snapshot.status(),
+                snapshot.cancelable(),
+                snapshot.details());
+    }
+
+    /// Publishes a cumulative registry progress transition for the owning executor.
+    ///
+    /// @param sourceExecutor executor whose registry progress changed
+    private void executionProgressChanged(TaskExecutor sourceExecutor) {
+        OptionalDouble progress = sourceExecutor.taskExecutionProgress();
+        if (progress.isEmpty()) {
+            return;
+        }
+        @Nullable PresentationTransition transition;
+        synchronized (stateLock) {
+            if (status != LaunchStatus.PREPARING || executor != sourceExecutor) {
+                return;
+            }
+            TaskSnapshot current = presentationSnapshot;
+            transition = replacePresentationSnapshotLocked(new TaskSnapshot(
+                    current.title(),
+                    current.phase(),
+                    progress,
+                    current.status(),
+                    current.cancelable(),
+                    current.details()));
         }
         reportCleanupFailure(notifyPresentationTransition(transition));
     }
@@ -527,6 +587,7 @@ public final class DefaultLaunchSession implements LaunchSession {
 
         @Nullable Subscription completionSubscription;
         @Nullable Subscription taskPresentationSubscription;
+        @Nullable Subscription executionProgressSubscription;
         @Nullable TaskExecutorPresentationModel taskPresentation;
         @Nullable PresentationTransition terminalPresentationTransition;
         synchronized (stateLock) {
@@ -547,6 +608,8 @@ public final class DefaultLaunchSession implements LaunchSession {
             executorSubscription = null;
             taskPresentationSubscription = presentationSubscription;
             presentationSubscription = null;
+            executionProgressSubscription = this.executionProgressSubscription;
+            this.executionProgressSubscription = null;
             taskPresentation = executorPresentation;
             executorPresentation = null;
         }
@@ -560,6 +623,7 @@ public final class DefaultLaunchSession implements LaunchSession {
                 notifyPresentationTransition(terminalPresentationTransition));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(completionSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(taskPresentationSubscription));
+        cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(executionProgressSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> closePresentation(taskPresentation));
 
         // CompletableFuture invokes synchronous dependents here; every public state surface is already terminal.
@@ -725,18 +789,21 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// @param executor stopped task executor
     /// @param presentation executor presentation adapter
     /// @param presentationSubscription bridge into the stable session presentation
+    /// @param executionProgressSubscription bridge into cumulative registry progress
     /// @param completionSubscription session completion listener registration
     @NotNullByDefault
     private record PreparedExecution(
             TaskExecutor executor,
             TaskExecutorPresentationModel presentation,
             Subscription presentationSubscription,
+            Subscription executionProgressSubscription,
             Subscription completionSubscription) {
         /// Validates one complete prepared execution bundle.
         private PreparedExecution {
             Objects.requireNonNull(executor, "executor");
             Objects.requireNonNull(presentation, "presentation");
             Objects.requireNonNull(presentationSubscription, "presentationSubscription");
+            Objects.requireNonNull(executionProgressSubscription, "executionProgressSubscription");
             Objects.requireNonNull(completionSubscription, "completionSubscription");
         }
     }
