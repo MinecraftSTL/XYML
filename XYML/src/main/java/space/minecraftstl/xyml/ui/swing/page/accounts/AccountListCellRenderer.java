@@ -75,9 +75,6 @@ public final class AccountListCellRenderer extends JPanel
     /// List whose UI paints the current selection background, or `null` before first configuration.
     private @Nullable JList<?> selectionOwner;
 
-    /// Logical row represented during the next paint.
-    private int selectionIndex = -1;
-
     /// Whether the represented row is selected.
     private boolean selected;
 
@@ -127,7 +124,6 @@ public final class AccountListCellRenderer extends JPanel
             boolean focused) {
         applyComponentOrientation(list.getComponentOrientation());
         selectionOwner = list;
-        selectionIndex = index;
         this.selected = selected;
         this.focused = focused;
         configurePalette(list, selected);
@@ -157,25 +153,41 @@ public final class AccountListCellRenderer extends JPanel
         return this;
     }
 
-    /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+    /// Paints the account-specific gray selection before the transparent renderer hierarchy.
+    ///
+    /// The general list painter delegates the fill color back to FlatLaf, so using it here would restore the
+    /// theme accent. Account rows intentionally own a neutral gray fill while retaining the shared focus outline.
     ///
     /// @param graphics destination graphics
     @Override
     protected void paintComponent(Graphics graphics) {
         @Nullable JList<?> owner = selectionOwner;
         if (selected && owner != null) {
-            RoundedListSelectionPainter.paintSelectedBackground(
-                    owner,
-                    graphics,
-                    selectionIndex,
-                    getWidth(),
-                    getHeight(),
-                    getBackground());
+            paintGraySelection(graphics);
         }
         if (focused && owner != null) {
             RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
         }
         super.paintComponent(graphics);
+    }
+
+    /// Paints a rounded gray selection without allowing the look and feel to substitute its accent color.
+    ///
+    /// @param graphics destination graphics
+    private void paintGraySelection(Graphics graphics) {
+        Graphics2D copy = (Graphics2D) graphics.create();
+        try {
+            copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int arc = Math.max(0, UIManager.getInt("List.selectionArc"));
+            if (arc == 0) {
+                arc = Math.max(0, UIManager.getInt("Component.arc"));
+            }
+            int boundedArc = Math.min(Math.min(getWidth(), getHeight()), arc);
+            copy.setColor(SELECTED_BACKGROUND);
+            copy.fillRoundRect(0, 0, getWidth(), getHeight(), boundedArc, boundedArc);
+        } finally {
+            copy.dispose();
+        }
     }
 
     /// Assigns child bounds before Swing's renderer pane paints this reusable complex component.
