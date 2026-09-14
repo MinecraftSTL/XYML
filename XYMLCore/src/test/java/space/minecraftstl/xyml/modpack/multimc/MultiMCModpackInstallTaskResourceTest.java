@@ -238,7 +238,8 @@ final class MultiMCModpackInstallTaskResourceTest {
                 DefaultDependencyManager dependencyManager,
                 Path zipFile,
                 GameInstanceID instanceId,
-                @Nullable String iconUrl) {
+                @Nullable String iconUrl,
+                @Nullable Set<String> excludedFiles) {
             throw new UnsupportedOperationException("Constructor-only fixture");
         }
     }

@@ -58,6 +58,9 @@ public final class CurseInstallTask extends Task<Void> {
     /// Existing modpack configuration, or null for a fresh installation.
     private final @Nullable ModpackConfiguration<CurseManifest> config;
 
+    /// Keys of optional files excluded from installation, or null to install all files.
+    private final @Nullable Set<String> excludedFiles;
+
     /// Validated icon extension, or null when no icon should be installed.
     private @Nullable String iconExt;
 
@@ -81,12 +84,33 @@ public final class CurseInstallTask extends Task<Void> {
             CurseManifest manifest,
             GameInstanceID instanceId,
             @Nullable String iconUrl) {
+        this(dependencyManager, zipFile, modpack, manifest, instanceId, iconUrl, null);
+    }
+
+    /// Creates a CurseForge installation with optional files excluded by key.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest CurseForge manifest
+    /// @param instanceId destination instance
+    /// @param iconUrl optional remote icon URL
+    /// @param excludedFiles optional file keys to skip
+    public CurseInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            CurseManifest manifest,
+            GameInstanceID instanceId,
+            @Nullable String iconUrl,
+            @Nullable Set<String> excludedFiles) {
         this.dependencyManager = dependencyManager;
         this.zipFile = zipFile;
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.iconUrl = iconUrl;
+        this.excludedFiles = excludedFiles == null ? null : Set.copyOf(excludedFiles);
         this.repository = dependencyManager.getGameRepository();
         this.run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
         setResources(
@@ -142,7 +166,7 @@ public final class CurseInstallTask extends Task<Void> {
                 dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().injectURLWithCandidates(iconUrl)));
             }
         }
-        dependencies.add(new CurseCompletionTask(dependencyManager, instanceId, manifest));
+        dependencies.add(new CurseCompletionTask(dependencyManager, instanceId, manifest, excludedFiles));
     }
 
     @Override

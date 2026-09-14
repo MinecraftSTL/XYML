@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
@@ -293,6 +294,25 @@ public final class ModpackHelper {
             GameInstanceID instanceId,
             Modpack modpack,
             String iconUrl) {
+        return getInstallTask(repository, zipFile, instanceId, modpack, iconUrl, null);
+    }
+
+    /// Creates an archive installation task with selected optional files excluded.
+    ///
+    /// @param repository destination game repository
+    /// @param zipFile archive path
+    /// @param instanceId destination instance identifier
+    /// @param modpack parsed modpack
+    /// @param iconUrl instance icon URL
+    /// @param excludedFiles optional file keys to skip
+    /// @return configured installation task
+    public static Task<?> getInstallTask(
+            XYMLGameRepository repository,
+            Path zipFile,
+            GameInstanceID instanceId,
+            Modpack modpack,
+            String iconUrl,
+            @Nullable Set<String> excludedFiles) {
         repository.markInstanceAsModpack(instanceId);
 
         ExceptionalRunnable<?> success = () -> {
@@ -314,7 +334,7 @@ public final class ModpackHelper {
         Task<?> installation = finalizeInstallation(
                 repository,
                 instanceId,
-                modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl),
+                modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl, excludedFiles),
                 success,
                 failure);
         if (modpack.getManifest() instanceof MultiMCInstanceConfiguration)
@@ -419,14 +439,14 @@ public final class ModpackHelper {
             throw new UnsupportedModpackException();
         }
         if (modpack.getManifest() instanceof MultiMCInstanceConfiguration)
-            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack)
+            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack, null)
                     .thenComposeAsync(createMultiMCPostUpdateTask(
                             repository,
                             (MultiMCInstanceConfiguration) modpack.getManifest(),
                             instanceId))
                     .thenComposeAsync(repository.refreshAsync());
         else
-            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack)
+            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack, null)
                     .thenComposeAsync(repository.refreshAsync());
     }
 

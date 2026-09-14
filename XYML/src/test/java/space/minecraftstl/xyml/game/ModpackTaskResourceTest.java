@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
@@ -243,7 +244,8 @@ public final class ModpackTaskResourceTest {
                 DefaultDependencyManager dependencyManager,
                 Path zipFile,
                 GameInstanceID instanceId,
-                String iconUrl) {
+                String iconUrl,
+                @Nullable Set<String> excludedFiles) {
             return installation;
         }
     }
