@@ -180,6 +180,16 @@ public abstract class TaskExecutor {
         }
     }
 
+    /// Returns a handle bound to this executor's exact top-level invocation.
+    ///
+    /// The default executor has no registry-backed aggregate and therefore returns an inert handle. Specialized
+    /// executors may override this method with an invocation-scoped handle.
+    ///
+    /// @return exact invocation progress handle
+    public TaskExecutionProgressHandle taskExecutionProgressHandle() {
+        return TaskExecutionProgressHandle.unavailable();
+    }
+
     /// Returns immutable stage metadata for progress presentation.
     public @Unmodifiable List<Task.StagesHint> getHints() {
         return hints;

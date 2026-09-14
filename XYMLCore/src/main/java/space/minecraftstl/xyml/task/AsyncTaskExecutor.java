@@ -53,6 +53,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Registry receiving one immutable top-level execution stream.
     private final TaskExecutionRegistry taskExecutionRegistry;
 
+    /// Invocation-scoped progress handle bound only by the first top-level execution.
+    private final TaskExecutionProgressHandle taskExecutionProgressHandle;
+
     /// Live cancellation domains belonging to repeated starts of this executor.
     private final Set<TaskResourceLockManager.Execution> resourceExecutions = ConcurrentHashMap.newKeySet();
 
@@ -96,6 +99,15 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         super(task);
         this.resourceLockManager = Objects.requireNonNull(resourceLockManager, "resourceLockManager");
         this.taskExecutionRegistry = Objects.requireNonNull(taskExecutionRegistry, "taskExecutionRegistry");
+        this.taskExecutionProgressHandle = TaskExecutionProgressHandle.forRegistry(taskExecutionRegistry);
+    }
+
+    /// Returns the invocation-scoped progress handle owned by this executor.
+    ///
+    /// @return handle bound to the first top-level execution only
+    @Override
+    public TaskExecutionProgressHandle taskExecutionProgressHandle() {
+        return taskExecutionProgressHandle;
     }
 
     /// Starts one execution chain and returns this executor.
@@ -131,6 +143,26 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
         AtomicBoolean stopNotificationAttempted = new AtomicBoolean();
         AtomicReference<@Nullable Throwable> invocationFailure = new AtomicReference<>();
+        try {
+            taskExecutionProgressHandle.bind(monitoredExecution.id());
+        } catch (Error bindFailure) {
+            failure = bindFailure;
+            invocationFailure.set(bindFailure);
+            try {
+                stopInvocation(
+                        resourceExecution,
+                        monitoredExecution,
+                        false,
+                        invocationFailure,
+                        stopNotificationAttempted);
+            } catch (RuntimeException | Error stopFailure) {
+                if (stopFailure != bindFailure) {
+                    bindFailure.addSuppressed(stopFailure);
+                }
+            }
+            removeExecutionWhenClean(resourceExecution);
+            throw bindFailure;
+        }
         if (cancellationToRun != null) {
             try {
                 cancellationToRun.run();

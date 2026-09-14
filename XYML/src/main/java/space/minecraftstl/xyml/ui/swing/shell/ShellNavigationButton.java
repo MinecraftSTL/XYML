@@ -120,7 +120,7 @@ final class ShellNavigationButton extends JToggleButton {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             if (activeTaskProgress.isPresent() && getWidth() > 0 && getHeight() > 0) {
                 double fraction = Math.max(0.0D, Math.min(1.0D, activeTaskProgress.getAsDouble()));
-                copy.setColor(progressFillColor());
+                copy.setColor(ProgressOverlayColors.fillColor(this));
                 int arc = Math.max(0, Math.min(
                         Math.min(getWidth(), getHeight()),
                         UIManager.getInt("Button.arc")));
@@ -145,24 +145,6 @@ final class ShellNavigationButton extends JToggleButton {
         } finally {
             copy.dispose();
         }
-    }
-
-    /// Returns a translucent fill color that is guaranteed to contrast with the current button surface.
-    ///
-    /// The foreground normally provides the theme's accent contrast. A luminance-based fallback handles custom
-    /// themes whose foreground and background are too close, ensuring that a non-zero progress value is visible.
-    ///
-    /// @return translucent progress fill color
-    private Color progressFillColor() {
-        @Nullable Color background = getBackground();
-        Color fill = themeAccentColor();
-        if (fill == null || background != null && colorDistance(fill, background) < 24) {
-            @Nullable Color foreground = getForeground();
-            fill = foreground == null
-                    ? background == null ? new Color(72, 126, 196) : contrastingColor(background)
-                    : foreground;
-        }
-        return new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 72);
     }
 
     /// Resolves the current FlatLaf accent used for task progress and count badges.
@@ -200,28 +182,6 @@ final class ShellNavigationButton extends JToggleButton {
                 + background.getGreen() * 587
                 + background.getBlue() * 114;
         return luminance >= 160_000 ? Color.BLACK : Color.WHITE;
-    }
-
-    /// Chooses a blue accent with enough contrast for one background color.
-    ///
-    /// @param background button background
-    /// @return contrasting accent color
-    private static Color contrastingColor(Color background) {
-        int luminance = background.getRed() * 299
-                + background.getGreen() * 587
-                + background.getBlue() * 114;
-        return luminance >= 128_000 ? new Color(35, 95, 170) : new Color(185, 215, 250);
-    }
-
-    /// Computes a compact RGB distance for contrast fallback selection.
-    ///
-    /// @param first first color
-    /// @param second second color
-    /// @return absolute channel distance
-    private static int colorDistance(Color first, Color second) {
-        return Math.abs(first.getRed() - second.getRed())
-                + Math.abs(first.getGreen() - second.getGreen())
-                + Math.abs(first.getBlue() - second.getBlue());
     }
 
     /// Creates a theme-aware navigation icon for one destination.

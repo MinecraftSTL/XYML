@@ -142,6 +142,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("instance.launch_script"),
                 i18n("instance.launch"),
                 i18n("swing.home.launching"),
+                i18n("swing.home.cancel_launch"),
                 i18n("swing.home.back_to_selections"));
     }
 
