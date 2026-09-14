@@ -133,7 +133,6 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     this,
                     taskExecutionTitle(),
                     taskExecutionUserVisible());
-            taskExecutionProgressHandle.bind(monitoredExecution.id());
             monitoredExecutions.put(resourceExecution, monitoredExecution);
             // A direct cancel can re-enter from the registry's initial publication before the monitoring map exists.
             // Handoff the cancellation marker after installing the handle so that invocation history cannot miss it.
@@ -144,6 +143,26 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
         AtomicBoolean stopNotificationAttempted = new AtomicBoolean();
         AtomicReference<@Nullable Throwable> invocationFailure = new AtomicReference<>();
+        try {
+            taskExecutionProgressHandle.bind(monitoredExecution.id());
+        } catch (Error bindFailure) {
+            failure = bindFailure;
+            invocationFailure.set(bindFailure);
+            try {
+                stopInvocation(
+                        resourceExecution,
+                        monitoredExecution,
+                        false,
+                        invocationFailure,
+                        stopNotificationAttempted);
+            } catch (RuntimeException | Error stopFailure) {
+                if (stopFailure != bindFailure) {
+                    bindFailure.addSuppressed(stopFailure);
+                }
+            }
+            removeExecutionWhenClean(resourceExecution);
+            throw bindFailure;
+        }
         if (cancellationToRun != null) {
             try {
                 cancellationToRun.run();

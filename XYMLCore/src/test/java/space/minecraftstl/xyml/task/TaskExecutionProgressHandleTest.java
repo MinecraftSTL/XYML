@@ -19,12 +19,13 @@ package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.observable.Subscription;
 
 import java.util.Objects;
-
-import java.util.OptionalDouble;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies that launch progress handles stay bound to one top-level execution.
 @NotNullByDefault
@@ -59,16 +60,72 @@ public final class TaskExecutionProgressHandleTest {
         assertEquals(0.5, handle.progress().orElseThrow());
     }
 
-    /// A repeated executor start cannot retarget the handle to another invocation.
+    /// A repeated binding attempt cannot retarget the handle or its listener to another execution.
     @Test
     public void repeatedBindingCannotFollowAnotherExecution() {
-        TaskExecutionProgressHandle handle = TaskExecutionProgressHandle.forRegistry(new TaskExecutionRegistry());
-        java.util.UUID first = java.util.UUID.randomUUID();
-        java.util.UUID second = java.util.UUID.randomUUID();
-        handle.bind(first);
-        handle.bind(first);
-        handle.bind(second);
-        assertEquals(OptionalDouble.empty(), handle.progress());
+        TaskExecutionRegistry registry = new TaskExecutionRegistry();
+        ProgressTask firstTask = new ProgressTask();
+        ProgressTask secondTask = new ProgressTask();
+        TaskExecutionRegistry.Execution firstExecution = registry.begin(
+                new NoopExecutor(firstTask),
+                "first",
+                true);
+        TaskExecutionRegistry.Execution secondExecution = registry.begin(
+                new NoopExecutor(secondTask),
+                "second",
+                true);
+        TaskExecutionProgressHandle handle = TaskExecutionProgressHandle.forRegistry(registry);
+        AtomicInteger notifications = new AtomicInteger();
+        Subscription subscription = handle.subscribe(notifications::incrementAndGet);
+        try {
+            handle.bind(firstExecution.id());
+            int notificationsAfterBinding = notifications.get();
+            firstExecution.taskRunning(null, firstTask);
+            firstTask.report(0.25);
+            assertEquals(0.25, handle.progress().orElseThrow());
+
+            secondExecution.taskRunning(null, secondTask);
+            secondTask.report(0.8);
+            assertEquals(0.25, handle.progress().orElseThrow());
+            int notificationsAfterSecondProgress = notifications.get();
+
+            handle.bind(secondExecution.id());
+            assertEquals(0.25, handle.progress().orElseThrow());
+            assertEquals(notificationsAfterSecondProgress, notifications.get());
+
+            firstTask.report(0.5);
+            assertEquals(0.5, handle.progress().orElseThrow());
+            assertTrue(notifications.get() > notificationsAfterBinding);
+        } finally {
+            subscription.unsubscribe();
+        }
+    }
+
+    /// A runtime listener failure is isolated so executor registration and startup still complete.
+    @Test
+    public void runtimeListenerFailureDoesNotInterruptExecutorStart() {
+        TaskExecutionRegistry registry = new TaskExecutionRegistry();
+        TaskResourceLockManager resourceLockManager = new TaskResourceLockManager();
+        ProgressTask task = new ProgressTask();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task, resourceLockManager, registry);
+        executor.setTaskExecutionPresentation("runtime-listener", true);
+        AtomicInteger notifications = new AtomicInteger();
+        Subscription subscription = executor.taskExecutionProgressHandle().subscribe(() -> {
+            notifications.incrementAndGet();
+            throw new IllegalStateException("listener failure");
+        });
+        try {
+            assertTrue(executor.test());
+            assertTrue(notifications.get() > 0);
+            TaskExecutionSnapshot snapshot = registry.snapshots().stream()
+                    .filter(candidate -> candidate.title().equals("runtime-listener"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(TaskExecutionStatus.SUCCEEDED, snapshot.status());
+            assertEquals(1.0, snapshot.progress().orElseThrow());
+        } finally {
+            subscription.unsubscribe();
+        }
     }
 
     /// Minimal executor authority needed to create isolated registry records.

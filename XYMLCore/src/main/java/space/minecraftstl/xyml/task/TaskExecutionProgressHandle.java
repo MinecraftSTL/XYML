@@ -20,11 +20,13 @@ package space.minecraftstl.xyml.task;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.util.Lang;
 
 import java.util.Objects;
 import java.util.OptionalDouble;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /// Provides an invocation-scoped view of one top-level task execution's aggregate progress.
@@ -97,13 +99,13 @@ public final class TaskExecutionProgressHandle {
             }
             for (TaskExecutionSnapshot snapshot : publication.snapshots()) {
                 if (snapshot.id().equals(currentExecutionId)) {
-                    listener.run();
+                    slot.notifySafely();
                     return;
                 }
             }
         });
-        if (executionId.get() != null) {
-            listener.run();
+        if (executionId.get() != null && slot.markBindingNotificationDelivered()) {
+            slot.notifySafely();
         }
         return Subscription.create(() -> {
             listeners.remove(slot);
@@ -123,16 +125,49 @@ public final class TaskExecutionProgressHandle {
             return;
         }
         for (ListenerSlot slot : listeners) {
-            slot.listener().run();
+            if (slot.markBindingNotificationDelivered()) {
+                slot.notifySafely();
+            }
+        }
+    }
+
+    /// Reports one listener runtime failure without changing execution semantics.
+    private static void reportListenerFailure(RuntimeException listenerFailure) {
+        try {
+            Lang.handleUncaughtException(listenerFailure);
+        } catch (RuntimeException ignored) {
+            // Listener reporting is diagnostic and cannot corrupt the task state machine.
         }
     }
 
     /// Owns one listener so binding invalidation can be isolated from registration removal.
     @NotNullByDefault
-    private record ListenerSlot(Runnable listener) {
-        /// Validates one listener slot.
-        private ListenerSlot {
-            Objects.requireNonNull(listener, "listener");
+    private static final class ListenerSlot {
+        /// Listener callback.
+        private final Runnable listener;
+
+        /// Whether the one-time binding notification has already been delivered.
+        private final AtomicBoolean bindingNotificationDelivered = new AtomicBoolean();
+
+        /// Creates one listener slot.
+        private ListenerSlot(Runnable listener) {
+            this.listener = Objects.requireNonNull(listener, "listener");
+        }
+
+        /// Claims the one-time notification emitted when the handle binds.
+        ///
+        /// @return true only for the first caller
+        private boolean markBindingNotificationDelivered() {
+            return bindingNotificationDelivered.compareAndSet(false, true);
+        }
+
+        /// Invokes the listener while isolating runtime failures from the task state machine.
+        private void notifySafely() {
+            try {
+                listener.run();
+            } catch (RuntimeException listenerFailure) {
+                reportListenerFailure(listenerFailure);
+            }
         }
     }
 }
