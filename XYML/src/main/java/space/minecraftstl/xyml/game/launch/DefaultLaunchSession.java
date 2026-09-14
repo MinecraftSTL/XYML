@@ -47,8 +47,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Runs one launch task and releases its owner's single-flight slot at the first terminal preparation state.
 ///
 /// The session creates and owns a [TaskExecutorPresentationModel] before executor startup, then republishes that
-/// model through its stable [LaunchSession] identity. This session intentionally has no operation that stops a
-/// [ManagedProcess]. Once a process exists, ownership passes to the launcher process-monitoring layer.
+/// model through its stable [LaunchSession] identity. Once cancellation is accepted, a process produced concurrently
+/// by the task is force-stopped before cancellation is published. After successful preparation without cancellation,
+/// ownership passes to the launcher process-monitoring layer.
 @NotNullByDefault
 public final class DefaultLaunchSession implements LaunchSession {
     /// Serializes startup, cancellation, and terminal-state selection.
@@ -548,8 +549,9 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Maps the executor's terminal event to a launch-session outcome.
     ///
-    /// A non-null task result wins over a concurrent cancellation because the process has already crossed the
-    /// ownership boundary and must remain observable rather than being silently abandoned.
+    /// A non-null task result can race cancellation because task bodies publish their result before the executor
+    /// commits the terminal invocation outcome. The terminal transition resolves that race in favor of an already
+    /// accepted cancellation and force-stops the process instead of publishing it as a successful launch.
     ///
     /// @param task completed root launch task
     /// @param taskExecutor executor that emitted the terminal event
@@ -579,34 +581,51 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Performs the one allowed terminal transition and releases all preparation ownership.
     ///
-    /// The owning service slot is released before any listener publication or subscription cleanup, so failures in
-    /// those external boundaries cannot strand the single-flight guard. Cleanup failures are combined using
-    /// suppressed exceptions and rethrown only after all release steps have run.
+    /// An accepted cancellation wins over a process result produced by the same in-flight task. The process is
+    /// force-stopped before any terminal listener is published and never becomes observable through
+    /// [#createdProcess()]. The owning service slot is released before any listener publication or subscription
+    /// cleanup, so failures in those external boundaries cannot strand the single-flight guard. Cleanup failures are
+    /// combined using suppressed exceptions and rethrown only after all release steps have run.
     ///
-    /// @param terminalStatus terminal status to publish
-    /// @param process created process only for [LaunchStatus#PROCESS_CREATED]
-    /// @param terminalFailure failure only for [LaunchStatus#FAILED]
+    /// @param requestedStatus terminal status requested by the task or cancellation arbitration
+    /// @param requestedProcess created process only for [LaunchStatus#PROCESS_CREATED]
+    /// @param requestedFailure failure only for [LaunchStatus#FAILED]
     private void finish(
-            LaunchStatus terminalStatus,
-            @Nullable ManagedProcess process,
-            @Nullable Throwable terminalFailure) {
-        validateTerminalOutcome(terminalStatus, process, terminalFailure);
+            LaunchStatus requestedStatus,
+            @Nullable ManagedProcess requestedProcess,
+            @Nullable Throwable requestedFailure) {
+        validateTerminalOutcome(requestedStatus, requestedProcess, requestedFailure);
 
         @Nullable Subscription completionSubscription;
         @Nullable Subscription taskPresentationSubscription;
         @Nullable Subscription executionProgressSubscription;
         @Nullable TaskExecutorPresentationModel taskPresentation;
         @Nullable PresentationTransition terminalPresentationTransition;
+        @Nullable ManagedProcess processToForceStop;
+        LaunchStatus terminalStatus = requestedStatus;
+        @Nullable ManagedProcess terminalProcess = requestedProcess;
+        @Nullable Throwable terminalFailure = requestedFailure;
         synchronized (stateLock) {
             if (status != LaunchStatus.PREPARING) {
                 return;
             }
+            if (terminalStatus == LaunchStatus.PROCESS_CREATED
+                    && terminalProcess != null
+                    && cancellationRequested) {
+                processToForceStop = terminalProcess;
+                terminalStatus = LaunchStatus.CANCELLED;
+                terminalProcess = null;
+                terminalFailure = null;
+            } else {
+                processToForceStop = null;
+            }
+            validateTerminalOutcome(terminalStatus, terminalProcess, terminalFailure);
             TaskSnapshot terminalPresentation = createTerminalPresentation(
                     terminalStatus,
                     terminalFailure,
                     presentationSnapshot);
             status = terminalStatus;
-            createdProcess = process;
+            createdProcess = terminalProcess;
             failure = terminalFailure;
             terminalPresentationTransition = replacePresentationSnapshotLocked(terminalPresentation);
             executor = null;
@@ -622,10 +641,18 @@ public final class DefaultLaunchSession implements LaunchSession {
             executorPresentation = null;
         }
 
+        LaunchStatus finalizedStatus = terminalStatus;
+        @Nullable ManagedProcess finalizedProcess = terminalProcess;
+        @Nullable Throwable finalizedFailure = terminalFailure;
+        @Nullable ManagedProcess finalizedProcessToForceStop = processToForceStop;
+
         @Nullable Throwable cleanupFailure = null;
+        if (finalizedProcessToForceStop != null) {
+            cleanupFailure = attempt(cleanupFailure, finalizedProcessToForceStop::forceStop);
+        }
         // Release single-flight ownership before invoking any observer or unsubscribe callback.
         cleanupFailure = attempt(cleanupFailure, () -> preparationFinished.accept(this));
-        cleanupFailure = attempt(cleanupFailure, () -> statusProperty.setValue(terminalStatus));
+        cleanupFailure = attempt(cleanupFailure, () -> statusProperty.setValue(finalizedStatus));
         cleanupFailure = combineFailures(
                 cleanupFailure,
                 notifyPresentationTransition(terminalPresentationTransition));
@@ -635,10 +662,10 @@ public final class DefaultLaunchSession implements LaunchSession {
         cleanupFailure = attempt(cleanupFailure, () -> closePresentation(taskPresentation));
 
         // CompletableFuture invokes synchronous dependents here; every public state surface is already terminal.
-        if (process != null) {
-            completion.complete(process);
-        } else if (terminalFailure != null) {
-            completion.completeExceptionally(terminalFailure);
+        if (finalizedProcess != null) {
+            completion.complete(finalizedProcess);
+        } else if (finalizedFailure != null) {
+            completion.completeExceptionally(finalizedFailure);
         } else {
             completion.cancel(false);
         }
@@ -647,8 +674,8 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Creates task presentation matching the authoritative launch outcome.
     ///
-    /// This matters when cancellation races process creation: the task executor may report cancellation while the
-    /// launch contract must report the already-created process as success.
+    /// This matters when cancellation races process creation: an accepted cancellation remains authoritative even when
+    /// the task executor reports that the task body produced a process.
     ///
     /// @param terminalStatus authoritative launch terminal status
     /// @param terminalFailure non-cancellation failure, or null for other outcomes

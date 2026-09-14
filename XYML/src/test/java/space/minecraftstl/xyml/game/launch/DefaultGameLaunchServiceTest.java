@@ -220,6 +220,7 @@ final class DefaultGameLaunchServiceTest {
         assertEquals(LaunchStatus.CANCELLED, session.status());
         assertTrue(service.activePreparation().isEmpty());
         assertEquals(0, rawProcess.destroyCalls());
+        assertEquals(0, rawProcess.forceDestroyCalls());
         assertThrows(IllegalStateException.class, () -> service.launch(request("after-close")));
         taskRelease.countDown();
     }
@@ -240,6 +241,39 @@ final class DefaultGameLaunchServiceTest {
         assertEquals(LaunchStatus.PROCESS_CREATED, session.status());
         assertSame(process, session.createdProcess().orElseThrow());
         assertEquals(0, rawProcess.destroyCalls());
+        assertEquals(0, rawProcess.forceDestroyCalls());
+    }
+
+    /// An accepted cancellation force-stops a process published by the task before its terminal event.
+    @Test
+    @Timeout(10)
+    void acceptedCancellationForceStopsConcurrentlyCreatedProcess() throws Exception {
+        CountDownLatch processPublished = new CountDownLatch(1);
+        CountDownLatch taskRelease = new CountDownLatch(1);
+        RecordingProcess rawProcess = new RecordingProcess();
+        ManagedProcess process = managedProcess(rawProcess);
+        DefaultGameLaunchService service = service(
+                request -> new ProcessPublishingBlockingTask(process, processPublished, taskRelease));
+        try {
+            LaunchSession session = service.launch(request("process-cancel-race"));
+            assertTrue(processPublished.await(5, TimeUnit.SECONDS));
+            assertTrue(session.cancel());
+            assertEquals(LaunchStatus.PREPARING, session.status());
+            taskRelease.countDown();
+
+            CompletionException cancellation = assertThrows(
+                    CompletionException.class,
+                    () -> session.completion().toCompletableFuture().join());
+            assertTrue(cancellation.getCause() instanceof CancellationException);
+            assertEquals(LaunchStatus.CANCELLED, session.status());
+            assertTrue(session.createdProcess().isEmpty());
+            assertEquals(1, rawProcess.forceDestroyCalls());
+            assertEquals(0, rawProcess.destroyCalls());
+            assertTrue(service.activePreparation().isEmpty());
+        } finally {
+            taskRelease.countDown();
+            service.close();
+        }
     }
 
     /// Runtime status failures and presentation errors cannot retain the service's single-flight slot.
@@ -784,6 +818,41 @@ final class DefaultGameLaunchServiceTest {
         }
     }
 
+    /// Task that publishes its process before blocking until the test releases terminal completion.
+    @NotNullByDefault
+    private static final class ProcessPublishingBlockingTask extends Task<ManagedProcess> {
+        /// Process published before the task blocks.
+        private final ManagedProcess process;
+
+        /// Signals that the process result is visible to the launch session race.
+        private final CountDownLatch processPublished;
+
+        /// Controls when the task reaches its terminal event.
+        private final CountDownLatch release;
+
+        /// Creates one process-result cancellation race fixture.
+        ///
+        /// @param process process result published before termination
+        /// @param processPublished result-publication signal
+        /// @param release terminal-event control
+        private ProcessPublishingBlockingTask(
+                ManagedProcess process,
+                CountDownLatch processPublished,
+                CountDownLatch release) {
+            this.process = process;
+            this.processPublished = processPublished;
+            this.release = release;
+        }
+
+        /// Publishes the process, then ignores cancellation until the test releases the terminal event.
+        @Override
+        public void execute() throws Exception {
+            setResult(process);
+            processPublished.countDown();
+            release.await();
+        }
+    }
+
     /// Task that waits cooperatively until released or cancelled before publishing its process.
     @NotNullByDefault
     private static final class BlockingLaunchTask extends Task<ManagedProcess> {
@@ -959,6 +1028,9 @@ final class DefaultGameLaunchServiceTest {
         /// Number of calls to [#destroy()].
         private final AtomicInteger destroyCalls = new AtomicInteger();
 
+        /// Number of calls to [#destroyForcibly()].
+        private final AtomicInteger forceDestroyCalls = new AtomicInteger();
+
         /// Whether this fixture still reports itself as alive.
         private volatile boolean alive = true;
 
@@ -1003,6 +1075,14 @@ final class DefaultGameLaunchServiceTest {
             alive = false;
         }
 
+        /// Records one forced-stop request and marks the fixture exited.
+        @Override
+        public Process destroyForcibly() {
+            forceDestroyCalls.incrementAndGet();
+            alive = false;
+            return this;
+        }
+
         /// Returns the current fixture liveness state.
         @Override
         public boolean isAlive() {
@@ -1014,6 +1094,13 @@ final class DefaultGameLaunchServiceTest {
         /// @return destruction call count
         private int destroyCalls() {
             return destroyCalls.get();
+        }
+
+        /// Returns how many forced-stop requests were made.
+        ///
+        /// @return forced-destruction call count
+        private int forceDestroyCalls() {
+            return forceDestroyCalls.get();
         }
     }
 }

@@ -31,7 +31,7 @@ public enum LaunchStatus {
     /// Preparation terminated because of a non-cancellation failure.
     FAILED,
 
-    /// Preparation terminated after cancellation before a managed process was produced.
+    /// Preparation terminated after cancellation, including when a concurrently produced process was force-stopped.
     CANCELLED;
 
     /// Returns whether no further preparation-state transition is possible.
