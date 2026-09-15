@@ -21,6 +21,7 @@ import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.ui.FlatNativeWindowBorder;
 import com.formdev.flatlaf.util.SystemInfo;
+import com.formdev.flatlaf.util.UIScale;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -32,10 +33,13 @@ import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 
+import javax.swing.Icon;
 import javax.swing.JComponent;
+import javax.swing.JButton;
 import javax.swing.JRootPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -58,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -154,7 +159,7 @@ public final class AppShellFrameTest {
 
         SwingThemeManager themeManager = new SwingThemeManager(
                 ThemeBrightnessPreference.LIGHT,
-                new SwingDesignTokens(8),
+                new SwingDesignTokens(0),
                 SystemThemeDetector.lightFallback());
         AppShellFrame frame = AppShellFrame.create(
                 "XYML",
@@ -221,6 +226,22 @@ public final class AppShellFrameTest {
 
             frame.open();
             assertTrue(pagesCreated.await(5L, TimeUnit.SECONDS));
+            if (SystemInfo.isWindows) {
+                assertWindowsTitlePaneButtonGeometry(rootPane);
+                JButton squareCloseButton = Objects.requireNonNull(
+                        findButtonByAccessibleName(rootPane, "Close"),
+                        "square close title-pane button");
+                Icon squareCloseIcon = squareCloseButton.getIcon();
+
+                themeManager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(18));
+                assertWindowsTitlePaneButtonGeometry(rootPane);
+                JButton roundedCloseButton = Objects.requireNonNull(
+                        findButtonByAccessibleName(rootPane, "Close"),
+                        "rounded close title-pane button");
+                assertAll(
+                        () -> assertEquals(36, UIManager.getInt("TitlePane.buttonArc")),
+                        () -> assertNotSame(squareCloseIcon, roundedCloseButton.getIcon()));
+            }
             if (!SystemInfo.isMacOS) {
                 Rectangle buttonBounds = assertInstanceOf(
                         Rectangle.class,
@@ -229,12 +250,13 @@ public final class AppShellFrameTest {
                         frame.shellPanel().toolbar().launchButton().getParent(),
                         frame.shellPanel().toolbar().launchButton().getBounds(),
                         rootPane);
+                int launchWindowControlsGap = buttonBounds.x
+                        - launchBounds.x
+                        - launchBounds.width;
                 assertAll(
-                        () -> assertTrue(
-                                launchBounds.getMaxX() <= buttonBounds.getMinX(),
-                                "launch=" + launchBounds + ", buttons=" + buttonBounds),
-                        () -> assertTrue(
-                                buttonBounds.getMinX() - launchBounds.getMaxX() <= 16.0,
+                        () -> assertEquals(
+                                UIScale.scale(ShellToolbarPanel.LAUNCH_WINDOW_CONTROLS_GAP),
+                                launchWindowControlsGap,
                                 "launch=" + launchBounds + ", buttons=" + buttonBounds));
             }
             assertAll(
@@ -261,6 +283,63 @@ public final class AppShellFrameTest {
             EdtDispatcher.executeAndWait(frame::dispose);
             assertFalse(frame.undecoratedWindowResizerInstalled());
         }
+    }
+
+    /// Verifies the three visible Windows caption controls use centered squares with a trailing window margin.
+    ///
+    /// @param rootPane displayed shell root containing FlatLaf's title pane
+    private static void assertWindowsTitlePaneButtonGeometry(JRootPane rootPane) {
+        EdtDispatcher.executeAndWait(() -> {
+            layoutRecursively(rootPane);
+            for (String accessibleName : List.of("Iconify", "Maximize", "Close")) {
+                JButton button = Objects.requireNonNull(
+                        findButtonByAccessibleName(rootPane, accessibleName),
+                        accessibleName + " title-pane button");
+                Container parent = button.getParent();
+                assertAll(
+                        () -> assertEquals(36, button.getWidth(), accessibleName + " width"),
+                        () -> assertEquals(36, button.getHeight(), accessibleName + " height"),
+                        () -> assertEquals(
+                                (parent.getHeight() - button.getHeight()) / 2,
+                                button.getY(),
+                                accessibleName + " vertical position"));
+            }
+            JButton closeButton = Objects.requireNonNull(
+                    findButtonByAccessibleName(rootPane, "Close"),
+                    "close title-pane button");
+            Rectangle closeBounds = SwingUtilities.convertRectangle(
+                    closeButton.getParent(),
+                    closeButton.getBounds(),
+                    rootPane);
+            assertEquals(
+                    UIScale.scale(UIManager.getInsets("TitlePane.buttonsMargins").right),
+                    rootPane.getWidth() - closeBounds.x - closeBounds.width,
+                    "close=" + closeBounds + ", rootPane=" + rootPane.getBounds());
+        });
+    }
+
+    /// Finds one visible button by the stable FlatLaf accessibility label.
+    ///
+    /// @param component current component subtree
+    /// @param accessibleName requested accessible label
+    /// @return matching visible button, or `null` when this subtree contains none
+    private static @Nullable JButton findButtonByAccessibleName(
+            Component component,
+            String accessibleName) {
+        if (component instanceof JButton button
+                && button.isVisible()
+                && Objects.equals(button.getAccessibleContext().getAccessibleName(), accessibleName)) {
+            return button;
+        }
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                @Nullable JButton button = findButtonByAccessibleName(child, accessibleName);
+                if (button != null) {
+                    return button;
+                }
+            }
+        }
+        return null;
     }
 
     /// Synthesizes one real FlatLaf right-edge drag against a visible fallback resize hit target.

@@ -89,7 +89,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     return success;
                 })
                 .exceptionally(e -> {
-                    Lang.handleUncaughtException(resolveException(e));
+                    Throwable resolved = resolveException(e);
+                    if (resolved instanceof OutOfMemoryError) {
+                        notifyTaskListeners(it -> it.onStop(false, this));
+                    }
+                    Lang.handleUncaughtException(resolved);
                     return false;
                 });
         return this;
@@ -226,6 +230,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         }
 
                         task.setState(Task.TaskState.FAILED);
+                    } else if (resolved instanceof OutOfMemoryError e) {
+                        handleOutOfMemoryError(task, e);
                     }
 
                     throw new CompletionException(resolved); // rethrow error
@@ -340,10 +346,25 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         notifyTaskListeners(it -> it.onFailed(task, e));
 
                         task.setState(Task.TaskState.FAILED);
+                    } else if (resolved instanceof OutOfMemoryError e) {
+                        handleOutOfMemoryError(task, e);
                     }
 
                     throw new CompletionException(resolved); // rethrow error
                 });
+    }
+
+    /// Completes the failed task lifecycle while preserving the original error for the global handler.
+    ///
+    /// @param task task whose terminal callbacks must be published
+    /// @param error original out-of-memory error
+    private void handleOutOfMemoryError(Task<?> task, OutOfMemoryError error) {
+        Exception taskException = new Exception(error);
+        task.setException(taskException);
+        exception = taskException;
+        task.fireDoneEvent(this, true);
+        notifyTaskListeners(it -> it.onFailed(task, error));
+        task.setState(Task.TaskState.FAILED);
     }
 
     /// Dispatches one task to the regular or completable-future execution path.

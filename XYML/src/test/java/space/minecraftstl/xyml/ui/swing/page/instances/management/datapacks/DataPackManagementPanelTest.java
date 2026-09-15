@@ -17,8 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -42,6 +42,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JSplitPane;
 import javax.swing.JTextField;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -67,7 +68,9 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Verifies lazy world activation and real local DataPack import, reveal, and deletion commands.
 @NotNullByDefault
@@ -184,6 +187,70 @@ final class DataPackManagementPanelTest {
             assertFalse(Files.exists(dataPacksDirectory.resolve("imported.zip.disabled")));
             EdtDispatcher.executeAndWait(() ->
                     assertEquals(OptionalInt.of(0), panel.dataPackChoiceList().getChoiceModel().exactItemCount()));
+        } finally {
+            @Nullable DataPackManagementPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// A selected supported world receives every dropped ZIP while adjacent files are ignored.
+    @Test
+    void installsSupportedDroppedDataPacksOnlyForTheSelectedWorld() throws Exception {
+        Path savesDirectory = Files.createDirectories(temporaryDirectory.resolve("drop-run").resolve("saves"));
+        Path worldDirectory = createWorldDirectory(savesDirectory, "drop-world");
+        Path dataPacksDirectory = Files.createDirectories(worldDirectory.resolve("datapacks"));
+        Path first = createDataPackArchive(temporaryDirectory.resolve("first.zip"));
+        Path unsupported = Files.createFile(temporaryDirectory.resolve("notes.txt"));
+        Path second = createDataPackArchive(temporaryDirectory.resolve("SECOND.ZIP"));
+        WorldCatalogItem world = new WorldCatalogItem(
+                worldDirectory,
+                "drop-world",
+                "drop-world",
+                1L,
+                "1.20.1",
+                false,
+                null);
+        SingleWorldCatalogModel model = new SingleWorldCatalogModel(savesDirectory, world);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable DataPackManagementPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new DataPackManagementPanel(
+                    model,
+                    DataPackManagementStrings.english(),
+                    new RecordingInteractions(first),
+                    executor)));
+            DataPackManagementPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                assertFalse(handler.canImport(fileTransfer(panel, List.of(first))));
+                panel.activate();
+                prepareViewport(panel.worldChoiceList());
+                panel.worldChoiceList().getList().setSelectedIndex(0);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                TransferHandler.TransferSupport transfer = fileTransfer(
+                        panel,
+                        List.of(first, unsupported, second));
+                assertTrue(handler.canImport(transfer));
+                assertTrue(handler.importData(transfer));
+                assertFalse(handler.canImport(fileTransfer(panel, List.of(first))));
+            });
+            awaitBackgroundWork(executor);
+
+            assertTrue(Files.isRegularFile(dataPacksDirectory.resolve("first.zip")));
+            assertTrue(Files.isRegularFile(dataPacksDirectory.resolve("SECOND.ZIP")));
+            EdtDispatcher.executeAndWait(() -> {
+                panel.close();
+                assertNull(panel.getTransferHandler());
+            });
         } finally {
             @Nullable DataPackManagementPanel panel = panelReference.get();
             if (panel != null) {

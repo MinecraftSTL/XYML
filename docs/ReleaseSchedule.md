@@ -98,7 +98,13 @@ The build accepts these release inputs:
 - `BUILD_NUMBER`: the final positive decimal component used for an ordinary CI build when `RELEASE_VERSION` is absent.
 - `STABLE_VERSION`: an optional override of `stableVersion` in `config/project.properties`.
 
-Official builds reject missing or malformed release inputs. Local builds default to a six-component Dev snapshot such as `1.0.0.0.0.SNAPSHOT`.
+The root Gradle tasks in the `stl` group infer versions from Git topology. A channel counter is the number
+of first-parent commits from the merge base with its adjacent, more stable branch to the selected release commit.
+`buildMain`, `buildBeta`, `buildAlpha`, and `buildDev` inject that inferred version into their isolated builds.
+
+Feature and detached builds keep the six-component Dev shape `x.y.z.0.0.d`. Their `d` is the Dev counter inherited at
+the merge base with `dev`, plus the number of first-parent commits after that branch point. Uncommitted changes do not
+add a version component. Other official build invocations still reject missing or malformed release inputs.
 
 The Github Release publishing workflow runs only from `main`. It creates a Stable release and updates only the Stable
 channel descriptor; it does not publish Beta, Alpha, or Dev releases. Official-website distribution follows the table

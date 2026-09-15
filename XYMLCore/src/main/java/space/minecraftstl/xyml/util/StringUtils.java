@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.util;
 
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.PrintWriter;
@@ -32,6 +33,7 @@ import java.util.regex.PatternSyntaxException;
 /**
  * @author huangyuhui
  */
+@NotNullByDefault
 public final class StringUtils {
 
     private StringUtils() {
@@ -586,6 +588,15 @@ public final class StringUtils {
             result.append(ch);
         }
         return result.toString();
+    }
+
+    /// Converts provider Markdown into safe HTML for the current renderer.
+    ///
+    /// @param str Markdown source, or `null`
+    /// @param rawIndentedBlocks whether indented blocks should be rendered as literal code
+    /// @return escaped HTML, or `null` when the source is null
+    public static @Nullable String convertToHtml(@Nullable String str, boolean rawIndentedBlocks) {
+        return MarkdownHtmlRenderer.render(str, rawIndentedBlocks);
     }
 
     public static String truncate(String str, int limit) {

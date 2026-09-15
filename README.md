@@ -8,6 +8,9 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue?style=flat-square&logo=github)](https://github.com/MinecraftSTL/XYML)
 
+[![QQ Group](https://img.shields.io/badge/QQ-gray?style=flat-square&logo=qq&logoColor=ffffff)](https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs)
+[![Bilibili](https://img.shields.io/badge/Bilibili-gray?style=flat-square&logo=bilibili)](https://space.bilibili.com/2059457567)
+
 </div>
 
 ---
@@ -32,6 +35,8 @@ XYML 支持多种操作系统与 CPU 架构，具体支持程度及限制请参�
 XYML 源自 [HMCL（Hello Minecraft! Launcher）](https://github.com/HMCL-dev/HMCL)的代码与 Git 历史，HMCL 是本项目的上游仓库。HMCL 的维护者和社区贡献者奠定了 XYML 所继承的启动、下载、实例与账户管理、整合包、国际化和跨平台支持等基础；本仓库继续保留这些历史提交、作者信息和版权声明，并对此表示感谢。
 
 XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发行版。XYML 的版本号、发布渠道、构建产物和问题反馈均由本仓库独立管理；上游 HMCL 的发布状态与 XYML 不互相代表。仓库保留 `HMCL-dev/HMCL` 作为上游来源，以便追踪和评估适合 XYML 的上游变更。
+
+本仓库还在 [`libraries/`](libraries/README.md) 中维护四个采用 XYML 品牌的源码分叉。它们会与 XYML 一起构建，同时继续以独立 Java 归档或原生可执行文件的形式使用。只有许可证声明、溯源记录和必须兼容的远程运行时坐标会保留上游项目名称。
 
 ## 下载与发布
 

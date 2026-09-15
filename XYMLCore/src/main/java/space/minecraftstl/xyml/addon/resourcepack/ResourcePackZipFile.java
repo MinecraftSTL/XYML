@@ -123,6 +123,12 @@ final class ResourcePackZipFile extends ResourcePackFile {
                 .toList();
         return remoteVersions.isEmpty()
                 ? null
-                : new AddonUpdate(this, current, remoteVersions.get(0), false);
+                : new AddonUpdate(
+                        source,
+                        RemoteAddon.Type.RESOURCE_PACK,
+                        this,
+                        current,
+                        remoteVersions.get(0),
+                        false);
     }
 }

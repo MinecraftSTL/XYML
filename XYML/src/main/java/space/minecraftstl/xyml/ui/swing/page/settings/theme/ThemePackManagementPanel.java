@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
+import space.minecraftstl.xyml.theme.ThemePackExporter;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
@@ -31,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -57,6 +59,7 @@ import java.awt.Insets;
 import java.awt.event.ActionListener;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -119,6 +122,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
 
     /// Snapshot transition subscription owned by this panel.
     private final Subscription modelSubscription;
+
+    /// Page-scoped single-file route for XYML theme-pack archives.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
 
     /// Listener updating commands after a loaded row is selected.
     private final javax.swing.event.ListSelectionListener selectionListener = this::selectionChanged;
@@ -197,6 +203,10 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         configureList();
         modelSubscription = this.model.subscribe(this::modelChanged);
         applySnapshot(displayedSnapshot);
+        dropRegistration = ShellFileDropHandler.register(
+                this,
+                this::supportsDroppedThemePack,
+                this::importDroppedThemePack);
         iconLoad = preloadCommandIcons(Objects.requireNonNull(iconExecutor, "iconExecutor"));
         activate();
     }
@@ -234,6 +244,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
             return;
         }
         EdtDispatcher.execute(() -> {
+            dropRegistration.close();
             modelSubscription.unsubscribe();
             choiceList.getList().removeListSelectionListener(selectionListener);
             choiceList.getChoiceModel().removeListDataListener(listDataListener);
@@ -376,6 +387,30 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     private void chooseAndImport() {
         @Nullable Path archive = interactions.chooseImportArchive(this);
         if (archive != null) {
+            model.importArchive(archive);
+        }
+    }
+
+    /// Returns whether this ready page accepts one dropped XYML theme archive.
+    ///
+    /// @param archive normalized dropped path
+    /// @return whether the path has the theme extension and no operation is active
+    private boolean supportsDroppedThemePack(Path archive) {
+        @Nullable Path fileName = Objects.requireNonNull(archive, "archive").getFileName();
+        return !closed.get()
+                && !exporting
+                && displayedSnapshot.status() == ThemePackManagementStatus.READY
+                && !displayedSnapshot.busy()
+                && fileName != null
+                && fileName.toString().toLowerCase(Locale.ROOT).endsWith(ThemePackExporter.FILE_EXTENSION);
+    }
+
+    /// Imports one accepted dropped theme archive through the existing model operation.
+    ///
+    /// @param archive normalized supported theme archive
+    private void importDroppedThemePack(Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (supportsDroppedThemePack(archive)) {
             model.importArchive(archive);
         }
     }

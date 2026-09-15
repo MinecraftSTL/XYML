@@ -22,7 +22,9 @@ import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.FileDownloadTask;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -31,8 +33,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-public record RemoteAddon(String slug, String author, String title, String description, List<String> categories,
+/// Immutable remote project metadata shared by provider catalogs and installed-add-on updates.
+///
+/// @param slug provider project slug
+/// @param author project author display name
+/// @param title project display title
+/// @param description provider description
+/// @param categories immutable provider category snapshot
+/// @param pageUrl public project page
+/// @param iconUrl public icon URL
+/// @param data provider-specific operations
+/// @param type add-on type, or `null` when a provider result has no mapped type
+@NotNullByDefault
+public record RemoteAddon(String slug, String author, String title, String description,
+                          @Unmodifiable List<String> categories,
                           String pageUrl, String iconUrl, IAddon data, @Nullable Type type) {
+
+    /// Defensively snapshots provider-owned category metadata.
+    public RemoteAddon {
+        categories = List.copyOf(categories);
+    }
 
     public static final RemoteAddon BROKEN = new RemoteAddon("", "", "RemoteAddon.BROKEN", "", Collections.emptyList(), "", "", new IAddon() {
         @Override
@@ -222,9 +242,31 @@ public record RemoteAddon(String slug, String author, String title, String descr
         Source getSource();
     }
 
-    public record Version(IVersion self, String projectId, String name, String version, String changelog,
-                          Instant datePublished, VersionType versionType, File file, List<Dependency> dependencies,
-                          List<String> gameVersions, List<ModLoaderType> loaders) {
+    /// Immutable provider version metadata. Changelog text is loaded on demand through the repository.
+    ///
+    /// @param self provider-specific version value
+    /// @param versionId provider version identifier used by follow-up APIs
+    /// @param projectId provider project identifier
+    /// @param name display name
+    /// @param version display version
+    /// @param datePublished publication timestamp
+    /// @param versionType release channel
+    /// @param file downloadable artifact
+    /// @param dependencies immutable provider dependency snapshot
+    /// @param gameVersions immutable compatible game-version snapshot
+    /// @param loaders immutable compatible loader snapshot
+    @NotNullByDefault
+    public record Version(IVersion self, String versionId, String projectId, String name, String version,
+                          Instant datePublished, VersionType versionType, File file,
+                          @Unmodifiable List<Dependency> dependencies,
+                          @Unmodifiable List<String> gameVersions,
+                          @Unmodifiable List<ModLoaderType> loaders) {
+        /// Defensively snapshots provider-owned collections.
+        public Version {
+            dependencies = List.copyOf(dependencies);
+            gameVersions = List.copyOf(gameVersions);
+            loaders = List.copyOf(loaders);
+        }
     }
 
     public record File(Map<String, String> hashes, String url, String filename) {

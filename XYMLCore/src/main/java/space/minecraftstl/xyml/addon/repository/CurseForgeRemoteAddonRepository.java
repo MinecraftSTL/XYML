@@ -30,19 +30,22 @@ import space.minecraftstl.xyml.util.io.HttpRequest;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.Checksum;
 
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
@@ -50,9 +53,13 @@ import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// @see <a href="https://docs.curseforge.com/rest-api">CurseForge API Doc</a>
+@NotNullByDefault
 public final class CurseForgeRemoteAddonRepository implements RemoteAddonRepository {
 
     private static final String PREFIX = "https://api.curseforge.com";
+
+    /// Public CurseForge web origin used to build exact version links.
+    private static final String BASE = "https://www.curseforge.com";
     private static final Semaphore SEMAPHORE = new Semaphore(16);
 
     public static final String API_KEY = System.getProperty("xyml.curseforge.apikey", JarUtils.getAttribute("xyml.curseforge.apikey", ""));
@@ -88,6 +95,18 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public RemoteAddon.Type getType() {
         if (type == null) throw new UnsupportedOperationException();
         return type;
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public String getApiBaseUrl() {
+        return PREFIX;
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public String getBaseUrl() {
+        return BASE;
     }
 
     private static int toModsSearchSortField(SortType sort) {
@@ -193,23 +212,69 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         }
     }
 
-    @Override
-    public Optional<RemoteAddon.Version> getRemoteVersionByLocalFile(Path file) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (InputStream stream = Files.newInputStream(file)) {
-            byte[] buf = new byte[1024];
-            int len;
-            while ((len = stream.read(buf, 0, buf.length)) != -1) {
+    /// Calculates the CurseForge fingerprint without retaining the filtered file in memory.
+    ///
+    /// @param file the local file to fingerprint
+    /// @return the unsigned 32-bit fingerprint represented by a `long`
+    /// @throws IOException if the file cannot be read or its fingerprint cannot be completed
+    static long calculateFingerprint(Path file) throws IOException {
+        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            long startPosition = channel.position();
+
+            byte[] bufferArray = new byte[1024 * 1024];
+            ByteBuffer buffer = ByteBuffer.wrap(bufferArray);
+
+            long filteredLength = 0;
+            while (channel.read(buffer) > 0) {
+                int len = buffer.position();
                 for (int i = 0; i < len; i++) {
-                    byte b = buf[i];
+                    byte b = bufferArray[i];
                     if (b != 0x9 && b != 0xa && b != 0xd && b != 0x20) {
-                        baos.write(b);
+                        filteredLength++;
                     }
                 }
+                buffer.clear();
             }
-        }
 
-        long hash = Integer.toUnsignedLong(MurmurHash2.hash32(baos.toByteArray(), baos.size(), 1));
+            channel.position(startPosition);
+
+            Checksum hasher = MurmurHash2.hash32(filteredLength, 1);
+            while (channel.read(buffer) > 0) {
+                int len = buffer.position();
+
+                int pos = 0;
+                while (pos < len) {
+                    byte b = bufferArray[pos];
+                    if (b == 0x9 || b == 0xa || b == 0xd || b == 0x20) {
+                        break;
+                    }
+                    pos++;
+                }
+
+                if (pos < len) {
+                    int pos2 = pos + 1;
+                    while (pos2 < len) {
+                        byte b = bufferArray[pos2];
+                        if (b != 0x9 && b != 0xa && b != 0xd && b != 0x20) {
+                            bufferArray[pos++] = b;
+                        }
+                        pos2++;
+                    }
+                }
+
+                hasher.update(bufferArray, 0, pos);
+                buffer.clear();
+            }
+            return hasher.getValue();
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new IOException(e);
+        }
+    }
+
+    /// Finds the remote CurseForge version matching a local file.
+    @Override
+    public Optional<RemoteAddon.Version> getRemoteVersionByLocalFile(Path file) throws IOException {
+        long hash = calculateFingerprint(file);
         if (hash == 811513880) { // Workaround for https://github.com/HMCL-dev/HMCL/issues/4597
             return Optional.empty();
         }
@@ -267,6 +332,46 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         }
     }
 
+    /// {@inheritDoc}
+    @Override
+    public @Nullable String getAddonChangelog(DownloadProvider downloadProvider, String addonId, String versionId) throws IOException {
+        SEMAPHORE.acquireUninterruptibly();
+        try {
+            Response<String> response = withApiKey(HttpRequest.GET(
+                    String.format("%s/v1/mods/%s/files/%s/changelog", PREFIX, addonId, versionId)))
+                    .getJson(Response.typeOf(String.class));
+            return response.data();
+        } finally {
+            SEMAPHORE.release();
+        }
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public String getVersionPageUrl(RemoteAddon.Version version) throws IOException {
+        SEMAPHORE.acquireUninterruptibly();
+        try {
+            Response<CurseAddon> response = withApiKey(HttpRequest.GET(PREFIX + "/v1/mods/" + version.projectId()))
+                    .getJson(Response.typeOf(CurseAddon.class));
+            String category = switch (response.data().classId()) {
+                case SECTION_MOD -> "mc-mods";
+                case SECTION_RESOURCE_PACK -> "texture-packs";
+                case SECTION_WORLD -> "worlds";
+                case SECTION_MODPACK -> "modpacks";
+                case SECTION_DATAPACK -> "data-packs";
+                case SECTION_BUKKIT_PLUGIN -> "bukkit-plugins";
+                case SECTION_ADDONS -> "mc-addons";
+                case SECTION_CUSTOMIZATION -> "customization";
+                case SECTION_SHADER -> "shaders";
+                default -> throw new IllegalArgumentException("Unsupported CurseForge class id ["
+                        + response.data().classId() + "]");
+            };
+            return BASE + "/minecraft/" + category + "/" + response.data().slug() + "/files/" + version.versionId();
+        } finally {
+            SEMAPHORE.release();
+        }
+    }
+
     @Override
     public Stream<RemoteAddonRepository.Category> getCategories() throws IOException {
         if (type == null) throw new UnsupportedOperationException();
@@ -305,6 +410,9 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public static final int SECTION_BUKKIT_PLUGIN = 5;
     public static final int SECTION_MOD = 6;
     public static final int SECTION_RESOURCE_PACK = 12;
+
+    /// CurseForge class identifier for Minecraft data packs.
+    public static final int SECTION_DATAPACK = 6945;
     public static final int SECTION_WORLD = 17;
     public static final int SECTION_MODPACK = 4471;
     public static final int SECTION_SHADER = 6552;
@@ -492,10 +600,10 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
 
                 return new RemoteAddon.Version(
                         this,
+                        Integer.toString(id),
                         Integer.toString(modId),
                         displayName(),
                         fileName(),
-                        null,
                         fileDate(),
                         versionType,
                         new RemoteAddon.File(Collections.emptyMap(), downloadUrl(), fileName()),

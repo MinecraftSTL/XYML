@@ -17,20 +17,26 @@
  */
 package space.minecraftstl.xyml.ui.swing.choice;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
+import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.JPanel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Graphics2D;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
@@ -106,6 +112,31 @@ public final class ViewportChoiceListTest {
         });
     }
 
+    /// The default text renderer leaves transparent corners around the selected-row background.
+    @Test
+    public void paintsRoundedDefaultSelection() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            ViewportChoiceList<String> choiceList = new ViewportChoiceList<>(
+                    new ImmediateDataSource(),
+                    value -> value);
+            JList<ChoiceListEntry<String>> list = choiceList.getList();
+            JComponent row = (JComponent) list.getCellRenderer().getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, "first"),
+                    0,
+                    true,
+                    false);
+            row.setSize(new Dimension(240, list.getFixedCellHeight()));
+            BufferedImage rendered = render(row);
+
+            assertFalse(row.isOpaque());
+            assertRoundedSelection(rendered, list.getSelectionBackground().getRGB());
+            choiceList.close();
+        });
+    }
+
     /// Mouse-wheel input moves a constrained list instead of leaving an oversized view clipped by its parent.
     @Test
     public void mouseWheelMovesConstrainedViewport() throws Exception {
@@ -136,6 +167,34 @@ public final class ViewportChoiceListTest {
             assertTrue(choiceList.getVerticalScrollBar().getValue() > initialValue);
             choiceList.close();
         });
+    }
+
+    /// Paints one fixed-size Swing component into a transparent image.
+    ///
+    /// @param component component to paint
+    /// @return rendered pixels
+    private static BufferedImage render(JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    /// Verifies transparent corners and an opaque selected center edge.
+    ///
+    /// @param image selected-row rendering
+    /// @param selectionArgb expected selected background
+    private static void assertRoundedSelection(BufferedImage image, int selectionArgb) {
+        assertEquals(0, image.getRGB(0, 0) >>> 24);
+        assertEquals(0, image.getRGB(image.getWidth() - 1, 0) >>> 24);
+        assertEquals(selectionArgb, image.getRGB(image.getWidth() - 2, image.getHeight() / 2));
     }
 
     /// A bounded data source that completes requests immediately.

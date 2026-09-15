@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.addon;
 
 import space.minecraftstl.xyml.download.DownloadProvider;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -26,9 +27,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+/// Provider-neutral remote project, version, file, and changelog gateway.
+@NotNullByDefault
 public interface RemoteAddonRepository {
 
     RemoteAddon.Type getType();
+
+    /// Returns the provider API base URL used for raw metadata requests.
+    ///
+    /// @return absolute provider API base URL
+    String getApiBaseUrl();
+
+    /// Returns the provider's public web base URL.
+    ///
+    /// @return absolute provider web base URL
+    String getBaseUrl();
 
     enum SortType {
         POPULARITY,
@@ -90,6 +103,23 @@ public interface RemoteAddonRepository {
     RemoteAddon.File getAddonFile(String projectId, String fileId) throws IOException;
 
     Stream<RemoteAddon.Version> getRemoteVersionsById(DownloadProvider downloadProvider, String id) throws IOException;
+
+    /// Loads a version changelog without adding it to every version-list response.
+    ///
+    /// @param downloadProvider provider used to transform or mirror API requests
+    /// @param addonId provider project identifier
+    /// @param versionId provider version identifier
+    /// @return provider Markdown, or `null` when no changelog exists
+    /// @throws IOException when provider metadata cannot be loaded
+    @Nullable String getAddonChangelog(DownloadProvider downloadProvider, String addonId, String versionId)
+            throws IOException;
+
+    /// Returns the provider's exact public page for one version.
+    ///
+    /// @param version provider version metadata
+    /// @return absolute public version-page URL
+    /// @throws IOException when required provider project metadata cannot be loaded
+    String getVersionPageUrl(RemoteAddon.Version version) throws IOException;
 
     Stream<Category> getCategories() throws IOException;
 

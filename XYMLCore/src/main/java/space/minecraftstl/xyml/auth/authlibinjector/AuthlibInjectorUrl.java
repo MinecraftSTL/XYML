@@ -49,7 +49,8 @@ public final class AuthlibInjectorUrl {
             return Optional.empty();
         }
 
-        String @Unmodifiable [] elements = text.split(":", 3);
+        String normalized = text.trim();
+        String @Unmodifiable [] elements = normalized.split(":", 3);
         if (elements.length == 3
                 && SCHEME.equals(elements[0])
                 && PATH_YGGDRASIL_SERVER.equals(elements[1])) {

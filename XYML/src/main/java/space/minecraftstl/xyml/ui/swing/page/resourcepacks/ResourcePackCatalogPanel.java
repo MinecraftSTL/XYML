@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -29,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
@@ -111,6 +113,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Owned toolkit-neutral catalog model and viewport source.
     private final ResourcePackCatalogModel model;
+
+    /// Page-scoped filtered resource-pack file-list route.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
 
     /// Localized visible and accessible text.
     private final ResourcePackCatalogStrings strings;
@@ -283,6 +288,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         super();
         @Nullable ViewportChoiceList<ResourcePackCatalogItem> acquiredChoiceList = null;
         @Nullable Subscription acquiredSubscription = null;
+        @Nullable ShellFileDropHandler.RouteRegistration acquiredDropRegistration = null;
         try {
             EdtDispatcher.requireEventDispatchThread();
             this.model = Objects.requireNonNull(model, "model");
@@ -333,8 +339,16 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     model.subscribe(this::modelChanged),
                     "resource-pack model returned null subscription");
             applySnapshot(model.snapshot());
+            acquiredDropRegistration = ShellFileDropHandler.registerFiles(
+                    this,
+                    this::supportsDroppedResourcePack,
+                    this::importDroppedResourcePacks);
         } catch (RuntimeException | Error failure) {
             @Nullable Throwable cleanupFailure = null;
+            if (acquiredDropRegistration != null) {
+                ShellFileDropHandler.RouteRegistration registration = acquiredDropRegistration;
+                cleanupFailure = attemptCleanup(cleanupFailure, registration::close);
+            }
             if (acquiredSubscription != null) {
                 Subscription subscription = acquiredSubscription;
                 cleanupFailure = attemptCleanup(cleanupFailure, subscription::unsubscribe);
@@ -353,6 +367,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             throw failure;
         }
         modelSubscription = Objects.requireNonNull(acquiredSubscription);
+        dropRegistration = Objects.requireNonNull(acquiredDropRegistration);
     }
 
     /// Returns the immutable snapshot currently represented by the page.
@@ -1035,6 +1050,24 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         startWrite(() -> model.importResourcePacks(selectedSources));
     }
 
+    /// Returns whether this writable page accepts one dropped resource-pack path.
+    ///
+    /// @param source normalized dropped path
+    /// @return whether the path is a resource-pack archive or directory and the catalog can write
+    private boolean supportsDroppedResourcePack(Path source) {
+        return currentWritableSnapshot() != null && ResourcePackFile.isFileResourcePack(source);
+    }
+
+    /// Imports supported resource packs through the model's existing serialized write gate.
+    ///
+    /// @param sources immutable supported paths in transfer order
+    private void importDroppedResourcePacks(@Unmodifiable List<Path> sources) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!sources.isEmpty() && currentWritableSnapshot() != null) {
+            startWrite(() -> model.importResourcePacks(sources));
+        }
+    }
+
     /// Selects every logical row in the current filtered path index without loading off-screen rows.
     private void selectAllResourcePacks() {
         EdtDispatcher.requireEventDispatchThread();
@@ -1503,6 +1536,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             }
             resourcesClosed = true;
             @Nullable Throwable failure = null;
+            failure = attemptCleanup(failure, dropRegistration::close);
             failure = attemptCleanup(failure, modelSubscription::unsubscribe);
             failure = attemptCleanup(
                     failure,

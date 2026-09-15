@@ -197,6 +197,7 @@ public final class AppShellFrame extends JFrame {
         EdtDispatcher.executeAndWait(() -> {
             setExtendedState(nonIconifiedState(getExtendedState()));
             setVisible(true);
+            WindowsNativeUtils.applyWindowCornerPreference(this, themeManager.designTokens().cornerRadius());
             WindowsNativeUtils.applyAppUserModelRelaunchProperties(this);
             requestSystemThemeRefresh();
         });

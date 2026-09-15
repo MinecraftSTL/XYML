@@ -19,8 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -64,6 +64,7 @@ import java.util.zip.GZIPOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -139,7 +140,9 @@ final class NBTEditorPanelTest {
             assertTrue(value.isEnabled());
             assertEquals("1", value.getText());
             value.setText("41");
-            findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+            AbstractButton apply = findNamed(panel, "nbtEditorApply", AbstractButton.class);
+            assertNull(apply.getClientProperty("JButton.buttonType"));
+            apply.doClick();
             assertTrue(controller.snapshot().dirty());
             assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
             assertEquals("41", value.getText());

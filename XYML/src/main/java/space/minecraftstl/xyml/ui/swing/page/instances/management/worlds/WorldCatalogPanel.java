@@ -29,6 +29,9 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -232,6 +235,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Owned model subscription released on close.
     private final Subscription modelSubscription;
 
+    /// Page-scoped single-file route for world ZIP archives.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Guards requested activation so construction never starts a scan.
     private final AtomicBoolean activated = new AtomicBoolean();
 
@@ -315,6 +321,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             }
         });
         applySnapshot(displayedSnapshot);
+        dropRegistration = ShellFileDropHandler.register(
+                this,
+                this::supportsDroppedWorld,
+                this::importWorldArchive);
     }
 
     /// Returns the visible tab title.
@@ -994,6 +1004,30 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         if (archive == null) {
             return;
         }
+        importWorldArchive(archive);
+    }
+
+    /// Returns whether this ready page accepts one dropped world ZIP.
+    ///
+    /// @param archive normalized dropped path
+    /// @return whether the path is a ZIP and no world or launch operation is active
+    private boolean supportsDroppedWorld(Path archive) {
+        return !closed.get()
+                && displayedSnapshot.status() == WorldCatalogStatus.READY
+                && !displayedSnapshot.operationPending()
+                && quickPlayOperationText == null
+                && "zip".equals(FileUtils.getExtension(
+                        Objects.requireNonNull(archive, "archive")).toLowerCase(Locale.ROOT));
+    }
+
+    /// Performs the existing world-import preflight and target-name flow for one archive.
+    ///
+    /// @param archive normalized chooser-selected or dropped ZIP path
+    private void importWorldArchive(Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!supportsDroppedWorld(archive)) {
+            return;
+        }
         model.inspectImport(archive).whenComplete((candidate, failure) -> EdtDispatcher.execute(() -> {
             if (closed.get()) {
                 return;
@@ -1215,7 +1249,17 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         if (selected == null || !selected.readable() || !ChunkBaseWorldTools.supports(selected)) {
             return;
         }
-        JPopupMenu menu = new JPopupMenu();
+        JPopupMenu menu = createChunkBaseMenu(selected);
+        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+    }
+
+    /// Creates the exact-radius menu of Chunk Base destinations supported by one selected world.
+    ///
+    /// @param selected readable world whose version determines available destinations
+    /// @return configured rounded popup menu
+    JPopupMenu createChunkBaseMenu(WorldCatalogItem selected) {
+        WorldCatalogItem world = Objects.requireNonNull(selected, "selected");
+        JPopupMenu menu = new RoundedPopupMenu();
         addChunkBaseMenuItem(menu, "worldsChunkBaseSeedMap", "world.chunkbase.seed_map", ChunkBaseTool.SEED_MAP);
         addChunkBaseMenuItem(menu, "worldsChunkBaseStronghold", "world.chunkbase.stronghold", ChunkBaseTool.STRONGHOLD);
         addChunkBaseMenuItem(
@@ -1223,10 +1267,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "worldsChunkBaseNetherFortress",
                 "world.chunkbase.nether_fortress",
                 ChunkBaseTool.NETHER_FORTRESS);
-        if (ChunkBaseWorldTools.supportsEndCity(selected)) {
+        if (ChunkBaseWorldTools.supportsEndCity(world)) {
             addChunkBaseMenuItem(menu, "worldsChunkBaseEndCity", "world.chunkbase.end_city", ChunkBaseTool.END_CITY);
         }
-        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+        return menu;
     }
 
     /// Adds one localized Chunk Base destination to the current popup menu.
@@ -1504,6 +1548,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Detaches all UI listeners and closes owned resources on the EDT.
     private void closeOnEventDispatchThread() {
+        dropRegistration.close();
         quickPlayOperationRevision++;
         quickPlayOperationText = null;
         choiceList.getList().removeListSelectionListener(selectionListener);

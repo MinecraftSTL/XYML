@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.addon;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /// Sub-classes should implement `Comparable`
+@NotNullByDefault
 public abstract class LocalAddonFile {
 
     protected LocalAddonFile() {
@@ -52,10 +54,33 @@ public abstract class LocalAddonFile {
 
     public abstract void delete() throws IOException;
 
-    @Nullable
-    public abstract AddonUpdate checkUpdates(DownloadProvider downloadProvider, String gameVersion, RemoteAddon.Source source) throws IOException;
+    /// Finds one compatible update from a remote source when this local add-on supports remote identification.
+    ///
+    /// @param downloadProvider provider used for remote metadata requests
+    /// @param gameVersion owning Minecraft version
+    /// @param source remote service to query
+    /// @return update metadata, or `null` when this add-on cannot be updated from the source
+    /// @throws IOException when source metadata cannot be loaded
+    public @Nullable AddonUpdate checkUpdates(
+            DownloadProvider downloadProvider,
+            String gameVersion,
+            RemoteAddon.Source source)
+            throws IOException {
+        return null;
+    }
 
+    /// Immutable update metadata retaining the source and repository type that produced the candidate.
+    ///
+    /// @param source remote service that supplied the target version
+    /// @param repoType content repository type used for provider follow-up requests
+    /// @param localAddonFile exact installed add-on
+    /// @param currentVersion identified installed version
+    /// @param targetVersion selected newer compatible version
+    /// @param useRemoteFileName whether installation should adopt the provider artifact name
+    @NotNullByDefault
     public record AddonUpdate(
+            RemoteAddon.Source source,
+            RemoteAddon.Type repoType,
             LocalAddonFile localAddonFile,
             RemoteAddon.Version currentVersion,
             RemoteAddon.Version targetVersion,
