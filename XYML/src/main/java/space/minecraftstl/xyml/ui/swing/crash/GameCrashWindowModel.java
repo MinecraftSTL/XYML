@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.ExportedCrashBundle;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.game.JavaRuntimeRepairTaskFactory;
@@ -65,6 +66,9 @@ final class GameCrashWindowModel {
     /// Window-owned read-only dependency catalog cache, or null when dependency search is unavailable.
     private final @Nullable SwingMcpMissingDependencySearch missingDependencySearch;
 
+    /// Restricts whether this window may expose executable repair actions.
+    private final PresentationMode presentationMode;
+
     /// Creates an immutable game-crash window model.
     ///
     /// @param exitType classified process-exit outcome
@@ -76,7 +80,23 @@ final class GameCrashWindowModel {
             List<Detail> details,
             LogAnalyzable logAnalyzable,
             Path latestLog) {
-        this(exitType, details, logAnalyzable, latestLog, null);
+        this(exitType, details, logAnalyzable, latestLog, PresentationMode.REPAIR_ALLOWED, null);
+    }
+
+    /// Creates a model with an explicit presentation mode and no dependency-search action.
+    ///
+    /// @param exitType classified process-exit outcome
+    /// @param details ordered environment details
+    /// @param logAnalyzable immutable Core log-analysis input
+    /// @param latestLog path associated with the analysis
+    /// @param presentationMode action policy for this window
+    GameCrashWindowModel(
+            ProcessListener.ExitType exitType,
+            List<Detail> details,
+            LogAnalyzable logAnalyzable,
+            Path latestLog,
+            PresentationMode presentationMode) {
+        this(exitType, details, logAnalyzable, latestLog, presentationMode, null);
     }
 
     /// Creates an immutable game-crash window model with an optional window-owned dependency search.
@@ -91,11 +111,13 @@ final class GameCrashWindowModel {
             List<Detail> details,
             LogAnalyzable logAnalyzable,
             Path latestLog,
+            PresentationMode presentationMode,
             @Nullable SwingMcpMissingDependencySearch missingDependencySearch) {
         this.exitType = Objects.requireNonNull(exitType, "exitType");
         this.details = List.copyOf(Objects.requireNonNull(details, "details"));
         this.logAnalyzable = Objects.requireNonNull(logAnalyzable, "logAnalyzable");
         this.latestLog = Objects.requireNonNull(latestLog, "latestLog");
+        this.presentationMode = Objects.requireNonNull(presentationMode, "presentationMode");
         this.missingDependencySearch = missingDependencySearch;
     }
 
@@ -196,7 +218,48 @@ final class GameCrashWindowModel {
                     manifest));
         }
         Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
-        return new GameCrashWindowModel(exitType, details, logAnalyzable, latestLog, missingDependencySearch);
+        return new GameCrashWindowModel(
+                exitType,
+                details,
+                logAnalyzable,
+                latestLog,
+                PresentationMode.REPAIR_ALLOWED,
+                missingDependencySearch);
+    }
+
+    /// Builds a diagnostic-only model from a validated exported crash bundle.
+    ///
+    /// @param bundle validated crash-export contents
+    /// @return immutable diagnostic-only display and analysis model
+    static GameCrashWindowModel fromImported(ExportedCrashBundle bundle) {
+        ExportedCrashBundle imported = Objects.requireNonNull(bundle, "bundle");
+        List<Detail> details = new ArrayList<>();
+        details.add(new Detail(i18n("game.crash.import.archive"), imported.archive().toString()));
+        String sources = imported.texts().stream()
+                .flatMap(text -> text.sources().stream())
+                .distinct()
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("-");
+        details.add(new Detail(i18n("game.crash.import.sources"), sources));
+        LogAnalyzable analyzable = new LogAnalyzable(
+                null,
+                null,
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.UNKNOWN,
+                -1,
+                null,
+                null,
+                null,
+                null,
+                space.minecraftstl.xyml.util.platform.Bits.UNKNOWN,
+                null,
+                List.of());
+        return new GameCrashWindowModel(
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                details,
+                analyzable,
+                imported.archive(),
+                PresentationMode.DIAGNOSTIC_ONLY);
     }
 
     /// Returns the classified process-exit outcome.
@@ -225,6 +288,27 @@ final class GameCrashWindowModel {
     /// @return latest-log path
     Path latestLog() {
         return latestLog;
+    }
+
+    /// Returns whether executable repair actions may be exposed.
+    ///
+    /// @return true for normal instance crash windows
+    boolean repairActionsAllowed() {
+        return presentationMode == PresentationMode.REPAIR_ALLOWED;
+    }
+
+    /// Returns whether exporting or revealing another crash bundle is allowed.
+    ///
+    /// @return true for normal instance crash windows
+    boolean exportAllowed() {
+        return repairActionsAllowed();
+    }
+
+    /// Returns whether this window is diagnostic-only.
+    ///
+    /// @return true for imported crash reports
+    boolean diagnosticOnly() {
+        return presentationMode == PresentationMode.DIAGNOSTIC_ONLY;
     }
 
     /// Releases the window-owned read-only dependency catalog cache.
@@ -276,5 +360,15 @@ final class GameCrashWindowModel {
             Objects.requireNonNull(label, "label");
             Objects.requireNonNull(value, "value");
         }
+    }
+
+    /// Presentation policy used to enforce the imported-report read-only boundary.
+    @NotNullByDefault
+    enum PresentationMode {
+        /// Normal launched-instance crash handling with existing safe actions.
+        REPAIR_ALLOWED,
+
+        /// Imported report inspection without instance mutation or repair actions.
+        DIAGNOSTIC_ONLY
     }
 }

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.ExportedCrashBundle;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
@@ -191,6 +192,27 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             List<Log> logs,
             Runnable showGameLogs) {
         return open(process, exitType, repository, manifest, launchOptions, logs, showGameLogs, null);
+    }
+
+    /// Creates, opens, and returns a read-only window for one validated exported crash bundle.
+    ///
+    /// @param owner component or window used to own the imported log viewer
+    /// @param bundle validated crash-export contents
+    /// @return closeable diagnostic-only crash-window handle
+    public static SwingGameCrashWindow openImported(Component owner, ExportedCrashBundle bundle) {
+        Objects.requireNonNull(owner, "owner");
+        ExportedCrashBundle imported = Objects.requireNonNull(bundle, "bundle");
+        ExecutorService worker = newWorker();
+        DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(worker);
+        SwingGameCrashWindow window = new SwingGameCrashWindow(
+                GameCrashWindowModel.fromImported(imported),
+                (ignoredInput, ignoredLatestLog) -> service.analyze(imported),
+                new GameCrashReasonFormatter(),
+                new ImportedGameCrashWindowActions(owner, imported),
+                worker,
+                true);
+        window.show();
+        return window;
     }
 
     /// Creates, opens, and returns a production crash window with an optional missing-mod search action.
@@ -481,7 +503,8 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             }
 
             if (frame == null) {
-                JFrame createdFrame = new JFrame(i18n("game.crash.title"));
+                JFrame createdFrame = new JFrame(i18n(
+                        model.diagnosticOnly() ? "game.crash.import.title" : "game.crash.title"));
                 createdFrame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
                 createdFrame.setContentPane(root);
                 createdFrame.setMinimumSize(MINIMUM_SIZE);
@@ -534,7 +557,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @return header component
     private Component createHeaderOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
-        JLabel headline = new JLabel(titleFor(model.exitType()));
+        JLabel headline = new JLabel(model.diagnosticOnly()
+                ? i18n("game.crash.import.title")
+                : titleFor(model.exitType()));
         headline.setFont(headline.getFont().deriveFont(Font.BOLD, headline.getFont().getSize2D() + 2.0F));
         headline.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
 
@@ -623,10 +648,6 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @return action toolbar
     private Component createActionsOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
-        JButton export = new JButton(i18n("logwindow.export_game_crash_logs"));
-        export.addActionListener(event -> exportCrashLogsOnEdt());
-        exportButton = export;
-
         JButton logs = new JButton(i18n("logwindow.title"));
         logs.addActionListener(event -> showGameLogsOnEdt());
 
@@ -638,7 +659,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         operationStatus = status;
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
-        buttons.add(export);
+        if (model.exportAllowed()) {
+            JButton export = new JButton(i18n("logwindow.export_game_crash_logs"));
+            export.addActionListener(event -> exportCrashLogsOnEdt());
+            exportButton = export;
+            buttons.add(export);
+        }
         buttons.add(logs);
         buttons.add(help);
 
@@ -748,7 +774,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                     resultId,
                     reason,
                     evidence,
-                    diagnosis.solver(),
+                    model.repairActionsAllowed() ? diagnosis.solver() : null,
                     analysis.runtimeCandidates(diagnosis.resultId())));
             rows.add(Box.createVerticalStrut(6));
         }
@@ -863,6 +889,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @param row mutable row state
     private void executeRepairRowOnEdt(RepairRow row) {
         EdtDispatcher.requireEventDispatchThread();
+        if (!model.repairActionsAllowed()) {
+            return;
+        }
         if (closed.get()
                 || row.state == RepairState.PREPARING
                 || row.state == RepairState.AWAITING_SELECTION
