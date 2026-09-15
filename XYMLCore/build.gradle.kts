@@ -24,7 +24,7 @@ dependencies {
     api(libs.jsoup)
     api(libs.jna)
     api(libs.pci.ids)
-    api(project(":hello-nbt"))
+    api(project(":xoyz-nbt"))
     api(libs.weburl)
     api(libs.uuid.tools)
     compileOnlyApi(libs.jetbrains.annotations)

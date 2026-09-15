@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
@@ -858,6 +859,11 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         Throwable current = Objects.requireNonNull(failure, "failure");
         if (current instanceof CompletionException && current.getCause() != null) {
             current = Objects.requireNonNull(current.getCause(), "completion cause");
+        }
+        if (current instanceof UnsupportedInstallationException unsupported
+                && unsupported.getReason()
+                == UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE) {
+            return i18n("install.failed.cleanroom_not_compatible_with_forge");
         }
         @Nullable String message = current.getMessage();
         return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;

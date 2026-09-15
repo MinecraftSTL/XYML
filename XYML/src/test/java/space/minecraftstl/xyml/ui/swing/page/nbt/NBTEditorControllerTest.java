@@ -110,7 +110,7 @@ final class NBTEditorControllerTest {
         ui.run(controller::close);
     }
 
-    /// Uses only the seven concrete HelloNBT scalar setters and rejects a container edit.
+    /// Uses only the seven concrete XoyzNBT scalar setters and rejects a container edit.
     @Test
     void preservesEverySupportedScalarType() throws Exception {
         Path source = temporaryDirectory.resolve("types.dat");

@@ -57,7 +57,7 @@ fi
 if [ -n "${XYML_JAVA_OPTS+x}" ]; then
   _XYML_VM_OPTIONS=${XYML_JAVA_OPTS}
 else
-  _XYML_VM_OPTIONS="-XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=15"
+  _XYML_VM_OPTIONS="-XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=15 -XX:G1PeriodicGCInterval=900000 -XX:G1PeriodicGCSystemLoadThreshold=0.6 -XX:+UseStringDeduplication"
 fi
 
 function show_warning_console() {

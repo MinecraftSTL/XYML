@@ -27,7 +27,7 @@ import java.util.Objects;
 public record NBTValueEditResult(boolean applied, @Nullable String errorMessage) {
     /// Validates success and failure invariants.
     ///
-    /// @param applied whether the concrete HelloNBT setter ran
+    /// @param applied whether the concrete XoyzNBT setter ran
     /// @param errorMessage technical validation detail, or `null` on success
     public NBTValueEditResult {
         if (applied && errorMessage != null) {

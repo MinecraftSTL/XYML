@@ -29,7 +29,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Applies text input only through concrete scalar setters supplied by HelloNBT.
+/// Applies text input only through concrete scalar setters supplied by XoyzNBT.
 @NotNullByDefault
 final class NBTValueEditor {
     /// Prevents construction of this stateless utility.
@@ -38,7 +38,7 @@ final class NBTValueEditor {
 
     /// Returns whether the exact element has a supported type-preserving setter.
     ///
-    /// @param element concrete HelloNBT element
+    /// @param element concrete XoyzNBT element
     /// @return whether scalar text editing is supported
     static boolean isEditable(NBTElement element) {
         NBTElement candidate = Objects.requireNonNull(element, "element");
@@ -56,7 +56,7 @@ final class NBTValueEditor {
     /// Numeric input is trimmed before parsing. String input is preserved exactly, including leading
     /// whitespace and line breaks.
     ///
-    /// @param element concrete HelloNBT scalar
+    /// @param element concrete XoyzNBT scalar
     /// @param text proposed value text
     /// @return success or a validation reason without partial mutation
     static NBTValueEditResult apply(NBTElement element, String text) {
