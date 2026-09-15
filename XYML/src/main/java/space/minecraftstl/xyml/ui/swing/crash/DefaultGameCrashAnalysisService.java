@@ -21,12 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.ExportedCrashBundle;
+import space.minecraftstl.xyml.game.ExportedCrashBundleText;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
 import space.minecraftstl.xyml.game.analyzer.Solver;
+import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -53,7 +58,11 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
     private static final @Unmodifiable List<ResultID> LOG_RESULT_ORDER = List.of(
             ResultID.JRE_32BIT,
             ResultID.VIRTUAL_MEMORY,
+            ResultID.C2_COMPILER,
             ResultID.JRE_VERSION,
+            ResultID.LEGACY_JAVA_FIXER,
+            ResultID.CLIENT_MOD_ON_SERVER,
+            ResultID.RENDERER_MOD_COMPATIBILITY,
             ResultID.FORGE_MISSING_DEPENDENCY,
             ResultID.FABRIC_MISSING_DEPENDENCY,
             ResultID.CODE_PAGE);
@@ -83,46 +92,86 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
         LogAnalyzable copiedInput = Objects.requireNonNull(logAnalyzable, "logAnalyzable");
         Path copiedLatestLog = Objects.requireNonNull(latestLog, "latestLog");
 
-        CompletableFuture<SourceAnalysis> captured =
-                CompletableFuture.supplyAsync(() -> analyzeCapturedLogs(copiedInput), executor);
-        CompletableFuture<SourceAnalysis> persisted =
-                CompletableFuture.supplyAsync(() -> analyzeLatestLog(copiedInput, copiedLatestLog), executor);
-        return captured.thenCombine(persisted, DefaultGameCrashAnalysisService::merge);
+        CompletableFuture<List<PhysicalText>> captured =
+                CompletableFuture.supplyAsync(() -> capturedTexts(copiedInput), executor);
+        CompletableFuture<List<PhysicalText>> persisted =
+                CompletableFuture.supplyAsync(() -> latestLogTexts(copiedLatestLog), executor);
+        return captured.thenCombine(persisted, (capturedTexts, latestLogTexts) -> {
+            List<PhysicalText> texts = new ArrayList<>(capturedTexts.size() + latestLogTexts.size());
+            texts.addAll(capturedTexts);
+            texts.addAll(latestLogTexts);
+            return merge(analyzeTexts(copiedInput, texts));
+        });
     }
 
-    /// Analyzes the complete captured console output and any crash report referenced or embedded in it.
+    /// Analyzes every unique text in one already validated exported crash bundle.
+    ///
+    /// @param bundle immutable validated crash-export contents
+    /// @return asynchronous merged read-only diagnosis retaining archive entry provenance
+    CompletionStage<GameCrashAnalysis> analyze(ExportedCrashBundle bundle) {
+        ExportedCrashBundle copiedBundle = Objects.requireNonNull(bundle, "bundle");
+        return CompletableFuture.supplyAsync(() -> {
+            List<PhysicalText> texts = new ArrayList<>();
+            for (ExportedCrashBundleText text : copiedBundle.texts()) {
+                for (String source : text.sources()) {
+                    texts.add(new PhysicalText(source, text.content()));
+                }
+            }
+            LogAnalyzable input = new LogAnalyzable(
+                    null,
+                    null,
+                    ProcessListener.ExitType.APPLICATION_ERROR,
+                    OperatingSystem.UNKNOWN,
+                    -1,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Bits.UNKNOWN,
+                    null,
+                    List.of());
+            return merge(analyzeTexts(input, texts));
+        }, executor);
+    }
+
+    /// Collects captured output and its referenced or embedded crash report.
     ///
     /// @param input immutable launch context and captured-output snapshot
-    /// @return established rules, limited log diagnoses, and crash-report stack keywords
-    private static SourceAnalysis analyzeCapturedLogs(LogAnalyzable input) {
+    /// @return immutable physical text sources in stable order
+    private static @Unmodifiable List<PhysicalText> capturedTexts(LogAnalyzable input) {
         String rawLog = input.logText();
+        List<PhysicalText> texts = new ArrayList<>();
+        texts.add(new PhysicalText("captured", rawLog));
+        addCrashReport(texts, rawLog);
+        return List.copyOf(texts);
+    }
+
+    /// Adds one referenced or embedded crash-report body after the source log.
+    ///
+    /// @param texts mutable physical text accumulator
+    /// @param log source log that may contain a report marker
+    private static void addCrashReport(List<PhysicalText> texts, String log) {
         @Nullable String crashReport = null;
         try {
-            crashReport = CrashReportAnalyzer.findCrashReport(rawLog);
+            crashReport = CrashReportAnalyzer.findCrashReport(log);
         } catch (IOException | InvalidPathException exception) {
             LOG.warning("Failed to read crash report", exception);
         }
         if (crashReport == null) {
-            crashReport = CrashReportAnalyzer.extractCrashReport(rawLog);
+            crashReport = CrashReportAnalyzer.extractCrashReport(log);
         }
-
-        Set<String> keywords = crashReport == null
-                ? Set.of()
-                : CrashReportAnalyzer.findKeywordsFromCrashReport(crashReport);
-        return new SourceAnalysis(
-                List.copyOf(CrashReportAnalyzer.analyze(rawLog)),
-                LogAnalyzer.analyzeAll(input),
-                keywords);
+        if (crashReport != null) {
+            texts.add(new PhysicalText("crash_report", crashReport));
+        }
     }
 
     /// Reads and analyzes the instance's latest log when it is still available.
     ///
-    /// @param context immutable launch context whose log lines will be replaced
     /// @param latestLog on-disk `logs/latest.log` path
-    /// @return established rules, limited log diagnoses, and stack keywords, or an empty result after read failure
-    private static SourceAnalysis analyzeLatestLog(LogAnalyzable context, Path latestLog) {
+    /// @return immutable physical text sources, or an empty list after read failure
+    private static @Unmodifiable List<PhysicalText> latestLogTexts(Path latestLog) {
         if (!Files.isReadable(latestLog)) {
-            return SourceAnalysis.empty();
+            return List.of();
         }
 
         String log;
@@ -130,42 +179,64 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
             log = FileUtils.readTextMaybeNativeEncoding(latestLog);
         } catch (IOException exception) {
             LOG.warning("Failed to read logs/latest.log", exception);
-            return SourceAnalysis.empty();
+            return List.of();
         }
-        LogAnalyzable persistedInput = context.withLogLines(List.of(log));
-        return new SourceAnalysis(
-                List.copyOf(CrashReportAnalyzer.analyze(log)),
-                LogAnalyzer.analyzeAll(persistedInput),
-                CrashReportAnalyzer.findKeywordsFromCrashReport(log));
+        List<PhysicalText> texts = new ArrayList<>();
+        texts.add(new PhysicalText("latest_log", log));
+        addCrashReport(texts, log);
+        return List.copyOf(texts);
     }
 
-    /// Merges both sources with stable deduplication and removes established rules superseded by limited diagnoses.
+    /// Analyzes unique contents once while retaining every physical source that supplied each content.
     ///
-    /// @param captured captured-output diagnosis
-    /// @param persisted latest-log diagnosis
+    /// @param context immutable launch context whose log lines are replaced for each unique text
+    /// @param texts physical texts in stable source order
+    /// @return immutable source diagnoses after content-based deduplication
+    private static @Unmodifiable List<SourceAnalysis> analyzeTexts(
+            LogAnalyzable context,
+            List<PhysicalText> texts) {
+        Map<String, LinkedHashSet<String>> sourcesByContent = new LinkedHashMap<>();
+        for (PhysicalText text : texts) {
+            sourcesByContent.computeIfAbsent(text.content(), ignored -> new LinkedHashSet<>()).add(text.source());
+        }
+
+        List<SourceAnalysis> analyses = new ArrayList<>();
+        for (Map.Entry<String, LinkedHashSet<String>> entry : sourcesByContent.entrySet()) {
+            String content = entry.getKey();
+            LogAnalyzable input = context.withLogLines(List.of(content));
+            analyses.add(new SourceAnalysis(
+                    List.copyOf(entry.getValue()),
+                    List.copyOf(CrashReportAnalyzer.analyze(content)),
+                    LogAnalyzer.analyzeAll(input),
+                    CrashReportAnalyzer.findKeywordsFromCrashReport(content)));
+        }
+        return List.copyOf(analyses);
+    }
+
+    /// Merges all unique sources with stable deduplication and removes superseded legacy diagnoses.
+    ///
+    /// @param sources unique-content diagnoses with physical provenance
     /// @return immutable merged diagnosis
-    private static GameCrashAnalysis merge(
-            SourceAnalysis captured,
-            SourceAnalysis persisted) {
+    private static GameCrashAnalysis merge(@Unmodifiable List<SourceAnalysis> sources) {
         LinkedHashMap<CrashReportAnalyzer.Rule, CrashReportAnalyzer.Result> crashResults =
                 new LinkedHashMap<>();
         LinkedHashMap<CrashReportAnalyzer.Rule, List<String>> evidenceSources =
                 new LinkedHashMap<>();
         List<CrashReportAnalyzer.Result> suppressedResults = new ArrayList<>();
-        for (CrashReportAnalyzer.Result result : captured.crashResults()) {
-            addCrashResult(crashResults, evidenceSources, result, "captured");
-        }
-        for (CrashReportAnalyzer.Result result : persisted.crashResults()) {
-            addCrashResult(crashResults, evidenceSources, result, "latest_log");
-        }
 
         Map<ResultID, AnalyzeResult<LogAnalyzable>> logResults = new LinkedHashMap<>();
         Map<ResultID, List<String>> logEvidenceSources = new LinkedHashMap<>();
-        for (AnalyzeResult<LogAnalyzable> result : captured.logResults()) {
-            addLogResult(logResults, logEvidenceSources, result, "captured");
-        }
-        for (AnalyzeResult<LogAnalyzable> result : persisted.logResults()) {
-            addLogResult(logResults, logEvidenceSources, result, "latest_log");
+        for (SourceAnalysis source : sources) {
+            for (CrashReportAnalyzer.Result result : source.crashResults()) {
+                for (String sourceName : source.sources()) {
+                    addCrashResult(crashResults, evidenceSources, result, sourceName);
+                }
+            }
+            for (AnalyzeResult<LogAnalyzable> result : source.logResults()) {
+                for (String sourceName : source.sources()) {
+                    addLogResult(logResults, logEvidenceSources, result, sourceName);
+                }
+            }
         }
         for (ResultID resultId : orderedLogResultIds(logResults)) {
             removeSupersededCrashRules(crashResults, suppressedResults, resultId);
@@ -175,8 +246,10 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
             suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
         }
 
-        Set<String> keywords = new HashSet<>(captured.keywords());
-        keywords.addAll(persisted.keywords());
+        Set<String> keywords = new HashSet<>();
+        for (SourceAnalysis source : sources) {
+            keywords.addAll(source.keywords());
+        }
         return new GameCrashAnalysis(
                 orderedCrashResults(crashResults),
                 orderedLogResults(logResults),
@@ -314,7 +387,8 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
     /// @return true for Forge or Fabric dependency failures
     private static boolean isMissingDependencyResult(ResultID resultId) {
         return resultId == ResultID.FORGE_MISSING_DEPENDENCY
-                || resultId == ResultID.FABRIC_MISSING_DEPENDENCY;
+                || resultId == ResultID.FABRIC_MISSING_DEPENDENCY
+                || resultId == ResultID.RENDERER_MOD_COMPATIBILITY;
     }
 
     /// Removes legacy results whose evidence and repair are represented by one limited log diagnosis.
@@ -347,6 +421,13 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
                 suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING);
                 suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.FABRIC_WARNINGS);
             }
+            case RENDERER_MOD_COMPATIBILITY -> {
+                suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.MOD_RESOLUTION);
+                suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.MOD_RESOLUTION_CONFLICT);
+                suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING);
+                suppress(crashResults, suppressedResults, CrashReportAnalyzer.Rule.FABRIC_WARNINGS);
+            }
+            case C2_COMPILER, CLIENT_MOD_ON_SERVER, LEGACY_JAVA_FIXER -> { }
         }
     }
 
@@ -368,21 +449,27 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
     /// @param keywords crash-report stack keywords
     @NotNullByDefault
     private record SourceAnalysis(
+            @Unmodifiable List<String> sources,
             @Unmodifiable List<CrashReportAnalyzer.Result> crashResults,
             @Unmodifiable List<AnalyzeResult<LogAnalyzable>> logResults,
             @Unmodifiable Set<String> keywords) {
         /// Defensively copies every source result collection.
         private SourceAnalysis {
+            sources = List.copyOf(Objects.requireNonNull(sources, "sources"));
             crashResults = List.copyOf(Objects.requireNonNull(crashResults, "crashResults"));
             logResults = List.copyOf(Objects.requireNonNull(logResults, "logResults"));
             keywords = Set.copyOf(Objects.requireNonNull(keywords, "keywords"));
         }
 
-        /// Returns an immutable diagnosis containing no evidence.
-        ///
-        /// @return empty source diagnosis
-        private static SourceAnalysis empty() {
-            return new SourceAnalysis(List.of(), List.of(), Set.of());
+    }
+
+    /// One physical log or crash-report text before content-based deduplication.
+    @NotNullByDefault
+    private record PhysicalText(String source, String content) {
+        /// Validates one physical source and text snapshot.
+        private PhysicalText {
+            source = Objects.requireNonNull(source, "source");
+            content = Objects.requireNonNull(content, "content");
         }
     }
 }

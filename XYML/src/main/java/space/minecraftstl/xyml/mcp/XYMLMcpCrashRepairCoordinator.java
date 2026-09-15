@@ -745,6 +745,12 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                     CrashReportAnalyzer.Rule.MOD_RESOLUTION,
                     CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING,
                     CrashReportAnalyzer.Rule.FABRIC_WARNINGS);
+            case RENDERER_MOD_COMPATIBILITY -> List.of(
+                    CrashReportAnalyzer.Rule.MOD_RESOLUTION,
+                    CrashReportAnalyzer.Rule.MOD_RESOLUTION_CONFLICT,
+                    CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING,
+                    CrashReportAnalyzer.Rule.FABRIC_WARNINGS);
+            case C2_COMPILER, CLIENT_MOD_ON_SERVER, LEGACY_JAVA_FIXER -> List.of();
         };
     }
 

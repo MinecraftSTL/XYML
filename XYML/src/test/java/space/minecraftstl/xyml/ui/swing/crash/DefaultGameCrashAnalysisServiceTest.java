@@ -22,6 +22,8 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.ExportedCrashBundle;
+import space.minecraftstl.xyml.game.ExportedCrashBundleText;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
@@ -453,6 +455,75 @@ class DefaultGameCrashAnalysisServiceTest {
                 CrashReportAnalyzer.Rule.FABRIC_WARNINGS), analysis.suppressedResults().stream()
                 .map(CrashReportAnalyzer.Result::rule)
                 .toList());
+    }
+
+    /// Analyzes the body of a crash report referenced by captured launcher output, not only the marker line.
+    ///
+    /// @throws Exception when temporary I/O or bounded asynchronous completion fails
+    @Test
+    void analyzesReferencedCrashReportBody() throws Exception {
+        Path crashReport = temporaryDirectory.resolve("crash-report.txt");
+        Files.writeString(crashReport, "java.lang.NoSuchMethodError: com.example.Missing.method()");
+        String captured = "#@!@# Game crashed! Crash report saved to: #@!@# " + crashReport;
+
+        GameCrashAnalysis analysis = analyze(
+                input(List.of(new Log(captured)), Bits.BIT_64),
+                temporaryDirectory.resolve("missing-latest.log"));
+
+        assertEquals(List.of(CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR), analysis.results().stream()
+                .map(CrashReportAnalyzer.Result::rule)
+                .toList());
+        assertEquals(List.of("crash_report"), analysis.evidenceSources()
+                .get(CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR));
+    }
+
+    /// Deduplicates identical captured and latest-log text while retaining both physical source names.
+    ///
+    /// @throws Exception when temporary I/O or bounded asynchronous completion fails
+    @Test
+    void deduplicatesIdenticalSourceContentsAndRetainsSources() throws Exception {
+        String duplicate = "java.lang.NoSuchMethodError: com.example.Missing.method()";
+        Path latestLog = temporaryDirectory.resolve("latest.log");
+        Files.writeString(latestLog, duplicate);
+
+        GameCrashAnalysis analysis = analyze(
+                input(List.of(new Log(duplicate)), Bits.BIT_64),
+                latestLog);
+
+        assertEquals(1, analysis.results().stream()
+                .filter(result -> result.rule() == CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR)
+                .count());
+        assertEquals(List.of("captured", "latest_log"), analysis.evidenceSources()
+                .get(CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR));
+    }
+
+    /// Analyzes validated exported-bundle text and preserves its archive entry as evidence provenance.
+    ///
+    /// @throws Exception when bounded asynchronous completion fails
+    @Test
+    void analyzesExportedCrashBundleAndRetainsEntrySource() throws Exception {
+        String report = "java.lang.NoSuchMethodError: com.example.Missing.method()";
+        ExportedCrashBundle bundle = new ExportedCrashBundle(
+                temporaryDirectory.resolve("minecraft-exported-crash-info-test.zip"),
+                List.of(new ExportedCrashBundleText(
+                        ExportedCrashBundleText.Kind.CRASH_REPORT,
+                        report,
+                        List.of("crash-reports/crash-2026-09-16.txt"))));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            GameCrashAnalysis analysis = new DefaultGameCrashAnalysisService(executor)
+                    .analyze(bundle)
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+
+            assertEquals(List.of(CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR), analysis.results().stream()
+                    .map(CrashReportAnalyzer.Result::rule)
+                    .toList());
+            assertEquals(List.of("crash-reports/crash-2026-09-16.txt"), analysis.evidenceSources()
+                    .get(CrashReportAnalyzer.Rule.NO_SUCH_METHOD_ERROR));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /// Analyzes diagnostic evidence beyond the UI's bounded evidence-snippet range.
