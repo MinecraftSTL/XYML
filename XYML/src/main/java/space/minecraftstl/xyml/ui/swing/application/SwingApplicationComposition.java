@@ -71,6 +71,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.In
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.crash.SwingCrashReportDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingShellNBTDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogInteractions;
@@ -945,6 +946,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 animator,
                 presentation.taskProgressAnimationDuration());
         SwingShellNBTDropLauncher.install(frame, Schedulers.io());
+        SwingCrashReportDropLauncher.install(frame, Schedulers.io());
         return new AppShellApplicationWindow(frame);
     }
 

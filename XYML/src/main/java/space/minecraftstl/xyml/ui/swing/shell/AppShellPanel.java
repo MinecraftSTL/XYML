@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorUrl;
+import space.minecraftstl.xyml.game.ExportedCrashBundleReader;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
@@ -537,7 +538,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @return whether the path is a modpack and the shell is on the default workspace or downloads
     private boolean supportsDroppedModpack(java.nio.file.Path path) {
         ShellPageId page = selectedPage();
-        return ModpackHelper.isFileModpackByExtension(path)
+        return !ExportedCrashBundleReader.hasSupportedFileName(path)
+                && ModpackHelper.isFileModpackByExtension(path)
                 && (page == null || page == ShellPageId.DOWNLOADS);
     }
 
