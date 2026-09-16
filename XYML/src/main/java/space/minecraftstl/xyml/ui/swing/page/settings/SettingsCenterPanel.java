@@ -476,11 +476,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         configureDownloadAndProxyControls();
         configureMcpControls();
         SwingTransparency.revealBackgroundThroughTabs(tabs);
+        tabs.setName("settingsTabs");
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
         tabs.addTab(i18n("settings.launcher.download"), createScrollPane(createDownloadAndProxyPage()));
         tabs.addTab(i18n("settings.mcp.title"), createScrollPane(createMcpPage()));
+        tabs.addTab(i18n("settings.launcher.misc"), createScrollPane(createMiscPage()));
         tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(createAppearancePage()));
         tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
         tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
@@ -706,13 +708,22 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         JPanel page = createPage();
         page.add(createHeading(i18n("settings.mcp.title")), "growx");
         page.add(mcpEnabledBox, "growx");
-        page.add(mcpEnablementWarningBox, "growx");
         page.add(createMcpBearerTokenRow(), "growx");
         page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
         page.add(mcpConfirmInstanceDeletionBox, "growx");
         page.add(mcpConfirmModDeletionBox, "growx");
         page.add(mcpRestartPanel, "growx");
         page.add(mcpValidationLabel, "growx");
+        return page;
+    }
+
+    /// Creates the miscellaneous launcher preferences page.
+    ///
+    /// @return miscellaneous preferences content
+    private JPanel createMiscPage() {
+        JPanel page = createPage();
+        page.add(createHeading(i18n("settings.launcher.misc")), "growx");
+        page.add(mcpEnablementWarningBox, "growx");
         return page;
     }
 

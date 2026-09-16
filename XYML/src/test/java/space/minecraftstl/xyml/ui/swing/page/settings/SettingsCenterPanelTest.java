@@ -41,7 +41,9 @@ import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import javax.swing.JCheckBox;
 import javax.swing.JPasswordField;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
@@ -59,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies the MCP enablement gate through the real settings-center Swing controls.
 @Isolated
@@ -97,6 +100,33 @@ public final class SettingsCenterPanelTest {
         public void close() {
         }
     };
+
+    /// Keeps the MCP enablement warning preference on the miscellaneous page instead of the MCP page.
+    @Test
+    public void mcpEnablementWarningAppearsOnMiscPage() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(
+                    store,
+                    () -> new McpEnablementResult(false, false));
+            try {
+                onEventDispatchThread(() -> {
+                    JTabbedPane settingsTabs = findComponent(panel, "settingsTabs", JTabbedPane.class);
+                    JCheckBox warning = findComponent(
+                            panel, "settingsMcpEnablementWarning", JCheckBox.class);
+                    int warningTabIndex = findContainingTab(settingsTabs, warning);
+                    int mcpTabIndex = findTabIndex(settingsTabs, i18n("settings.mcp.title"));
+                    assertAll(
+                            () -> assertEquals(
+                                    i18n("settings.launcher.misc"),
+                                    settingsTabs.getTitleAt(warningTabIndex)),
+                            () -> assertNotEquals(mcpTabIndex, warningTabIndex));
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
 
     /// Enabling after an explicit confirmation persists only after the decision callback returns.
     @Test
@@ -732,6 +762,34 @@ public final class SettingsCenterPanelTest {
         @Override
         public void setMcpConfirmModDeletion(boolean required) {
         }
+    }
+
+    /// Finds the settings tab containing one descendant component.
+    ///
+    /// @param tabs settings tab container
+    /// @param descendant component whose owning tab is required
+    /// @return zero-based owning tab index
+    private static int findContainingTab(JTabbedPane tabs, Component descendant) {
+        for (int index = 0; index < tabs.getTabCount(); index++) {
+            if (SwingUtilities.isDescendingFrom(descendant, tabs.getComponentAt(index))) {
+                return index;
+            }
+        }
+        throw new AssertionError("Component is not contained by any settings tab");
+    }
+
+    /// Finds one settings tab by localized title.
+    ///
+    /// @param tabs settings tab container
+    /// @param title expected localized tab title
+    /// @return zero-based matching tab index
+    private static int findTabIndex(JTabbedPane tabs, String title) {
+        for (int index = 0; index < tabs.getTabCount(); index++) {
+            if (Objects.equals(title, tabs.getTitleAt(index))) {
+                return index;
+            }
+        }
+        throw new AssertionError("Missing settings tab: " + title);
     }
 
     /// Finds one typed named Swing component recursively.
