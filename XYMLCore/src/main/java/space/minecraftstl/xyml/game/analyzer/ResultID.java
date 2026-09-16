@@ -22,6 +22,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Stable identifiers for the deliberately limited launch-log causes.
 @NotNullByDefault
 public enum ResultID {
+    /// HotSpot terminated while compiling code with the C2 optimizing compiler.
+    C2_COMPILER,
+
+    /// A client-only mod or class was loaded by a dedicated server.
+    CLIENT_MOD_ON_SERVER,
+
     /// Windows legacy code-page handling failed around a non-ASCII launch path.
     CODE_PAGE,
 
@@ -38,5 +44,11 @@ public enum ResultID {
     FORGE_MISSING_DEPENDENCY,
 
     /// Fabric reported a hard missing mod dependency.
-    FABRIC_MISSING_DEPENDENCY
+    FABRIC_MISSING_DEPENDENCY,
+
+    /// A legacy Minecraft launch on Java 8 requires the Legacy Java Fixer compatibility mod.
+    LEGACY_JAVA_FIXER,
+
+    /// Fabric reported an explicit Indium, Iris, or Iris Flywheel compatibility failure.
+    RENDERER_MOD_COMPATIBILITY
 }

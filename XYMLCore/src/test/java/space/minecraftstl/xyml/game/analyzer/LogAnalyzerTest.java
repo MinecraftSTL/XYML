@@ -836,6 +836,245 @@ class LogAnalyzerTest {
         assertTrue(LogAnalyzer.analyze(input).isEmpty());
     }
 
+    /// Detects a fatal HotSpot report only when the current crashing thread and compile-task section both identify C2.
+    @Test
+    void detectsC2CompilerCrash() {
+        LogAnalyzable input = input(
+                List.of(
+                        "# A fatal error has been detected by the Java Runtime Environment:",
+                        "#",
+                        "Current thread (0x000001ed63cc4000):  JavaThread \"C2 CompilerThread0\" daemon",
+                        "Current CompileTask:",
+                        "C2: 1234 567 net.minecraft.client.Minecraft::runGameLoop (456 bytes)"),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.JVM_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.C2_COMPILER,
+                C2CompilerAnalyzer.class);
+
+        assertEquals(RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                result.solver().repairAction().actionType());
+        assertFalse(result.solver().repairAction().executable());
+    }
+
+    /// Rejects a report that separates the current-thread label and JavaThread details across physical lines.
+    @Test
+    void c2CompilerAnalyzerRejectsSplitCurrentThreadLine() {
+        LogAnalyzable input = input(
+                List.of(
+                        "# A fatal error has been detected by the Java Runtime Environment:",
+                        "Current thread (0x000001ed63cc4000):",
+                        "  JavaThread \"C2 CompilerThread0\" daemon",
+                        "Current CompileTask:",
+                        "C2: 1234 567 net.minecraft.client.Minecraft::runGameLoop (456 bytes)"),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.JVM_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Rejects ordinary VM thread dumps that merely contain idle C2 compiler threads.
+    @Test
+    void c2CompilerAnalyzerRejectsThreadDumpWithoutCompileFailure() {
+        LogAnalyzable input = input(
+                List.of(
+                        "# A fatal error has been detected by the Java Runtime Environment:",
+                        "JavaThread \"C2 CompilerThread1\" daemon [_thread_blocked]",
+                        "There is insufficient memory for the Java Runtime Environment to continue."),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.JVM_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Detects the Java 8 LaunchWrapper collection failure on supported legacy Minecraft versions.
+    @Test
+    void detectsLegacyJavaFixerRequirement() {
+        LogAnalyzable input = legacyInput(List.of(
+                "Exception in thread \"main\" java.util.ConcurrentModificationException",
+                "\tat java.util.ArrayList$Itr.checkForComodification(ArrayList.java:901)",
+                "\tat net.minecraft.launchwrapper.Launch.launch(Launch.java:117)"));
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.LEGACY_JAVA_FIXER,
+                LegacyJavaFixerAnalyzer.class);
+
+        assertEquals(List.of("legacyjavafixer"), result.solver().repairAction().dependencyIds());
+    }
+
+    /// Rejects a generic concurrent-modification stack that is unrelated to LaunchWrapper startup.
+    @Test
+    void legacyJavaFixerAnalyzerRejectsUnrelatedConcurrentModification() {
+        LogAnalyzable input = legacyInput(List.of(
+                "Exception in thread \"main\" java.util.ConcurrentModificationException",
+                "\tat example.mod.Registry.reload(Registry.java:42)"));
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Rejects the legacy LaunchWrapper stack when the selected runtime is not Java 8.
+    @Test
+    void legacyJavaFixerAnalyzerRejectsOtherJavaVersions() {
+        LogAnalyzable input = new LogAnalyzable(
+                "1.7.10",
+                MAIN_CLASS,
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                JAVA_PATH,
+                17,
+                17,
+                Bits.BIT_64,
+                4096,
+                List.of(
+                        "Exception in thread \"main\" java.util.ConcurrentModificationException",
+                        "\tat net.minecraft.launchwrapper.Launch.launch(Launch.java:117)"));
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Detects an explicit Fabric incompatibility sentence owned by Iris.
+    @Test
+    void detectsRendererModCompatibilityFailure() {
+        LogAnalyzable input = input(
+                List.of(
+                        "[main/ERROR]: Incompatible mod set!",
+                        " - Mod 'Iris' (iris) 1.7.0 is incompatible with mod 'Sodium' (sodium) 0.4.10."),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.RENDERER_MOD_COMPATIBILITY,
+                RendererModCompatibilityAnalyzer.class);
+
+        assertEquals(List.of("iris"), result.solver().repairAction().dependencyIds());
+    }
+
+    /// Detects Fabric's explicit proposed solution to install Iris Flywheel compatibility.
+    @Test
+    void detectsRendererCompatibilitySolution() {
+        LogAnalyzable input = input(
+                List.of(
+                        "Incompatible mods found!",
+                        "A potential solution has been determined:",
+                        " - Install mod 'Iris Flywheel Compat' (irisflw), any version."),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.RENDERER_MOD_COMPATIBILITY,
+                RendererModCompatibilityAnalyzer.class);
+
+        assertEquals(List.of("irisflw"), result.solver().repairAction().dependencyIds());
+    }
+
+    /// Rejects an ordinary loaded-mod listing that merely names Indium.
+    @Test
+    void rendererModCompatibilityAnalyzerRejectsModListing() {
+        LogAnalyzable input = input(
+                List.of(
+                        "Fabric Mods:",
+                        "\tindium: Indium 1.0.28+mc1.20.4",
+                        "Minecraft started successfully."),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Detects Forge's exact invalid-distribution failure in a crash report.
+    @Test
+    void detectsClientModOnDedicatedServer() {
+        LogAnalyzable input = input(
+                List.of(
+                        "---- Minecraft Crash Report ----",
+                        "Caused by: java.lang.RuntimeException: Attempted to load class "
+                                + "net/minecraft/client/Minecraft for invalid dist DEDICATED_SERVER"),
+                OperatingSystem.LINUX,
+                -1,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertOnlyResult(input, ResultID.CLIENT_MOD_ON_SERVER, ClientModOnServerAnalyzer.class);
+    }
+
+    /// Detects Fabric's exact server-environment class loading failure.
+    @Test
+    void detectsFabricClientModOnServer() {
+        LogAnalyzable input = input(
+                List.of(
+                        "Description: Mod loading error",
+                        "java.lang.RuntimeException: Cannot load class example.client.ClientEntrypoint "
+                                + "in environment type SERVER"),
+                OperatingSystem.LINUX,
+                -1,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertOnlyResult(input, ResultID.CLIENT_MOD_ON_SERVER, ClientModOnServerAnalyzer.class);
+    }
+
+    /// Rejects an isolated invalid-distribution sentence without fatal launch or crash-report context.
+    @Test
+    void clientModOnServerAnalyzerRejectsRecoveredException() {
+        LogAnalyzable input = input(
+                List.of(
+                        "java.lang.RuntimeException: Attempted to load class "
+                                + "net/minecraft/client/Minecraft for invalid dist DEDICATED_SERVER",
+                        "The optional integration was disabled and launch continued."),
+                OperatingSystem.LINUX,
+                -1,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
     /// Rejects all error-like evidence retained after a normal process exit.
     ///
     /// @throws IOException when the real regression log cannot be read
@@ -933,6 +1172,26 @@ class LogAnalyzerTest {
                 requiredJavaVersion,
                 currentJavaVersion,
                 javaBits,
+                4096,
+                logLines);
+    }
+
+    /// Creates a Java 8 legacy-game input for Legacy Java Fixer tests.
+    ///
+    /// @param logLines source lines in order
+    /// @return immutable Java 8 launch input for Minecraft 1.7.10
+    private static LogAnalyzable legacyInput(List<String> logLines) {
+        return new LogAnalyzable(
+                "1.7.10",
+                MAIN_CLASS,
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                JAVA_PATH,
+                8,
+                8,
+                Bits.BIT_64,
                 4096,
                 logLines);
     }

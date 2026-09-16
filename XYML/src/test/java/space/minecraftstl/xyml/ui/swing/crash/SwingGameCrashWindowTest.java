@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.ExportedCrashBundle;
+import space.minecraftstl.xyml.game.ExportedCrashBundleText;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.FabricMissingDependencyAnalyzer;
@@ -36,6 +38,7 @@ import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.JPanel;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
@@ -102,6 +105,49 @@ class SwingGameCrashWindowTest {
 
         assertTrue(window.isClosed());
         assertTrue(worker.isShutdown());
+    }
+
+    /// Closes the injected actions exactly once even when the crash-window close boundary is called repeatedly.
+    @Test
+    void closeReleasesActionsExactlyOnce() {
+        ControlledAnalysisService service = new ControlledAnalysisService();
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        RecordingActions actions = new RecordingActions();
+        SwingGameCrashWindow window = window(
+                service,
+                worker,
+                new RecordingRepairInteraction(true, null),
+                actions);
+
+        window.close();
+        window.close();
+        EdtDispatcher.executeAndWait(() -> { });
+
+        assertEquals(1, actions.closeCalls.get());
+        assertTrue(worker.isShutdown());
+    }
+
+    /// Keeps imported-log actions closed and unable to recreate secondary UI in headless lifecycle tests.
+    @Test
+    void importedActionsReleaseLogViewerBoundaryIdempotently() {
+        ExportedCrashBundle bundle = new ExportedCrashBundle(
+                Path.of("minecraft-exported-crash-info-test.zip"),
+                List.of(new ExportedCrashBundleText(
+                        ExportedCrashBundleText.Kind.LOG,
+                        "first imported log",
+                        List.of("minecraft.log"))));
+        ImportedGameCrashWindowActions actions = new ImportedGameCrashWindowActions(new JPanel(), bundle);
+
+        assertEquals(1, actions.sourceCount());
+        assertFalse(actions.isClosed());
+        actions.close();
+        actions.close();
+
+        EdtDispatcher.executeAndWait(() -> {
+            actions.showGameLogs();
+            assertFalse(actions.hasOpenLogDialogOnEdt());
+        });
+        assertTrue(actions.isClosed());
     }
 
     /// Keeps a missing-dependency search idle until the corresponding reason row is explicitly clicked.
@@ -582,6 +628,21 @@ class SwingGameCrashWindowTest {
             ControlledAnalysisService service,
             ExecutorService worker,
             SwingGameCrashWindow.RepairInteraction repairInteraction) {
+        return window(service, worker, repairInteraction, new RecordingActions());
+    }
+
+    /// Creates one native-frame-disabled window with explicit action and repair boundaries.
+    ///
+    /// @param service controlled analysis service
+    /// @param worker window-owned executor
+    /// @param repairInteraction deterministic confirmation and candidate selector
+    /// @param actions controlled window actions
+    /// @return test window
+    private static SwingGameCrashWindow window(
+            ControlledAnalysisService service,
+            ExecutorService worker,
+            SwingGameCrashWindow.RepairInteraction repairInteraction,
+            GameCrashWindowActions actions) {
         GameCrashWindowModel model = new GameCrashWindowModel(
                 ProcessListener.ExitType.APPLICATION_ERROR,
                 List.of(new GameCrashWindowModel.Detail("Instance", "Test")),
@@ -591,7 +652,7 @@ class SwingGameCrashWindowTest {
                 model,
                 service,
                 new GameCrashReasonFormatter(),
-                new RecordingActions(),
+                actions,
                 worker,
                 false,
                 repairInteraction);
@@ -889,6 +950,9 @@ class SwingGameCrashWindowTest {
     /// Keeps export, log-window, and desktop effects inert for lifecycle tests.
     @NotNullByDefault
     private static final class RecordingActions implements GameCrashWindowActions {
+        /// Number of times the owning crash window released this boundary.
+        private final AtomicInteger closeCalls = new AtomicInteger();
+
         /// Returns an already completed inert export path.
         ///
         /// @return inert export stage
@@ -914,6 +978,12 @@ class SwingGameCrashWindowTest {
         /// @param destination link destination
         @Override
         public void openLink(URI destination) {
+        }
+
+        /// Records release of this action boundary.
+        @Override
+        public void close() {
+            closeCalls.incrementAndGet();
         }
     }
 }

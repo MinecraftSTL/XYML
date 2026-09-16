@@ -29,7 +29,11 @@ public enum AnalyzableType {
     LOG(List.of(
             new JRE32BitAnalyzer(),
             new VirtualMemoryAnalyzer(),
+            new C2CompilerAnalyzer(),
             new JREVersionAnalyzer(),
+            new LegacyJavaFixerAnalyzer(),
+            new ClientModOnServerAnalyzer(),
+            new RendererModCompatibilityAnalyzer(),
             new ForgeMissingDependencyAnalyzer(),
             new FabricMissingDependencyAnalyzer(),
             new CodePageAnalyzer()));

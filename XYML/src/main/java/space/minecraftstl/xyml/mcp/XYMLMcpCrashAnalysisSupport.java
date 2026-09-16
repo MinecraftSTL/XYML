@@ -204,6 +204,12 @@ final class XYMLMcpCrashAnalysisSupport {
                     supersededBy.put("MOD_RESOLUTION_MISSING", resultId);
                     supersededBy.put("FABRIC_WARNINGS", resultId);
                 }
+                case "RENDERER_MOD_COMPATIBILITY" -> {
+                    supersededBy.put("MOD_RESOLUTION", resultId);
+                    supersededBy.put("MOD_RESOLUTION_CONFLICT", resultId);
+                    supersededBy.put("MOD_RESOLUTION_MISSING", resultId);
+                    supersededBy.put("FABRIC_WARNINGS", resultId);
+                }
                 default -> {
                     // This diagnosis has no legacy rule that it supersedes.
                 }

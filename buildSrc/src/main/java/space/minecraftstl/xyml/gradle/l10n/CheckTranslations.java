@@ -17,24 +17,37 @@
  */
 package space.minecraftstl.xyml.gradle.l10n;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
+import org.gradle.api.file.FileTree;
 import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.InputFile;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.BiConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/// Validates localized resource bundles, duplicate declarations, and crash-analysis source references.
+///
 /// @author Glavo
+@NotNullByDefault
 public abstract class CheckTranslations extends DefaultTask {
 
     private static final Logger LOGGER = Logging.getLogger(CheckTranslations.class);
+    private static final Pattern CRASH_MESSAGE_KEY = Pattern.compile(
+            "\\\"(game\\.crash\\.[a-z0-9_.-]*[a-z0-9_-])\\\"");
 
     @InputFile
     public abstract RegularFileProperty getEnglishFile();
@@ -48,14 +61,60 @@ public abstract class CheckTranslations extends DefaultTask {
     @InputFile
     public abstract RegularFileProperty getClassicalChineseFile();
 
+    /// Returns Java sources whose complete crash-message key literals must exist in the primary bundles.
+    ///
+    /// @return source files participating in crash-message key validation
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileTree getCrashMessageSources() {
+        Path root = getProject().getRootProject().getProjectDir().toPath();
+        return getProject().files(
+                        root.resolve("XYMLCore/src/main/java/space/minecraftstl/xyml/game/analyzer"),
+                        root.resolve("XYML/src/main/java/space/minecraftstl/xyml/ui/swing/crash"))
+                .getAsFileTree()
+                .matching(pattern -> pattern.include("**/*.java"));
+    }
+
     @TaskAction
     public void run() throws IOException {
+        validate(
+                getEnglishFile().getAsFile().get().toPath(),
+                getSimplifiedChineseFile().getAsFile().get().toPath(),
+                getTraditionalChineseFile().getAsFile().get().toPath(),
+                getClassicalChineseFile().getAsFile().get().toPath(),
+                getCrashMessageSources().getFiles());
+    }
+
+    /// Validates four resource bundles and complete crash-message key literals from Java sources.
+    ///
+    /// @param englishFile English resource bundle
+    /// @param simplifiedChineseFile Simplified Chinese resource bundle
+    /// @param traditionalChineseFile Traditional Chinese resource bundle
+    /// @param classicalChineseFile Classical Chinese resource bundle
+    /// @param sourceFiles Java source files whose complete crash keys must be translated
+    /// @throws IOException when a resource or source file cannot be read
+    static void validate(
+            Path englishFile,
+            Path simplifiedChineseFile,
+            Path traditionalChineseFile,
+            Path classicalChineseFile,
+            Set<File> sourceFiles) throws IOException {
         Checker checker = new Checker();
 
-        var english = new PropertiesFile(getEnglishFile());
-        var simplifiedChinese = new PropertiesFile(getSimplifiedChineseFile());
-        var traditionalChinese = new PropertiesFile(getTraditionalChineseFile());
-        var classicalChinese = new PropertiesFile(getClassicalChineseFile());
+        var english = new PropertiesFile(englishFile);
+        var simplifiedChinese = new PropertiesFile(simplifiedChineseFile);
+        var traditionalChinese = new PropertiesFile(traditionalChineseFile);
+        var classicalChinese = new PropertiesFile(classicalChineseFile);
+
+        for (PropertiesFile file : List.of(english, simplifiedChinese, traditionalChinese, classicalChinese)) {
+            checker.checkDuplicateKeys(file);
+        }
+
+        for (Map.Entry<String, List<Path>> reference : findCrashMessageKeyReferences(sourceFiles).entrySet()) {
+            checker.checkReferencedKeyExists(english, reference.getKey(), reference.getValue());
+            checker.checkReferencedKeyExists(simplifiedChinese, reference.getKey(), reference.getValue());
+            checker.checkReferencedKeyExists(traditionalChinese, reference.getKey(), reference.getValue());
+        }
 
         simplifiedChinese.forEach((key, value) -> {
             checker.checkKeyExists(english, key);
@@ -82,9 +141,31 @@ public abstract class CheckTranslations extends DefaultTask {
         checker.check();
     }
 
+    /// Finds complete crash-message key literals in the supplied Java sources.
+    ///
+    /// @param sourceFiles Java source files to inspect
+    /// @return stable key-to-source mapping in first-seen order
+    /// @throws IOException when a source file cannot be read
+    static Map<String, List<Path>> findCrashMessageKeyReferences(Set<File> sourceFiles) throws IOException {
+        Map<String, List<Path>> references = new LinkedHashMap<>();
+        List<Path> sortedSources = sourceFiles.stream()
+                .map(File::toPath)
+                .map(path -> path.toAbsolutePath().normalize())
+                .sorted()
+                .toList();
+        for (Path source : sortedSources) {
+            Matcher matcher = CRASH_MESSAGE_KEY.matcher(Files.readString(source));
+            while (matcher.find()) {
+                references.computeIfAbsent(matcher.group(1), ignored -> new ArrayList<>()).add(source);
+            }
+        }
+        references.replaceAll((ignored, paths) -> List.copyOf(new LinkedHashSet<>(paths)));
+        return Collections.unmodifiableMap(references);
+    }
+
     private static final class PropertiesFile {
         final Path path;
-        final Properties properties = new Properties();
+        final TrackingProperties properties = new TrackingProperties();
 
         PropertiesFile(RegularFileProperty property) throws IOException {
             this(property.getAsFile().get().toPath().toAbsolutePath().normalize());
@@ -106,6 +187,24 @@ public abstract class CheckTranslations extends DefaultTask {
         }
     }
 
+    /// Properties implementation that retains keys overwritten by later declarations.
+    private static final class TrackingProperties extends Properties {
+        private final Set<String> duplicateKeys = new LinkedHashSet<>();
+
+        /// Records a duplicate before preserving the standard last-declaration-wins behavior.
+        ///
+        /// @param key property key
+        /// @param value property value
+        /// @return previous value, or null when this is the first declaration
+        @Override
+        public synchronized Object put(Object key, Object value) {
+            if (containsKey(key)) {
+                duplicateKeys.add(key.toString());
+            }
+            return super.put(key, value);
+        }
+    }
+
     private static final class Checker {
 
         private final Map<PropertiesFile, Map<Class<?>, Set<Problem>>> problems = new LinkedHashMap<>();
@@ -114,6 +213,18 @@ public abstract class CheckTranslations extends DefaultTask {
         public void checkKeyExists(PropertiesFile file, String key) {
             if (!file.properties.containsKey(key)) {
                 onFailure(file, new Problem.MissingKey(key));
+            }
+        }
+
+        public void checkDuplicateKeys(PropertiesFile file) {
+            for (String key : file.properties.duplicateKeys) {
+                onFailure(file, new Problem.DuplicateKey(key));
+            }
+        }
+
+        public void checkReferencedKeyExists(PropertiesFile file, String key, List<Path> sources) {
+            if (!file.properties.containsKey(key)) {
+                onFailure(file, new Problem.MissingReferencedKey(key, sources));
             }
         }
 
@@ -156,6 +267,36 @@ public abstract class CheckTranslations extends DefaultTask {
             @Override
             public String getMessage() {
                 return "missing key '%s'".formatted(key);
+            }
+        }
+
+        private static final class DuplicateKey extends Problem {
+            private final String key;
+
+            DuplicateKey(String key) {
+                this.key = key;
+            }
+
+            @Override
+            public String getMessage() {
+                return "duplicate key '%s'".formatted(key);
+            }
+        }
+
+        private static final class MissingReferencedKey extends Problem {
+            private final String key;
+            private final List<Path> sources;
+
+            MissingReferencedKey(String key, List<Path> sources) {
+                this.key = key;
+                this.sources = List.copyOf(sources);
+            }
+
+            @Override
+            public String getMessage() {
+                return "missing source-referenced key '%s' used by %s".formatted(
+                        key,
+                        sources.stream().map(Path::getFileName).distinct().toList());
             }
         }
 
