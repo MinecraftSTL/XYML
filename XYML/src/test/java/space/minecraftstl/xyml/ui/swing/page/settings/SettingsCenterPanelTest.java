@@ -36,10 +36,13 @@ import space.minecraftstl.xyml.setting.UserSettings;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JPasswordField;
 import javax.swing.JTextArea;
 import java.awt.Component;
@@ -60,7 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/// Verifies the MCP enablement gate through the real settings-center Swing controls.
+/// Verifies update-source and MCP behavior through the real settings-center Swing controls.
 @Isolated
 @NotNullByDefault
 public final class SettingsCenterPanelTest {
@@ -97,6 +100,46 @@ public final class SettingsCenterPanelTest {
         public void close() {
         }
     };
+
+    /// Keeps a configured out-of-matrix channel visible without adding it to the selectable list.
+    @Test
+    public void updateChannelModelRestrictsNewChoicesButDisplaysConfiguredOverride() {
+        DefaultComboBoxModel<UpdateChannel> model = SettingsCenterPanel.updateChannelModel(UpdateChannel.STABLE);
+        JComboBox<UpdateChannel> selector = new JComboBox<>(model);
+
+        assertAll(
+                () -> assertEquals(2, model.getSize()),
+                () -> assertEquals(UpdateChannel.STABLE, model.getElementAt(0)),
+                () -> assertEquals(UpdateChannel.BETA, model.getElementAt(1)));
+
+        model.setSelectedItem(UpdateChannel.ALPHA);
+        assertAll(
+                () -> assertEquals(UpdateChannel.ALPHA, selector.getSelectedItem()),
+                () -> assertEquals(2, model.getSize()));
+
+        selector.setSelectedItem(UpdateChannel.BETA);
+        assertEquals(UpdateChannel.BETA, selector.getSelectedItem());
+    }
+
+    /// Persists an allowed update-source selection made through the settings combo box.
+    @Test
+    public void updateChannelSelectionPersistsImmediately() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
+            try {
+                onEventDispatchThread(() -> {
+                    JComboBox<?> selector = findComponent(panel, "settingsUpdateChannel", JComboBox.class);
+                    selector.setSelectedItem(UpdateChannel.BETA);
+                    assertAll(
+                            () -> assertEquals(UpdateChannel.BETA, selector.getSelectedItem()),
+                            () -> assertEquals(UpdateChannel.BETA, store.updateChannel()));
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
 
     /// Enabling after an explicit confirmation persists only after the decision callback returns.
     @Test
@@ -383,7 +426,7 @@ public final class SettingsCenterPanelTest {
     private static SettingsCenterSnapshot snapshot(boolean mcpEnabled, boolean showWarning) {
         return new SettingsCenterSnapshot(
                 SupportedLocale.DEFAULT,
-                false,
+                UpdateChannel.getChannel(),
                 false,
                 false,
                 EnumCommonDirectory.DEFAULT,
@@ -557,6 +600,9 @@ public final class SettingsCenterPanelTest {
         /// Initial immutable snapshot used during panel construction.
         private final SettingsCenterSnapshot initialSnapshot;
 
+        /// Current update source value.
+        private UpdateChannel updateChannel;
+
         /// Current MCP enablement value.
         private boolean mcpEnabled;
 
@@ -572,6 +618,7 @@ public final class SettingsCenterPanelTest {
         /// Creates a recording store from one immutable snapshot.
         private FakeSettingsStore(SettingsCenterSnapshot initialSnapshot) {
             this.initialSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
+            updateChannel = initialSnapshot.updateChannel();
             mcpEnabled = initialSnapshot.mcpEnabled();
             showMcpEnablementWarning = initialSnapshot.showMcpEnablementWarning();
             mcpBearerToken = initialSnapshot.mcpBearerToken();
@@ -608,6 +655,11 @@ public final class SettingsCenterPanelTest {
             showMcpEnablementWarning = show;
         }
 
+        /// Returns the recorded update source.
+        private UpdateChannel updateChannel() {
+            return updateChannel;
+        }
+
         /// Returns the recorded MCP state.
         private boolean mcpEnabled() {
             return mcpEnabled;
@@ -638,9 +690,10 @@ public final class SettingsCenterPanelTest {
         public void setLanguage(SupportedLocale language) {
         }
 
-        /// Ignores a preview-update write.
+        /// Records an update-source write.
         @Override
-        public void setAcceptPreviewUpdates(boolean accepted) {
+        public void setUpdateChannel(UpdateChannel channel) {
+            updateChannel = Objects.requireNonNull(channel, "channel");
         }
 
         /// Ignores an update-prompt write.

@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import java.util.Objects;
@@ -49,10 +50,10 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param language requested display language
     void setLanguage(SupportedLocale language);
 
-    /// Persists whether preview updates may be offered.
+    /// Persists the update source shared by automatic and manual launcher checks.
     ///
-    /// @param accepted whether preview updates are eligible
-    void setAcceptPreviewUpdates(boolean accepted);
+    /// @param channel selected update source channel
+    void setUpdateChannel(UpdateChannel channel);
 
     /// Persists whether automatic update dialogs are suppressed.
     ///

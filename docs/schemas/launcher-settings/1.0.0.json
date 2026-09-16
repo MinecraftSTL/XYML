@@ -26,9 +26,6 @@
         "DEV"
       ]
     },
-    "acceptPreviewUpdate": {
-      "type": "boolean"
-    },
     "disableAutoShowUpdateDialog": {
       "type": "boolean"
     },

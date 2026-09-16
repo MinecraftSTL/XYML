@@ -256,23 +256,23 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Update source channel shared by automatic and manual launcher checks.
     @SerializedName("updateChannel")
-    private final ObjectProperty<UpdateChannel> updateChannel =
+    private final ObjectProperty<@Nullable UpdateChannel> updateChannel =
             new RawPreservingObjectProperty<>(UpdateChannel.getChannel());
 
     /// Returns the configured launcher update source channel property.
     ///
-    /// @return update source channel property
-    public ObjectProperty<UpdateChannel> updateChannelProperty() {
+    /// Unsupported serialized values leave this property null while their raw JSON is preserved.
+    ///
+    /// @return nullable configured update source channel property
+    public ObjectProperty<@Nullable UpdateChannel> updateChannelProperty() {
         return updateChannel;
     }
 
-    /// Whether preview builds are accepted by update checks.
-    @SerializedName("acceptPreviewUpdate")
-    private final BooleanProperty acceptPreviewUpdate = new SimpleBooleanProperty(false);
-
-    /// Returns the preview update opt-in property.
-    public BooleanProperty acceptPreviewUpdateProperty() {
-        return acceptPreviewUpdate;
+    /// Resolves the configured update source or the running build channel when no supported value is configured.
+    ///
+    /// @return effective update source channel
+    public UpdateChannel getEffectiveUpdateChannel() {
+        return Objects.requireNonNullElse(updateChannel.get(), UpdateChannel.getChannel());
     }
 
     /// Whether automatic update dialogs are disabled.

@@ -37,7 +37,7 @@ public final class LauncherSettingsTest {
     @Test
     public void updateChannelDefaultsAndPersistsIndependently() {
         LauncherSettings defaults = new LauncherSettings();
-        assertEquals(UpdateChannel.getChannel(), defaults.updateChannelProperty().get());
+        assertEquals(UpdateChannel.getChannel(), defaults.getEffectiveUpdateChannel());
 
         LauncherSettings configured = LauncherSettings.fromJson(JsonParser.parseString("""
                 {
@@ -46,11 +46,16 @@ public final class LauncherSettingsTest {
                 }
                 """).getAsJsonObject());
         assertEquals(UpdateChannel.ALPHA, configured.updateChannelProperty().get());
-        assertTrue(configured.acceptPreviewUpdateProperty().get());
 
         LauncherSettings legacy = LauncherSettings.fromJson(
                 JsonParser.parseString("{\"acceptPreviewUpdate\":true}").getAsJsonObject());
-        assertEquals(UpdateChannel.getChannel(), legacy.updateChannelProperty().get());
+        assertEquals(UpdateChannel.getChannel(), legacy.getEffectiveUpdateChannel());
+        assertTrue(JsonParser.parseString(legacy.toJson()).getAsJsonObject()
+                .get("acceptPreviewUpdate").getAsBoolean());
+
+        LauncherSettings invalid = LauncherSettings.fromJson(
+                JsonParser.parseString("{\"updateChannel\":\"NIGHTLY\"}").getAsJsonObject());
+        assertEquals(UpdateChannel.getChannel(), invalid.getEffectiveUpdateChannel());
 
         JsonObject serialized = JsonParser.parseString(configured.toJson()).getAsJsonObject();
         assertEquals("ALPHA", serialized.get("updateChannel").getAsString());

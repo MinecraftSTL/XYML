@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -119,12 +120,12 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.languageProperty().set(Objects.requireNonNull(language, "language")));
     }
 
-    /// Queues a preview-update preference write.
+    /// Queues an update-source channel write.
     ///
-    /// @param accepted whether preview updates are eligible
+    /// @param channel selected update source channel
     @Override
-    public void setAcceptPreviewUpdates(boolean accepted) {
-        write(() -> settings.acceptPreviewUpdateProperty().set(accepted));
+    public void setUpdateChannel(UpdateChannel channel) {
+        write(() -> settings.updateChannelProperty().set(Objects.requireNonNull(channel, "channel")));
     }
 
     /// Queues the automatic-update-dialog preference write.
@@ -325,7 +326,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
     private void subscribeToSettingsProperties() {
         requireEventThread();
         propertySubscriptions.add(settings.languageProperty().subscribe(change -> scheduleRefreshSnapshot()));
-        propertySubscriptions.add(settings.acceptPreviewUpdateProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.updateChannelProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.disableAutoShowUpdateDialogProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.disableAprilFoolsProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.commonDirectoryTypeProperty().subscribe(change -> scheduleRefreshSnapshot()));
@@ -386,7 +387,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         @Nullable String resolvedDirectory = settings.getResolvedCommonDirectory();
         return new SettingsCenterSnapshot(
                 Objects.requireNonNullElse(configuredLanguage, SupportedLocale.DEFAULT),
-                settings.acceptPreviewUpdateProperty().get(),
+                settings.getEffectiveUpdateChannel(),
                 settings.disableAutoShowUpdateDialogProperty().get(),
                 settings.disableAprilFoolsProperty().get(),
                 Objects.requireNonNullElse(configuredDirectoryType, EnumCommonDirectory.DEFAULT),

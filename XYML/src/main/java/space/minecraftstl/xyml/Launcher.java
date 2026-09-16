@@ -213,7 +213,7 @@ public final class Launcher {
     /// Creates and opens the production Swing runtime.
     private void startSwingWindow() {
         try {
-            boolean acceptPreviewUpdate = settings().acceptPreviewUpdateProperty().get();
+            UpdateChannel updateChannel = settings().getEffectiveUpdateChannel();
             boolean disableAutomaticUpdatePrompt = settings().disableAutoShowUpdateDialogProperty().get();
             SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
                     SWING_PAGE_TRANSITION_DURATION,
@@ -291,7 +291,7 @@ public final class Launcher {
                         if (!runtime.isClosed()) {
                             startSwingUpdateCheck(
                                     runtime,
-                                    acceptPreviewUpdate,
+                                    updateChannel,
                                     disableAutomaticUpdatePrompt);
                         }
                     });
@@ -344,11 +344,11 @@ public final class Launcher {
     /// Starts the toolkit-neutral update service after startup decisions have enabled the main window.
     ///
     /// @param runtime active native runtime used as the update-dialog owner
-    /// @param acceptPreviewUpdate whether preview releases are eligible
+    /// @param updateChannel configured update source channel
     /// @param disableAutomaticPrompt whether successful checks must remain silent
     private void startSwingUpdateCheck(
             SwingApplicationRuntime runtime,
-            boolean acceptPreviewUpdate,
+            UpdateChannel updateChannel,
             boolean disableAutomaticPrompt) {
         SwingUpdateCheckService service;
         synchronized (swingUpdateLifecycleLock) {
@@ -377,9 +377,7 @@ public final class Launcher {
             swingUpdateNotifications = notifications;
         }
         try {
-            service.check(new UpdateCheckRequest(
-                    UpdateChannel.getChannel(),
-                    acceptPreviewUpdate)).whenComplete((
+            service.check(new UpdateCheckRequest(updateChannel)).whenComplete((
                     @Nullable UpdateCheckResult result,
                     @Nullable Throwable failure) -> {
                 if (result != null) {
