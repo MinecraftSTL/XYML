@@ -21,6 +21,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 
 import java.util.Objects;
@@ -32,6 +33,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests current launcher settings serialization behavior.
 @NotNullByDefault
 public final class LauncherSettingsTest {
+    /// Persists an explicit update source while leaving the obsolete preview preference unmigrated.
+    @Test
+    public void updateChannelDefaultsAndPersistsIndependently() {
+        LauncherSettings defaults = new LauncherSettings();
+        assertEquals(UpdateChannel.getChannel(), defaults.getEffectiveUpdateChannel());
+
+        LauncherSettings configured = LauncherSettings.fromJson(JsonParser.parseString("""
+                {
+                  "updateChannel": "ALPHA",
+                  "acceptPreviewUpdate": true
+                }
+                """).getAsJsonObject());
+        assertEquals(UpdateChannel.ALPHA, configured.updateChannelProperty().get());
+
+        LauncherSettings legacy = LauncherSettings.fromJson(
+                JsonParser.parseString("{\"acceptPreviewUpdate\":true}").getAsJsonObject());
+        assertEquals(UpdateChannel.getChannel(), legacy.getEffectiveUpdateChannel());
+        assertTrue(JsonParser.parseString(legacy.toJson()).getAsJsonObject()
+                .get("acceptPreviewUpdate").getAsBoolean());
+
+        LauncherSettings invalid = LauncherSettings.fromJson(
+                JsonParser.parseString("{\"updateChannel\":\"NIGHTLY\"}").getAsJsonObject());
+        assertEquals(UpdateChannel.getChannel(), invalid.getEffectiveUpdateChannel());
+
+        JsonObject serialized = JsonParser.parseString(configured.toJson()).getAsJsonObject();
+        assertEquals("ALPHA", serialized.get("updateChannel").getAsString());
+    }
+
     /// Verifies the MCP listener and independent deletion-confirmation defaults and persistence.
     @Test
     public void mcpServerDefaultsToDisabled() {

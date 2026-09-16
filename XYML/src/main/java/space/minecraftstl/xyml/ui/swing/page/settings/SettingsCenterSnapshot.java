@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import java.util.Objects;
@@ -28,7 +29,7 @@ import java.util.Objects;
 /// Immutable launcher preferences rendered by [SettingsCenterPanel].
 ///
 /// @param language selected launcher language
-/// @param acceptPreviewUpdates whether preview releases are eligible for update checks
+/// @param updateChannel selected source for automatic and manual launcher update checks
 /// @param disableAutomaticUpdatePrompt whether available updates remain non-modal
 /// @param disableAprilFools whether seasonal launcher behavior is disabled
 /// @param commonDirectoryType resolved common-directory selection mode
@@ -55,7 +56,7 @@ import java.util.Objects;
 @NotNullByDefault
 public record SettingsCenterSnapshot(
         SupportedLocale language,
-        boolean acceptPreviewUpdates,
+        UpdateChannel updateChannel,
         boolean disableAutomaticUpdatePrompt,
         boolean disableAprilFools,
         EnumCommonDirectory commonDirectoryType,
@@ -82,6 +83,7 @@ public record SettingsCenterSnapshot(
     /// Validates non-null values and the numeric setting invariants.
     public SettingsCenterSnapshot {
         Objects.requireNonNull(language, "language");
+        Objects.requireNonNull(updateChannel, "updateChannel");
         Objects.requireNonNull(commonDirectoryType, "commonDirectoryType");
         Objects.requireNonNull(commonDirectory, "commonDirectory");
         Objects.requireNonNull(resolvedCommonDirectory, "resolvedCommonDirectory");
@@ -107,7 +109,7 @@ public record SettingsCenterSnapshot(
     /// bearer-token authentication and the enablement-warning preference were added.
     ///
     /// @param language selected launcher language
-    /// @param acceptPreviewUpdates whether preview releases are eligible for update checks
+    /// @param updateChannel selected source for automatic and manual launcher update checks
     /// @param disableAutomaticUpdatePrompt whether available updates remain non-modal
     /// @param disableAprilFools whether seasonal launcher behavior is disabled
     /// @param commonDirectoryType resolved common-directory selection mode
@@ -131,7 +133,7 @@ public record SettingsCenterSnapshot(
     /// @param writable whether changes can be persisted to launcher settings
     public SettingsCenterSnapshot(
             SupportedLocale language,
-            boolean acceptPreviewUpdates,
+            UpdateChannel updateChannel,
             boolean disableAutomaticUpdatePrompt,
             boolean disableAprilFools,
             EnumCommonDirectory commonDirectoryType,
@@ -155,7 +157,7 @@ public record SettingsCenterSnapshot(
             boolean writable) {
         this(
                 language,
-                acceptPreviewUpdates,
+                updateChannel,
                 disableAutomaticUpdatePrompt,
                 disableAprilFools,
                 commonDirectoryType,

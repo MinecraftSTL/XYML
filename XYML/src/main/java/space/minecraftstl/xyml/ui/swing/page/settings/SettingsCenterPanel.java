@@ -90,10 +90,6 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the launcher setting.
     private static final @Unmodifiable List<String> ADDON_SOURCES = List.of("modrinth", "curseforge");
 
-    /// Broadly distributed release channels exposed by the manual update selector.
-    private static final @Unmodifiable List<UpdateChannel> UPDATE_CHANNELS =
-            List.of(UpdateChannel.STABLE, UpdateChannel.BETA);
-
     /// Store supplying and persisting the non-appearance settings.
     private final SettingsCenterStore store;
 
@@ -127,12 +123,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Locale selector with user-facing localized display names.
     private final JComboBox<SupportedLocale> languageBox;
 
-    /// Preview-update eligibility preference.
-    private final JCheckBox previewUpdatesBox = new JCheckBox(i18n("update.preview"));
-
-    /// Release channel used by explicit update checks without changing the build's own channel.
-    private final JComboBox<UpdateChannel> updateChannelBox = new JComboBox<>(new DefaultComboBoxModel<>(
-            UPDATE_CHANNELS.toArray(UpdateChannel[]::new)));
+    /// Persisted release channel shared by automatic and explicit update checks.
+    private final JComboBox<UpdateChannel> updateChannelBox =
+            new JComboBox<>(updateChannelModel(UpdateChannel.getChannel()));
 
     /// Starts a manual update check for the selected release channel.
     private final JButton checkUpdatesButton = new JButton(i18n("update.tooltip"));
@@ -521,14 +514,15 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         updateChannelBox.setName("settingsUpdateChannel");
         updateChannelBox.setRenderer(updateChannelRenderer());
         updateChannelBox.setSelectedItem(UpdateChannel.getChannel());
+        updateChannelBox.addActionListener(event -> {
+            @Nullable UpdateChannel selected = (UpdateChannel) updateChannelBox.getSelectedItem();
+            if (!applyingSnapshot && selected != null) {
+                store.setUpdateChannel(selected);
+            }
+        });
         checkUpdatesButton.setName("settingsUpdateCheck");
         checkUpdatesButton.addActionListener(event -> checkForUpdates());
         updateStatusLabel.setName("settingsUpdateStatus");
-        previewUpdatesBox.addActionListener(event -> {
-            if (!applyingSnapshot) {
-                store.setAcceptPreviewUpdates(previewUpdatesBox.isSelected());
-            }
-        });
         disableUpdatePromptBox.addActionListener(event -> {
             if (!applyingSnapshot) {
                 store.setAutomaticUpdatePromptDisabled(disableUpdatePromptBox.isSelected());
@@ -665,7 +659,6 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createHeading(i18n("update")), "growx");
         page.add(createFieldRow(i18n("update"), updateChannelBox), "growx");
         page.add(createUpdateActionsRow(), "growx");
-        page.add(previewUpdatesBox, "growx");
         page.add(disableUpdatePromptBox, "growx");
         page.add(new JSeparator(), "growx");
         page.add(createHeading(i18n("settings.launcher.debug")), "growx");
@@ -879,6 +872,18 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 selected);
     }
 
+    /// Creates the selectable model for one running build channel.
+    ///
+    /// A configured channel outside this model can still become the selected item without becoming a list choice.
+    ///
+    /// @param currentChannel release channel embedded in the running launcher
+    /// @return model containing only channels selectable through the settings UI
+    static DefaultComboBoxModel<UpdateChannel> updateChannelModel(UpdateChannel currentChannel) {
+        Objects.requireNonNull(currentChannel, "currentChannel");
+        return new DefaultComboBoxModel<>(
+                currentChannel.selectableUpdateSources().toArray(UpdateChannel[]::new));
+    }
+
     /// Creates a localized renderer for launcher update channels.
     ///
     /// @return update-channel combo-box renderer
@@ -985,7 +990,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         return i18n("settings.launcher.proxy.default");
     }
 
-    /// Starts a manual launcher update check for the selected channel and preview preference.
+    /// Starts a manual launcher update check for the selected persisted channel.
     private void checkForUpdates() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || restartInProgress || updateCheckInProgress) {
@@ -1001,7 +1006,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         updateStatusLabel.setText(i18n("update.checking"));
         updateMaintenanceControlAvailability();
         try {
-            maintenanceActions.checkForUpdates(new UpdateCheckRequest(channel, previewUpdatesBox.isSelected()))
+            maintenanceActions.checkForUpdates(new UpdateCheckRequest(channel))
                     .whenComplete((
                             @Nullable UpdateCheckResult result,
                             @Nullable Throwable failure) -> EdtDispatcher.execute(
@@ -1437,7 +1442,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         try {
             displayedSnapshot = snapshot;
             languageBox.setSelectedItem(snapshot.language());
-            previewUpdatesBox.setSelected(snapshot.acceptPreviewUpdates());
+            updateChannelBox.getModel().setSelectedItem(snapshot.updateChannel());
             disableUpdatePromptBox.setSelected(snapshot.disableAutomaticUpdatePrompt());
             disableAprilFoolsBox.setSelected(snapshot.disableAprilFools());
             restartPanel.updateSettings(snapshot.language(), snapshot.disableAprilFools());
@@ -1484,7 +1489,6 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         boolean interactive = enabled && !closed && !restartInProgress;
         tabs.setEnabled(!closed && !restartInProgress);
         languageBox.setEnabled(interactive);
-        previewUpdatesBox.setEnabled(interactive);
         disableUpdatePromptBox.setEnabled(interactive);
         disableAprilFoolsBox.setEnabled(interactive);
         restartPanel.setAvailable(interactive);
