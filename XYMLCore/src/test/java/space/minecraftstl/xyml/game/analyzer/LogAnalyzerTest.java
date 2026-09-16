@@ -843,7 +843,7 @@ class LogAnalyzerTest {
                 List.of(
                         "# A fatal error has been detected by the Java Runtime Environment:",
                         "#",
-                        "Current thread (0x000001ed63cc4000): JavaThread \"C2 CompilerThread0\" daemon",
+                        "Current thread (0x000001ed63cc4000):  JavaThread \"C2 CompilerThread0\" daemon",
                         "Current CompileTask:",
                         "C2: 1234 567 net.minecraft.client.Minecraft::runGameLoop (456 bytes)"),
                 OperatingSystem.WINDOWS,
@@ -862,6 +862,27 @@ class LogAnalyzerTest {
         assertEquals(RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
                 result.solver().repairAction().actionType());
         assertFalse(result.solver().repairAction().executable());
+    }
+
+    /// Rejects a report that separates the current-thread label and JavaThread details across physical lines.
+    @Test
+    void c2CompilerAnalyzerRejectsSplitCurrentThreadLine() {
+        LogAnalyzable input = input(
+                List.of(
+                        "# A fatal error has been detected by the Java Runtime Environment:",
+                        "Current thread (0x000001ed63cc4000):",
+                        "  JavaThread \"C2 CompilerThread0\" daemon",
+                        "Current CompileTask:",
+                        "C2: 1234 567 net.minecraft.client.Minecraft::runGameLoop (456 bytes)"),
+                OperatingSystem.WINDOWS,
+                1252,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.JVM_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
     }
 
     /// Rejects ordinary VM thread dumps that merely contain idle C2 compiler threads.

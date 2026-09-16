@@ -32,7 +32,7 @@ public final class C2CompilerAnalyzer implements Analyzer<LogAnalyzable> {
 
     /// `hs_err` current-thread line that explicitly owns the crash to C2.
     private static final Pattern C2_THREAD = Pattern.compile(
-            "(?m)^(?:# )?Current thread \\([^\\r\\n]+\\): JavaThread \\\"C2 CompilerThread\\d*\\\"[^\\r\\n]*$");
+            "(?m)^(?:# )?Current thread \\([^\\r\\n]+\\):[ \\t]+JavaThread \\\"C2 CompilerThread\\d*\\\"[^\\r\\n]*$");
 
     /// `hs_err` section written only when a compiler task was active.
     private static final Pattern CURRENT_COMPILE_TASK = Pattern.compile(
