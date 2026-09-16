@@ -42,6 +42,7 @@ import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeReference;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.*;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -251,6 +252,18 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the launcher UI language property.
     public ObjectProperty<SupportedLocale> languageProperty() {
         return language;
+    }
+
+    /// Update source channel shared by automatic and manual launcher checks.
+    @SerializedName("updateChannel")
+    private final ObjectProperty<UpdateChannel> updateChannel =
+            new RawPreservingObjectProperty<>(UpdateChannel.getChannel());
+
+    /// Returns the configured launcher update source channel property.
+    ///
+    /// @return update source channel property
+    public ObjectProperty<UpdateChannel> updateChannelProperty() {
+        return updateChannel;
     }
 
     /// Whether preview builds are accepted by update checks.

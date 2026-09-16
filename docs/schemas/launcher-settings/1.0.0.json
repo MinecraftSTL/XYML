@@ -18,6 +18,14 @@
     "language": {
       "type": "string"
     },
+    "updateChannel": {
+      "enum": [
+        "STABLE",
+        "BETA",
+        "ALPHA",
+        "DEV"
+      ]
+    },
     "acceptPreviewUpdate": {
       "type": "boolean"
     },
