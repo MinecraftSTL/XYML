@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
@@ -44,17 +45,21 @@ import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Read-only Swing actions for an imported crash-report archive.
 @NotNullByDefault
-final class ImportedGameCrashWindowActions implements GameCrashWindowActions, AutoCloseable {
+final class ImportedGameCrashWindowActions implements GameCrashWindowActions {
     /// Component used to resolve the dialog owner.
     private final Component owner;
 
     /// Validated archive whose individual text entries are displayed lazily.
     private final ExportedCrashBundle bundle;
+
+    /// Prevents a disposed log viewer from being recreated after the owning crash window closes.
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     /// Currently open lazy log viewer, accessed on the EDT.
     private @Nullable JDialog logDialog;
@@ -90,7 +95,7 @@ final class ImportedGameCrashWindowActions implements GameCrashWindowActions, Au
     @Override
     public void showGameLogs() {
         EdtDispatcher.requireEventDispatchThread();
-        if (java.awt.GraphicsEnvironment.isHeadless()) {
+        if (closed.get() || java.awt.GraphicsEnvironment.isHeadless()) {
             return;
         }
         @Nullable JDialog currentDialog = logDialog;
@@ -124,12 +129,18 @@ final class ImportedGameCrashWindowActions implements GameCrashWindowActions, Au
         });
         if (sources.getItemCount() > 0) {
             sources.setSelectedIndex(0);
+            SourceItem first = sources.getItemAt(0);
+            content.setText(first.text().content());
+            content.setCaretPosition(0);
         }
 
+        JPanel sourceSelector = new JPanel(new BorderLayout(8, 0));
+        sourceSelector.add(new JLabel(i18n("game.crash.import.logs.source")), BorderLayout.WEST);
+        sourceSelector.add(sources, BorderLayout.CENTER);
+
         dialog.setLayout(new BorderLayout(8, 8));
-        dialog.add(new JLabel(i18n("game.crash.import.logs.source")), BorderLayout.NORTH);
-        dialog.add(sources, BorderLayout.CENTER);
-        dialog.add(new JScrollPane(content), BorderLayout.SOUTH);
+        dialog.add(sourceSelector, BorderLayout.NORTH);
+        dialog.add(new JScrollPane(content), BorderLayout.CENTER);
         dialog.setMinimumSize(new Dimension(720, 480));
         dialog.setSize(900, 620);
         dialog.setLocationByPlatform(true);
@@ -170,9 +181,28 @@ final class ImportedGameCrashWindowActions implements GameCrashWindowActions, Au
         return bundle.texts().size();
     }
 
+    /// Reports whether this action boundary has released its secondary UI resources.
+    ///
+    /// @return true after the first close request
+    boolean isClosed() {
+        return closed.get();
+    }
+
+    /// Reports whether a native imported-log viewer is currently retained.
+    ///
+    /// @return true while a displayable log dialog is retained
+    boolean hasOpenLogDialogOnEdt() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JDialog currentDialog = logDialog;
+        return currentDialog != null && currentDialog.isDisplayable();
+    }
+
     /// Disposes the source viewer on the EDT.
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
         EdtDispatcher.executeAndWait(() -> {
             @Nullable JDialog currentDialog = logDialog;
             logDialog = null;

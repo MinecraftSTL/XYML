@@ -368,6 +368,11 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (currentExport != null) {
             currentExport.cancel(true);
         }
+        try {
+            actions.close();
+        } catch (RuntimeException closeFailure) {
+            LOG.warning("Failed to close game crash window actions", closeFailure);
+        }
         model.close();
         worker.shutdownNow();
         EdtDispatcher.execute(this::disposeOnEdt);
