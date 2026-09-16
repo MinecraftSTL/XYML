@@ -24,14 +24,12 @@ import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.ExportedCrashBundle;
 import space.minecraftstl.xyml.game.ExportedCrashBundleText;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.ExportedCrashBundleContextParser;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
 import space.minecraftstl.xyml.game.analyzer.Solver;
-import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.util.io.FileUtils;
-import space.minecraftstl.xyml.util.platform.Bits;
-import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -117,19 +115,7 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
                     texts.add(new PhysicalText(source, text.content()));
                 }
             }
-            LogAnalyzable input = new LogAnalyzable(
-                    null,
-                    null,
-                    ProcessListener.ExitType.APPLICATION_ERROR,
-                    OperatingSystem.UNKNOWN,
-                    -1,
-                    null,
-                    null,
-                    null,
-                    null,
-                    Bits.UNKNOWN,
-                    null,
-                    List.of());
+            LogAnalyzable input = ExportedCrashBundleContextParser.parse(copiedBundle);
             return merge(analyzeTexts(input, texts));
         }, executor);
     }
