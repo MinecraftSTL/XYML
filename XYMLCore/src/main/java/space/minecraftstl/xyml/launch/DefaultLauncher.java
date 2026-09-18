@@ -324,6 +324,7 @@ public class DefaultLauncher extends Launcher {
         if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
             classpath.removeIf(c -> c.contains("2.9.4-nightly-20150209"));
             classpath.removeIf(c -> c.contains("platform-3.4.0"));
+            classpath.removeIf(c -> c.contains("icu4j-core-mojang"));
         }
 
         Path jar = repository.getInstanceJar(manifest);
