@@ -721,16 +721,16 @@ public final class SwingAccountCreationDialog extends JDialog
     /// Shows a typed acknowledgement prompt for an invalid offline username.
     ///
     /// @param username requested invalid name
-    /// @return true only after exact whitespace-insensitive acknowledgement
+    /// @return true after the normalized acknowledgement matches
     private boolean showInvalidUsernamePrompt(String username) {
-        String expected = replacePunctuationWithSpaces(
-                i18n("account.methods.offline.name.invalid.confirmation"));
+        String expected = i18n("account.methods.offline.name.invalid.confirmation");
+        String displayedExpected = replacePunctuationWithSpaces(expected);
         JTextField confirmation = new JTextField();
         String guidance = i18n("account.methods.offline.name.invalid")
                 + "\n\n"
                 + i18n(
                 "account.methods.offline.name.invalid.confirmation.prompt",
-                expected);
+                displayedExpected);
         JPanel content = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]10[]"));
         content.add(createSelectablePromptText(guidance), "growx, wrap");
         confirmation.setToolTipText(username);
@@ -788,7 +788,7 @@ public final class SwingAccountCreationDialog extends JDialog
     ///
     /// @param confirmation acknowledgement input field
     /// @param confirmButton button that accepts the warning
-    /// @param expected normalized localized acknowledgement
+    /// @param expected localized acknowledgement used for matching
     static void bindConfirmationButton(
             JTextField confirmation,
             JButton confirmButton,
@@ -1006,10 +1006,10 @@ public final class SwingAccountCreationDialog extends JDialog
                 : message;
     }
 
-    /// Replaces localized punctuation with spaces for stable typed acknowledgement matching.
+    /// Replaces localized punctuation with spaces for acknowledgement prompt display.
     ///
     /// @param text localized acknowledgement
-    /// @return punctuation-free text
+    /// @return display text with punctuation replaced by spaces
     static String replacePunctuationWithSpaces(String text) {
         StringBuilder result = new StringBuilder(text.length());
         text.codePoints().forEach(codePoint -> {
@@ -1022,13 +1022,52 @@ public final class SwingAccountCreationDialog extends JDialog
         return result.toString();
     }
 
-    /// Compares acknowledgement text while ignoring every Unicode whitespace character.
+    /// Compares acknowledgements after applying the confirmation normalization order.
+    ///
+    /// Whitespace is removed first, then at most one boundary ASCII double quote is removed from
+    /// each side, and finally all ASCII commas and full stops are removed.
     ///
     /// @param input user-entered text
     /// @param expected localized expected text
-    /// @return true when normalized text matches exactly
+    /// @return true when normalized text matches without regard to case
     static boolean matchesConfirmation(String input, String expected) {
-        return removeWhitespace(input).contentEquals(removeWhitespace(expected));
+        return normalizeConfirmation(input).equalsIgnoreCase(normalizeConfirmation(expected));
+    }
+
+    /// Normalizes one acknowledgement for matching.
+    ///
+    /// @param text source text
+    /// @return text normalized in whitespace, boundary-quote, punctuation order
+    private static String normalizeConfirmation(String text) {
+        return removeEnglishCommasAndPeriods(
+                removeBoundaryDoubleQuotes(removeWhitespace(text)));
+    }
+
+    /// Removes at most one ASCII double quote from each boundary.
+    ///
+    /// @param text source text
+    /// @return text without one leading and one trailing double quote at most
+    private static String removeBoundaryDoubleQuotes(String text) {
+        int start = text.startsWith("\"") ? 1 : 0;
+        int end = text.length();
+        if (end > start && text.endsWith("\"")) {
+            end--;
+        }
+        return text.substring(start, end);
+    }
+
+    /// Removes all ASCII commas and full stops.
+    ///
+    /// @param text source text
+    /// @return text without ASCII commas or full stops
+    private static String removeEnglishCommasAndPeriods(String text) {
+        StringBuilder result = new StringBuilder(text.length());
+        text.codePoints().forEach(codePoint -> {
+            if (codePoint != ',' && codePoint != '.') {
+                result.appendCodePoint(codePoint);
+            }
+        });
+        return result.toString();
     }
 
     /// Removes Unicode whitespace and space separators.
