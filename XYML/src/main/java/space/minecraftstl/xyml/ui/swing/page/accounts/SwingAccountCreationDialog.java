@@ -1022,13 +1022,13 @@ public final class SwingAccountCreationDialog extends JDialog
         return result.toString();
     }
 
-    /// Compares acknowledgement text while ignoring every Unicode whitespace character.
+    /// Compares acknowledgement text while ignoring Unicode whitespace and case.
     ///
     /// @param input user-entered text
     /// @param expected localized expected text
-    /// @return true when normalized text matches exactly
+    /// @return true when normalized text matches without regard to case
     static boolean matchesConfirmation(String input, String expected) {
-        return removeWhitespace(input).contentEquals(removeWhitespace(expected));
+        return removeWhitespace(input).equalsIgnoreCase(removeWhitespace(expected));
     }
 
     /// Removes Unicode whitespace and space separators.

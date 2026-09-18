@@ -261,6 +261,9 @@ public final class SwingAccountCreationCoordinatorTest {
                 () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
                         "Iknowandconfirm",
                         expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "iKNOWandCONFIRM",
+                        expected)),
                 () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
                         "Iknow",
                         expected)));
