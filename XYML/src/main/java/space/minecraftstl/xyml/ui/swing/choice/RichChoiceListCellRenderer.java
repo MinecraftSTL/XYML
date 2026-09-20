@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.choice;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.SwingOverlayColors;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -76,9 +77,6 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Compact horizontal gap used when the list cannot fit the normal row geometry.
     private static final int COMPACT_HORIZONTAL_GAP = 6;
-
-    /// Semi-transparent neutral wash used to distinguish disabled local rows.
-    private static final Color DISABLED_ROW_BACKGROUND = new Color(128, 128, 128, 64);
 
     /// Placeholder occupying the loaded-row icon slot during asynchronous loading.
     private static final Icon LOADING_ICON = new StatePlaceholderIcon(false);
@@ -340,7 +338,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             Graphics2D washGraphics = (Graphics2D) graphics.create();
             try {
                 washGraphics.setComposite(AlphaComposite.SrcOver);
-                washGraphics.setColor(DISABLED_ROW_BACKGROUND);
+                washGraphics.setColor(SwingOverlayColors.contrastOverlay(this));
                 washGraphics.fillRect(0, 0, getWidth(), getHeight());
             } finally {
                 washGraphics.dispose();

@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.shell;
+package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -23,26 +23,28 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.JComponent;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.util.Objects;
 
-/// Resolves the shared translucent contrast color used by task progress overlays.
+/// Resolves shared translucent contrast colors for Swing overlay surfaces.
 @NotNullByDefault
-final class ProgressOverlayColors {
-    /// Alpha used by progress overlays so the underlying control remains visible.
+public final class SwingOverlayColors {
+    /// Alpha used by overlays so the underlying control remains visible.
     private static final int OVERLAY_ALPHA = 72;
 
     /// Prevents construction of this color utility.
-    private ProgressOverlayColors() {
+    private SwingOverlayColors() {
     }
 
-    /// Resolves a black or white overlay from the actual control surface.
+    /// Resolves a black or white overlay from the actual component surface.
     ///
-    /// The component background is preferred because navigation and launch controls may use a surface different from
-    /// the global panel or list defaults. UI defaults remain fallbacks for delegates that leave the component unset.
+    /// The component background is preferred because controls may use a surface different from the global panel or
+    /// list defaults. UI defaults remain fallbacks for delegates that leave the component unset.
     ///
     /// @param component control receiving the overlay
     /// @return translucent black for light surfaces or white for dark surfaces
-    static Color fillColor(JComponent component) {
-        @Nullable Color surface = component.getBackground();
+    public static Color contrastOverlay(JComponent component) {
+        JComponent target = Objects.requireNonNull(component, "component");
+        @Nullable Color surface = target.getBackground();
         if (surface == null) {
             surface = UIManager.getColor("Button.background");
         }

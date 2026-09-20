@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 
-import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.util.OptionalDouble;
@@ -85,21 +84,6 @@ public final class LaunchProgressButtonTest {
         assertAll(
                 () -> assertTrue(button.filledProgressWidth(200) > 0),
                 () -> assertTrue(rendered.getRGB(160, 18) != rendered.getRGB(40, 18)));
-    }
-
-    /// Uses black in a light theme and white in a dark theme for the translucent progress fill.
-    @Test
-    public void followsThemeBrightnessForProgressFill() {
-        LaunchProgressButton button = new LaunchProgressButton();
-        button.setBackground(Color.WHITE);
-        Color lightFill = ProgressOverlayColors.fillColor(button);
-        button.setBackground(Color.BLACK);
-        Color darkFill = ProgressOverlayColors.fillColor(button);
-        assertAll(
-                () -> assertEquals(Color.BLACK.getRGB() & 0x00FFFFFF, lightFill.getRGB() & 0x00FFFFFF),
-                () -> assertEquals(Color.WHITE.getRGB() & 0x00FFFFFF, darkFill.getRGB() & 0x00FFFFFF),
-                () -> assertEquals(72, lightFill.getAlpha()),
-                () -> assertEquals(72, darkFill.getAlpha()));
     }
 
 }

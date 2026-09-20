@@ -34,6 +34,7 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -154,9 +155,9 @@ public final class RichChoiceListCellRendererTest {
         });
     }
 
-    /// Paints a disabled row as a translucent wash over the list surface rather than a solid gray fill.
+    /// Paints disabled rows with a surface-relative contrast overlay.
     @Test
-    public void paintsDisabledSurfaceAsTranslucentWash() {
+    public void paintsDisabledSurfaceWithThemeContrastOverlay() {
         RichChoiceListCellRenderer<String> renderer = new RichChoiceListCellRenderer<>(
                 value -> "Disabled mod",
                 value -> "disabled metadata",
@@ -165,34 +166,51 @@ public final class RichChoiceListCellRendererTest {
                 value -> "tooltip",
                 value -> true);
         JList<ChoiceListEntry<String>> list = new JList<>();
-        Color listBackground = new Color(220, 220, 220);
-        list.setBackground(listBackground);
         list.setSize(new Dimension(240, RichChoiceListCellRenderer.ROW_HEIGHT));
         EdtDispatcher.executeAndWait(() -> {
-            renderer.getListCellRendererComponent(
-                    list,
-                    ChoiceListEntry.loaded(0, "disabled"),
-                    0,
-                    false,
-                    false);
-            BufferedImage image = new BufferedImage(
-                    renderer.getWidth(),
-                    renderer.getHeight(),
-                    BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            try {
-                graphics.setColor(listBackground);
-                graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
-                renderer.paint(graphics);
-            } finally {
-                graphics.dispose();
-            }
-            Color painted = new Color(image.getRGB(image.getWidth() - 2, image.getHeight() - 2), true);
-            assertFalse(renderer.isOpaque());
-            assertTrue(painted.getRed() > 128 && painted.getRed() < listBackground.getRed());
-            assertEquals(painted.getRed(), painted.getGreen());
-            assertEquals(painted.getGreen(), painted.getBlue());
+            Color light = paintRowBackground(renderer, list, Color.WHITE, false);
+            Color dark = paintRowBackground(renderer, list, Color.BLACK, false);
+            Color selected = paintRowBackground(renderer, list, Color.WHITE, true);
+            assertAll(
+                    () -> assertFalse(renderer.isOpaque()),
+                    () -> assertTrue(light.getRed() < Color.WHITE.getRed()),
+                    () -> assertTrue(dark.getRed() > Color.BLACK.getRed()),
+                    () -> assertEquals(list.getSelectionBackground(), selected));
         });
+    }
+
+    /// Paints one reusable row over a surface and samples an unobstructed background pixel.
+    ///
+    /// @param renderer reusable row renderer
+    /// @param list owning selection list
+    /// @param surfaceColor surface beneath the transparent row
+    /// @param selected whether the row uses the list selection surface
+    /// @return sampled painted color
+    private static Color paintRowBackground(
+            RichChoiceListCellRenderer<String> renderer,
+            JList<ChoiceListEntry<String>> list,
+            Color surfaceColor,
+            boolean selected) {
+        list.setBackground(surfaceColor);
+        renderer.getListCellRendererComponent(
+                list,
+                ChoiceListEntry.loaded(0, "disabled"),
+                0,
+                selected,
+                false);
+        BufferedImage image = new BufferedImage(
+                renderer.getWidth(),
+                renderer.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setColor(surfaceColor);
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+            renderer.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return new Color(image.getRGB(image.getWidth() - 4, image.getHeight() / 2), true);
     }
 
     /// Reserves a full-width localized disabled glyph before shrinking the icon slot.

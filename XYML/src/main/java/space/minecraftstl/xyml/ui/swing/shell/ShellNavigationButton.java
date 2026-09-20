@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.shell;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.SwingOverlayColors;
 
 import javax.swing.JToggleButton;
 import javax.swing.UIManager;
@@ -120,7 +121,7 @@ final class ShellNavigationButton extends JToggleButton {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             if (activeTaskProgress.isPresent() && getWidth() > 0 && getHeight() > 0) {
                 double fraction = Math.max(0.0D, Math.min(1.0D, activeTaskProgress.getAsDouble()));
-                copy.setColor(ProgressOverlayColors.fillColor(this));
+                copy.setColor(SwingOverlayColors.contrastOverlay(this));
                 int arc = Math.max(0, Math.min(
                         Math.min(getWidth(), getHeight()),
                         UIManager.getInt("Button.arc")));
