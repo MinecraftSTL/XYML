@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.SwingOverlayColors;
 
 import javax.swing.JButton;
 import javax.swing.UIManager;
@@ -96,7 +97,7 @@ final class LaunchProgressButton extends JButton {
                     Math.min(availableWidth, getHeight()),
                     UIManager.getInt("Button.arc")));
             copy.clip(new RoundRectangle2D.Double(0, 0, availableWidth, getHeight(), arc, arc));
-            copy.setColor(ProgressOverlayColors.fillColor(this));
+            copy.setColor(SwingOverlayColors.contrastOverlay(this));
             copy.fillRect(0, 0, filledWidth, getHeight());
         } finally {
             copy.dispose();
