@@ -470,7 +470,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @return localized evidence label text
     String repairEvidenceTextOnEdt(String resultId) {
         EdtDispatcher.requireEventDispatchThread();
-        return requireRepairRow(resultId).evidence.getText();
+        return requireRepairRow(resultId).evidenceText;
     }
 
     /// Reports whether one repair action is currently enabled.
@@ -590,7 +590,8 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         information.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         JScrollPane scroll = new JScrollPane(information);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.getHorizontalScrollBar().setUnitIncrement(24);
         scroll.setBorder(BorderFactory.createTitledBorder(i18n("game.crash.info")));
         scroll.setMinimumSize(new Dimension(180, 0));
         return scroll;
@@ -620,18 +621,23 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         reason.setCaretPosition(0);
         reasonPane = reason;
 
-        JPanel diagnosisContent = new JPanel();
+        JPanel diagnosisContent = new CrashDiagnosisViewport();
         diagnosisContent.setLayout(new BoxLayout(diagnosisContent, BoxLayout.Y_AXIS));
+        diagnosisContent.setAlignmentX(Component.LEFT_ALIGNMENT);
+        reason.setAlignmentX(Component.LEFT_ALIGNMENT);
         diagnosisContent.add(reason);
         diagnosisContent.add(Box.createVerticalStrut(8));
         JPanel rows = new JPanel();
         rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
         rows.setOpaque(false);
+        rows.setAlignmentX(Component.LEFT_ALIGNMENT);
+        rows.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
         diagnosisRowsPanel = rows;
         diagnosisContent.add(rows);
 
         JScrollPane scroll = new JScrollPane(diagnosisContent);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.getHorizontalScrollBar().setUnitIncrement(24);
         scroll.setBorder(BorderFactory.createEmptyBorder());
 
         JProgressBar progress = new JProgressBar();
@@ -840,39 +846,42 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         JPanel details = new JPanel();
         details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
         details.setOpaque(false);
+        details.setAlignmentX(Component.LEFT_ALIGNMENT);
         JEditorPane text = new JEditorPane("text/html", htmlDocument(reason));
         text.setEditable(false);
         text.setOpaque(false);
+        text.setAlignmentX(Component.LEFT_ALIGNMENT);
         text.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true);
         text.setBorder(BorderFactory.createEmptyBorder());
         details.add(text);
-        JLabel evidenceLabel = new JLabel(evidence);
-        evidenceLabel.setFont(evidenceLabel.getFont().deriveFont(
-                Font.PLAIN,
-                evidenceLabel.getFont().getSize2D() - 1.0F));
+        WrappingHtmlPane evidenceLabel = new WrappingHtmlPane(
+                htmlDocument(GameCrashReasonFormatter.escapeHtmlArgument(evidence)),
+                row.getFont().deriveFont(Font.PLAIN, row.getFont().getSize2D() - 1.0F));
         details.add(evidenceLabel);
         row.add(details, BorderLayout.CENTER);
 
         boolean executable = solver != null && solver.repairAction().executable();
-        JLabel status = new JLabel(executable
-                ? actionStatus(solver, "game.crash.repair.available", "game.crash.search_missing_dependency.available")
-                : i18n("game.crash.repair.manual"));
+        @Nullable JLabel status = null;
+        if (executable) {
+            status = new JLabel();
+            status.setVisible(false);
+        }
         @Nullable JButton action = null;
         if (executable) {
             action = new JButton(actionLabel(solver));
             action.setName("gameCrashRepair-" + resultId);
         }
         if (action != null) {
-            RepairRow repairRow = new RepairRow(resultId, solver, candidates, action, evidenceLabel, status);
+            JLabel visibleStatus = Objects.requireNonNull(status, "status");
+            RepairRow repairRow = new RepairRow(
+                    resultId, solver, candidates, action, evidenceLabel, evidence, visibleStatus);
             repairRows.put(resultId, repairRow);
             action.addActionListener(event -> executeRepairRowOnEdt(repairRow));
             JPanel controls = new JPanel(new BorderLayout(4, 4));
             controls.setOpaque(false);
-            controls.add(status, BorderLayout.NORTH);
+            controls.add(visibleStatus, BorderLayout.NORTH);
             controls.add(action, BorderLayout.SOUTH);
             row.add(controls, BorderLayout.EAST);
-        } else {
-            row.add(status, BorderLayout.EAST);
         }
         return row;
     }
@@ -909,7 +918,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             if (residualExecutor != null) {
                 row.transitionTo(RepairState.PREPARING);
                 row.button.setEnabled(false);
-                row.status.setText(actionStatus(
+                row.setStatus(actionStatus(
                         row.solver,
                         "game.crash.repair.preparing",
                         "game.crash.search_missing_dependency.preparing"));
@@ -921,7 +930,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         row.transitionTo(RepairState.PREPARING);
         row.button.setEnabled(false);
         row.button.setText(actionLabel(row.solver));
-        row.status.setText(actionStatus(
+        row.setStatus(actionStatus(
                 row.solver,
                 "game.crash.repair.preparing",
                 "game.crash.search_missing_dependency.preparing"));
@@ -929,10 +938,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 == RepairActionDescriptor.ConfirmationRequirement.REQUIRED
                 && !confirmRepairOnEdt(row)) {
             row.transitionTo(RepairState.AVAILABLE);
-            row.status.setText(actionStatus(
-                    row.solver,
-                    "game.crash.repair.available",
-                    "game.crash.search_missing_dependency.available"));
+            row.clearStatus();
             row.button.setEnabled(true);
             return;
         }
@@ -945,10 +951,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         if (candidateChoice.cancelled()) {
             row.transitionTo(RepairState.AVAILABLE);
-            row.status.setText(actionStatus(
-                    row.solver,
-                    "game.crash.repair.available",
-                    "game.crash.search_missing_dependency.available"));
+            row.clearStatus();
             row.button.setEnabled(true);
             return;
         }
@@ -1029,23 +1032,20 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             row.residualOriginalSuccess = false;
             row.transitionTo(RepairState.SUCCEEDED);
             if (isRepeatableSearch(row.solver)) {
-                row.status.setText(i18n("game.crash.search_missing_dependency.done"));
+                row.setStatus(i18n("game.crash.search_missing_dependency.done"));
                 row.button.setText(actionLabel(row.solver));
                 row.button.setEnabled(true);
                 setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
                 followUpCompletion.complete(null);
             } else {
-                row.status.setText(i18n("game.crash.repair.succeeded"));
+                row.setStatus(i18n("game.crash.repair.succeeded"));
                 row.button.setEnabled(false);
             }
             return;
         }
         row.residualOriginalSuccess = false;
         row.transitionTo(RepairState.AVAILABLE);
-        row.status.setText(actionStatus(
-                row.solver,
-                "game.crash.repair.available",
-                "game.crash.search_missing_dependency.available"));
+        row.clearStatus();
         row.button.setText(actionLabel(row.solver));
         row.button.setEnabled(true);
         executeRepairRowOnEdt(row);
@@ -1184,7 +1184,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 row.transitionTo(RepairState.AWAITING_SELECTION);
             }
             row.transitionTo(RepairState.RUNNING);
-            row.status.setText(actionStatus(
+            row.setStatus(actionStatus(
                     row.solver,
                     "game.crash.repair.running",
                     "game.crash.search_missing_dependency.running"));
@@ -1209,13 +1209,13 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         if (phase == RepairTaskPhase.AWAITING_SELECTION && row.state == RepairState.PREPARING) {
             row.transitionTo(RepairState.AWAITING_SELECTION);
-            row.status.setText(i18n("game.crash.search_missing_dependency.awaiting_selection"));
+            row.setStatus(i18n("game.crash.search_missing_dependency.awaiting_selection"));
             return true;
         }
         if (phase == RepairTaskPhase.RUNNING
                 && (row.state == RepairState.PREPARING || row.state == RepairState.AWAITING_SELECTION)) {
             row.transitionTo(RepairState.RUNNING);
-            row.status.setText(actionStatus(
+            row.setStatus(actionStatus(
                     row.solver,
                     "game.crash.repair.running",
                     "game.crash.search_missing_dependency.running"));
@@ -1242,7 +1242,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     private void failCandidateSelectionOnEdt(RepairRow row, RuntimeException failure) {
         EdtDispatcher.requireEventDispatchThread();
         row.transitionTo(RepairState.FAILED_RETRYABLE);
-        row.status.setText(i18n("game.crash.repair.failed"));
+        row.setStatus(i18n("game.crash.repair.failed"));
         row.button.setText(i18n("game.crash.repair.retry"));
         row.button.setEnabled(true);
         LOG.warning("Failed to select Java runtime candidate for " + row.resultId, failure);
@@ -1288,29 +1288,26 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (success) {
             row.transitionTo(RepairState.SUCCEEDED);
             if (isRepeatableSearch(row.solver)) {
-                row.status.setText(i18n("game.crash.search_missing_dependency.done"));
+                row.setStatus(i18n("game.crash.search_missing_dependency.done"));
                 row.button.setText(actionLabel(row.solver));
                 row.button.setEnabled(true);
                 setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
                 followUpCompletion.complete(null);
             } else {
-                row.status.setText(i18n("game.crash.repair.succeeded"));
+                row.setStatus(i18n("game.crash.repair.succeeded"));
                 row.button.setEnabled(false);
             }
             return;
         }
         if (unwrapFailure(failure) instanceof CancellationException) {
             row.transitionTo(RepairState.AVAILABLE);
-            row.status.setText(actionStatus(
-                    row.solver,
-                    "game.crash.repair.available",
-                    "game.crash.search_missing_dependency.available"));
+            row.clearStatus();
             row.button.setText(actionLabel(row.solver));
             row.button.setEnabled(true);
             return;
         }
         row.transitionTo(RepairState.FAILED_RETRYABLE);
-        row.status.setText(actionStatus(
+        row.setStatus(actionStatus(
                 row.solver,
                 "game.crash.repair.failed",
                 "game.crash.search_missing_dependency.failed"));
@@ -1330,7 +1327,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     private void markBlockedResidualOnEdt(RepairRow row, @Unmodifiable List<String> residual) {
         EdtDispatcher.requireEventDispatchThread();
         row.transitionTo(RepairState.BLOCKED_RESIDUAL);
-        row.status.setText(actionStatus(
+        row.setStatus(actionStatus(
                 row.solver,
                 "game.crash.repair.failed",
                 "game.crash.search_missing_dependency.failed"));
@@ -1659,8 +1656,11 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         /// Row action button.
         private final JButton button;
 
-        /// Bounded evidence label shown for this cause.
-        private final JLabel evidence;
+        /// Bounded wrapping evidence view shown for this cause.
+        private final JEditorPane evidence;
+
+        /// Plain bounded evidence retained for deterministic tests.
+        private final String evidenceText;
 
         /// Row status label.
         private final JLabel status;
@@ -1683,20 +1683,23 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         /// @param solver solver that creates fresh tasks
         /// @param candidates immutable runtime candidates
         /// @param button row action button
-        /// @param evidence bounded evidence label
+        /// @param evidence bounded wrapping evidence view
+        /// @param evidenceText plain bounded evidence retained for tests
         /// @param status lifecycle status label
         private RepairRow(
                 String resultId,
                 Solver solver,
                 @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates,
                 JButton button,
-                JLabel evidence,
+                JEditorPane evidence,
+                String evidenceText,
                 JLabel status) {
             this.resultId = Objects.requireNonNull(resultId, "resultId");
             this.solver = Objects.requireNonNull(solver, "solver");
             this.candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
             this.button = Objects.requireNonNull(button, "button");
             this.evidence = Objects.requireNonNull(evidence, "evidence");
+            this.evidenceText = Objects.requireNonNull(evidenceText, "evidenceText");
             this.status = Objects.requireNonNull(status, "status");
         }
 
@@ -1710,6 +1713,20 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             }
             state = checkedState;
             stateHistory.add(checkedState);
+        }
+
+        /// Shows one lifecycle status under the row action.
+        ///
+        /// @param text localized lifecycle status
+        private void setStatus(String text) {
+            status.setText(Objects.requireNonNull(text, "text"));
+            status.setVisible(true);
+        }
+
+        /// Clears the lifecycle status when the action is available again.
+        private void clearStatus() {
+            status.setText("");
+            status.setVisible(false);
         }
 
         /// Requests cancellation of the currently running task during window disposal.
