@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -99,6 +100,33 @@ final class DefaultWorldCatalogModelTest {
             assertEquals(access.directories().subList(4, 7), access.materializedDirectories());
             assertFalse(access.materializedDirectories().contains(access.directories().get(0)));
             assertFalse(access.materializedDirectories().contains(access.directories().get(11)));
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Deletion forwards the selected recycle-bin mode to the blocking access boundary.
+    @Test
+    void deleteWorldForwardsSelectedMode() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 1);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            ready.get(5, TimeUnit.SECONDS);
+            WorldCatalogItem world = model.load(
+                    IndexRange.ofLength(0, 1),
+                    new LoadCancellation()).toCompletableFuture().get(5, TimeUnit.SECONDS).items().get(0);
+
+            model.deleteWorld(world, DeletionMode.RECYCLE_BIN_FIRST).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+            assertEquals(DeletionMode.RECYCLE_BIN_FIRST, access.lastDeleteMode);
         } finally {
             model.close();
             executor.shutdownNow();
@@ -659,7 +687,23 @@ final class DefaultWorldCatalogModelTest {
             cancellation.throwIfCancelled();
         }
 
-        /// Ignores an unused synthetic deletion request.
+        /// Latest deletion mode observed by the access boundary.
+        private @Nullable DeletionMode lastDeleteMode;
+
+        /// Ignores an unused synthetic deletion request while recording the selected mode.
+        ///
+        /// @param world synthetic row
+        /// @param mode selected deletion behavior
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void delete(
+                WorldCatalogItem world,
+                DeletionMode mode,
+                LoadCancellation cancellation) throws IOException {
+            lastDeleteMode = mode;
+            delete(world, cancellation);
+        }
+
         ///
         /// @param world synthetic row
         /// @param cancellation cooperative cancellation signal

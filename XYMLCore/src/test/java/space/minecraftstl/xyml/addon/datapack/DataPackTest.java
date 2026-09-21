@@ -22,6 +22,9 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -90,6 +93,35 @@ final class DataPackTest {
         assertTrue(snapshots.get(0).isEmpty());
     }
 
+    /// A batch attempts every pack and reports only the paths that could not enter the recycle bin.
+    @Test
+    void batchDeletionAttemptsEveryPackAndAggregatesFailures() throws IOException {
+        Path first = writeDirectoryPack("first", true);
+        Path second = writeDirectoryPack("second", true);
+        Path failed = writeDirectoryPack("failed", true);
+        Path trash = temporaryDirectory.resolve("trash");
+        DataPack dataPack = new DataPack(
+                temporaryDirectory,
+                new RecordingTrashOperations(trash, failed));
+        dataPack.loadFromDir();
+        List<DataPack.Pack> selected = List.of(
+                pack(dataPack, "first"),
+                pack(dataPack, "failed"),
+                pack(dataPack, "second"));
+
+        TrashMoveException failure = assertThrows(
+                TrashMoveException.class,
+                () -> dataPack.deletePacks(selected, DeletionMode.RECYCLE_BIN_FIRST));
+
+        assertEquals(List.of(failed), failure.failedPaths());
+        assertFalse(Files.exists(first));
+        assertFalse(Files.exists(second));
+        assertTrue(Files.exists(failed));
+        assertTrue(Files.exists(trash.resolve("first")));
+        assertTrue(Files.exists(trash.resolve("second")));
+        assertEquals(List.of("failed"), ids(dataPack.getPacks()));
+    }
+
     /// Active state uses plain Core state, renames metadata, and publishes synchronously without JavaFX properties.
     @Test
     void changesActiveStateWithoutJavaFxProperty() throws IOException {
@@ -119,6 +151,18 @@ final class DataPackTest {
         assertEquals(List.of(Thread.currentThread(), Thread.currentThread()), notificationThreads);
     }
 
+    /// Resolves one loaded pack by stable identifier.
+    ///
+    /// @param dataPack loaded manager
+    /// @param id stable identifier
+    /// @return matching pack
+    private static DataPack.Pack pack(DataPack dataPack, String id) {
+        return dataPack.getPacks().stream()
+                .filter(candidate -> candidate.getId().equals(id))
+                .findFirst()
+                .orElseThrow();
+    }
+
     /// Writes one valid directory data pack in its enabled or disabled state.
     ///
     /// @param name directory name and stable pack identifier
@@ -137,6 +181,46 @@ final class DataPackTest {
     /// @return pack metadata JSON
     private static String packMetadata() {
         return "{\"pack\":{\"pack_format\":15,\"description\":\"fixture\"}}";
+    }
+
+    /// Moves every accepted target into a temporary trash directory and refuses one exact path.
+    @NotNullByDefault
+    private static final class RecordingTrashOperations implements TrashOperations {
+        /// Temporary trash destination.
+        private final Path trashDirectory;
+
+        /// Exact target refused by this implementation.
+        private final Path refusedPath;
+
+        /// Creates one deterministic recycle-bin substitute.
+        ///
+        /// @param trashDirectory temporary trash destination
+        /// @param refusedPath exact target that must remain in place
+        private RecordingTrashOperations(Path trashDirectory, Path refusedPath) {
+            this.trashDirectory = trashDirectory;
+            this.refusedPath = refusedPath;
+        }
+
+        /// Reports a supported recycle-bin boundary.
+        @Override
+        public boolean isSupported() {
+            return true;
+        }
+
+        /// Moves accepted targets and refuses the configured path.
+        @Override
+        public boolean moveToTrash(Path path) {
+            if (path.equals(refusedPath)) {
+                return false;
+            }
+            try {
+                Files.createDirectories(trashDirectory);
+                Files.move(path, trashDirectory.resolve(path.getFileName()));
+                return true;
+            } catch (IOException exception) {
+                return false;
+            }
+        }
     }
 
     /// Extracts stable identifiers from an immutable snapshot.
