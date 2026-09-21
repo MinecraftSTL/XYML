@@ -590,8 +590,8 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         information.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         JScrollPane scroll = new JScrollPane(information);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        scroll.getHorizontalScrollBar().setUnitIncrement(24);
+        scroll.setName("gameCrashInformationScroll");
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setBorder(BorderFactory.createTitledBorder(i18n("game.crash.info")));
         scroll.setMinimumSize(new Dimension(180, 0));
         return scroll;
@@ -636,8 +636,8 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         diagnosisContent.add(rows);
 
         JScrollPane scroll = new JScrollPane(diagnosisContent);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        scroll.getHorizontalScrollBar().setUnitIncrement(24);
+        scroll.setName("gameCrashReasonScroll");
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setBorder(BorderFactory.createEmptyBorder());
 
         JProgressBar progress = new JProgressBar();
