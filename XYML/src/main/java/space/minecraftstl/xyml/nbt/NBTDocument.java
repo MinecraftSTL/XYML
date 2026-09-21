@@ -24,11 +24,11 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/// One loaded NBT document with a mutable HelloNBT root and a stale-save baseline.
+/// One loaded NBT document with a mutable XoyzNBT root and a stale-save baseline.
 ///
-/// HelloNBT itself supplies the concrete mutation operations on tags, chunks, and regions. This
+/// XoyzNBT itself supplies the concrete mutation operations on tags, chunks, and regions. This
 /// class intentionally does not invent a second editing API or claim that arbitrary textual input
-/// can be converted safely. A caller that uses `rootElement` must obey HelloNBT's type and parent
+/// can be converted safely. A caller that uses `rootElement` must obey XoyzNBT's type and parent
 /// invariants and must not mutate the root concurrently with `NBTDocumentService.save`.
 @NotNullByDefault
 public final class NBTDocument {
@@ -41,7 +41,7 @@ public final class NBTDocument {
     /// Exact outer encoding that save operations preserve.
     private final NBTStorageEncoding storageEncoding;
 
-    /// Mutable in-memory HelloNBT root exposed as the library's actual editing boundary.
+    /// Mutable in-memory XoyzNBT root exposed as the library's actual editing boundary.
     private final NBTElement rootElement;
 
     /// Last successfully loaded or saved semantic root used to reject stale overwrites.
@@ -55,7 +55,7 @@ public final class NBTDocument {
     /// @param file normalized absolute source path
     /// @param fileType supported source family
     /// @param storageEncoding detected source encoding
-    /// @param rootElement parsed mutable HelloNBT root
+    /// @param rootElement parsed mutable XoyzNBT root
     /// @param sourceFingerprint stable encoded source fingerprint
     NBTDocument(
             Path file,
@@ -92,20 +92,20 @@ public final class NBTDocument {
         return storageEncoding;
     }
 
-    /// Returns the mutable root supplied by HelloNBT.
+    /// Returns the mutable root supplied by XoyzNBT.
     ///
     /// No launcher-specific editing semantics are added here. Callers must use only operations
-    /// supported by the concrete HelloNBT element type and must not mutate it during an asynchronous
+    /// supported by the concrete XoyzNBT element type and must not mutate it during an asynchronous
     /// save.
     ///
-    /// @return mutable HelloNBT root
+    /// @return mutable XoyzNBT root
     public NBTElement rootElement() {
         return rootElement;
     }
 
     /// Creates a fresh lazy structural view of the current in-memory root.
     ///
-    /// A fresh view should be requested after a HelloNBT mutation because each node captures its
+    /// A fresh view should be requested after a XoyzNBT mutation because each node captures its
     /// name, scalar text, and direct-child count at construction time.
     ///
     /// @return new lazily materialized root node
@@ -117,7 +117,7 @@ public final class NBTDocument {
 
     /// Returns a deep snapshot of the current working root for one save transaction.
     ///
-    /// @return detached HelloNBT root snapshot
+    /// @return detached XoyzNBT root snapshot
     synchronized NBTElement snapshotElementForSave() {
         return rootElement.clone();
     }
