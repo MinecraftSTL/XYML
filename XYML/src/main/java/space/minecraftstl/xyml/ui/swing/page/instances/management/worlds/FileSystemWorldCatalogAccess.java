@@ -26,7 +26,10 @@ import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.WorldArchiveImporter;
 import space.minecraftstl.xyml.game.WorldLockedException;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
@@ -55,6 +58,9 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     /// Stable managed instance identifier.
     private final GameInstanceID instanceId;
 
+    /// Recycle-bin movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Deterministic case-insensitive order for raw directory labels.
     private static final Comparator<Path> DIRECTORY_ORDER = Comparator
             .comparing(FileSystemWorldCatalogAccess::directoryName, String.CASE_INSENSITIVE_ORDER)
@@ -65,8 +71,21 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     /// @param repository managed game repository
     /// @param instanceId stable non-blank instance identifier
     FileSystemWorldCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
+        this(repository, instanceId, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates one adapter with an explicit recycle-bin boundary.
+    ///
+    /// @param repository managed game repository
+    /// @param instanceId stable non-blank instance identifier
+    /// @param trashOperations recycle-bin implementation
+    FileSystemWorldCatalogAccess(
+            GameRepository repository,
+            GameInstanceID instanceId,
+            TrashOperations trashOperations) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Resolves and normalizes the managed instance game version without enumerating saves.
@@ -202,15 +221,28 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     /// @throws IOException when the world is unreadable, locked, or cannot be removed
     @Override
     public void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException {
+        delete(world, DeletionMode.PERMANENT, cancellation);
+    }
+
+    /// Reopens a validated current world and deletes it through the selected mode.
+    @Override
+    public void delete(
+            WorldCatalogItem world,
+            DeletionMode mode,
+            LoadCancellation cancellation) throws IOException {
         WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
         if (!selectedWorld.readable()) {
             throw new IOException("Unreadable worlds cannot be deleted through the World API");
         }
         signal.throwIfCancelled();
         World sourceWorld = new World(selectedWorld.path());
+        if (sourceWorld.isLocked()) {
+            throw new WorldLockedException("The world " + sourceWorld.getFile() + " has been locked");
+        }
         signal.throwIfCancelled();
-        sourceWorld.delete();
+        FileUtils.deleteWithMode(sourceWorld.getFile(), requestedMode, trashOperations);
         signal.throwIfCancelled();
     }
 

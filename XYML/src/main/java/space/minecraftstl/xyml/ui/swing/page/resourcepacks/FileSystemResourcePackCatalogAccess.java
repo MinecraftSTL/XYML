@@ -33,6 +33,9 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -81,6 +84,9 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// Test hook invoked inside the shared gate after staging creation and before source copying.
     private final Runnable beforeStagingCopy;
 
+    /// Recycle-bin capability and movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates a manager adapter without starting any I/O.
     ///
     /// @param repository repository containing the managed instance
@@ -98,6 +104,20 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             GameRepository repository,
             GameInstanceID instanceId,
             Runnable beforeStagingCopy) {
+        this(repository, instanceId, beforeStagingCopy, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates an adapter with deterministic pre-copy and recycle-bin boundaries.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank repository instance identifier
+    /// @param beforeStagingCopy hook after private staging creation and before copying
+    /// @param trashOperations recycle-bin implementation
+    FileSystemResourcePackCatalogAccess(
+            GameRepository repository,
+            GameInstanceID instanceId,
+            Runnable beforeStagingCopy,
+            TrashOperations trashOperations) {
         Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(instanceId, "instanceId");
         manager = new ResourcePackManager(repository, instanceId);
@@ -109,6 +129,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         this.beforeStagingCopy = Objects.requireNonNull(
                 beforeStagingCopy,
                 "beforeStagingCopy");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Enumerates only supported direct-child shapes and sorts by exact file name.
@@ -504,15 +525,17 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         OptionsState disabled = withDisabled(options, fileName(target));
         cancellation.throwIfCancelled();
         commitPoint.run();
-        if (!disabled.equals(options)) {
+        boolean optionsChanged = !disabled.equals(options);
+        if (optionsChanged) {
             saveOptionsState(disabled);
         }
-        if (Files.isSymbolicLink(target)) {
-            Files.deleteIfExists(target);
-        } else if (Files.isDirectory(target)) {
-            FileUtils.deleteDirectory(target);
-        } else {
-            Files.deleteIfExists(target);
+        try {
+            FileUtils.deleteWithMode(target, mutation.mode(), trashOperations);
+        } catch (TrashMoveException failure) {
+            if (optionsChanged) {
+                saveOptionsState(options);
+            }
+            throw failure;
         }
     }
 

@@ -108,9 +108,9 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
         } else if (mutation instanceof ModCatalogMutation.EnabledBatch enabledBatch) {
             setEnabled(enabledBatch.localKeys(), enabledBatch.enabled(), cancellation);
         } else if (mutation instanceof ModCatalogMutation.Delete deleteMutation) {
-            manager.removeMods(findCurrent(deleteMutation.localKey()));
+            manager.removeMods(deleteMutation.mode(), findCurrent(deleteMutation.localKey()));
         } else if (mutation instanceof ModCatalogMutation.DeleteBatch deleteBatch) {
-            deleteMods(deleteBatch.localKeys(), cancellation);
+            deleteMods(deleteBatch.localKeys(), deleteBatch.mode(), cancellation);
         } else {
             throw new IllegalArgumentException("Unsupported Mod mutation " + mutation.getClass().getName());
         }
@@ -187,10 +187,11 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
     /// @throws IOException when current index access or deletion fails
     private void deleteMods(
             @Unmodifiable List<String> localKeys,
+            space.minecraftstl.xyml.util.io.DeletionMode mode,
             LoadCancellation cancellation) throws IOException {
         @Unmodifiable List<LocalModFile> targets = findCurrent(localKeys);
         requireNotCancelled(cancellation);
-        manager.removeMods(targets.toArray(LocalModFile[]::new));
+        manager.removeMods(mode, targets.toArray(LocalModFile[]::new));
     }
 
     /// Resolves a mutation target from the manager's current exact index.

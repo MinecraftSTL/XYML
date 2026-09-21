@@ -15,30 +15,23 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.util.io;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
-import java.util.Objects;
 
-/// Single-pack persistent disable-then-delete request.
-///
-/// @param path normalized stable current-index path
-/// @param mode selected deletion behavior
+/// Provides platform recycle-bin capability checks and target moves.
 @NotNullByDefault
-record ResourcePackDeleteMutation(Path path, DeletionMode mode) implements ResourcePackCatalogMutationRequest {
-    /// Creates a permanent-delete request for compatibility callers.
+public interface TrashOperations {
+    /// Returns whether this platform can move a path to a recycle bin.
     ///
-    /// @param path normalized stable current-index path
-    ResourcePackDeleteMutation(Path path) {
-        this(path, DeletionMode.PERMANENT);
-    }
+    /// @return whether the recycle bin is available
+    boolean isSupported();
 
-    /// Validates the stable target path and mode.
-    ResourcePackDeleteMutation {
-        Objects.requireNonNull(path, "path");
-        Objects.requireNonNull(mode, "mode");
-    }
+    /// Attempts to move one path to the platform recycle bin.
+    ///
+    /// @param path exact file, directory, or symbolic link to move
+    /// @return whether the target was moved successfully
+    boolean moveToTrash(Path path);
 }

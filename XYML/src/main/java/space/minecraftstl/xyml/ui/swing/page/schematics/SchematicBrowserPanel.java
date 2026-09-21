@@ -34,6 +34,8 @@ import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.BorderFactory;
@@ -73,6 +75,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /// Swing schematic browser backed by a shallow, viewport-driven toolkit-neutral model.
@@ -676,17 +679,21 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         }
         Path expectedDirectory = beforeDialog.currentDirectory();
         Path capturedPath = selected.path();
-        final boolean confirmed;
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (!confirmed || !isSelectedActionCurrent(expectedDirectory, capturedPath)) {
+        if (mode == null || !isSelectedActionCurrent(expectedDirectory, capturedPath)) {
             return;
         }
-        startWrite(() -> model.delete(capturedPath));
+        startDeletion(
+                model.delete(capturedPath, mode),
+                () -> model.delete(capturedPath, DeletionMode.PERMANENT),
+                () -> interactions.confirmPermanentFallback(this, selected),
+                true);
     }
 
     /// Starts one asynchronous platform reveal while keeping unrelated browser commands available.
@@ -728,6 +735,40 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         completion.whenComplete((
                 @Nullable SchematicBrowserSnapshot ignored,
                 @Nullable Throwable failure) -> EdtDispatcher.execute(() -> writeCompleted(failure)));
+    }
+
+    /// Observes one deletion and retries permanently only after the original warning is approved.
+    ///
+    /// @param initial initial deletion stage
+    /// @param permanentRetry permanent retry stage
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void startDeletion(
+            CompletionStage<SchematicBrowserSnapshot> initial,
+            Supplier<CompletionStage<SchematicBrowserSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        final CompletionStage<SchematicBrowserSnapshot> completion;
+        try {
+            completion = Objects.requireNonNull(initial, "schematic deletion returned null");
+        } catch (RuntimeException failure) {
+            writeCompleted(failure);
+            return;
+        }
+        completion.whenComplete((@Nullable SchematicBrowserSnapshot ignored, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> {
+                    if (failure == null || !isOpen()) {
+                        return;
+                    }
+                    Throwable resolved = unwrapCompletionFailure(failure);
+                    if (allowFallback && resolved instanceof TrashMoveException) {
+                        if (confirmFallback.getAsBoolean()) {
+                            startDeletion(permanentRetry.get(), permanentRetry, confirmFallback, false);
+                        }
+                        return;
+                    }
+                    writeCompleted(failure);
+                }));
     }
 
     /// Reports only write failures that were not already published in the browser status.

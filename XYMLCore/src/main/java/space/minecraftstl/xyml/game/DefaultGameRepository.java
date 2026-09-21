@@ -27,7 +27,9 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -436,6 +438,56 @@ public class DefaultGameRepository implements GameRepository {
     /// @return whether the instance was absent or its directory was moved out of the repository
     public boolean removeInstanceFromDiskWithoutRefresh(GameInstanceID id) {
         return removeInstanceFromDisk(id, false);
+    }
+
+    /// Moves one instance directory to the recycle bin without scheduling a repository refresh.
+    ///
+    /// @param id instance identifier to remove
+    /// @throws IOException when the event is denied, the path cannot be moved, or an I/O failure occurs
+    public void removeInstanceToTrashWithoutRefresh(GameInstanceID id) throws IOException {
+        removeInstanceWithMode(id, DeletionMode.RECYCLE_BIN_FIRST);
+    }
+
+    /// Permanently removes one instance directory without scheduling a repository refresh.
+    ///
+    /// @param id instance identifier to remove
+    /// @throws IOException when the event is denied or the path cannot be removed
+    public void removeInstancePermanentlyWithoutRefresh(GameInstanceID id) throws IOException {
+        removeInstanceWithMode(id, DeletionMode.PERMANENT);
+    }
+
+    /// Removes one instance through a caller-selected recycle-bin or permanent mode.
+    ///
+    /// @param id instance identifier to remove
+    /// @param mode requested deletion behavior
+    /// @throws IOException when the event is denied or the selected operation fails
+    private void removeInstanceWithMode(GameInstanceID id, DeletionMode mode) throws IOException {
+        if (EventBus.EVENT_BUS.fireEvent(new RemoveInstanceEvent(this, id)) == Event.Result.DENY) {
+            throw new IOException("Instance removal was denied");
+        }
+
+        Path file = getInstanceRoot(id);
+        if (Files.notExists(file)) {
+            status.instances.remove(id);
+            return;
+        }
+
+        if (mode == DeletionMode.RECYCLE_BIN_FIRST) {
+            if (!FileUtils.moveToTrash(file)) {
+                if (Files.exists(file)) {
+                    throw new TrashMoveException(List.of(file));
+                }
+                status.instances.remove(id);
+                return;
+            }
+            status.instances.remove(id);
+            return;
+        }
+
+        Path removedFile = file.toAbsolutePath().resolveSibling(FileUtils.getName(file) + "_removed");
+        Files.move(file, removedFile, StandardCopyOption.REPLACE_EXISTING);
+        status.instances.remove(id);
+        FileUtils.forceDelete(removedFile);
     }
 
     /// Removes one instance and optionally preserves the legacy asynchronous refresh side effect.

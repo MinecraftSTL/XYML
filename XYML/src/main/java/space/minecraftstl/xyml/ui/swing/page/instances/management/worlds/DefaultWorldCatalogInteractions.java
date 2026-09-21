@@ -24,6 +24,9 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import javax.swing.JFileChooser;
@@ -59,13 +62,29 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     /// Caller-owned executor for filesystem and platform desktop work.
     private final Executor executor;
 
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates the production interaction implementation.
     ///
     /// @param strings stable visible text
     /// @param executor caller-owned background executor
     public DefaultWorldCatalogInteractions(WorldCatalogStrings strings, Executor executor) {
+        this(strings, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings stable visible text
+    /// @param executor caller-owned background executor
+    /// @param trashOperations recycle-bin implementation
+    DefaultWorldCatalogInteractions(
+            WorldCatalogStrings strings,
+            Executor executor,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Shows a ZIP-only single-file chooser on the EDT.
@@ -128,6 +147,25 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 strings.deleteDialogTitle(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(world, "world");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, world) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, world);
     }
 
     /// Prompts for one sibling copy name on the EDT.

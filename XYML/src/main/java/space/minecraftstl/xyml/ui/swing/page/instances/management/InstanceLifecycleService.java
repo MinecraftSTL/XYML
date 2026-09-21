@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.FileSaver;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.io.IOException;
 
@@ -109,6 +110,22 @@ public interface InstanceLifecycleService {
     /// @return unstarted deletion task
     default Task<@Nullable Void> deleteTask(GameInstanceID sourceId) {
         return Task.runAsync("Delete game instance", Schedulers.io(), () -> {
+            delete(sourceId);
+            EdtDispatcher.executeAndWait(() -> reconcileSelection(null));
+            FileSaver.waitForAllSaves();
+        });
+    }
+
+    /// Creates an unstarted task for a complete deletion lifecycle using the requested deletion mode.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param mode recycle-bin-first or permanent deletion behavior
+    /// @return unstarted deletion task
+    default Task<@Nullable Void> deleteTask(GameInstanceID sourceId, DeletionMode mode) {
+        return Task.runAsync("Delete game instance", Schedulers.io(), () -> {
+            if (mode != DeletionMode.PERMANENT) {
+                throw new UnsupportedOperationException("This lifecycle service does not support recycle-bin deletion");
+            }
             delete(sourceId);
             EdtDispatcher.executeAndWait(() -> reconcileSelection(null));
             FileSaver.waitForAllSaves();

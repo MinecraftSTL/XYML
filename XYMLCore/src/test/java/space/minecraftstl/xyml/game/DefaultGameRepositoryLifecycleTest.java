@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the refresh boundary of low-level instance deletion operations.
@@ -63,6 +64,22 @@ public final class DefaultGameRepositoryLifecycleTest {
         assertTrue(repository.removeInstanceFromDisk(instanceId));
 
         assertEquals(1, repository.refreshTaskCount.get());
+    }
+
+    /// The explicit permanent mode removes the directory without relying on the platform recycle bin.
+    ///
+    /// @throws IOException when the fixture cannot be created or removed
+    @Test
+    public void permanentDeletionDoesNotScheduleRefresh() throws IOException {
+        TrackingRepository repository = new TrackingRepository(temporaryDirectory.resolve("permanent"));
+        GameInstanceID instanceId = new GameInstanceID("instance");
+        Path instanceDirectory = repository.getInstanceRoot(instanceId);
+        Files.createDirectories(instanceDirectory);
+
+        repository.removeInstancePermanentlyWithoutRefresh(instanceId);
+
+        assertFalse(Files.exists(instanceDirectory));
+        assertEquals(0, repository.refreshTaskCount.get());
     }
 
     /// Repository substitute recording refresh-task creation without scanning the fixture directory.

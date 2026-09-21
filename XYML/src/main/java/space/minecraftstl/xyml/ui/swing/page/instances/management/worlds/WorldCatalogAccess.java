@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -92,6 +93,19 @@ interface WorldCatalogAccess {
     /// @param cancellation cooperative operation cancellation signal
     /// @throws IOException when Core cannot delete the world
     void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException;
+
+    /// Deletes one validated, unlocked world using the selected recycle-bin or permanent mode.
+    ///
+    /// @param world current loaded world row
+    /// @param mode selected deletion behavior
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot delete the world
+    default void delete(
+            WorldCatalogItem world,
+            DeletionMode mode,
+            LoadCancellation cancellation) throws IOException {
+        delete(world, cancellation);
+    }
 
     /// Writes one selected world's editable details and keeps the mutation on the background side.
     ///

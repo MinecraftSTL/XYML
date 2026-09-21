@@ -25,6 +25,8 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
@@ -50,6 +52,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -348,16 +352,26 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Confirms and schedules permanent deletion for the selected local ZIP archive.
+    /// Chooses a mode and schedules deletion for the selected local ZIP archive.
     private void deleteSelectedBackup() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable WorldBackupArchive archive = selectedArchive();
-        if (archive == null || closed.get() || operationPending || !interactions.confirmDelete(this, archive)) {
+        if (archive == null || closed.get() || operationPending) {
+            return;
+        }
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, archive);
+        if (mode == null) {
             return;
         }
         long request = beginOperation(i18n("swing.world_backup.deleting"));
         try {
-            observeSnapshot(catalog.deleteBackup(archive), request, i18n("swing.world_backup.deleted"));
+            observeDeletion(
+                    catalog.deleteBackup(archive, mode),
+                    request,
+                    i18n("swing.world_backup.deleted"),
+                    () -> catalog.deleteBackup(archive, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallback(this, archive),
+                    true);
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
@@ -422,6 +436,73 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                         updateControls();
                     }
                 }));
+    }
+
+    /// Observes one backup deletion and offers the original warning before permanent retry.
+    ///
+    /// @param stage initial deletion stage
+    /// @param request active request token
+    /// @param successStatus visible success text
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback original warning confirmation
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void observeDeletion(
+            CompletionStage<WorldBackupSnapshot> stage,
+            long request,
+            String successStatus,
+            Supplier<CompletionStage<WorldBackupSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        Objects.requireNonNull(stage, "stage").whenComplete((
+                @Nullable WorldBackupSnapshot snapshot,
+                @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
+            if (closed.get() || request != requestSequence) {
+                return;
+            }
+            if (failure == null) {
+                if (snapshot == null) {
+                    completeFailure(request, new IllegalStateException(i18n("swing.world_backup.missing_index")));
+                } else {
+                    operationPending = false;
+                    applySnapshot(snapshot);
+                    statusLabel.setText(snapshot.archives().isEmpty()
+                            ? i18n("world.backup.empty")
+                            : Objects.requireNonNull(successStatus, "successStatus"));
+                    updateControls();
+                }
+                return;
+            }
+            Throwable resolved = unwrapFailure(failure);
+            if (allowFallback && resolved instanceof TrashMoveException) {
+                operationPending = false;
+                updateControls();
+                if (confirmFallback.getAsBoolean()) {
+                    long retryRequest = beginOperation(i18n("swing.world_backup.deleting"));
+                    observeDeletion(
+                            permanentRetry.get(),
+                            retryRequest,
+                            successStatus,
+                            permanentRetry,
+                            confirmFallback,
+                            false);
+                } else {
+                    statusLabel.setText(i18n("message.failed"));
+                }
+                return;
+            }
+            completeFailure(request, failure);
+        }));
+    }
+
+    /// Unwraps completion wrappers before classifying a recycle-bin failure.
+    ///
+    /// @param failure observed failure
+    /// @return original failure
+    private static Throwable unwrapFailure(Throwable failure) {
+        if (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+            return failure.getCause();
+        }
+        return failure;
     }
 
     /// Clears pending state and presents one concise asynchronous operation failure.

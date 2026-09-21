@@ -24,7 +24,10 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.WorldLockedException;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.SwingUtilities;
 import java.io.IOException;
@@ -69,6 +72,9 @@ public final class FileSystemWorldBackupCatalog implements WorldBackupCatalog {
     /// Caller-owned worker receiving every filesystem, compression, and archive operation.
     private final Executor executor;
 
+    /// Recycle-bin movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates a production catalog for a repository instance without touching its filesystem.
     ///
     /// @param repository repository containing the managed instance
@@ -86,10 +92,23 @@ public final class FileSystemWorldBackupCatalog implements WorldBackupCatalog {
     /// @param runDirectory managed instance run directory
     /// @param executor caller-owned background executor
     FileSystemWorldBackupCatalog(Path runDirectory, Executor executor) {
+        this(runDirectory, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates a catalog with an explicit recycle-bin boundary.
+    ///
+    /// @param runDirectory managed instance run directory
+    /// @param executor caller-owned background executor
+    /// @param trashOperations recycle-bin implementation
+    FileSystemWorldBackupCatalog(
+            Path runDirectory,
+            Executor executor,
+            TrashOperations trashOperations) {
         Path normalizedRunDirectory = Objects.requireNonNull(runDirectory, "runDirectory").toAbsolutePath().normalize();
         this.savesDirectory = normalizedRunDirectory.resolve("saves");
         this.backupsDirectory = normalizedRunDirectory.resolve("backups");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Returns the saves directory without performing an I/O operation.
@@ -135,10 +154,19 @@ public final class FileSystemWorldBackupCatalog implements WorldBackupCatalog {
     /// @return terminal shallow snapshot after archive deletion
     @Override
     public CompletionStage<WorldBackupSnapshot> deleteBackup(WorldBackupArchive archive) {
+        return deleteBackup(archive, DeletionMode.PERMANENT);
+    }
+
+    /// Schedules selected-mode deletion of one direct-child backup archive and a fresh index.
+    @Override
+    public CompletionStage<WorldBackupSnapshot> deleteBackup(
+            WorldBackupArchive archive,
+            DeletionMode mode) {
         WorldBackupArchive requestedArchive = Objects.requireNonNull(archive, "archive");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         return submit(() -> {
             Path archivePath = requireDirectBackupArchive(requestedArchive);
-            FileUtils.forceDelete(archivePath);
+            FileUtils.deleteWithMode(archivePath, requestedMode, trashOperations);
             return indexDirectories();
         });
     }

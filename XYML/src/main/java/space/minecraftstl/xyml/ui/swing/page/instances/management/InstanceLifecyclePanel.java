@@ -24,6 +24,8 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -240,13 +242,17 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
         submitMutation(MutationKind.DUPLICATE, destination, request.copySaves());
     }
 
-    /// Confirms a destructive deletion before scheduling its filesystem work.
+    /// Chooses a deletion mode before scheduling its filesystem work.
     private void requestDelete() {
         EdtDispatcher.requireEventDispatchThread();
-        if (!isInteractive() || !interactions.confirmDelete(this, instanceId)) {
+        if (!isInteractive()) {
             return;
         }
-        submitMutation(MutationKind.DELETE, null, false);
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, instanceId);
+        if (mode == null) {
+            return;
+        }
+        submitMutation(MutationKind.DELETE, null, false, mode);
     }
 
     /// Normalizes and syntactically validates one native-dialog destination before scheduling work.
@@ -276,6 +282,20 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             MutationKind kind,
             @Nullable GameInstanceID destinationId,
             boolean copySaves) {
+        submitMutation(kind, destinationId, copySaves, null);
+    }
+
+    /// Starts one mutually exclusive background mutation with an optional exact deletion mode.
+    ///
+    /// @param kind requested mutation kind
+    /// @param destinationId target destination, or `null` for deletion
+    /// @param copySaves whether duplication should include worlds
+    /// @param deletionMode selected deletion behavior, or null for other mutations
+    private void submitMutation(
+            MutationKind kind,
+            @Nullable GameInstanceID destinationId,
+            boolean copySaves,
+            @Nullable DeletionMode deletionMode) {
         EdtDispatcher.requireEventDispatchThread();
         MutationKind requestedKind = Objects.requireNonNull(kind, "kind");
         if (!operationPending.compareAndSet(false, true) || closed.get()) {
@@ -284,11 +304,15 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
         updateActionState();
         statusLabel.setText(strings.workingStatus());
         try {
-            executor.execute(() -> runMutationOnExecutor(requestedKind, destinationId, copySaves));
+            executor.execute(() -> runMutationOnExecutor(
+                    requestedKind,
+                    destinationId,
+                    copySaves,
+                    deletionMode));
         } catch (RuntimeException failure) {
-            completeMutation(requestedKind, destinationId, failure);
+            completeMutation(requestedKind, destinationId, deletionMode, failure);
         } catch (Error failure) {
-            completeMutation(requestedKind, destinationId, failure);
+            completeMutation(requestedKind, destinationId, deletionMode, failure);
             throw failure;
         }
     }
@@ -301,13 +325,14 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     private void runMutationOnExecutor(
             MutationKind kind,
             @Nullable GameInstanceID destinationId,
-            boolean copySaves) {
+            boolean copySaves,
+            @Nullable DeletionMode deletionMode) {
         try {
             requireBackgroundThread();
             Task<@Nullable Void> mutation = switch (kind) {
                 case RENAME -> service.renameTask(instanceId, requireDestination(destinationId));
                 case DUPLICATE -> service.duplicateTask(instanceId, requireDestination(destinationId), copySaves);
-                case DELETE -> service.deleteTask(instanceId);
+                case DELETE -> service.deleteTask(instanceId, requireDeletionMode(deletionMode));
             };
             TaskExecutor taskExecutor = mutation.executor();
             taskExecutor.subscribeTaskListener(new TaskListener() {
@@ -320,14 +345,14 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
                                 "Instance lifecycle task stopped without a terminal failure");
                     }
                     @Nullable Throwable terminalFailure = failure;
-                    EdtDispatcher.execute(() -> completeMutation(kind, destinationId, terminalFailure));
+                    EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, terminalFailure));
                 }
             });
             taskExecutor.start();
         } catch (Exception failure) {
-            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, failure));
+            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, failure));
         } catch (Error failure) {
-            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, failure));
+            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, failure));
             throw failure;
         }
     }
@@ -340,6 +365,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     private void completeMutation(
             MutationKind kind,
             @Nullable GameInstanceID destinationId,
+            @Nullable DeletionMode deletionMode,
             @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
         if (!operationPending.compareAndSet(true, false)) {
@@ -349,6 +375,17 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             return;
         }
         if (failure != null) {
+            if (kind == MutationKind.DELETE
+                    && deletionMode == DeletionMode.RECYCLE_BIN_FIRST
+                    && hasTrashMoveFailure(failure)) {
+                if (interactions.confirmPermanentFallback(this, instanceId)) {
+                    submitMutation(MutationKind.DELETE, null, false, DeletionMode.PERMANENT);
+                } else {
+                    statusLabel.setText(strings.deleteFailure());
+                    updateActionState();
+                }
+                return;
+            }
             statusLabel.setText(failureStatus(kind));
             updateActionState();
             showFailure(failureTitle(kind), failureDetail(failure));
@@ -428,6 +465,32 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
         if (SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Instance lifecycle filesystem work must not run on the EDT");
         }
+    }
+
+    /// Returns the selected deletion mode required by the deletion execution path.
+    ///
+    /// @param deletionMode selected mode, or null for a malformed operation
+    /// @return non-null deletion mode
+    private static DeletionMode requireDeletionMode(@Nullable DeletionMode deletionMode) {
+        if (deletionMode == null) {
+            throw new IllegalStateException("A deletion mode is required for this instance deletion");
+        }
+        return deletionMode;
+    }
+
+    /// Detects a recycle-bin failure through task exception wrapping.
+    ///
+    /// @param failure terminal task failure
+    /// @return whether a [TrashMoveException] exists in the cause chain
+    private static boolean hasTrashMoveFailure(Throwable failure) {
+        @Nullable Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current != null) {
+            if (current instanceof TrashMoveException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /// Returns a non-null destination required by rename and duplication execution paths.

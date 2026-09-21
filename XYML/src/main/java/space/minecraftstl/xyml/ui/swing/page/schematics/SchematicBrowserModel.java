@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.schematics;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.nio.file.Path;
@@ -84,6 +85,15 @@ public interface SchematicBrowserModel extends ViewportChoiceDataSource<Schemati
     /// @param target exact path captured from the current stable listing
     /// @return completion of the write and its resulting stable browser state
     CompletionStage<SchematicBrowserSnapshot> delete(Path target);
+
+    /// Deletes one exact direct child using the selected recycle-bin or permanent mode.
+    ///
+    /// @param target exact path captured from the current stable listing
+    /// @param mode selected deletion behavior
+    /// @return completion of the write and its resulting stable browser state
+    default CompletionStage<SchematicBrowserSnapshot> delete(Path target, DeletionMode mode) {
+        return delete(target);
+    }
 
     /// Cancels public completions, requests cooperative operation cancellation, and prevents late publication.
     ///

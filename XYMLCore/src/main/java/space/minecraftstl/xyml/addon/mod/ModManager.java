@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.game.NoSuchGameInstanceException;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.tree.ZipFileTree;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -303,6 +304,19 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         for (LocalModFile localModFile : localModFiles) {
             localModFile.delete();
         }
+    }
+
+    /// Removes every supplied current or archived mod through one selected deletion mode.
+    ///
+    /// @param mode recycle-bin-first or permanent deletion behavior
+    /// @param localModFiles exact Mod files to remove
+    /// @throws IOException when a selected deletion fails
+    public void removeMods(DeletionMode mode, LocalModFile... localModFiles) throws IOException {
+        DeletionMode requestedMode = java.util.Objects.requireNonNull(mode, "mode");
+        @Unmodifiable List<Path> paths = java.util.Arrays.stream(localModFiles)
+                .map(file -> java.util.Objects.requireNonNull(file, "localModFiles contains null").getFile())
+                .toList();
+        FileUtils.deleteAllWithMode(paths, requestedMode);
     }
 
     public void rollback(LocalModFile from, LocalModFile to) throws IOException {

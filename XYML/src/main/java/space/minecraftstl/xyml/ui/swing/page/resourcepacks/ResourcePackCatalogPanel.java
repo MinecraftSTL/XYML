@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
@@ -75,6 +76,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -1181,7 +1183,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 enabled ? model::enableResourcePack : model::disableResourcePack));
     }
 
-    /// Confirms and permanently deletes every selected stable path.
+    /// Chooses a mode and deletes every selected stable path.
     private void confirmAndDeleteSelectedResourcePacks() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
@@ -1190,15 +1192,28 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         long expectedRevision = snapshot.contentRevision();
-        final boolean confirmed;
+        int selectedCount = selectedPaths.size();
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDeleteSelected(this, selectedPaths.size());
+            mode = interactions.chooseDeleteModeSelected(this, selectedCount);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (confirmed && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
-            startWrite(() -> applySequentially(selectedPaths, model::deleteResourcePack));
+        if (mode != null && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
+            startDeletion(
+                    () -> ResourcePackDeletionFallback.deleteSerially(
+                            selectedPaths,
+                            mode,
+                            path -> model.deleteResourcePack(path, mode),
+                            model::snapshot),
+                    () -> ResourcePackDeletionFallback.deleteSerially(
+                            selectedPaths,
+                            DeletionMode.PERMANENT,
+                            path -> model.deleteResourcePack(path, DeletionMode.PERMANENT),
+                            model::snapshot),
+                    () -> interactions.confirmPermanentFallbackSelected(this, selectedCount),
+                    true);
         }
     }
 
@@ -1284,7 +1299,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 : model.disableResourcePack(expectedPath));
     }
 
-    /// Permanently deletes the selected pack only after confirmation and stale-state rejection.
+    /// Deletes the selected pack after mode selection and stale-state rejection.
     private void confirmAndDeleteSelectedResourcePack() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot beforeDialog = currentWritableSnapshot();
@@ -1294,15 +1309,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
         long expectedRevision = beforeDialog.contentRevision();
         Path expectedPath = selected.path();
-        final boolean confirmed;
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (confirmed && isSelectedActionCurrent(expectedRevision, expectedPath)) {
-            startWrite(() -> model.deleteResourcePack(expectedPath));
+        if (mode != null && isSelectedActionCurrent(expectedRevision, expectedPath)) {
+            startDeletion(
+                    () -> model.deleteResourcePack(expectedPath, mode),
+                    () -> model.deleteResourcePack(expectedPath, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallback(this, selected),
+                    true);
         }
     }
 
@@ -1359,9 +1378,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @param operation deferred model write
     private void startWrite(Supplier<CompletionStage<ResourcePackCatalogSnapshot>> operation) {
         EdtDispatcher.requireEventDispatchThread();
-        if (writePending || currentWritableSnapshot() == null) {
-            return;
-        }
+        if (writePending || currentWritableSnapshot() == null) return;
         writePending = true;
         synchronized (stateLock) {
             writeStartUpdateRevision = updateRevision;
@@ -1374,6 +1391,38 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             completion.whenComplete((
                     @Nullable ResourcePackCatalogSnapshot ignored,
                     @Nullable Throwable failure) -> EdtDispatcher.execute(() -> writeCompleted(failure)));
+        } catch (RuntimeException failure) {
+            writeCompleted(failure);
+        } catch (Error failure) {
+            writePending = false;
+            updateSelectionDetails();
+            throw failure;
+        }
+    }
+
+    /// Starts one deletion and offers permanent fallback only when the recycle-bin move fails.
+    ///
+    /// @param initial initial deletion stage
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback original-warning confirmation
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void startDeletion(
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback, boolean allowFallback) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (writePending || currentWritableSnapshot() == null) return;
+        writePending = true;
+        synchronized (stateLock) {
+            writeStartUpdateRevision = updateRevision;
+        }
+        updateActionAvailability(choiceList.getSelectedValue());
+        try {
+            ResourcePackDeletionFallback.observe(
+                    Objects.requireNonNull(initial.get(), "resource-pack deletion returned null"),
+                    permanentRetry, confirmFallback, allowFallback,
+                    () -> { writePending = false; updateSelectionDetails(); },
+                    this::writeCompleted);
         } catch (RuntimeException failure) {
             writeCompleted(failure);
         } catch (Error failure) {

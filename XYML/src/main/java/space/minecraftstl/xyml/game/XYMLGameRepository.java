@@ -55,6 +55,7 @@ import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -557,6 +558,47 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         } catch (IOException exception) {
             LOG.warning("Interrupted while flushing settings before deleting instance " + instanceId, exception);
             return false;
+        }
+    }
+
+    /// Flushes settings and moves one instance directory to the recycle bin without a repository refresh.
+    ///
+    /// @param instanceId instance identifier
+    /// @throws IOException when pending saves, recycle-bin movement, or cache cleanup fails
+    public void removeInstanceToTrashWithoutRefresh(GameInstanceID instanceId) throws IOException {
+        removeInstanceWithModeWithoutRefresh(instanceId, DeletionMode.RECYCLE_BIN_FIRST);
+    }
+
+    /// Flushes settings and permanently removes one instance directory without a repository refresh.
+    ///
+    /// @param instanceId instance identifier
+    /// @throws IOException when pending saves, permanent removal, or cache cleanup fails
+    public void removeInstancePermanentlyWithoutRefresh(GameInstanceID instanceId) throws IOException {
+        removeInstanceWithModeWithoutRefresh(instanceId, DeletionMode.PERMANENT);
+    }
+
+    /// Runs one selected removal mode while preserving the existing settings barriers and cache invalidation.
+    ///
+    /// @param instanceId instance identifier
+    /// @param mode requested deletion behavior
+    /// @throws IOException when the configured removal or cache invalidation fails
+    private void removeInstanceWithModeWithoutRefresh(
+            GameInstanceID instanceId,
+            DeletionMode mode) throws IOException {
+        try {
+            withInstanceSettingsLocks(List.of(instanceId), () -> {
+                waitForPendingSaves("deleting", instanceId);
+                if (mode == DeletionMode.RECYCLE_BIN_FIRST) {
+                    super.removeInstanceToTrashWithoutRefresh(instanceId);
+                } else {
+                    super.removeInstancePermanentlyWithoutRefresh(instanceId);
+                }
+                discardInstanceCaches(instanceId);
+                return null;
+            });
+        } catch (IOException exception) {
+            LOG.warning("Interrupted while flushing settings before deleting instance " + instanceId, exception);
+            throw exception;
         }
     }
 
