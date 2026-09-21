@@ -358,15 +358,33 @@ public final class FileUtils {
         return false;
     }
 
-    /**
-     * Move file to trash.
-     *
-     * @param file the file being moved to trash.
-     * @return false if moveToTrash does not exist, or platform does not support Desktop.Action.MOVE_TO_TRASH
-     */
+    /// Returns whether the current platform exposes a usable recycle-bin operation.
+    ///
+    /// Linux and BSD use the known-desktop XDG trash implementation. Other platforms require
+    /// [java.awt.Desktop.Action#MOVE_TO_TRASH] and a non-headless desktop session.
+    ///
+    /// @return whether moving a path to the recycle bin is supported
+    public static boolean isMoveToTrashSupported() {
+        if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
+            return hasKnownDesktop();
+        }
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
+            return false;
+        }
+        try {
+            return java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.MOVE_TO_TRASH);
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /// Moves one file, directory, or symbolic link to the platform recycle bin.
+    ///
+    /// @param file the path being moved to the recycle bin
+    /// @return false when the platform is unsupported, missing, or the move fails
     public static boolean moveToTrash(Path file) {
-        if (OperatingSystem.CURRENT_OS.isLinuxOrBSD() && hasKnownDesktop()) {
-            if (!Files.exists(file)) {
+        if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
+            if (!hasKnownDesktop() || Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
                 return false;
             }
 
@@ -399,7 +417,9 @@ public final class FileUtils {
                 }
 
                 String time = DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(ZonedDateTime.now().truncatedTo(ChronoUnit.SECONDS));
-                if (Files.isDirectory(file)) {
+                if (Files.isSymbolicLink(file)) {
+                    Files.createSymbolicLink(targetFile, Files.readSymbolicLink(file));
+                } else if (Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)) {
                     FileUtils.copyDirectory(file, targetFile);
                 } else {
                     FileUtils.copyFile(file, targetFile);
@@ -408,18 +428,100 @@ public final class FileUtils {
                 Files.createDirectories(infoDir);
                 Files.writeString(infoFile, "[Trash Info]\nPath=" + FileUtils.getAbsolutePath(file) + "\nDeletionDate=" + time + "\n");
                 FileUtils.forceDelete(file);
-            } catch (IOException e) {
-                LOG.warning("Failed to move " + file + " to trash", e);
+            } catch (IOException | SecurityException exception) {
+                LOG.warning("Failed to move " + file + " to trash", exception);
                 return false;
             }
 
             return true;
         }
 
+        if (!isMoveToTrashSupported()) {
+            return false;
+        }
         try {
             return java.awt.Desktop.getDesktop().moveToTrash(file.toFile());
-        } catch (Exception e) {
+        } catch (Exception exception) {
             return false;
+        }
+    }
+
+    /// Deletes one path according to the requested mode.
+    ///
+    /// Missing paths are treated as already deleted. Recycle-bin mode never falls back to permanent
+    /// deletion and reports unresolved paths through [TrashMoveException].
+    ///
+    /// @param path target path
+    /// @param mode permanent deletion or recycle-bin-first behavior
+    /// @throws IOException when permanent deletion or the recycle-bin move fails
+    public static void deleteWithMode(Path path, DeletionMode mode) throws IOException {
+        deleteWithMode(path, mode, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Deletes one path through an explicit recycle-bin implementation.
+    ///
+    /// @param path target path
+    /// @param mode permanent deletion or recycle-bin-first behavior
+    /// @param trashOperations recycle-bin implementation
+    /// @throws IOException when permanent deletion or the recycle-bin move fails
+    public static void deleteWithMode(
+            Path path,
+            DeletionMode mode,
+            TrashOperations trashOperations) throws IOException {
+        Path target = Objects.requireNonNull(path, "path");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
+        TrashOperations trash = Objects.requireNonNull(trashOperations, "trashOperations");
+        if (Files.notExists(target, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (requestedMode == DeletionMode.RECYCLE_BIN_FIRST) {
+            if (!trash.moveToTrash(target)) {
+                throw new TrashMoveException(List.of(target));
+            }
+        } else {
+            forceDelete(target);
+        }
+    }
+
+    /// Deletes every path according to one mode while preserving the full recycle-bin failure set.
+    ///
+    /// @param paths target paths in processing order
+    /// @param mode permanent deletion or recycle-bin-first behavior
+    /// @throws IOException when permanent deletion fails or recycle-bin targets remain
+    public static void deleteAllWithMode(Iterable<Path> paths, DeletionMode mode) throws IOException {
+        deleteAllWithMode(paths, mode, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Deletes every path through an explicit recycle-bin implementation.
+    ///
+    /// @param paths target paths in processing order
+    /// @param mode permanent deletion or recycle-bin-first behavior
+    /// @param trashOperations recycle-bin implementation
+    /// @throws IOException when permanent deletion fails or recycle-bin targets remain
+    public static void deleteAllWithMode(
+            Iterable<Path> paths,
+            DeletionMode mode,
+            TrashOperations trashOperations) throws IOException {
+        Objects.requireNonNull(paths, "paths");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
+        TrashOperations trash = Objects.requireNonNull(trashOperations, "trashOperations");
+        if (requestedMode == DeletionMode.PERMANENT) {
+            for (Path path : paths) {
+                deleteWithMode(path, requestedMode, trash);
+            }
+            return;
+        }
+
+        List<Path> failedPaths = new ArrayList<>();
+        for (Path path : paths) {
+            try {
+                deleteWithMode(path, requestedMode, trash);
+            } catch (TrashMoveException exception) {
+                failedPaths.addAll(exception.failedPaths());
+            }
+        }
+        if (!failedPaths.isEmpty()) {
+            throw new TrashMoveException(failedPaths);
         }
     }
 
