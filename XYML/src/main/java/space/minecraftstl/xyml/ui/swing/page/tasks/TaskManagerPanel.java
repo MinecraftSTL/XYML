@@ -171,6 +171,24 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     /// Current immutable snapshot set used by the most recent render.
     private @Unmodifiable List<TaskExecutionSnapshot> displayedSnapshots = List.of();
 
+    /// Reusable top-level row views keyed by stable execution identity.
+    private final Map<UUID, ExecutionRowView> executionRows = new HashMap<>();
+
+    /// Execution order currently installed in each lifecycle list.
+    private final Map<JPanel, @Unmodifiable List<UUID>> renderedListOrders = new HashMap<>();
+
+    /// Reusable empty-state labels keyed by lifecycle list.
+    private final Map<JPanel, JLabel> emptyLabels = new HashMap<>();
+
+    /// Latest publication waiting for one EDT flush.
+    private @Nullable TaskExecutionRegistry.Publication pendingPublication;
+
+    /// Whether a deferred publication flush has already been queued.
+    private boolean publicationFlushQueued;
+
+    /// Whether the task page currently participates in the visible component hierarchy.
+    private boolean pageShowing;
+
     /// Last registry publication revision rendered on the event dispatch thread.
     private long displayedRevision = -1L;
 
@@ -280,6 +298,17 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             public void componentResized(ComponentEvent event) {
                 refreshLayoutForWidth();
             }
+
+            @Override
+            public void componentShown(ComponentEvent event) {
+                pageShowing = true;
+                flushPendingPublication();
+            }
+
+            @Override
+            public void componentHidden(ComponentEvent event) {
+                pageShowing = false;
+            }
         });
     }
 
@@ -360,11 +389,38 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
 
     /// Routes one complete registry publication to Swing without splitting one event into internal rows.
     private void snapshotsChanged(TaskExecutionRegistry.Publication publication) {
-        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
-            if (!closed && publication.revision() >= displayedRevision) {
-                renderSnapshots(publication);
+        boolean queueFlush = false;
+        synchronized (executionRows) {
+            if (closed || publication.revision() < displayedRevision) {
+                return;
             }
-        });
+            pendingPublication = publication;
+            if (!publicationFlushQueued) {
+                publicationFlushQueued = true;
+                queueFlush = true;
+            }
+        }
+        if (queueFlush) {
+            EdtDispatcher.executeLater(this::flushPendingPublication);
+        }
+    }
+
+    /// Applies the newest publication once, deferring hidden pages until they become visible again.
+    private void flushPendingPublication() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable TaskExecutionRegistry.Publication publication;
+        synchronized (executionRows) {
+            publicationFlushQueued = false;
+            if (closed || pendingPublication == null) {
+                return;
+            }
+            if (!pageShowing) {
+                return;
+            }
+            publication = pendingPublication;
+            pendingPublication = null;
+        }
+        renderSnapshots(publication);
     }
 
     /// Rebuilds the three top-level lists from one immutable registry snapshot.
@@ -399,9 +455,11 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         completed.sort(Comparator.comparing(TaskManagerPanel::terminalTime).reversed());
         aborted.sort(Comparator.comparing(TaskManagerPanel::terminalTime).reversed());
 
-        renderList(runningList, running, "swing.task.empty.running", retainedIds);
-        renderList(completedList, completed, "swing.task.empty.completed", retainedIds);
-        renderList(abortedList, aborted, "swing.task.empty.aborted", retainedIds);
+        boolean layoutChanged = false;
+        layoutChanged |= renderList(runningList, running, "swing.task.empty.running", retainedIds);
+        layoutChanged |= renderList(completedList, completed, "swing.task.empty.completed", retainedIds);
+        layoutChanged |= renderList(abortedList, aborted, "swing.task.empty.aborted", retainedIds);
+        executionRows.keySet().retainAll(retainedIds);
         renderedRunningFrameWidth = calculateTaskFrameWidth(runningList);
         renderedCompletedFrameWidth = calculateTaskFrameWidth(completedList);
         renderedAbortedFrameWidth = calculateTaskFrameWidth(abortedList);
@@ -409,7 +467,9 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         tabs.setTitleAt(0, tabTitle("swing.task.tab.running", running.size()));
         tabs.setTitleAt(1, tabTitle("swing.task.tab.completed", completed.size()));
         tabs.setTitleAt(2, tabTitle("swing.task.tab.aborted", aborted.size()));
-        revalidate();
+        if (layoutChanged) {
+            revalidate();
+        }
         if (toggleRepaintSuppressed) {
             toggleRepaintPending = true;
         } else {
@@ -418,45 +478,80 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     }
 
     /// Renders one category without creating rows for internal tasks.
-    private void renderList(
+    private boolean renderList(
             JPanel list,
             List<TaskExecutionSnapshot> snapshots,
             String emptyKey,
             Set<UUID> retainedIds) {
-        list.removeAll();
         if (snapshots.isEmpty()) {
-            JLabel empty = new JLabel(i18n(emptyKey));
-            empty.setName(emptyKey.replace('.', '_'));
-            empty.setBorder(BorderFactory.createEmptyBorder(14, 8, 14, 8));
-            list.add(empty);
-            return;
+            retainedIds.addAll(renderedListOrders.getOrDefault(list, List.of()));
+            renderedListOrders.put(list, List.of());
+            JLabel empty = emptyLabels.computeIfAbsent(list, ignored -> {
+                JLabel label = new JLabel(i18n(emptyKey));
+                label.setName(emptyKey.replace('.', '_'));
+                label.setBorder(BorderFactory.createEmptyBorder(14, 8, 14, 8));
+                return label;
+            });
+            empty.setText(i18n(emptyKey));
+            if (list.getComponentCount() != 1 || list.getComponent(0) != empty) {
+                list.removeAll();
+                list.add(empty);
+                return true;
+            }
+            return false;
         }
+
+        @Unmodifiable List<UUID> desiredOrder = snapshots.stream()
+                .map(TaskExecutionSnapshot::id)
+                .toList();
+        @Nullable List<UUID> previousOrder = renderedListOrders.get(list);
+        boolean structureChanged = previousOrder == null || !previousOrder.equals(desiredOrder);
+        boolean layoutChanged = structureChanged;
         int taskFrameWidth = calculateTaskFrameWidth(list);
         for (TaskExecutionSnapshot snapshot : snapshots) {
             retainedIds.add(snapshot.id());
-            list.add(createExecutionRow(snapshot, taskFrameWidth));
-            list.add(Box.createVerticalStrut(8));
+            boolean expanded = expandedExecutions.contains(snapshot.id());
+            ExecutionRowView row;
+            if (expanded) {
+                row = createExecutionRowView(snapshot, taskFrameWidth);
+                executionRows.put(snapshot.id(), row);
+                structureChanged = true;
+                layoutChanged = true;
+            } else {
+                row = executionRows.computeIfAbsent(
+                        snapshot.id(),
+                        ignored -> createExecutionRowView(snapshot, taskFrameWidth));
+                layoutChanged |= row.update(snapshot, taskFrameWidth, false);
+            }
         }
-        list.add(Box.createVerticalGlue());
+        if (structureChanged) {
+            list.removeAll();
+            emptyLabels.remove(list);
+            for (TaskExecutionSnapshot snapshot : snapshots) {
+                list.add(executionRows.get(snapshot.id()).component());
+                list.add(Box.createVerticalStrut(8));
+            }
+            list.add(Box.createVerticalGlue());
+            renderedListOrders.put(list, desiredOrder);
+        }
+        return layoutChanged;
     }
 
-    /// Creates one expandable top-level execution row.
-    private JPanel createExecutionRow(TaskExecutionSnapshot snapshot, int taskFrameWidth) {
+    /// Creates one reusable expandable top-level execution row.
+    private ExecutionRowView createExecutionRowView(TaskExecutionSnapshot snapshot, int taskFrameWidth) {
         boolean expanded = expandedExecutions.contains(snapshot.id());
+        UUID executionId = snapshot.id();
         JPanel row = new JPanel(new BorderLayout(TASK_ROW_GAP, 0));
-        row.setName("taskExecutionRow-" + snapshot.id());
+        row.setName("taskExecutionRow-" + executionId);
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setOpaque(false);
-        row.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(rowBorder(snapshot.status())),
-                BorderFactory.createEmptyBorder(10, 12, 10, 12)));
         row.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseReleased(MouseEvent event) {
                 if (event.getSource() == row
                         && event.getButton() == MouseEvent.BUTTON1
                         && event.getClickCount() == 1) {
-                    toggleExpanded(snapshot.id());
+                    toggleExpanded(executionId);
                 }
             }
         });
@@ -475,55 +570,43 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         disclosure.setFocusPainted(true);
         disclosure.setRolloverEnabled(true);
         disclosure.setOpaque(true);
-        disclosure.addActionListener(event -> toggleExpanded(snapshot.id()));
+        disclosure.addActionListener(event -> toggleExpanded(executionId));
         Dimension disclosurePreferredSize = disclosure.getPreferredSize();
         disclosure.setMaximumSize(new Dimension(disclosurePreferredSize.width, Integer.MAX_VALUE));
 
         JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
         actionPanel.setOpaque(false);
         JProgressBar progressBar = createProgressBar(snapshot);
-        progressBar.addMouseListener(toggleOnClick(snapshot.id()));
+        progressBar.addMouseListener(toggleOnClick(executionId));
         actionPanel.add(progressBar);
-        actionPanel.addMouseListener(toggleOnClick(snapshot.id()));
-        if (!snapshot.status().isTerminal() && snapshot.cancelable()) {
-            JButton cancel = new JButton(i18n("swing.task.button.cancel"));
-            cancel.setName("taskExecutionCancel");
-            cancel.addActionListener(event -> {
-                cancel.setEnabled(false);
-                Schedulers.io().execute(() -> registry.requestCancellation(snapshot.id()));
+        actionPanel.addMouseListener(toggleOnClick(executionId));
+        JButton cancel = new JButton(i18n("swing.task.button.cancel"));
+        cancel.setName("taskExecutionCancel");
+        cancel.addActionListener(event -> {
+            cancel.setEnabled(false);
+            Schedulers.io().execute(() -> registry.requestCancellation(executionId));
+        });
+        JButton retry = createIconButton(
+                "taskExecutionRetry",
+                "button.retry",
+                "assets/swing/icons/refresh.svg");
+        retry.addActionListener(event -> {
+            retry.setEnabled(false);
+            Schedulers.io().execute(() -> {
+                try {
+                    registry.retry(executionId);
+                } finally {
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> retry.setEnabled(true));
+                }
             });
-            actionPanel.add(cancel);
-        }
-        if (snapshot.userVisible()
-                && (snapshot.status() == TaskExecutionStatus.FAILED
-                || snapshot.status() == TaskExecutionStatus.CANCELLED)) {
-            JButton retry = createIconButton(
-                    "taskExecutionRetry",
-                    "button.retry",
-                    "assets/swing/icons/refresh.svg");
-            retry.addActionListener(event -> {
-                retry.setEnabled(false);
-                Schedulers.io().execute(() -> {
-                    try {
-                        registry.retry(snapshot.id());
-                    } finally {
-                        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> retry.setEnabled(true));
-                    }
-                });
-            });
-            actionPanel.add(retry);
-        }
-        if (snapshot.status().isTerminal()) {
-            JButton delete = createIconButton(
-                    "taskExecutionDelete",
-                    "button.delete",
-                    "assets/swing/icons/delete.svg");
-            delete.addActionListener(event -> registry.remove(snapshot.id()));
-            actionPanel.add(delete);
-        }
-        Dimension actionPreferredSize = actionPanel.getPreferredSize();
-        actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
+        });
+        JButton delete = createIconButton(
+                "taskExecutionDelete",
+                "button.delete",
+                "assets/swing/icons/delete.svg");
+        delete.addActionListener(event -> registry.remove(executionId));
 
+        Dimension actionPreferredSize = actionPanel.getPreferredSize();
         int contentWidth = calculateTaskContentWidth(taskFrameWidth, disclosurePreferredSize.width);
         int titleWidth = calculateTaskTitleWidth(contentWidth, actionPreferredSize.width);
         JPanel header = new JPanel();
@@ -531,20 +614,20 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         header.setAlignmentX(Component.LEFT_ALIGNMENT);
         header.setOpaque(false);
         // Keep the title/action header clickable while the full-height disclosure button owns the left strip.
-        header.addMouseListener(toggleOnClick(snapshot.id()));
+        header.addMouseListener(toggleOnClick(executionId));
 
         JPanel titlePanel = new JPanel();
         titlePanel.setOpaque(false);
         titlePanel.setLayout(new BoxLayout(titlePanel, BoxLayout.Y_AXIS));
         titlePanel.setAlignmentY(Component.TOP_ALIGNMENT);
-        configureDetailsToggle(titlePanel, snapshot.id(), snapshot.title());
+        configureDetailsToggle(titlePanel, executionId, snapshot.title());
         JTextArea title = createWrappedTitleArea(snapshot.title(), titleWidth, "taskExecutionTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         setWrappedTitleSize(title, titleWidth);
         JLabel status = new JLabel(statusText(snapshot.status()));
         status.setName("taskExecutionStatus");
         status.setMaximumSize(new Dimension(titleWidth, status.getPreferredSize().height));
-        MouseAdapter toggleOnClick = toggleOnClick(snapshot.id());
+        MouseAdapter toggleOnClick = toggleOnClick(executionId);
         title.addMouseListener(toggleOnClick);
         status.addMouseListener(toggleOnClick);
         titlePanel.add(title);
@@ -559,12 +642,23 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         content.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.setOpaque(false);
         content.add(header, BorderLayout.NORTH);
-        if (expanded) {
-            content.add(createDetails(snapshot, contentWidth, titleWidth), BorderLayout.CENTER);
-        }
         row.add(disclosure, BorderLayout.WEST);
         row.add(content, BorderLayout.CENTER);
-        return row;
+        ExecutionRowView view = new ExecutionRowView(
+                row,
+                disclosure,
+                actionPanel,
+                progressBar,
+                cancel,
+                retry,
+                delete,
+                title,
+                status,
+                titlePanel,
+                content,
+                disclosurePreferredSize.width);
+        view.update(snapshot, taskFrameWidth, expanded);
+        return view;
     }
 
     /// Computes the task frame width from the currently allocated list width.
@@ -1039,6 +1133,16 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         progress.setName("taskExecutionProgress");
         progress.setPreferredSize(new Dimension(120, 14));
         progress.setOpaque(false);
+        updateProgressBar(progress, snapshot);
+        progress.setToolTipText(i18n("swing.task.progress_name"));
+        return progress;
+    }
+
+    /// Updates one aggregate progress bar without replacing its component identity.
+    ///
+    /// @param progress reusable progress bar
+    /// @param snapshot latest execution snapshot
+    private static void updateProgressBar(JProgressBar progress, TaskExecutionSnapshot snapshot) {
         if (snapshot.progress().isPresent()) {
             progress.setValue(toProgressValue(snapshot.progress().getAsDouble()));
             progress.setIndeterminate(false);
@@ -1046,8 +1150,6 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             progress.setIndeterminate(!snapshot.status().isTerminal());
             progress.setValue(snapshot.status() == TaskExecutionStatus.SUCCEEDED ? PROGRESS_MAXIMUM : 0);
         }
-        progress.setToolTipText(i18n("swing.task.progress_name"));
-        return progress;
     }
 
     /// Creates a task-level determinate or indeterminate progress bar.
@@ -1501,6 +1603,192 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         }
         Color resolved = border == null ? new Color(128, 128, 128) : border;
         return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue(), 150);
+    }
+
+    /// Stable Swing components representing one top-level execution row.
+    @NotNullByDefault
+    private final class ExecutionRowView {
+        /// Root row moved between lifecycle lists without reconstruction.
+        private final JPanel row;
+
+        /// Details disclosure strip.
+        private final JButton disclosure;
+
+        /// Action controls shown at the trailing edge of the header.
+        private final JPanel actionPanel;
+
+        /// Aggregate progress bar retained across updates.
+        private final JProgressBar progressBar;
+
+        /// Cancel command for active executions.
+        private final JButton cancelButton;
+
+        /// Retry command for terminal failures and cancellations.
+        private final JButton retryButton;
+
+        /// Delete command for terminal records.
+        private final JButton deleteButton;
+
+        /// Wrapping workflow title.
+        private final JTextArea title;
+
+        /// Localized lifecycle status label.
+        private final JLabel status;
+
+        /// Fixed-width title column.
+        private final JPanel titlePanel;
+
+        /// Content host containing the header and optional expanded details.
+        private final JPanel content;
+
+        /// Disclosure width used for stable title calculations.
+        private final int disclosureWidth;
+
+        /// Currently mounted details scroll pane, or null while collapsed.
+        private @Nullable JScrollPane details;
+
+        /// Latest snapshot represented by this row.
+        private @Nullable TaskExecutionSnapshot displayedSnapshot;
+
+        /// Most recently applied title width.
+        private int titleWidth = -1;
+
+        /// Whether the cancel action is currently mounted.
+        private boolean cancelPresent;
+
+        /// Whether the retry action is currently mounted.
+        private boolean retryPresent;
+
+        /// Whether the delete action is currently mounted.
+        private boolean deletePresent;
+
+        /// Creates one reusable row shell.
+        private ExecutionRowView(
+                JPanel row,
+                JButton disclosure,
+                JPanel actionPanel,
+                JProgressBar progressBar,
+                JButton cancelButton,
+                JButton retryButton,
+                JButton deleteButton,
+                JTextArea title,
+                JLabel status,
+                JPanel titlePanel,
+                JPanel content,
+                int disclosureWidth) {
+            this.row = row;
+            this.disclosure = disclosure;
+            this.actionPanel = actionPanel;
+            this.progressBar = progressBar;
+            this.cancelButton = cancelButton;
+            this.retryButton = retryButton;
+            this.deleteButton = deleteButton;
+            this.title = title;
+            this.status = status;
+            this.titlePanel = titlePanel;
+            this.content = content;
+            this.disclosureWidth = disclosureWidth;
+        }
+
+        /// Returns the root component for parent-list reconciliation.
+        private JPanel component() {
+            return row;
+        }
+
+        /// Applies one immutable execution snapshot to the existing components.
+        ///
+        /// @param snapshot latest execution state
+        /// @param frameWidth available row frame width
+        /// @param expanded whether details should remain mounted
+        /// @return whether component geometry or structure changed
+        private boolean update(TaskExecutionSnapshot snapshot, int frameWidth, boolean expanded) {
+            Objects.requireNonNull(snapshot, "snapshot");
+            boolean layoutChanged = false;
+            row.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(rowBorder(snapshot.status())),
+                    BorderFactory.createEmptyBorder(10, 12, 10, 12)));
+            disclosure.setText(expanded ? "v" : ">");
+            disclosure.setToolTipText(expanded
+                    ? i18n("swing.task.hide_details")
+                    : i18n("swing.task.show_details"));
+            updateProgressBar(progressBar, snapshot);
+
+            boolean canCancel = !snapshot.status().isTerminal() && snapshot.cancelable();
+            boolean canRetry = snapshot.userVisible()
+                    && (snapshot.status() == TaskExecutionStatus.FAILED
+                    || snapshot.status() == TaskExecutionStatus.CANCELLED);
+            boolean canDelete = snapshot.status().isTerminal();
+            layoutChanged |= syncActions(canCancel, canRetry, canDelete);
+
+            Dimension actionPreferredSize = actionPanel.getPreferredSize();
+            actionPanel.setMaximumSize(new Dimension(actionPreferredSize.width, Integer.MAX_VALUE));
+            int contentWidth = calculateTaskContentWidth(frameWidth, disclosureWidth);
+            int replacementTitleWidth = calculateTaskTitleWidth(contentWidth, actionPreferredSize.width);
+            if (titleWidth != replacementTitleWidth) {
+                titleWidth = replacementTitleWidth;
+                setWrappedTitleSize(title, titleWidth);
+                status.setMaximumSize(new Dimension(titleWidth, status.getPreferredSize().height));
+                setFixedWidth(titlePanel, titleWidth);
+                layoutChanged = true;
+            }
+            if (!Objects.equals(title.getText(), snapshot.title())) {
+                title.setText(snapshot.title());
+                title.setToolTipText(snapshot.title());
+            }
+            title.getAccessibleContext().setAccessibleName(snapshot.title());
+            status.setText(statusText(snapshot.status()));
+
+            if (expanded) {
+                if (details == null || !Objects.equals(displayedSnapshot, snapshot)) {
+                    if (details != null) {
+                        content.remove(details);
+                    }
+                    details = createDetails(snapshot, contentWidth, titleWidth);
+                    content.add(details, BorderLayout.CENTER);
+                    layoutChanged = true;
+                }
+            } else if (details != null) {
+                content.remove(details);
+                details = null;
+                layoutChanged = true;
+            }
+            displayedSnapshot = snapshot;
+            if (layoutChanged) {
+                actionPanel.revalidate();
+                content.revalidate();
+                row.revalidate();
+            }
+            return layoutChanged;
+        }
+
+        /// Reconciles mounted action components with the latest execution state.
+        private boolean syncActions(boolean cancel, boolean retry, boolean delete) {
+            if (cancelPresent == cancel && retryPresent == retry && deletePresent == delete) {
+                cancelButton.setEnabled(cancel);
+                retryButton.setEnabled(retry);
+                deleteButton.setEnabled(delete);
+                return false;
+            }
+            actionPanel.remove(cancelButton);
+            actionPanel.remove(retryButton);
+            actionPanel.remove(deleteButton);
+            cancelPresent = cancel;
+            retryPresent = retry;
+            deletePresent = delete;
+            if (cancel) {
+                actionPanel.add(cancelButton);
+            }
+            if (retry) {
+                actionPanel.add(retryButton);
+            }
+            if (delete) {
+                actionPanel.add(deleteButton);
+            }
+            cancelButton.setEnabled(cancel);
+            retryButton.setEnabled(retry);
+            deleteButton.setEnabled(delete);
+            return true;
+        }
     }
 
     /// Tab host that can hold one already-painted frame while a row layout transaction settles.

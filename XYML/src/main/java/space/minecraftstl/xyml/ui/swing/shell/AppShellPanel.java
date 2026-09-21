@@ -412,7 +412,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
         JComponent destinationPage = pageCache.getOrCreate(page);
         pageDeck.showPage(destinationPage, true, direction);
-        showInstanceManagement();
+        EdtDispatcher.executeLater(this::showInstanceManagement);
         updateSelection(page);
     }
 
@@ -496,7 +496,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Restores management for the selected instance when the persistent page supports it.
     private void showInstanceManagement() {
         if (instancesPage instanceof InstancesPanel panel) {
-            panel.showSelectedInstanceManagement(false).toCompletableFuture().join();
+            panel.showSelectedInstanceManagement(false).whenComplete(
+                    (@Nullable Void ignored, @Nullable Throwable failure) -> {
+                        if (failure != null) {
+                            LOG.warning("Failed to prepare instance management behind the active page", failure);
+                        }
+                    });
         }
     }
 

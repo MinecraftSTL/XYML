@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -61,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the task page's bounded log and horizontally scrollable detail layout.
@@ -74,6 +76,54 @@ public final class TaskManagerPanelLayoutTest {
 
     /// Placement where the target row top is below the outer list viewport.
     private static final int ANCHOR_BELOW = 2;
+
+    /// Repeated progress and terminal transitions reuse one top-level row component.
+    @Test
+    public void updatesExecutionRowsIncrementally() {
+        UUID executionId = UUID.nameUUIDFromBytes("incremental-row".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Instant startedAt = Instant.now();
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            panelReference.set(panel);
+            publish(panel, executionSnapshot(
+                    executionId,
+                    TaskExecutionStatus.RUNNING,
+                    OptionalDouble.of(0.2D),
+                    startedAt,
+                    null));
+        });
+
+        TaskManagerPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JPanel initialRow = named(panel, "taskExecutionRow-" + executionId, JPanel.class).get(0);
+                publish(panel, executionSnapshot(
+                        executionId,
+                        TaskExecutionStatus.RUNNING,
+                        OptionalDouble.of(0.8D),
+                        startedAt,
+                        null));
+                JPanel updatedRow = named(panel, "taskExecutionRow-" + executionId, JPanel.class).get(0);
+                JProgressBar progress = named(updatedRow, "taskExecutionProgress", JProgressBar.class).get(0);
+                assertEquals(800, progress.getValue());
+                assertSame(initialRow, updatedRow);
+
+                publish(panel, executionSnapshot(
+                        executionId,
+                        TaskExecutionStatus.SUCCEEDED,
+                        OptionalDouble.of(1.0D),
+                        startedAt,
+                        startedAt.plusSeconds(1L)));
+                JPanel completedRow = named(panel, "taskExecutionRow-" + executionId, JPanel.class).get(0);
+                assertSame(initialRow, completedRow);
+                assertEquals("taskManagerCompletedScroll",
+                        ((JScrollPane) completedRow.getParent().getParent().getParent()).getName());
+            });
+        } finally {
+            EdtDispatcher.executeAndWait(panel::close);
+        }
+    }
 
     /// The expanded workflow keeps nested titles aligned and exposes horizontal overflow controls.
     @Test
@@ -807,6 +857,37 @@ public final class TaskManagerPanelLayoutTest {
                 null,
                 List.of(),
                 List.of(new TaskExecutionLogEntry(timestamp, null, "running", "surrounding")));
+    }
+
+    /// Creates one top-level execution fixture with a selected lifecycle state.
+    ///
+    /// @param id stable execution identifier
+    /// @param status execution status
+    /// @param progress aggregate normalized progress
+    /// @param startedAt start timestamp
+    /// @param endedAt terminal timestamp, or null while active
+    /// @return immutable execution fixture
+    private static TaskExecutionSnapshot executionSnapshot(
+            UUID id,
+            TaskExecutionStatus status,
+            OptionalDouble progress,
+            Instant startedAt,
+            @Nullable Instant endedAt) {
+        return new TaskExecutionSnapshot(
+                id,
+                "Incremental workflow",
+                status,
+                progress,
+                1.0D,
+                progress.orElse(0.0D),
+                true,
+                true,
+                !status.isTerminal(),
+                startedAt,
+                endedAt,
+                null,
+                List.of(),
+                List.of());
     }
 
     /// Immutable values captured immediately before a collapse action.
