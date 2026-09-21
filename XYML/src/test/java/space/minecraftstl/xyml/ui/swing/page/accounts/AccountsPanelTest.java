@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
+import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -216,6 +217,54 @@ public final class AccountsPanelTest {
                     () -> assertEquals(2, interaction.overwriteConfirmations.get()),
                     () -> assertEquals(List.of("account-0"), model.removedIds()),
                     () -> assertEquals(List.of(), interaction.failures));
+            panel.close();
+        });
+    }
+
+    /// Reorder controls respect group boundaries and reuse read-only recovery confirmation.
+    @Test
+    public void movesSelectedAccountWithinGroupAndConfirmsReadOnlyRecovery() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(groupedItems(), snapshot(0, 4, 0L));
+        model.setMoveRequiresOverwrite(true);
+        RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS, interaction));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<AccountListItem>> list = panel.choiceList().getList();
+            AbstractButton moveUp = findButton(panel, "accountsMoveUp");
+            AbstractButton moveDown = findButton(panel, "accountsMoveDown");
+            assertAll(
+                    () -> assertFalse(moveUp.isEnabled()),
+                    () -> assertTrue(moveDown.isEnabled()),
+                    () -> assertTrue(list.getDragEnabled()),
+                    () -> assertEquals(DropMode.INSERT, list.getDropMode()),
+                    () -> assertTrue(list.getTransferHandler() != null));
+
+            interaction.allowOverwrite = false;
+            moveDown.doClick();
+            assertAll(
+                    () -> assertEquals(List.of(), model.movedIds()),
+                    () -> assertEquals(1, interaction.overwriteConfirmations.get()));
+
+            interaction.allowOverwrite = true;
+            moveDown.doClick();
+            assertAll(
+                    () -> assertEquals(List.of("account-0"), model.movedIds()),
+                    () -> assertEquals(List.of(1), model.moveTargets()),
+                    () -> assertEquals(List.of(true), model.moveOverwritePermissions()),
+                    () -> assertEquals(2, interaction.overwriteConfirmations.get()));
+
+            list.setSelectedIndex(3);
+            assertAll(
+                    () -> assertTrue(moveUp.isEnabled()),
+                    () -> assertFalse(moveDown.isEnabled()));
             panel.close();
         });
     }
@@ -519,6 +568,41 @@ public final class AccountsPanelTest {
                     "profile-" + index));
         }
         return List.copyOf(result);
+    }
+
+    /// Creates two portable rows followed by two global rows.
+    ///
+    /// @return immutable grouped account rows
+    private static @Unmodifiable List<AccountListItem> groupedItems() {
+        return List.of(
+                new AccountListItem(
+                        "account-0",
+                        "Portable One",
+                        "Offline",
+                        "profile-0",
+                        true,
+                        AccountAvatarSource.bundledDefault()),
+                new AccountListItem(
+                        "account-1",
+                        "Portable Two",
+                        "Offline",
+                        "profile-1",
+                        true,
+                        AccountAvatarSource.bundledDefault()),
+                new AccountListItem(
+                        "account-2",
+                        "Global One",
+                        "Microsoft",
+                        "profile-2",
+                        false,
+                        AccountAvatarSource.bundledDefault()),
+                new AccountListItem(
+                        "account-3",
+                        "Global Two",
+                        "Microsoft",
+                        "profile-3",
+                        false,
+                        AccountAvatarSource.bundledDefault()));
     }
 
     /// Creates a snapshot with an exact source count.
@@ -861,11 +945,23 @@ public final class AccountsPanelTest {
         /// Refreshed stable account identifiers.
         private final List<String> refreshedIds = new ArrayList<>();
 
+        /// Moved stable account identifiers.
+        private final List<String> movedIds = new ArrayList<>();
+
+        /// Final target indices recorded for account moves.
+        private final List<Integer> moveTargets = new ArrayList<>();
+
+        /// Backup-and-overwrite permissions recorded for account moves.
+        private final List<Boolean> moveOverwritePermissions = new ArrayList<>();
+
         /// Controllable refresh completion.
         private CompletableFuture<Void> refreshCompletion = CompletableFuture.completedFuture(null);
 
         /// Whether removal requires explicit backup-and-overwrite consent.
         private boolean removalRequiresOverwrite;
+
+        /// Whether account moves require explicit backup-and-overwrite consent.
+        private boolean moveRequiresOverwrite;
 
         /// Optional configured-server persistence capability exposed to the tested page.
         private @Nullable AuthlibServerStore authlibServerStore;
@@ -936,6 +1032,12 @@ public final class AccountsPanelTest {
             return OptionalInt.of(items.size());
         }
 
+        /// Returns stable account identifiers in current source order.
+        @Override
+        public @Unmodifiable List<String> stableItemIds() {
+            return items.stream().map(AccountListItem::accountId).toList();
+        }
+
         /// Captures and optionally completes a viewport request.
         @Override
         public synchronized CompletionStage<ChoicePage<AccountListItem>> load(
@@ -971,6 +1073,39 @@ public final class AccountsPanelTest {
                 throw new AccountStorageOverwriteRequiredException(accountId, "read-only account storage");
             }
             removedIds.add(accountId);
+        }
+
+        /// Reports whether one target remains inside the source account's storage group.
+        @Override
+        public synchronized boolean canMoveAccount(String accountId, int targetIndex) {
+            int sourceIndex = indexOf(accountId);
+            if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= items.size() || sourceIndex == targetIndex) {
+                return false;
+            }
+            return items.get(sourceIndex).portable() == items.get(targetIndex).portable();
+        }
+
+        /// Reorders one fake source row and publishes the resulting selection index.
+        @Override
+        public synchronized void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
+            if (!canMoveAccount(accountId, targetIndex)) {
+                throw new IllegalArgumentException("Invalid account move target: " + targetIndex);
+            }
+            if (moveRequiresOverwrite && !allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(accountId, "read-only account storage");
+            }
+            movedIds.add(accountId);
+            moveTargets.add(targetIndex);
+            moveOverwritePermissions.add(allowReadOnlyOverwrite);
+            List<AccountListItem> reordered = new ArrayList<>(items);
+            AccountListItem moved = reordered.remove(indexOf(accountId));
+            reordered.add(targetIndex, moved);
+            items = List.copyOf(reordered);
+            AccountsSnapshot before = current.get();
+            current.set(new AccountsSnapshot(
+                    OptionalInt.of(targetIndex),
+                    reordered.size(),
+                    before.contentRevision() + 1L));
         }
 
         /// Records one refresh command and returns its controllable completion.
@@ -1046,6 +1181,13 @@ public final class AccountsPanelTest {
             removalRequiresOverwrite = required;
         }
 
+        /// Configures whether account moves require confirmed storage recovery.
+        ///
+        /// @param required whether a normal move attempt must signal read-only storage
+        private synchronized void setMoveRequiresOverwrite(boolean required) {
+            moveRequiresOverwrite = required;
+        }
+
         /// Returns the immutable removal-command history.
         ///
         /// @return removed stable account identifiers
@@ -1058,6 +1200,27 @@ public final class AccountsPanelTest {
         /// @return refreshed stable account identifiers
         private synchronized @Unmodifiable List<String> refreshedIds() {
             return List.copyOf(refreshedIds);
+        }
+
+        /// Returns the immutable move-command history.
+        ///
+        /// @return moved stable account identifiers
+        private synchronized @Unmodifiable List<String> movedIds() {
+            return List.copyOf(movedIds);
+        }
+
+        /// Returns final indices recorded for account moves.
+        ///
+        /// @return immutable target indices in command order
+        private synchronized @Unmodifiable List<Integer> moveTargets() {
+            return List.copyOf(moveTargets);
+        }
+
+        /// Returns delegated backup-and-overwrite permissions for account moves.
+        ///
+        /// @return immutable permissions in command order
+        private synchronized @Unmodifiable List<Boolean> moveOverwritePermissions() {
+            return List.copyOf(moveOverwritePermissions);
         }
 
         /// Returns a snapshot of captured request ranges.
@@ -1122,6 +1285,19 @@ public final class AccountsPanelTest {
                     List.copyOf(values),
                     OptionalInt.of(itemSnapshot.size()),
                     actualRange.endExclusive() == itemSnapshot.size());
+        }
+
+        /// Finds one account row by stable identifier.
+        ///
+        /// @param accountId stable account identifier
+        /// @return current source index, or -1 when absent
+        private int indexOf(String accountId) {
+            for (int index = 0; index < items.size(); index++) {
+                if (items.get(index).accountId().equals(accountId)) {
+                    return index;
+                }
+            }
+            return -1;
         }
     }
 }

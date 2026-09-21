@@ -363,6 +363,16 @@ public final class LauncherAccountStore
         execute(() -> removeAccountOnEventThread(accountId, allowReadOnlyOverwrite));
     }
 
+    /// Moves one account within its storage group, optionally recovering read-only files first.
+    @Override
+    public void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
+        Objects.requireNonNull(accountId, "accountId");
+        if (closed.get()) {
+            throw new IllegalStateException("Launcher launcher account store is closed");
+        }
+        execute(() -> moveAccountOnEventThread(accountId, targetIndex, allowReadOnlyOverwrite));
+    }
+
     /// Requests idempotent subscription removal without blocking a Swing EDT caller on the state event thread.
     @Override
     public void close() {
@@ -451,6 +461,43 @@ public final class LauncherAccountStore
             Accounts.setSelectedAccount(replacement);
         }
         Accounts.getAccounts().remove(target);
+    }
+
+    /// Moves one exact account after validating its final index and storage-group boundary.
+    ///
+    /// @param accountId stable account identifier
+    /// @param targetIndex final zero-based source index
+    /// @param allowReadOnlyOverwrite whether the user confirmed backup-and-overwrite recovery
+    private static void moveAccountOnEventThread(
+            String accountId,
+            int targetIndex,
+            boolean allowReadOnlyOverwrite) {
+        requireEventThread();
+        Account target = findAccount(accountId);
+        int sourceIndex = Accounts.getAccounts().indexOf(target);
+        if (targetIndex < 0 || targetIndex >= Accounts.getAccounts().size()) {
+            throw new IllegalArgumentException("Account target index out of range: " + targetIndex);
+        }
+        if (sourceIndex == targetIndex) {
+            return;
+        }
+        Account destination = Accounts.getAccounts().get(targetIndex);
+        if (target.isPortable() != destination.isPortable()) {
+            throw new IllegalArgumentException("Account cannot cross storage groups");
+        }
+        if (Accounts.isAccountFilesReadOnly(target)) {
+            if (!allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(
+                        accountId,
+                        i18n("account.storage.read_only"));
+            }
+            try {
+                Accounts.forceOverwriteAccountFiles(target);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(i18n("message.failed"), failure);
+            }
+        }
+        Accounts.moveAccount(target, targetIndex);
     }
 
     /// Locates one existing offline account by its persisted launcher identifier.
@@ -625,6 +672,7 @@ public final class LauncherAccountStore
                 title,
                 accountDetail(account),
                 account.getProfileID().toString(),
+                account.isPortable(),
                 avatarSource(account));
     }
 
