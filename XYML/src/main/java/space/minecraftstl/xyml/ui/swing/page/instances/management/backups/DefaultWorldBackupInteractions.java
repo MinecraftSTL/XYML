@@ -20,6 +20,9 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -44,11 +47,23 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
     /// Caller-owned worker used for platform file-manager integration.
     private final Executor executor;
 
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates native interactions backed by one caller-owned background executor.
     ///
     /// @param executor worker for filesystem and AWT desktop actions
     public DefaultWorldBackupInteractions(Executor executor) {
+        this(executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates native interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param executor worker for filesystem and AWT desktop actions
+    /// @param trashOperations recycle-bin implementation
+    DefaultWorldBackupInteractions(Executor executor, TrashOperations trashOperations) {
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Schedules directory creation and platform file-manager opening outside the EDT.
@@ -82,6 +97,25 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
                 i18n("swing.world_backup.delete_title"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, WorldBackupArchive archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(archive, "archive");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, archive) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, WorldBackupArchive archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, archive);
     }
 
     /// Prompts for one new save directory name without inspecting archive contents on the EDT.

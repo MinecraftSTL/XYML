@@ -19,6 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -48,6 +50,27 @@ public interface WorldCatalogInteractions extends AutoCloseable {
     /// @param world selected loaded world
     /// @return whether deletion was explicitly confirmed
     boolean confirmDelete(Component owner, WorldCatalogItem world);
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param world current selected world
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteMode(Component owner, WorldCatalogItem world) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, world) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a world could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param world current selected world
+    /// @return whether permanent deletion was approved
+    default boolean confirmPermanentFallback(Component owner, WorldCatalogItem world) {
+        return confirmDelete(owner, world);
+    }
 
     /// Prompts for a sibling name for a copied world.
     ///
