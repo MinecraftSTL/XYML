@@ -70,7 +70,13 @@ val xymlReleaseVersion = if (xymlBranchReleaseType != null) {
     "$xymlStableVersion.0.0.0.0"
 }
 
+val xymlArtifactVersion = if (xymlReleaseVersion.endsWith('.')) {
+    xymlReleaseVersion.dropLast(1) + '-'
+} else {
+    xymlReleaseVersion
+}
 extra["xymlReleaseVersion"] = xymlReleaseVersion
+extra["xymlArtifactVersion"] = xymlArtifactVersion
 extra["xymlReleaseChannel"] = xymlReleaseChannel
 extra["xymlBranchName"] = xymlBranchName.orEmpty()
 
