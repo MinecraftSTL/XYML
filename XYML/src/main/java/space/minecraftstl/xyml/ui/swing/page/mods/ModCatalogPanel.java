@@ -892,18 +892,25 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 : null;
     }
 
-    /// Returns a stable writable snapshot shared by displayed Swing state and the model.
+    /// Returns a stable page snapshot that may accept a mutation regardless of visible row count.
     ///
-    /// @return writable current snapshot, or null when stale, loading, empty, or busy
-    private @Nullable ModCatalogSnapshot currentWritableSnapshot() {
+    /// @return ready writable snapshot, or null when stale, loading, closed, or busy
+    private @Nullable ModCatalogSnapshot currentReadyWritableSnapshot() {
         ModCatalogSnapshot current = model.snapshot();
         return !closed
                 && current.contentRevision() == displayedSnapshot.contentRevision()
                 && current.status() == ModCatalogStatus.READY
-                && current.listEnabled()
                 && current.writeStatus() != ModCatalogWriteStatus.BUSY
                 ? current
                 : null;
+    }
+
+    /// Returns a stable writable snapshot that also contains selectable rows.
+    ///
+    /// @return writable selection snapshot, or null when stale, loading, empty, or busy
+    private @Nullable ModCatalogSnapshot currentWritableSnapshot() {
+        @Nullable ModCatalogSnapshot ready = currentReadyWritableSnapshot();
+        return ready != null && ready.listEnabled() ? ready : null;
     }
 
     /// Captures selected logical indexes as immutable rename-stable keys without loading rows.
@@ -1068,7 +1075,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param source normalized dropped path
     /// @return whether the path has a supported Mod suffix and the catalog can write
     private boolean supportsDroppedMod(Path source) {
-        return currentWritableSnapshot() != null && ModManager.isFileNameMod(source);
+        return currentReadyWritableSnapshot() != null && ModManager.isFileNameMod(source);
     }
 
     /// Imports all supported Mod paths delivered by the page-scoped drop route.
@@ -1076,10 +1083,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param sources immutable supported paths in transfer order
     private void importDroppedMods(@Unmodifiable List<Path> sources) {
         EdtDispatcher.requireEventDispatchThread();
-        if (!sources.isEmpty() && currentWritableSnapshot() != null) {
+        if (!sources.isEmpty() && currentReadyWritableSnapshot() != null) {
             @Unmodifiable List<Path> capturedSources = List.copyOf(sources);
             SwingUtilities.invokeLater(() -> {
-                if (!closed && currentWritableSnapshot() != null) {
+                if (!closed && currentReadyWritableSnapshot() != null) {
                     resolveAndSubmitImport(capturedSources);
                 }
             });

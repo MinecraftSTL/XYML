@@ -368,6 +368,39 @@ public final class ModCatalogPanelTest {
         });
     }
 
+    /// A supported drop is accepted and installed when the catalog has no visible rows.
+    @Test
+    public void importsSupportedDroppedModsIntoEmptyCatalog() throws Exception {
+        RecordingModel model = new RecordingModel(items(0));
+        RecordingInteractions interactions = new RecordingInteractions();
+        AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panelReference.set(panel);
+            assertTrue(findButton(panel, "modsImport").isEnabled());
+            assertFalse(findButton(panel, "modsSelectAll").isEnabled());
+
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    new File("empty-target.jar"),
+                    new File("notes.txt")));
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertTrue(model.imports().isEmpty());
+        });
+        SwingUtilities.invokeAndWait(() -> { });
+        SwingUtilities.invokeAndWait(() -> {
+            assertEquals(1, model.imports().size());
+            assertEquals(
+                    List.of(Path.of("empty-target.jar").toAbsolutePath().normalize()),
+                    model.imports().get(0));
+
+            ModCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            panel.close();
+        });
+    }
+
     /// Logical select-all and batch commands use stable keys without loading off-screen rows.
     @Test
     public void batchesFilteredStableKeysWithoutWideningViewportLoads() throws Exception {
