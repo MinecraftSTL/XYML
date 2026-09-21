@@ -304,11 +304,16 @@ final class WorldCatalogPanelQuickPlayTest {
             int bottom = scroll.getVerticalScrollBar().getMaximum()
                     - scroll.getVerticalScrollBar().getVisibleAmount();
             scroll.getVerticalScrollBar().setValue(bottom);
+            layoutRecursively(panel);
+            bottom = scroll.getVerticalScrollBar().getMaximum()
+                    - scroll.getVerticalScrollBar().getVisibleAmount();
+            scroll.getVerticalScrollBar().setValue(bottom);
+            layoutRecursively(panel);
             Rectangle deleteBounds = SwingUtilities.convertRectangle(
                     delete.getParent(),
                     delete.getBounds(),
                     details);
-            assertTrue(scroll.getViewport().getViewRect().intersects(deleteBounds));
+            assertTrue(scroll.getViewport().getViewRect().contains(deleteBounds));
             assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
 
             panel.setSize(720, 980);
