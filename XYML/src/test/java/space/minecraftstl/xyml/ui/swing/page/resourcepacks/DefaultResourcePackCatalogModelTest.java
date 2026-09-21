@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ScrollDirection;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportLoadListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportLoadPlan;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportRequestCoordinator;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.SwingUtilities;
 import java.io.IOException;
@@ -820,7 +821,10 @@ public final class DefaultResourcePackCatalogModelTest {
                 cancellation -> supportedIndex(List.of(retained, deleted)),
                 DefaultResourcePackCatalogModelTest::itemsForPaths,
                 (mutation, cancellation, commitPoint) -> {
-                    assertInstanceOf(ResourcePackDeleteMutation.class, mutation);
+                    ResourcePackDeleteMutation deleteMutation = assertInstanceOf(
+                            ResourcePackDeleteMutation.class,
+                            mutation);
+                    assertEquals(DeletionMode.RECYCLE_BIN_FIRST, deleteMutation.mode());
                     commitPoint.run();
                     return new ResourcePackCatalogMutationAccessResult(
                             supportedIndex(List.of(retained)),
@@ -833,7 +837,7 @@ public final class DefaultResourcePackCatalogModelTest {
         model.selectResourcePack(deleted);
 
         CompletionStage<ResourcePackCatalogSnapshot> completion =
-                model.deleteResourcePack(deleted);
+                model.deleteResourcePack(deleted, DeletionMode.RECYCLE_BIN_FIRST);
         executor.runNext();
         Throwable observed = stageFailure(completion);
         ResourcePackCatalogSnapshot terminal = model.snapshot();
