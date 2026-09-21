@@ -144,7 +144,7 @@ public final class ModCatalogPanelTest {
             ModCatalogPanel panel = new ModCatalogPanel(
                     model, STRINGS, ACTION_STRINGS, interactions);
             panelReference.set(panel);
-            panel.setSize(new Dimension(1120, 620));
+            panel.setSize(new Dimension(900, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
 

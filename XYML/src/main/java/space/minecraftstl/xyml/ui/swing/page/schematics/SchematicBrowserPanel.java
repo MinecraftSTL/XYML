@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
@@ -129,9 +130,6 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
 
     /// State cards for loading, failure, empty, and populated directories.
     private final JPanel contentCards = new JPanel(new CardLayout());
-
-    /// Responsive list/details split created with the populated browser card.
-    private @Nullable ResponsiveBrowserSplitPane browserSplit;
 
     /// Parent-directory toolbar command.
     private final JButton returnButton = new JButton();
@@ -487,15 +485,17 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsScroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
 
         ResponsiveBrowserSplitPane responsiveSplit = new ResponsiveBrowserSplitPane(choiceList, detailsPanel);
-        browserSplit = responsiveSplit;
-        JSplitPane createdSplit = responsiveSplit;
 
         loadingLabel.setText(strings.idleText());
         emptyLabel.setText(strings.emptyText());
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(errorPanel, ERROR_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
-        contentCards.add(createdSplit, BROWSER_CARD);
+        SwingHorizontalScrollPane browserScroll = new SwingHorizontalScrollPane(
+                responsiveSplit,
+                "schematicsCatalogScroll",
+                responsiveSplit.requiredMinimumWidth());
+        contentCards.add(browserScroll, BROWSER_CARD);
         contentCards.setOpaque(false);
         add(contentCards, "grow");
 
@@ -503,16 +503,6 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         statusLabel.getAccessibleContext().setAccessibleName("");
         statusLabel.getAccessibleContext().setAccessibleDescription("");
         add(statusLabel, "growx, h 28!");
-    }
-
-    /// Selects the browser's list/details orientation from the width allocated by its host.
-    @Override
-    public void doLayout() {
-        @Nullable ResponsiveBrowserSplitPane split = browserSplit;
-        if (split != null) {
-            split.updateForAvailableWidth(getWidth());
-        }
-        super.doLayout();
     }
 
     /// Coalesces a model transition to the latest state on the EDT.
@@ -1530,16 +1520,19 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         }
     }
 
-    /// Switches the schematic browser between side-by-side and stacked layouts.
+    /// Keeps the schematic list/details split horizontal while preserving user-adjustable minimum widths.
     @NotNullByDefault
     private static final class ResponsiveBrowserSplitPane extends JSplitPane {
-        /// Whether the divider ratio has been initialized for the current orientation.
-        private boolean orientationInitialized;
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
 
-        /// List surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
         private final JComponent leftComponent;
 
-        /// Details surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Details surface whose minimum width is applied when space permits.
         private final JComponent rightComponent;
 
         /// Computed minimum width of the list surface.
@@ -1548,12 +1541,12 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         /// Computed minimum width of the details surface.
         private final int rightMinimumWidth;
 
-        /// Creates a borderless responsive split for the schematic browser.
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
         ///
         /// @param list viewport-driven browser list
         /// @param details selected-entry details surface
         private ResponsiveBrowserSplitPane(JComponent list, JComponent details) {
-            super(JSplitPane.VERTICAL_SPLIT, list, details);
+            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
             setName("schematicsBrowserSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
@@ -1569,45 +1562,32 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
-        /// Selects side-by-side or stacked presentation from the children's required widths.
+        /// Returns the width required by both columns and the divider.
         ///
-        /// @param availableWidth width allocated by the owning page
-        private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= horizontalMinimumWidth();
-            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desiredOrientation) {
-                setOrientation(desiredOrientation);
-                orientationInitialized = false;
-                leftComponent.setMinimumSize(horizontal
-                        ? new Dimension(leftMinimumWidth, 0)
-                        : new Dimension(0, 0));
-                rightComponent.setMinimumSize(horizontal
-                        ? new Dimension(rightMinimumWidth, 0)
-                        : new Dimension(0, 0));
-            }
-            setResizeWeight(horizontal ? 0.62D : 0.48D);
-        }
-
-        /// Returns the width required to display both panes and the divider.
-        ///
-        /// @return horizontal layout minimum width
-        private int horizontalMinimumWidth() {
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
             return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
         }
 
-        /// Initializes and clamps the divider only after the split has a real horizontal extent.
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
         @Override
         public void doLayout() {
-            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
-            if (!orientationInitialized) {
-                int extent = horizontal ? getWidth() : getHeight();
-                int usableExtent = extent - getDividerSize();
-                if (usableExtent > 1) {
-                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.62D : 0.48D)));
-                    orientationInitialized = true;
-                }
+            boolean canApplyMinimums = getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
             }
-            if (horizontal && getWidth() > 0) {
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.62D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
                 int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
                 int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
                 if (location != getDividerLocation()) {
@@ -1617,12 +1597,11 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             super.doLayout();
         }
 
-        /// Allows the card layout to allocate widths below the side-by-side breakpoint.
-        ///
-        /// @return zero minimum so each child can shrink in stacked mode
+        /// Allows the card layout to constrain both children without honoring their preferred widths.
         @Override
         public Dimension getMinimumSize() {
             return new Dimension(0, 0);
         }
     }
+
 }

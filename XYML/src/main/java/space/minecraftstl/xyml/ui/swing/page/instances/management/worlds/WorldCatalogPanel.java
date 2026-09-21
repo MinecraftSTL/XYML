@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
@@ -52,6 +53,7 @@ import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.JViewport;
 import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
@@ -117,7 +119,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
 
     /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
-    private final ResponsiveCatalogSplitPane catalogSplit;
+    private final JComponent catalogSplit;
 
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
@@ -367,13 +369,6 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         return choiceList;
     }
 
-    /// Selects the list/details orientation from the width allocated by the instance shell.
-    @Override
-    public void doLayout() {
-        catalogSplit.updateForAvailableWidth(getWidth());
-        super.doLayout();
-    }
-
     /// Returns the latest snapshot rendered by this panel.
     ///
     /// @return immutable rendered catalog snapshot
@@ -450,7 +445,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Creates a stable split between the viewport list and the selected-world details.
     ///
     /// @return unframed catalog split component
-    private ResponsiveCatalogSplitPane createCatalogSplit() {
+    private JComponent createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout());
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
@@ -469,9 +464,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                         + listInsets.right,
                 0));
 
-        return new ResponsiveCatalogSplitPane(
+        ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
+        return new SwingHorizontalScrollPane(
+                split,
+                "worldsCatalogScroll",
+                split.requiredMinimumWidth());
     }
 
     /// Creates editable selected-world metadata and icon-only row actions.
@@ -670,11 +669,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         int valueMinimumWidth = SwingTextAreas.maximumMinimumTextWidth(
-                detailTitle, directoryValue, pathValue, gameVersionValue,
+                directoryValue, pathValue, gameVersionValue,
                 worldSpawnValue, lastPlayedValue, playedTimeValue,
                 playerLocationValue, playerLastDeathValue, playerSpawnValue,
                 lockedValue, readabilityValue);
-        int detailsMinimumWidth = Math.max(140 + 8 + valueMinimumWidth, 184) + 28;
+        int detailsMinimumWidth = Math.max(
+                Math.max(140 + 8 + valueMinimumWidth, 184),
+                valueMinimumWidth) + 28;
         int scrollBarWidth = scroll.getVerticalScrollBar().getPreferredSize().width;
         scroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);
@@ -1696,16 +1697,22 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         removeAll();
     }
 
-    /// Switches the world catalog between side-by-side and stacked layouts from actual host width.
+    /// Keeps the world catalog split horizontal while preserving user-adjustable minimum widths.
     @NotNullByDefault
     private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Whether the divider ratio has been initialized for the current orientation.
-        private boolean orientationInitialized;
+        /// Original responsive breakpoint retained from the pre-existing page layout.
+        private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
 
-        /// List surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
+
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
         private final JComponent leftComponent;
 
-        /// Details surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Details surface whose minimum width is applied when space permits.
         private final JComponent rightComponent;
 
         /// Computed minimum width of the list surface.
@@ -1714,7 +1721,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         /// Computed minimum width of the details surface.
         private final int rightMinimumWidth;
 
-        /// Creates a borderless split whose children may shrink to the allocated host width.
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
         ///
         /// @param list list surface
         /// @param details selected-world details surface
@@ -1733,45 +1740,74 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
-        /// Selects side-by-side or stacked presentation from the children's required widths.
+        /// Returns the nearest outer viewport width or the split width without a viewport.
         ///
-        /// @param availableWidth width allocated by the owning page
-        private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= horizontalMinimumWidth();
-            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desiredOrientation) {
-                setOrientation(desiredOrientation);
-                orientationInitialized = false;
-                leftComponent.setMinimumSize(horizontal
-                        ? new Dimension(leftMinimumWidth, 0)
-                        : new Dimension(0, 0));
-                rightComponent.setMinimumSize(horizontal
-                        ? new Dimension(rightMinimumWidth, 0)
-                        : new Dimension(0, 0));
+        /// @return available host width
+        private int availableViewportWidth() {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof JViewport viewport
+                        && viewport.getWidth() > 0) {
+                    return viewport.getWidth();
+                }
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    return scroll.getWidth();
+                }
+                parent = parent.getParent();
             }
-            setResizeWeight(horizontal ? 0.46D : 0.48D);
+            return getWidth();
         }
 
-        /// Returns the width required to display both panes and the divider.
+        /// Enables the page-level horizontal fallback only while this split is horizontal.
         ///
-        /// @return horizontal layout minimum width
-        private int horizontalMinimumWidth() {
+        /// @param horizontal whether the original page threshold selects horizontal presentation
+        private void updateOuterHorizontalScroll(boolean horizontal) {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    scroll.setMinimumContentWidth(horizontal ? requiredMinimumWidth() : 0);
+                    return;
+                }
+                parent = parent.getParent();
+            }
+        }
+
+        /// Returns the width required by both columns and the divider.
+        ///
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
             return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
         }
 
-        /// Initializes and clamps the divider only after the split has a real horizontal extent.
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
         @Override
         public void doLayout() {
-            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
-            if (!orientationInitialized) {
-                int extent = horizontal ? getWidth() : getHeight();
-                int usableExtent = extent - getDividerSize();
-                if (usableExtent > 1) {
-                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.46D : 0.48D)));
-                    orientationInitialized = true;
-                }
+            int availableWidth = availableViewportWidth();
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desired = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desired) {
+                setOrientation(desired);
+                dividerInitialized = false;
+                minimumsApplied = false;
             }
-            if (horizontal && getWidth() > 0) {
+            updateOuterHorizontalScroll(horizontal);
+            boolean canApplyMinimums = getOrientation() == HORIZONTAL_SPLIT
+                    && getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
+            }
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.46D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
                 int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
                 int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
                 if (location != getDividerLocation()) {

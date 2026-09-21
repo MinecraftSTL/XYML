@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -48,6 +49,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JViewport;
 import javax.swing.ListSelectionModel;
 import javax.swing.KeyStroke;
 import javax.swing.event.DocumentEvent;
@@ -57,6 +59,7 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.HierarchyEvent;
@@ -218,7 +221,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private final JTextArea enabledValue;
 
     /// Responsive split that changes from side-by-side to stacked at narrow widths.
-    private final ResponsiveCatalogSplitPane catalogSplit;
+    private final JComponent catalogSplit;
 
     /// Rechecks a pending placeholder selection and details after sparse rows change.
     private final ListDataListener listDataListener;
@@ -351,7 +354,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                             ResourcePackCatalogItem::description,
                             item -> !item.enabled()));
             choiceList = acquiredChoiceList;
-            catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
+            ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
+                    choiceList,
+                    createDetailsPanel());
+            catalogSplit = new SwingHorizontalScrollPane(
+                    split,
+                    "resourcePacksCatalogScroll",
+                    split.requiredMinimumWidth());
             configureComponents();
             acquiredSubscription = Objects.requireNonNull(
                     model.subscribe(this::modelChanged),
@@ -401,13 +410,6 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @return viewport-driven resource-pack list
     public ViewportChoiceList<ResourcePackCatalogItem> choiceList() {
         return choiceList;
-    }
-
-    /// Selects the responsive list/details orientation from this page's allocated width.
-    @Override
-    public void doLayout() {
-        catalogSplit.updateForAvailableWidth(getWidth());
-        super.doLayout();
     }
 
     /// Rechecks first-load eligibility after this page becomes displayable.
@@ -1817,16 +1819,22 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
     }
 
-    /// Switches the catalog between side-by-side and stacked layouts from actual allocated width.
+    /// Keeps the resource-pack catalog split horizontal while preserving user-adjustable minimum widths.
     @NotNullByDefault
     private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Whether the divider ratio has been initialized for the current orientation.
-        private boolean orientationInitialized;
+        /// Original responsive breakpoint retained from the pre-existing page layout.
+        private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
 
-        /// List surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
+
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
         private final JComponent leftComponent;
 
-        /// Details surface whose horizontal minimum is applied only in side-by-side mode.
+        /// Details surface whose minimum width is applied when space permits.
         private final JComponent rightComponent;
 
         /// Computed minimum width of the list surface.
@@ -1835,7 +1843,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         /// Computed minimum width of the details surface.
         private final int rightMinimumWidth;
 
-        /// Creates a borderless responsive split using stable list and details components.
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
         ///
         /// @param list viewport-driven list
         /// @param details read-only details surface
@@ -1856,46 +1864,74 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
-        /// Selects an orientation from the page width that the shell actually allocated.
+        /// Returns the nearest outer viewport width or the split width without a viewport.
         ///
-        /// @param availableWidth allocated page width
-        private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= horizontalMinimumWidth();
-            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desiredOrientation) {
-                setOrientation(desiredOrientation);
-                orientationInitialized = false;
-                leftComponent.setMinimumSize(horizontal
-                        ? new Dimension(leftMinimumWidth, 0)
-                        : new Dimension(0, 0));
-                rightComponent.setMinimumSize(horizontal
-                        ? new Dimension(rightMinimumWidth, 0)
-                        : new Dimension(0, 0));
+        /// @return available host width
+        private int availableViewportWidth() {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof JViewport viewport
+                        && viewport.getWidth() > 0) {
+                    return viewport.getWidth();
+                }
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    return scroll.getWidth();
+                }
+                parent = parent.getParent();
             }
-            setResizeWeight(horizontal ? 0.42D : 0.48D);
+            return getWidth();
         }
 
-        /// Returns the width required to display both panes and the divider.
+        /// Enables the page-level horizontal fallback only while this split is horizontal.
         ///
-        /// @return horizontal layout minimum width
-        private int horizontalMinimumWidth() {
+        /// @param horizontal whether the original page threshold selects horizontal presentation
+        private void updateOuterHorizontalScroll(boolean horizontal) {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    scroll.setMinimumContentWidth(horizontal ? requiredMinimumWidth() : 0);
+                    return;
+                }
+                parent = parent.getParent();
+            }
+        }
+
+        /// Returns the width required by both columns and the divider.
+        ///
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
             return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
         }
 
-        /// Lays out children and initializes or clamps the divider for the selected orientation.
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
         @Override
         public void doLayout() {
-            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
-            if (!orientationInitialized) {
-                int extent = horizontal ? getWidth() : getHeight();
-                int usableExtent = extent - getDividerSize();
-                if (usableExtent > 1) {
-                    double ratio = horizontal ? 0.42D : 0.48D;
-                    setDividerLocation((int) Math.round(usableExtent * ratio));
-                    orientationInitialized = true;
-                }
+            int availableWidth = availableViewportWidth();
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desired = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desired) {
+                setOrientation(desired);
+                dividerInitialized = false;
+                minimumsApplied = false;
             }
-            if (horizontal && getWidth() > 0) {
+            updateOuterHorizontalScroll(horizontal);
+            boolean canApplyMinimums = getOrientation() == HORIZONTAL_SPLIT
+                    && getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
+            }
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.42D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
                 int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
                 int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
                 if (location != getDividerLocation()) {
@@ -1905,12 +1941,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             super.doLayout();
         }
 
-        /// Allows the shell to allocate widths below the side-by-side breakpoint.
-        ///
-        /// @return zero minimum so the existing child scroll panes receive every constrained dimension
+        /// Allows the shell to constrain both children without honoring their preferred widths.
         @Override
         public Dimension getMinimumSize() {
             return new Dimension(0, 0);
         }
     }
+
 }

@@ -431,7 +431,7 @@ public final class ResourcePackCatalogPanelTest {
             layoutRecursively(panel);
             assertAll(
                     () -> assertEquals(
-                            JSplitPane.VERTICAL_SPLIT,
+                            JSplitPane.HORIZONTAL_SPLIT,
                             split.getOrientation(),
                             () -> "panel=" + panel.getSize() + ", split=" + split.getSize()),
                     () -> assertTrue(split.getTopComponent().getHeight() > 0),
