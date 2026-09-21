@@ -1202,10 +1202,16 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
         if (mode != null && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
             startDeletion(
-                    () -> applySequentially(selectedPaths, path -> model.deleteResourcePack(path, mode)),
-                    () -> applySequentially(
+                    () -> ResourcePackDeletionFallback.deleteSerially(
                             selectedPaths,
-                            path -> model.deleteResourcePack(path, DeletionMode.PERMANENT)),
+                            mode,
+                            path -> model.deleteResourcePack(path, mode),
+                            model::snapshot),
+                    () -> ResourcePackDeletionFallback.deleteSerially(
+                            selectedPaths,
+                            DeletionMode.PERMANENT,
+                            path -> model.deleteResourcePack(path, DeletionMode.PERMANENT),
+                            model::snapshot),
                     () -> interactions.confirmPermanentFallbackSelected(this, selectedCount),
                     true);
         }
@@ -1405,9 +1411,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
             BooleanSupplier confirmFallback, boolean allowFallback) {
         EdtDispatcher.requireEventDispatchThread();
-        if (writePending || currentWritableSnapshot() == null) {
-            return;
-        }
+        if (writePending || currentWritableSnapshot() == null) return;
         writePending = true;
         synchronized (stateLock) {
             writeStartUpdateRevision = updateRevision;

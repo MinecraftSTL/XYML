@@ -20,12 +20,21 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.io.DeletionBatchException;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /// Coordinates the recycle-bin-first failure boundary for one resource-pack deletion.
@@ -73,6 +82,97 @@ final class ResourcePackDeletionFallback {
             }
             onFailure.accept(failure);
         }));
+    }
+
+    /// Deletes paths serially while attempting every target and aggregating all failures.
+    ///
+    /// @param paths immutable deletion targets
+    /// @param mode selected deletion behavior
+    /// @param deletion one-path asynchronous deletion
+    /// @param snapshot current snapshot supplier
+    /// @return terminal stage after every target or the aggregate failure
+    static CompletionStage<ResourcePackCatalogSnapshot> deleteSerially(
+            List<Path> paths,
+            DeletionMode mode,
+            Function<Path, CompletionStage<ResourcePackCatalogSnapshot>> deletion,
+            Supplier<ResourcePackCatalogSnapshot> snapshot) {
+        return deleteSerially(
+                List.copyOf(Objects.requireNonNull(paths, "paths")),
+                0,
+                Objects.requireNonNull(mode, "mode"),
+                Objects.requireNonNull(deletion, "deletion"),
+                Objects.requireNonNull(snapshot, "snapshot"),
+                new ArrayList<>(),
+                new ArrayList<>());
+    }
+
+    /// Recursively attempts the next path and retains every encountered failure.
+    ///
+    /// @param paths immutable deletion targets
+    /// @param index next target index
+    /// @param mode selected deletion behavior
+    /// @param deletion one-path asynchronous deletion
+    /// @param snapshot current snapshot supplier
+    /// @param failedPaths accumulated failed targets
+    /// @param failures accumulated individual failures
+    /// @return terminal stage
+    private static CompletionStage<ResourcePackCatalogSnapshot> deleteSerially(
+            List<Path> paths,
+            int index,
+            DeletionMode mode,
+            Function<Path, CompletionStage<ResourcePackCatalogSnapshot>> deletion,
+            Supplier<ResourcePackCatalogSnapshot> snapshot,
+            List<Path> failedPaths,
+            List<IOException> failures) {
+        if (index == paths.size()) {
+            if (failedPaths.isEmpty()) {
+                return CompletableFuture.completedFuture(snapshot.get());
+            }
+            if (mode == DeletionMode.RECYCLE_BIN_FIRST) {
+                TrashMoveException aggregate = new TrashMoveException(failedPaths);
+                addSuppressedFailures(aggregate, failures);
+                return CompletableFuture.failedFuture(aggregate);
+            }
+            DeletionBatchException aggregate = new DeletionBatchException(failedPaths);
+            addSuppressedFailures(aggregate, failures);
+            return CompletableFuture.failedFuture(aggregate);
+        }
+        Path path = paths.get(index);
+        return Objects.requireNonNull(deletion.apply(path), "deletion returned null")
+                .handle((@Nullable ResourcePackCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+                    if (failure == null) {
+                        return ignored;
+                    }
+                    Throwable resolved = unwrapFailure(failure);
+                    if (resolved instanceof IOException ioFailure) {
+                        failedPaths.add(path);
+                        failures.add(ioFailure);
+                        return null;
+                    }
+                    throw new CompletionException(resolved);
+                })
+                .thenCompose(ignored -> deleteSerially(
+                        paths,
+                        index + 1,
+                        mode,
+                        deletion,
+                        snapshot,
+                        failedPaths,
+                        failures));
+    }
+
+    /// Adds individual failures without changing the aggregate public contract.
+    ///
+    /// @param aggregate aggregate failure
+    /// @param failures individual failures
+    private static void addSuppressedFailures(
+            IOException aggregate,
+            List<? extends IOException> failures) {
+        for (IOException failure : failures) {
+            if (failure != aggregate) {
+                aggregate.addSuppressed(failure);
+            }
+        }
     }
 
     /// Unwraps one completion exception when present.

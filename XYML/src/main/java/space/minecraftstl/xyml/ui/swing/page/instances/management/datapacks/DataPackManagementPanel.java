@@ -972,9 +972,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             boolean allowFallback) {
         try {
             requireBackgroundThread();
-            for (DataPack.Pack pack : selected) {
-                context.dataPack().deletePack(pack, mode);
-            }
+            context.dataPack().deletePacks(selected, mode);
             finishDataPackOperation(context, null);
         } catch (IOException | RuntimeException failure) {
             if (allowFallback && failure instanceof TrashMoveException) {

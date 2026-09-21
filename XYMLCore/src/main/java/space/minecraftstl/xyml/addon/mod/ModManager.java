@@ -313,9 +313,10 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
     /// @throws IOException when a selected deletion fails
     public void removeMods(DeletionMode mode, LocalModFile... localModFiles) throws IOException {
         DeletionMode requestedMode = java.util.Objects.requireNonNull(mode, "mode");
-        for (LocalModFile localModFile : localModFiles) {
-            java.util.Objects.requireNonNull(localModFile, "localModFiles contains null").delete(requestedMode);
-        }
+        @Unmodifiable List<Path> paths = java.util.Arrays.stream(localModFiles)
+                .map(file -> java.util.Objects.requireNonNull(file, "localModFiles contains null").getFile())
+                .toList();
+        FileUtils.deleteAllWithMode(paths, requestedMode);
     }
 
     public void rollback(LocalModFile from, LocalModFile to) throws IOException {
