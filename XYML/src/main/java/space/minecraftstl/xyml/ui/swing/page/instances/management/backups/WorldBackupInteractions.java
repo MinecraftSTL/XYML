@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -31,7 +32,7 @@ import java.util.concurrent.CompletionStage;
 /// Filesystem-integrating implementations must execute `openDirectory` off the Swing EDT. Keeping
 /// these UI boundaries separate lets the page's catalog be tested without showing native dialogs.
 @NotNullByDefault
-public interface WorldBackupInteractions {
+public interface WorldBackupInteractions extends RetryableFailureInteraction {
     /// Opens the managed local backup directory using the platform file manager.
     ///
     /// @param directory directory to create if needed and open

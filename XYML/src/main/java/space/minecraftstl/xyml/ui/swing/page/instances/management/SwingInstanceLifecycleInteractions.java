@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
 import space.minecraftstl.xyml.util.io.TrashOperations;
@@ -41,6 +42,21 @@ import java.util.Objects;
 /// deliberately places the copy-worlds toggle in the same native confirmation surface as its target ID.
 @NotNullByDefault
 final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Localized text shared with the lifecycle panel.
     private final InstanceLifecycleStrings strings;
 

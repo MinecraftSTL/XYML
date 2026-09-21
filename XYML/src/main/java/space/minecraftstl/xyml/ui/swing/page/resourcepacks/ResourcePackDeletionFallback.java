@@ -44,6 +44,46 @@ final class ResourcePackDeletionFallback {
     private ResourcePackDeletionFallback() {
     }
 
+    /// Starts one deletion when the panel still permits a write.
+    ///
+    /// @param initial initial deletion operation
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback original-warning confirmation
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// @param canStart current panel write predicate
+    /// @param beginWrite callback entering busy state and updating controls
+    /// @param clearWriteGate callback clearing busy state
+    /// @param onFailure callback reporting a non-fallback failure
+    static void start(
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback,
+            BooleanSupplier canStart,
+            Runnable beginWrite,
+            Runnable clearWriteGate,
+            Consumer<Throwable> onFailure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!Objects.requireNonNull(canStart, "canStart").getAsBoolean()) {
+            return;
+        }
+        beginWrite.run();
+        try {
+            observe(
+                    Objects.requireNonNull(initial.get(), "resource-pack deletion returned null"),
+                    permanentRetry,
+                    confirmFallback,
+                    allowFallback,
+                    clearWriteGate,
+                    onFailure);
+        } catch (RuntimeException failure) {
+            onFailure.accept(failure);
+        } catch (Error failure) {
+            clearWriteGate.run();
+            throw failure;
+        }
+    }
+
     /// Observes one deletion and retries permanently after an approved recycle-bin fallback warning.
     ///
     /// @param initial initial deletion stage

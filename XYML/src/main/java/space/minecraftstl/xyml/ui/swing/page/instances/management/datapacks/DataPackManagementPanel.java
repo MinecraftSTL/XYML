@@ -226,6 +226,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Whether an import or deletion currently owns the selected data-pack manager.
     private boolean dataPackOperationPending;
 
+    /// Exact captured mutation retained until its terminal result is presented.
+    private @Nullable Runnable pendingDataPackRetry;
+
     /// Whether this page has started its lazy world-directory index.
     private boolean activated;
 
@@ -830,9 +833,48 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             SelectedWorld context,
             @Unmodifiable List<Path> archives) {
         @Unmodifiable List<Path> selectedArchives = List.copyOf(archives);
+        pendingDataPackRetry = () -> scheduleDataPackInstallation(context, selectedArchives);
         beginDataPackOperation();
         try {
             executor.execute(() -> installDataPacksOnExecutor(context, selectedArchives));
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Schedules one captured active-state request and retains it for retry.
+    ///
+    /// @param context stable selected-world context
+    /// @param selected immutable selected packs
+    /// @param active requested active state
+    private void scheduleDataPacksActive(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected,
+            boolean active) {
+        @Unmodifiable List<DataPack.Pack> captured = List.copyOf(selected);
+        pendingDataPackRetry = () -> scheduleDataPacksActive(context, captured, active);
+        beginDataPackOperation();
+        try {
+            executor.execute(() -> setDataPacksActiveOnExecutor(context, captured, active));
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Schedules one captured mode-aware deletion request and retains it for retry.
+    ///
+    /// @param context stable selected-world context
+    /// @param selected immutable selected packs
+    /// @param mode selected deletion behavior
+    private void scheduleDataPacksDeletion(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected,
+            DeletionMode mode) {
+        @Unmodifiable List<DataPack.Pack> captured = List.copyOf(selected);
+        pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, captured, mode);
+        beginDataPackOperation();
+        try {
+            executor.execute(() -> deleteDataPacksOnExecutor(context, captured, mode, true));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
@@ -905,12 +947,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (context == null || selected.isEmpty()) {
             return;
         }
-        beginDataPackOperation();
-        try {
-            executor.execute(() -> setDataPacksActiveOnExecutor(context, selected, active));
-        } catch (RuntimeException failure) {
-            finishDataPackOperation(context, failure);
-        }
+        scheduleDataPacksActive(context, selected, active);
     }
 
     /// Changes selected data-pack states outside the EDT before publishing the refreshed snapshot.
@@ -951,12 +988,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (mode == null) {
             return;
         }
-        beginDataPackOperation();
-        try {
-            executor.execute(() -> deleteDataPacksOnExecutor(context, selected, mode, true));
-        } catch (RuntimeException failure) {
-            finishDataPackOperation(context, failure);
-        }
+        scheduleDataPacksDeletion(context, selected, mode);
     }
 
     /// Deletes selected packs through their owning Core data-pack manager outside the EDT.
@@ -979,6 +1011,10 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 boolean[] approved = {false};
                 EdtDispatcher.executeAndWait(() -> approved[0] = interactions.confirmPermanentFallback(this, selected));
                 if (approved[0]) {
+                    pendingDataPackRetry = () -> scheduleDataPacksDeletion(
+                            context,
+                            selected,
+                            DeletionMode.PERMANENT);
                     deleteDataPacksOnExecutor(context, selected, DeletionMode.PERMANENT, false);
                 } else {
                     finishDataPackOperation(context, null);
@@ -1006,6 +1042,8 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             if (closed.get() || selectedWorld != context) {
                 return;
             }
+            @Nullable Runnable retryAction = pendingDataPackRetry;
+            pendingDataPackRetry = null;
             dataPackOperationPending = false;
             if (failure == null) {
                 List<DataPack.Pack> packs = context.dataPack().getPacks();
@@ -1015,7 +1053,15 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 dataPackStatusLabel.setText(strings.packsReadyText(packs.size()));
             } else {
                 dataPackStatusLabel.setText(strings.packsReadyText(dataPackSource.exactItemCount().orElse(0)));
-                showFailure(failure);
+                if (retryAction == null) {
+                    showFailure(failure);
+                } else {
+                    interactions.showRetryableFailure(
+                            this,
+                            strings.failureTitle(),
+                            failureDetail(failure),
+                            retryAction);
+                }
             }
             updateActionState();
         });
@@ -1138,6 +1184,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         selectedWorld = null;
         selectedWorldPath = null;
         dataPackOperationPending = false;
+        pendingDataPackRetry = null;
         removeAll();
     }
 

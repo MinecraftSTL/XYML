@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.schematics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -33,7 +34,7 @@ import java.util.concurrent.CompletionStage;
 /// Dialog methods must be called on the Swing event-dispatch thread. [#reveal] may be called
 /// from any thread and reports desktop work asynchronously without blocking the caller.
 @NotNullByDefault
-public interface SchematicBrowserInteractions {
+public interface SchematicBrowserInteractions extends RetryableFailureInteraction {
     /// Opens a multi-selection Litematic chooser on the event-dispatch thread.
     ///
     /// @param owner dialog owner

@@ -135,6 +135,9 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     /// Whether a path conversion and save is currently pending.
     private boolean savePending;
 
+    /// Exact save request retained until its terminal result is presented.
+    private @Nullable Runnable pendingSaveRetry;
+
     /// Whether list replacement is currently selecting an item programmatically.
     private boolean applyingSnapshot;
 
@@ -209,6 +212,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
                 return;
             }
             closed = true;
+        pendingSaveRetry = null;
             editSequence++;
             serviceSubscription.unsubscribe();
             service.close();
@@ -367,8 +371,11 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
             service.select(entry.id());
             statusLabel.setText("");
         } catch (RuntimeException failure) {
-            interaction.showFailure(this, failureDetail(failure));
             restoreSnapshotSelection();
+            interaction.showRetryableFailure(
+                    this,
+                    failureDetail(failure),
+                    () -> selectCurrentDirectory(entry));
         }
         updateActionAvailability();
     }
@@ -497,6 +504,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
             throw new IllegalStateException("Editing state lost its target directory");
         }
         long request = ++editSequence;
+        pendingSaveRetry = this::saveEditor;
         savePending = true;
         setEditorEnabled(false);
         updateActionAvailability();
@@ -636,6 +644,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     private void completeSaveSuccess() {
         EdtDispatcher.requireEventDispatchThread();
         savePending = false;
+        pendingSaveRetry = null;
         editorMode = EditorMode.IDLE;
         editedEntry = null;
         statusLabel.setText(i18n("message.success"));
@@ -647,6 +656,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     private void completeSaveCancelled() {
         EdtDispatcher.requireEventDispatchThread();
         savePending = false;
+        pendingSaveRetry = null;
         statusLabel.setText("");
         setEditorEnabled(true);
         updateActionAvailability();
@@ -657,11 +667,18 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     /// @param failure path preparation or mutation failure
     private void completeSaveFailure(Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Runnable retryAction = pendingSaveRetry;
+        pendingSaveRetry = null;
         savePending = false;
         statusLabel.setText(i18n("message.failed"));
         setEditorEnabled(true);
         updateActionAvailability();
-        interaction.showFailure(this, failureDetail(Objects.requireNonNull(failure, "failure")));
+        String detail = failureDetail(Objects.requireNonNull(failure, "failure"));
+        if (retryAction == null) {
+            interaction.showFailure(this, detail);
+        } else {
+            interaction.showRetryableFailure(this, detail, retryAction);
+        }
     }
 
     /// Removes the selected entry after normal and read-only recovery confirmations.
@@ -674,16 +691,37 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         if (selected == null || !interaction.confirmRemoval(this, selected)) {
             return;
         }
+        removeDirectory(selected, false);
+        updateActionAvailability();
+    }
+
+    /// Executes one exact directory removal and captures the same request for retry.
+    ///
+    /// @param selected exact selected directory entry
+    /// @param allowReadOnlyOverwrite whether protected storage recovery was granted
+    private void removeDirectory(
+            GameDirectoryManagementEntry selected,
+            boolean allowReadOnlyOverwrite) {
         try {
-            service.remove(selected.id(), false);
+            service.remove(selected.id(), allowReadOnlyOverwrite);
             statusLabel.setText(i18n("message.success"));
         } catch (GameDirectoryStorageOverwriteRequiredException protectedStorage) {
-            retryProtectedRemoval(selected, protectedStorage);
+            if (!allowReadOnlyOverwrite) {
+                retryProtectedRemoval(selected, protectedStorage);
+            } else {
+                statusLabel.setText(i18n("message.failed"));
+                interaction.showRetryableFailure(
+                        this,
+                        failureDetail(protectedStorage),
+                        () -> removeDirectory(selected, true));
+            }
         } catch (RuntimeException failure) {
             statusLabel.setText(i18n("message.failed"));
-            interaction.showFailure(this, failureDetail(failure));
+            interaction.showRetryableFailure(
+                    this,
+                    failureDetail(failure),
+                    () -> removeDirectory(selected, allowReadOnlyOverwrite));
         }
-        updateActionAvailability();
     }
 
     /// Retries one removal after read-only storage recovery is confirmed.
@@ -698,13 +736,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         if (!interaction.confirmReadOnlyOverwrite(this)) {
             return;
         }
-        try {
-            service.remove(selected.id(), true);
-            statusLabel.setText(i18n("message.success"));
-        } catch (RuntimeException failure) {
-            statusLabel.setText(i18n("message.failed"));
-            interaction.showFailure(this, failureDetail(failure));
-        }
+        removeDirectory(selected, true);
     }
 
     /// Cancels an add or edit without mutating persisted state.

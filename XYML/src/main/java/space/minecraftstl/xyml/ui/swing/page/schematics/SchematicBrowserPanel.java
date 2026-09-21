@@ -229,6 +229,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Snapshot currently represented by Swing controls, or null before initialization.
     private @Nullable SchematicBrowserSnapshot displayedSnapshot;
 
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Supplier<CompletionStage<SchematicBrowserSnapshot>> activeWriteOperation;
+
     /// Monotonic notification revision used to discard queued stale EDT updates.
     private long updateRevision;
 
@@ -725,6 +728,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     ///
     /// @param operation deferred model command
     private void startWrite(Supplier<CompletionStage<SchematicBrowserSnapshot>> operation) {
+        activeWriteOperation = Objects.requireNonNull(operation, "operation");
         final CompletionStage<SchematicBrowserSnapshot> completion;
         try {
             completion = Objects.requireNonNull(operation.get(), "schematic write returned null");
@@ -776,6 +780,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// @param failure asynchronous wrapper or original failure, or null after success
     private void writeCompleted(@Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Supplier<CompletionStage<SchematicBrowserSnapshot>> retryOperation =
+                activeWriteOperation;
+        activeWriteOperation = null;
         if (!isOpen() || failure == null) {
             return;
         }
@@ -783,10 +790,19 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         if (resolved instanceof CancellationException || isPublishedWriteFailure(resolved)) {
             return;
         }
-        interactions.showFailure(
-                this,
-                strings.actions().operationFailedTitle(),
-                failureText(resolved));
+        String detail = failureText(resolved);
+        if (retryOperation == null) {
+            interactions.showFailure(
+                    this,
+                    strings.actions().operationFailedTitle(),
+                    detail);
+        } else {
+            interactions.showRetryableFailure(
+                    this,
+                    strings.actions().operationFailedTitle(),
+                    detail,
+                    () -> startWrite(retryOperation));
+        }
     }
 
     /// Completes the local reveal gate and reports non-cancellation failures while still open.

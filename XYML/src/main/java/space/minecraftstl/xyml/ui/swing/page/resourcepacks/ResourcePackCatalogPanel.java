@@ -278,6 +278,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether a model write command remains locally outstanding.
     private boolean writePending;
 
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> activeWriteOperation;
+
     /// Model-notification revision captured immediately before the current write invocation.
     private long writeStartUpdateRevision;
 
@@ -1380,6 +1383,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         EdtDispatcher.requireEventDispatchThread();
         if (writePending || currentWritableSnapshot() == null) return;
         writePending = true;
+        activeWriteOperation = Objects.requireNonNull(operation, "operation");
         synchronized (stateLock) {
             writeStartUpdateRevision = updateRevision;
         }
@@ -1400,36 +1404,30 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
     }
 
-    /// Starts one deletion and offers permanent fallback only when the recycle-bin move fails.
-    ///
-    /// @param initial initial deletion stage
-    /// @param permanentRetry permanent deletion retry
-    /// @param confirmFallback original-warning confirmation
-    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// Starts one deletion and delegates fallback ownership to the focused helper.
     private void startDeletion(
             Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
             Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback, boolean allowFallback) {
-        EdtDispatcher.requireEventDispatchThread();
-        if (writePending || currentWritableSnapshot() == null) return;
-        writePending = true;
-        synchronized (stateLock) {
-            writeStartUpdateRevision = updateRevision;
-        }
-        updateActionAvailability(choiceList.getSelectedValue());
-        try {
-            ResourcePackDeletionFallback.observe(
-                    Objects.requireNonNull(initial.get(), "resource-pack deletion returned null"),
-                    permanentRetry, confirmFallback, allowFallback,
-                    () -> { writePending = false; updateSelectionDetails(); },
-                    this::writeCompleted);
-        } catch (RuntimeException failure) {
-            writeCompleted(failure);
-        } catch (Error failure) {
-            writePending = false;
-            updateSelectionDetails();
-            throw failure;
-        }
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        ResourcePackDeletionFallback.start(
+                initial,
+                permanentRetry,
+                confirmFallback,
+                allowFallback,
+                () -> !writePending && currentWritableSnapshot() != null,
+                () -> {
+                    writePending = true;
+                    synchronized (stateLock) {
+                        writeStartUpdateRevision = updateRevision;
+                    }
+                    updateActionAvailability(choiceList.getSelectedValue());
+                },
+                () -> {
+                    writePending = false;
+                    updateSelectionDetails();
+                },
+                this::writeCompleted);
     }
 
     /// Clears the local write gate and reports only failures not already published by the model.
@@ -1437,6 +1435,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @param failure asynchronous wrapper or original failure, or null after success
     private void writeCompleted(@Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> retryOperation =
+                activeWriteOperation;
+        activeWriteOperation = null;
         if (!isOpen()) {
             return;
         }
@@ -1448,10 +1449,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         Throwable resolved = unwrapCompletionFailure(failure);
         if (!(resolved instanceof CancellationException)
                 && !currentWriteFailureWasPublished()) {
-            interactions.showFailure(
-                    this,
-                    actionStrings.operationFailedTitle(),
-                    failureText(resolved));
+            @Nullable Runnable retryAction = retryOperation == null ? null : () -> startWrite(retryOperation);
+            interactions.showFailure(this, actionStrings.operationFailedTitle(),
+                    failureText(resolved), retryAction);
         }
     }
 

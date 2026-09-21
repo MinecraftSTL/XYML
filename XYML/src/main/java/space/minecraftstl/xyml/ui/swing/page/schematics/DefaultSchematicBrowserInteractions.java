@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
 import space.minecraftstl.xyml.util.io.TrashOperations;
@@ -49,6 +50,21 @@ import java.util.concurrent.Executor;
 /// to the executor and never performs network access or references JavaFX.
 @NotNullByDefault
 public final class DefaultSchematicBrowserInteractions implements SchematicBrowserInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Localized action presentation.
     private final SchematicBrowserActionStrings strings;
 

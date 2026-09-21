@@ -896,18 +896,25 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 : null;
     }
 
-    /// Returns a stable writable snapshot shared by displayed Swing state and the model.
+    /// Returns a stable page snapshot that may accept a mutation regardless of visible row count.
     ///
-    /// @return writable current snapshot, or null when stale, loading, empty, or busy
-    private @Nullable ModCatalogSnapshot currentWritableSnapshot() {
+    /// @return ready writable snapshot, or null when stale, loading, closed, or busy
+    private @Nullable ModCatalogSnapshot currentReadyWritableSnapshot() {
         ModCatalogSnapshot current = model.snapshot();
         return !closed
                 && current.contentRevision() == displayedSnapshot.contentRevision()
                 && current.status() == ModCatalogStatus.READY
-                && current.listEnabled()
                 && current.writeStatus() != ModCatalogWriteStatus.BUSY
                 ? current
                 : null;
+    }
+
+    /// Returns a stable writable snapshot that also contains selectable rows.
+    ///
+    /// @return writable selection snapshot, or null when stale, loading, empty, or busy
+    private @Nullable ModCatalogSnapshot currentWritableSnapshot() {
+        @Nullable ModCatalogSnapshot ready = currentReadyWritableSnapshot();
+        return ready != null && ready.listEnabled() ? ready : null;
     }
 
     /// Captures selected logical indexes as immutable rename-stable keys without loading rows.
@@ -964,7 +971,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         @Unmodifiable List<String> selectedKeys = selectedLocalKeys();
         if (!selectedKeys.isEmpty()
                 && isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
-            observeFailure(model.setModsEnabled(selectedKeys, enabled));
+            submitModsEnabled(selectedKeys, enabled);
         }
     }
 
@@ -985,7 +992,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
         if (isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
             observeDeletion(
-                    model.deleteMods(selectedKeys, mode),
+                    () -> model.deleteMods(selectedKeys, mode),
                     mode,
                     () -> model.deleteMods(selectedKeys, DeletionMode.PERMANENT),
                     () -> interactions.confirmPermanentFallbackSelected(this, selectedCount));
@@ -1068,7 +1075,11 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             }
             return;
         }
-        interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+        interactions.showRetryableFailure(
+                this,
+                actionStrings.errorTitle(),
+                failureDetail(failure),
+                () -> submitImport(sources, conflictActions));
     }
 
     /// Returns whether this writable page accepts one dropped Mod path.
@@ -1076,7 +1087,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param source normalized dropped path
     /// @return whether the path has a supported Mod suffix and the catalog can write
     private boolean supportsDroppedMod(Path source) {
-        return currentWritableSnapshot() != null && ModManager.isFileNameMod(source);
+        return currentReadyWritableSnapshot() != null && ModManager.isFileNameMod(source);
     }
 
     /// Imports all supported Mod paths delivered by the page-scoped drop route.
@@ -1084,10 +1095,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param sources immutable supported paths in transfer order
     private void importDroppedMods(@Unmodifiable List<Path> sources) {
         EdtDispatcher.requireEventDispatchThread();
-        if (!sources.isEmpty() && currentWritableSnapshot() != null) {
+        if (!sources.isEmpty() && currentReadyWritableSnapshot() != null) {
             @Unmodifiable List<Path> capturedSources = List.copyOf(sources);
             SwingUtilities.invokeLater(() -> {
-                if (!closed && currentWritableSnapshot() != null) {
+                if (!closed && currentReadyWritableSnapshot() != null) {
                     resolveAndSubmitImport(capturedSources);
                 }
             });
@@ -1118,7 +1129,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         observeDeletion(
-                model.deleteMod(selected.localKey(), mode),
+                () -> model.deleteMod(selected.localKey(), mode),
                 mode,
                 () -> model.deleteMod(selected.localKey(), DeletionMode.PERMANENT),
                 () -> interactions.confirmPermanentFallback(this, selected));
@@ -1131,43 +1142,95 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
         @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
-            observeFailure(model.setModEnabled(selected.localKey(), enabledToggle.isSelected()));
+            submitModEnabled(selected.localKey(), enabledToggle.isSelected());
         }
     }
 
-    /// Observes one deletion and offers the original warning before retrying permanent deletion.
+    /// Submits one exact enabled-state batch and captures the same request for retry.
     ///
-    /// @param stage initial deletion stage
-    /// @param mode mode used by the initial stage
-    /// @param permanentRetry retry using permanent deletion
+    /// @param localKeys immutable stable keys
+    /// @param enabled desired enabled state
+    private void submitModsEnabled(@Unmodifiable List<String> localKeys, boolean enabled) {
+        @Unmodifiable List<String> capturedKeys = List.copyOf(localKeys);
+        observeFailure(
+                model.setModsEnabled(capturedKeys, enabled),
+                () -> submitModsEnabled(capturedKeys, enabled));
+    }
+
+    /// Submits one exact enabled-state change and captures the same request for retry.
+    ///
+    /// @param localKey stable target key
+    /// @param enabled desired enabled state
+    private void submitModEnabled(String localKey, boolean enabled) {
+        String capturedKey = Objects.requireNonNull(localKey, "localKey");
+        observeFailure(
+                model.setModEnabled(capturedKey, enabled),
+                () -> submitModEnabled(capturedKey, enabled));
+    }
+
+    /// Observes one deletion and preserves recycle-bin fallback plus exact retry behavior.
+    ///
+    /// @param operation initial deletion operation
+    /// @param mode mode used by the initial operation
+    /// @param permanentRetry permanent deletion retry
     /// @param confirmFallback fallback confirmation
     private void observeDeletion(
-            CompletionStage<?> stage,
+            Supplier<CompletionStage<?>> operation,
             DeletionMode mode,
             Supplier<CompletionStage<?>> permanentRetry,
             BooleanSupplier confirmFallback) {
+        Supplier<CompletionStage<?>> capturedOperation = Objects.requireNonNull(operation, "operation");
+        CompletionStage<?> stage;
+        try {
+            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+        } catch (RuntimeException failure) {
+            handleDeletionFailure(capturedOperation, mode, permanentRetry, confirmFallback, failure);
+            return;
+        }
         stage.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
-            if (failure == null) {
-                return;
+            if (failure != null) {
+                Throwable cause = unwrapFailure(failure);
+                EdtDispatcher.execute(() -> handleDeletionFailure(
+                        capturedOperation,
+                        mode,
+                        permanentRetry,
+                        confirmFallback,
+                        cause));
             }
-            Throwable cause = unwrapFailure(failure);
-            EdtDispatcher.execute(() -> {
-                if (closed) {
-                    return;
-                }
-                if (mode == DeletionMode.RECYCLE_BIN_FIRST && hasTrashMoveFailure(cause)) {
-                    if (confirmFallback.getAsBoolean()) {
-                        observeDeletion(
-                                permanentRetry.get(),
-                                DeletionMode.PERMANENT,
-                                permanentRetry,
-                                confirmFallback);
-                    }
-                    return;
-                }
-                interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(cause));
-            });
         });
+    }
+
+    /// Handles one deletion failure after restoring the Swing failure boundary.
+    ///
+    /// @param operation exact deletion retry operation
+    /// @param mode mode used by the failed operation
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback fallback confirmation
+    /// @param failure original deletion failure
+    private void handleDeletionFailure(
+            Supplier<CompletionStage<?>> operation,
+            DeletionMode mode,
+            Supplier<CompletionStage<?>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            Throwable failure) {
+        if (closed) {
+            return;
+        }
+        if (mode == DeletionMode.RECYCLE_BIN_FIRST && hasTrashMoveFailure(failure)) {
+            if (confirmFallback.getAsBoolean()) {
+                observeDeletion(
+                        permanentRetry,
+                        DeletionMode.PERMANENT,
+                        permanentRetry,
+                        confirmFallback);
+            }
+            return;
+        }
+        interactions.showRetryableFailure(
+                this,
+                actionStrings.errorTitle(),
+                failureDetail(failure),
+                () -> observeDeletion(operation, mode, permanentRetry, confirmFallback));
     }
 
     /// Detects a recycle-bin failure through asynchronous wrappers.
@@ -1189,14 +1252,33 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     ///
     /// @param stage observed asynchronous operation
     private void observeFailure(CompletionStage<?> stage) {
+        observeFailure(stage, null);
+    }
+
+    /// Shows one asynchronous failure with an optional exact retry request.
+    ///
+    /// @param stage observed asynchronous operation
+    /// @param retryAction captured retry request, or null for a terminal failure
+    private void observeFailure(
+            CompletionStage<?> stage,
+            @Nullable Runnable retryAction) {
         stage.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
                 EdtDispatcher.execute(() -> {
                     if (!closed) {
-                        interactions.showFailure(
-                                this,
-                                actionStrings.errorTitle(),
-                                failureDetail(failure));
+                        String detail = failureDetail(failure);
+                        if (retryAction == null) {
+                            interactions.showFailure(
+                                    this,
+                                    actionStrings.errorTitle(),
+                                    detail);
+                        } else {
+                            interactions.showRetryableFailure(
+                                    this,
+                                    actionStrings.errorTitle(),
+                                    detail,
+                                    retryAction);
+                        }
                     }
                 });
             }

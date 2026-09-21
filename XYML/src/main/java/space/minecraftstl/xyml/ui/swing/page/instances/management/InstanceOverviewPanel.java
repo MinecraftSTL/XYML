@@ -53,6 +53,7 @@ import java.util.function.Consumer;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -664,11 +665,11 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         }
         if (choice instanceof InstanceIconChoice.BuiltIn builtIn) {
             submitRepositoryTask(
-                    localIconStore.selectBuiltInTask(builtIn.iconType(), executor),
+                    () -> localIconStore.selectBuiltInTask(builtIn.iconType(), executor),
                     () -> iconChanged(localIconStore));
         } else if (choice instanceof InstanceIconChoice.Custom custom) {
             submitRepositoryTask(
-                    localIconStore.selectCustomTask(custom.file(), executor),
+                    () -> localIconStore.selectCustomTask(custom.file(), executor),
                     () -> iconChanged(localIconStore));
         }
     }
@@ -688,37 +689,43 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             return;
         }
         submitRepositoryTask(
-                localIconStore.deleteCustomTask(executor),
+                () -> localIconStore.deleteCustomTask(executor),
                 () -> iconChanged(localIconStore));
     }
 
-    /// Starts a resource-aware repository task and delivers its terminal state on the EDT.
+    /// Starts one exact resource-aware repository task and captures its factory for retry.
     ///
-    /// @param task prepared mutation task
+    /// @param taskFactory deferred mutation task factory
     /// @param success EDT action after successful completion
-    private void submitRepositoryTask(Task<?> task, Runnable success) {
+    private void submitRepositoryTask(Supplier<Task<?>> taskFactory, Runnable success) {
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(task, "task");
-        Objects.requireNonNull(success, "success");
+        Supplier<Task<?>> capturedFactory = Objects.requireNonNull(taskFactory, "taskFactory");
+        Runnable capturedSuccess = Objects.requireNonNull(success, "success");
         if (!beginOperation()) {
             return;
         }
         TaskExecutor taskExecutor;
+        Task<?> task;
+        Runnable retryAction = () -> submitRepositoryTask(capturedFactory, capturedSuccess);
         try {
+            task = Objects.requireNonNull(capturedFactory.get(), "taskFactory returned null");
             taskExecutor = task.executor();
             taskExecutor.subscribeTaskListener(new TaskListener() {
                 /// Delivers the resource-aware mutation outcome to the EDT.
                 @Override
                 public void onStop(boolean successful, TaskExecutor completedExecutor) {
                     @Nullable Throwable failure = successful ? null : completedExecutor.getFailure();
-                    EdtDispatcher.execute(() -> operationCompleted(failure, success));
+                    EdtDispatcher.execute(() -> operationCompleted(
+                            failure,
+                            capturedSuccess,
+                            retryAction));
                 }
             });
             taskExecutor.start();
         } catch (RuntimeException failure) {
-            operationCompleted(failure, success);
+            operationCompleted(failure, capturedSuccess, retryAction);
         } catch (Error failure) {
-            operationCompleted(failure, success);
+            operationCompleted(failure, capturedSuccess, retryAction);
             throw failure;
         }
     }
@@ -734,12 +741,13 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         if (!beginOperation()) {
             return;
         }
+        Runnable retryAction = () -> submitRepositoryOperation(operation, success);
         try {
-            executor.execute(() -> repositoryOperationOnExecutor(operation, success));
+            executor.execute(() -> repositoryOperationOnExecutor(operation, success, retryAction));
         } catch (RuntimeException failure) {
-            operationCompleted(failure, success);
+            operationCompleted(failure, success, retryAction);
         } catch (Error failure) {
-            operationCompleted(failure, success);
+            operationCompleted(failure, success, retryAction);
             throw failure;
         }
     }
@@ -748,13 +756,16 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     ///
     /// @param operation background mutation
     /// @param success EDT action after success
-    private void repositoryOperationOnExecutor(RepositoryOperation operation, Runnable success) {
+    private void repositoryOperationOnExecutor(
+            RepositoryOperation operation,
+            Runnable success,
+            Runnable retryAction) {
         try {
             requireBackgroundThread();
             operation.run();
             EdtDispatcher.execute(() -> operationCompleted(null, success));
         } catch (Exception | Error failure) {
-            EdtDispatcher.execute(() -> operationCompleted(failure, success));
+            EdtDispatcher.execute(() -> operationCompleted(failure, success, retryAction));
         }
     }
 
@@ -771,6 +782,18 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param failure operation failure, or `null` when successful
     /// @param success EDT action after success
     private void operationCompleted(@Nullable Throwable failure, Runnable success) {
+        operationCompleted(failure, success, null);
+    }
+
+    /// Completes one non-snapshot operation with an optional exact retry request.
+    ///
+    /// @param failure operation failure, or `null` when successful
+    /// @param success EDT action after success
+    /// @param retryAction captured retry request, or null for a terminal failure
+    private void operationCompleted(
+            @Nullable Throwable failure,
+            Runnable success,
+            @Nullable Runnable retryAction) {
         EdtDispatcher.requireEventDispatchThread();
         operationPending.set(false);
         if (closed.get()) {
@@ -778,7 +801,15 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         }
         if (failure != null) {
             updateActionState();
-            showFailure(failure);
+            if (retryAction == null) {
+                showFailure(failure);
+            } else {
+                interactions.showRetryableFailure(
+                        this,
+                        strings.operationFailedTitle(),
+                        failureDetail(failure),
+                        retryAction);
+            }
             return;
         }
         success.run();

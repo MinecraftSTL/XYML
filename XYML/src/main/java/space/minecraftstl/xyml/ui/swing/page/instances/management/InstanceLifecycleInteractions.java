@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.awt.Component;
@@ -29,7 +30,7 @@ import java.awt.Component;
 /// All methods are invoked only from the Swing event-dispatch thread. Returning `null` from an input
 /// request represents cancellation and never schedules a background mutation.
 @NotNullByDefault
-public interface InstanceLifecycleInteractions {
+public interface InstanceLifecycleInteractions extends RetryableFailureInteraction {
     /// Requests a replacement instance name from the user.
     ///
     /// @param owner native dialog owner

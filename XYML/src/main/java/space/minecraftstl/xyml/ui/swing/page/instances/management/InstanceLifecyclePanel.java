@@ -310,9 +310,9 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
                     copySaves,
                     deletionMode));
         } catch (RuntimeException failure) {
-            completeMutation(requestedKind, destinationId, deletionMode, failure);
+            completeMutation(requestedKind, destinationId, copySaves, deletionMode, failure);
         } catch (Error failure) {
-            completeMutation(requestedKind, destinationId, deletionMode, failure);
+            completeMutation(requestedKind, destinationId, copySaves, deletionMode, failure);
             throw failure;
         }
     }
@@ -345,14 +345,17 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
                                 "Instance lifecycle task stopped without a terminal failure");
                     }
                     @Nullable Throwable terminalFailure = failure;
-                    EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, terminalFailure));
+                    EdtDispatcher.execute(() -> completeMutation(
+                            kind, destinationId, copySaves, deletionMode, terminalFailure));
                 }
             });
             taskExecutor.start();
         } catch (Exception failure) {
-            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, failure));
+            EdtDispatcher.execute(() -> completeMutation(
+                    kind, destinationId, copySaves, deletionMode, failure));
         } catch (Error failure) {
-            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, deletionMode, failure));
+            EdtDispatcher.execute(() -> completeMutation(
+                    kind, destinationId, copySaves, deletionMode, failure));
             throw failure;
         }
     }
@@ -361,10 +364,13 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     ///
     /// @param kind completed mutation kind
     /// @param destinationId target destination, or `null` for deletion
+    /// @param copySaves whether duplication should include worlds
+    /// @param deletionMode selected deletion mode, or null for other mutations
     /// @param failure mutation failure, or `null` after success
     private void completeMutation(
             MutationKind kind,
             @Nullable GameInstanceID destinationId,
+            boolean copySaves,
             @Nullable DeletionMode deletionMode,
             @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
@@ -388,7 +394,11 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             }
             statusLabel.setText(failureStatus(kind));
             updateActionState();
-            showFailure(failureTitle(kind), failureDetail(failure));
+            interactions.showRetryableFailure(
+                    this,
+                    failureTitle(kind),
+                    failureDetail(failure),
+                    () -> submitMutation(kind, destinationId, copySaves, deletionMode));
             return;
         }
         statusLabel.setText(strings.successStatus());

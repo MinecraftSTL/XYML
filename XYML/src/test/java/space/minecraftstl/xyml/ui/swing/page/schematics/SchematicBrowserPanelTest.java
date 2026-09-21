@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
@@ -1180,6 +1181,16 @@ public final class SchematicBrowserPanelTest {
             confirmedTargets.add(target);
             deleteDialogHook.run();
             return deletionConfirmed;
+        }
+
+        /// Maps deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner owning panel
+        /// @param target deletion target
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, SchematicBrowserItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
         }
 
         /// Captures the exact reveal target and returns the configured completion.

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -104,6 +105,19 @@ final class SwingGameDirectoryManagementInteraction implements GameDirectoryMana
                 i18n("button.remove"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog parent component
+    /// @param detail localized or diagnostic error detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, i18n("message.failed"), detail, retryAction);
     }
 
     /// Shows one terminal failure dialog.

@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -252,6 +253,30 @@ public final class ModCatalogPanelTest {
         });
     }
 
+    /// A failed import presents one Retry action that replays the exact captured batch.
+    @Test
+    public void retriesFailedImportWithExactCapturedBatch() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        model.replaceImportFailure(new IOException("locked"));
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            @Nullable Runnable retryAction = interactions.retryAction();
+            assertNotNull(retryAction);
+            retryAction.run();
+
+            assertEquals(2, model.imports().size());
+            assertEquals(model.imports().get(0), model.imports().get(1));
+            assertEquals(
+                    model.importConflictActions().get(0),
+                    model.importConflictActions().get(1));
+            panel.close();
+        });
+    }
+
     /// A conflict discovered during background preflight returns to the same choice flow and retries.
     @Test
     public void resolvesLateImportConflictAndRetriesMutation() throws Exception {
@@ -341,6 +366,39 @@ public final class ModCatalogPanelTest {
             ModCatalogPanel panel = Objects.requireNonNull(panelReference.get());
             panel.close();
             assertNull(panel.getTransferHandler());
+        });
+    }
+
+    /// A supported drop is accepted and installed when the catalog has no visible rows.
+    @Test
+    public void importsSupportedDroppedModsIntoEmptyCatalog() throws Exception {
+        RecordingModel model = new RecordingModel(items(0));
+        RecordingInteractions interactions = new RecordingInteractions();
+        AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panelReference.set(panel);
+            assertTrue(findButton(panel, "modsImport").isEnabled());
+            assertFalse(findButton(panel, "modsSelectAll").isEnabled());
+
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    new File("empty-target.jar"),
+                    new File("notes.txt")));
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertTrue(model.imports().isEmpty());
+        });
+        SwingUtilities.invokeAndWait(() -> { });
+        SwingUtilities.invokeAndWait(() -> {
+            assertEquals(1, model.imports().size());
+            assertEquals(
+                    List.of(Path.of("empty-target.jar").toAbsolutePath().normalize()),
+                    model.imports().get(0));
+
+            ModCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            panel.close();
         });
     }
 
@@ -807,6 +865,9 @@ public final class ModCatalogPanelTest {
         /// Conflict surfaced only when an import without its decision reaches the fake backend.
         private @Nullable Path lateImportConflict;
 
+        /// One-shot asynchronous import failure.
+        private @Nullable Throwable importFailure;
+
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
 
@@ -944,6 +1005,11 @@ public final class ModCatalogPanelTest {
             @Nullable Path conflict = lateImportConflict;
             if (conflict != null && !conflictActions.containsKey(conflict)) {
                 return CompletableFuture.failedFuture(new ModImportConflictException(conflict));
+            }
+            @Nullable Throwable failure = importFailure;
+            importFailure = null;
+            if (failure != null) {
+                return CompletableFuture.failedFuture(failure);
             }
             return CompletableFuture.completedFuture(snapshot);
         }
@@ -1087,6 +1153,13 @@ public final class ModCatalogPanelTest {
             lateImportConflict = conflict.toAbsolutePath().normalize();
         }
 
+        /// Configures one one-shot asynchronous import failure.
+        ///
+        /// @param failure failure retained for the next import call
+        private void replaceImportFailure(Throwable failure) {
+            importFailure = Objects.requireNonNull(failure, "failure");
+        }
+
         /// Returns deleted keys.
         ///
         /// @return immutable keys
@@ -1130,6 +1203,9 @@ public final class ModCatalogPanelTest {
         /// Deterministic import conflict response.
         private ModImportConflictAction importConflictAction = ModImportConflictAction.REPLACE;
 
+        /// Latest captured retry request.
+        private @Nullable Runnable retryAction;
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
@@ -1156,6 +1232,26 @@ public final class ModCatalogPanelTest {
             return batchDeleteConfirmed;
         }
 
+        /// Maps the single deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param target selected Mod
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+        }
+
+        /// Maps the batch deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param selectedCount selected Mod count
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+        }
+
         /// Records one exact reveal path.
         @Override
         public CompletionStage<@Nullable Void> reveal(Path target) {
@@ -1174,6 +1270,16 @@ public final class ModCatalogPanelTest {
         @Override
         public void showFailure(Component owner, String title, String detail) {
             throw new AssertionError(title + ": " + detail);
+        }
+
+        /// Captures one explicit retry request without showing a dialog.
+        @Override
+        public void showRetryableFailure(
+                Component owner,
+                String title,
+                String detail,
+                Runnable retryAction) {
+            this.retryAction = Objects.requireNonNull(retryAction, "retryAction");
         }
 
         /// Returns latest revealed path.
@@ -1202,6 +1308,13 @@ public final class ModCatalogPanelTest {
         /// @return immutable conflict sources
         private @Unmodifiable List<Path> importConflictSources() {
             return List.copyOf(importConflictSources);
+        }
+
+        /// Returns the latest captured retry request.
+        ///
+        /// @return retry request, or null when none was presented
+        private @Nullable Runnable retryAction() {
+            return retryAction;
         }
 
         /// Replaces the deterministic conflict response.
