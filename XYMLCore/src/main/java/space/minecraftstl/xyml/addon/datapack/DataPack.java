@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.Unzipper;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
@@ -277,14 +278,19 @@ public class DataPack {
     /// @param packToDelete pack to delete
     /// @throws IOException when the pack cannot be deleted
     public void deletePack(Pack packToDelete) throws IOException {
+        deletePack(packToDelete, DeletionMode.PERMANENT);
+    }
+
+    /// Deletes one pack through the selected recycle-bin or permanent mode and publishes the retained snapshot.
+    ///
+    /// @param packToDelete pack to delete
+    /// @param mode selected deletion behavior
+    /// @throws IOException when the selected deletion fails
+    public void deletePack(Pack packToDelete, DeletionMode mode) throws IOException {
         Objects.requireNonNull(packToDelete, "packToDelete");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         synchronized (mutationLock) {
-            Path pathToDelete = packToDelete.getPath();
-            if (Files.isDirectory(pathToDelete)) {
-                FileUtils.deleteDirectory(pathToDelete);
-            } else if (Files.isRegularFile(pathToDelete)) {
-                Files.delete(pathToDelete);
-            }
+            FileUtils.deleteWithMode(packToDelete.getPath(), requestedMode);
 
             @Unmodifiable List<Pack> retained = packs.stream()
                     .filter(pack -> !pack.getId().equals(packToDelete.getId()))

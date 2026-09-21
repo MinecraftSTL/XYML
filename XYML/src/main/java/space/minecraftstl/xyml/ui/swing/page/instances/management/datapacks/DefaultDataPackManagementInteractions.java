@@ -24,6 +24,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -54,13 +57,29 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
     /// Caller-owned executor for desktop and file-system operations.
     private final Executor executor;
 
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates production native interactions for one data-pack management page.
     ///
     /// @param strings stable visible text
     /// @param executor caller-owned background executor
     public DefaultDataPackManagementInteractions(DataPackManagementStrings strings, Executor executor) {
+        this(strings, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings stable visible text
+    /// @param executor caller-owned background executor
+    /// @param trashOperations recycle-bin implementation
+    DefaultDataPackManagementInteractions(
+            DataPackManagementStrings strings,
+            Executor executor,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Shows a single-file ZIP chooser on the EDT.
@@ -106,6 +125,29 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
                 strings.deleteDialogTitle(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        List.copyOf(Objects.requireNonNull(dataPacks, "dataPacks"));
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, dataPacks) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, dataPacks);
     }
 
     /// Schedules directory creation followed by platform reveal outside the EDT.
