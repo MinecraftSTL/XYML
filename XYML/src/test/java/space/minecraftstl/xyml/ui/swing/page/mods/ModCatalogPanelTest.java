@@ -40,9 +40,11 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
@@ -142,7 +144,7 @@ public final class ModCatalogPanelTest {
             ModCatalogPanel panel = new ModCatalogPanel(
                     model, STRINGS, ACTION_STRINGS, interactions);
             panelReference.set(panel);
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
 
@@ -153,7 +155,7 @@ public final class ModCatalogPanelTest {
 
             list.setSelectedIndex(1);
             assertEquals("mod-1", model.selectedKeys().get(0));
-            assertEquals("Mod 1", findLabel(panel, "modsDetailTitle").getText());
+            assertEquals("Mod 1", findTextArea(panel, "modsDetailTitle").getText());
 
             findButton(panel, "modsEnabled").doClick();
             assertEquals("mod-1:false", model.enabledCommands().get(0));
@@ -281,7 +283,7 @@ public final class ModCatalogPanelTest {
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(
                     model, STRINGS, ACTION_STRINGS, new RecordingInteractions());
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
 
@@ -350,7 +352,7 @@ public final class ModCatalogPanelTest {
 
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
             int rangeRequestCount = model.requestedRanges().size();
@@ -428,7 +430,7 @@ public final class ModCatalogPanelTest {
             JPanel details = findComponent(panel, "modsDetails", JPanel.class);
             AbstractButton deleteButton = findButton(panel, "modsDelete");
 
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             assertTrue(
                     detailsScroll.getVerticalScrollBar().getMaximum()
@@ -440,7 +442,7 @@ public final class ModCatalogPanelTest {
                     panel.choiceList().getVerticalScrollBar().getUnitIncrement() * 2);
             assertTrue(panel.choiceList().getVerticalScrollBar().getValue() > 0);
 
-            panel.setSize(new Dimension(900, 280));
+            panel.setSize(new Dimension(1120, 280));
             panel.invalidate();
             layoutRecursively(panel);
             assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
@@ -456,7 +458,7 @@ public final class ModCatalogPanelTest {
                     details);
             assertTrue(detailsScroll.getViewport().getViewRect().intersects(deleteBounds));
 
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             panel.invalidate();
             layoutRecursively(panel);
             assertTrue(
@@ -483,12 +485,78 @@ public final class ModCatalogPanelTest {
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
 
-            panel.setSize(new Dimension(600, 420));
+            panel.setSize(new Dimension(480, 420));
             panel.invalidate();
             layoutRecursively(panel);
             assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
             assertTrue(split.getTopComponent().getWidth() <= split.getWidth());
             assertTrue(split.getBottomComponent().getWidth() <= split.getWidth());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
+    /// Wraps long values, keeps detail actions contained, and clamps a user-adjusted divider.
+    @Test
+    public void wrapsLongDetailsAndClampsTheDivider() throws Exception {
+        ModCatalogItem longItem = new ModCatalogItem(
+                "very-long-mod-key-without-natural-breaks",
+                Path.of("mods", "very-long-mod-file-name-without-natural-breaks.jar"),
+                "very-long-mod-id-without-natural-breaks",
+                "A very long Mod display title that must wrap inside the details pane",
+                "A very long description that remains readable in the scrollable description area",
+                "First Author, Second Author, Third Author, Fourth Author",
+                "26.2.1-alpha.123456789",
+                "1.21.1-neoforge-very-long-version",
+                ModLoaderType.FABRIC,
+                "very-long-mod-file-name-without-natural-breaks.jar",
+                true);
+        RecordingModel model = new RecordingModel(List.of(longItem));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panel.setSize(new Dimension(1120, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            layoutRecursively(panel);
+
+            JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
+            JScrollPane detailsScroll = findComponent(panel, "modsDetailsScroll", JScrollPane.class);
+            JTextArea title = findTextArea(panel, "modsDetailTitle");
+            JTextArea file = findTextArea(panel, "modsDetailFile");
+            AbstractButton reveal = findButton(panel, "modsReveal");
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
+            assertTrue(title.getLineWrap());
+            assertTrue(title.getWrapStyleWord());
+            assertTrue(file.getLineWrap());
+            assertFalse(file.getWrapStyleWord());
+
+            int divider = split.getDividerLocation();
+            title.setText(title.getText() + " " + "extra-long-title-segment".repeat(8));
+            layoutRecursively(panel);
+            assertEquals(divider, split.getDividerLocation());
+            assertTrue(title.getPreferredSize().height
+                    > title.getFontMetrics(title.getFont()).getHeight());
+
+            Rectangle revealBounds = SwingUtilities.convertRectangle(
+                    reveal.getParent(),
+                    reveal.getBounds(),
+                    detailsScroll.getViewport().getView());
+            assertTrue(detailsScroll.getViewport().getViewRect().contains(revealBounds));
+
+            int leftMinimum = split.getLeftComponent().getMinimumSize().width;
+            int rightMinimum = split.getRightComponent().getMinimumSize().width;
+            split.setDividerLocation(0);
+            layoutRecursively(panel);
+            assertTrue(split.getLeftComponent().getWidth() >= leftMinimum);
+            split.setDividerLocation(split.getWidth());
+            layoutRecursively(panel);
+            assertTrue(split.getRightComponent().getWidth() >= rightMinimum);
             panel.close();
         });
 
@@ -609,6 +677,15 @@ public final class ModCatalogPanelTest {
     /// @return matching button
     private static AbstractButton findButton(Component root, String name) {
         return findComponent(root, name, AbstractButton.class);
+    }
+
+    /// Finds one named text area.
+    ///
+    /// @param root component root
+    /// @param name deterministic component name
+    /// @return matching text area
+    private static JTextArea findTextArea(Component root, String name) {
+        return findComponent(root, name, JTextArea.class);
     }
 
     /// Finds one named text field.
