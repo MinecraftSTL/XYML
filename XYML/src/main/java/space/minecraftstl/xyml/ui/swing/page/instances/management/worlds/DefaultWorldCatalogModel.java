@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.SwingUtilities;
@@ -356,10 +357,20 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// @return terminal catalog snapshot
     @Override
     public CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world) {
+        return deleteWorld(world, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one serialized Core deletion using the selected mode and one shallow index refresh.
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> deleteWorld(
+            WorldCatalogItem world,
+            DeletionMode mode) {
         WorldCatalogItem selectedWorld;
+        DeletionMode requestedMode;
         Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
+            requestedMode = Objects.requireNonNull(mode, "mode");
             savesDirectory = normalizedSavesDirectory();
             requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
@@ -367,7 +378,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         }
         return startMutation(
                 strings.deletingText(),
-                (source, cancellation) -> source.delete(selectedWorld, cancellation),
+                (source, cancellation) -> source.delete(selectedWorld, requestedMode, cancellation),
                 List.of(
                         TaskResource.worldCatalog(savesDirectory),
                         TaskResource.gameWorld(selectedWorld.path())),

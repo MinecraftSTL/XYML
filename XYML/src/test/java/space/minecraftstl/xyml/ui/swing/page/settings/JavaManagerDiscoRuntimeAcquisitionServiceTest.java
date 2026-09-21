@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import org.glavo.url.WebURL;
 import kala.compress.archivers.zip.UnixStat;
 import kala.compress.archivers.zip.ZipArchiveEntry;
 import kala.compress.archivers.zip.ZipArchiveOutputStream;
@@ -376,7 +377,7 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         Files.write(source, "bounded-download".getBytes(StandardCharsets.UTF_8));
         String checksum = DigestUtils.digestToString("SHA-256", source);
         ManagedJavaArchiveDownloadTask task = new ManagedJavaArchiveDownloadTask(
-                List.of(source.toUri()),
+                List.of(WebURL.of(source.toUri())),
                 ".zip",
                 "SHA-256",
                 checksum,
@@ -394,9 +395,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         String contents = "bounded-text-response";
         Files.writeString(source, contents, StandardCharsets.UTF_8);
         long exactBytes = Files.size(source);
-        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(List.of(source.toUri()), exactBytes);
+        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(List.of(WebURL.of(source.toUri())), exactBytes);
         BoundedTextFetchTask oversizedTask = new BoundedTextFetchTask(
-                List.of(source.toUri()),
+                List.of(WebURL.of(source.toUri())),
                 exactBytes - 1L);
 
         assertTrue(exactTask.test(), () -> "Exact bounded text fetch failed: " + exactTask.getException());

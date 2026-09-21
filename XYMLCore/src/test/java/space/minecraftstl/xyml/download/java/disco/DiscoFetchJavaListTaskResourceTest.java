@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.download.java.disco;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,7 +30,7 @@ import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.platform.Platform;
 
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -73,7 +74,7 @@ final class DiscoFetchJavaListTaskResourceTest {
         ///
         /// @return empty endpoint list
         @Override
-        public List<URI> getVersionListURLs() {
+        public @Unmodifiable List<WebURL> getVersionListURLs() {
             return List.of();
         }
 
@@ -81,7 +82,7 @@ final class DiscoFetchJavaListTaskResourceTest {
         ///
         /// @param assetObjectLocation unused asset location
         @Override
-        public List<URI> getAssetObjectCandidates(String assetObjectLocation) {
+        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
             return List.of();
         }
 

@@ -17,14 +17,16 @@
  */
 package space.minecraftstl.xyml.download.neoforge;
 
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.ArtifactMalformedException;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile.Processor;
-import space.minecraftstl.xyml.download.game.GameLibrariesTask;
 import space.minecraftstl.xyml.download.game.GameInstanceJsonDownloadTask;
+import space.minecraftstl.xyml.download.game.GameLibrariesTask;
 import space.minecraftstl.xyml.game.*;
+import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -36,16 +38,15 @@ import space.minecraftstl.xyml.util.io.ChecksumMismatchException;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.CommandBuilder;
-import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.platform.SystemUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -359,7 +360,7 @@ public class NeoForgeOldInstallTask extends Task<GameInstancePatch> {
                         throw new Exception("client_mappings download info not found");
                     }
 
-                    List<URI> mappingsUri = dependencyManager.getDownloadProvider()
+                    @Unmodifiable List<WebURL> mappingsUri = dependencyManager.getDownloadProvider()
                             .injectURLWithCandidates(mappings.getUrl());
                     var mappingsTask = new FileDownloadTask(
                             mappingsUri,

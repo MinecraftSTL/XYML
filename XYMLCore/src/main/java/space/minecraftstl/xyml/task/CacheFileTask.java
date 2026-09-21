@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.task;
 
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
@@ -24,7 +25,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -40,47 +40,47 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 @NotNullByDefault
 public final class CacheFileTask extends FetchTask<Path> {
 
-    /// Creates a cache fetch from one URI string.
+    /// Creates a cache fetch from one URL string.
     ///
-    /// @param uri HTTP source URI string
-    public CacheFileTask(String uri) {
-        this(NetworkUtils.toURI(uri));
+    /// @param url HTTP source URL string
+    public CacheFileTask(String url) {
+        this(WebURL.parse(url));
     }
 
-    /// Creates a cache fetch from one HTTP URI.
+    /// Creates a cache fetch from one HTTP URL.
     ///
-    /// @param uri HTTP source URI
-    public CacheFileTask(URI uri) {
-        super(List.of(uri));
-        setName(uri.toString());
+    /// @param url HTTP source URL
+    public CacheFileTask(WebURL url) {
+        super(List.of(url));
+        setName(url.toString());
         useCacheOperationResource();
 
-        if (!NetworkUtils.isHttpUri(uri))
-            throw new IllegalArgumentException(uri.toString());
+        if (!NetworkUtils.isHttpUri(url))
+            throw new IllegalArgumentException(url.toString());
     }
 
-    /// Creates a cache fetch from ordered HTTP candidate URIs.
+    /// Creates a cache fetch from ordered HTTP candidate URLs.
     ///
-    /// @param uris candidate HTTP URIs
-    public CacheFileTask(List<URI> uris) {
-        super(uris);
-        setName(uris.get(0).toString());
+    /// @param urls candidate HTTP URLs
+    public CacheFileTask(List<WebURL> urls) {
+        super(urls);
+        setName(urls.get(0).toString());
         useCacheOperationResource();
 
-        if (!uris.stream().allMatch(NetworkUtils::isHttpUri))
-            throw new IllegalArgumentException(uris.toString());
+        if (!urls.stream().allMatch(NetworkUtils::isHttpUri))
+            throw new IllegalArgumentException(urls.toString());
     }
 
     @Override
     protected EnumCheckETag shouldCheckETag() {
         // Check cache
-        for (URI uri : uris) {
+        for (WebURL url : urls) {
             try {
-                setResult(repository.getCachedRemoteFile(uri, true));
-                LOG.info("Using cached file for " + NetworkUtils.dropQuery(uri));
+                setResult(repository.getCachedRemoteFile(url, true));
+                LOG.info("Using cached file for " + NetworkUtils.dropQuery(url));
                 return EnumCheckETag.CACHED;
             } catch (CacheRepository.CacheExpiredException e) {
-                LOG.info("Cache expired for " + NetworkUtils.dropQuery(uri));
+                LOG.info("Cache expired for " + NetworkUtils.dropQuery(url));
             } catch (IOException ignored) {
             }
         }

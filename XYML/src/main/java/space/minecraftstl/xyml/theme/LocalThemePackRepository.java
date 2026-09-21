@@ -25,6 +25,10 @@ import kala.compress.archivers.zip.ZipExtraField;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -75,6 +79,9 @@ public final class LocalThemePackRepository {
     /// Resource ceilings for archives and installed packs.
     private final ThemePackArchiveLimits limits;
 
+    /// Recycle-bin movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates a repository with launcher-default limits.
     ///
     /// @param repositoryRoot local theme-pack directory
@@ -87,8 +94,21 @@ public final class LocalThemePackRepository {
     /// @param repositoryRoot local theme-pack directory
     /// @param limits resource ceilings
     public LocalThemePackRepository(Path repositoryRoot, ThemePackArchiveLimits limits) {
+        this(repositoryRoot, limits, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates a repository with explicit resource ceilings and recycle-bin implementation.
+    ///
+    /// @param repositoryRoot local theme-pack directory
+    /// @param limits resource ceilings
+    /// @param trashOperations recycle-bin implementation
+    public LocalThemePackRepository(
+            Path repositoryRoot,
+            ThemePackArchiveLimits limits,
+            TrashOperations trashOperations) {
         this.repositoryRoot = Objects.requireNonNull(repositoryRoot, "repositoryRoot").toAbsolutePath().normalize();
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Safely imports one local zip-compatible theme pack without replacing an existing installation.
@@ -139,12 +159,28 @@ public final class LocalThemePackRepository {
             String packageId,
             Path expectedDirectory,
             Executor executor) {
+        return deleteInstalled(packageId, expectedDirectory, DeletionMode.PERMANENT, executor);
+    }
+
+    /// Deletes one exact installed package using the selected recycle-bin or permanent mode.
+    ///
+    /// @param packageId expected package identifier
+    /// @param expectedDirectory exact installation directory observed by the caller
+    /// @param mode selected deletion behavior
+    /// @param executor caller-owned non-EDT worker executor
+    /// @return completion stage resolved after the package directory is absent
+    public CompletionStage<@Nullable Void> deleteInstalled(
+            String packageId,
+            Path expectedDirectory,
+            DeletionMode mode,
+            Executor executor) {
         String id = ThemePackManifest.requirePackageId(packageId);
         Path expected = Objects.requireNonNull(expectedDirectory, "expectedDirectory")
                 .toAbsolutePath()
                 .normalize();
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         return submit(executor, () -> {
-            deleteBlocking(id, expected);
+            deleteBlocking(id, expected, requestedMode);
             return null;
         });
     }
@@ -154,7 +190,10 @@ public final class LocalThemePackRepository {
     /// @param packageId expected package identifier
     /// @param expectedDirectory expected normalized installation directory
     /// @throws IOException when the repository changed or the package is unsafe
-    private void deleteBlocking(String packageId, Path expectedDirectory) throws IOException {
+    private void deleteBlocking(
+            String packageId,
+            Path expectedDirectory,
+            DeletionMode mode) throws IOException {
         if (!Files.exists(repositoryRoot, LinkOption.NOFOLLOW_LINKS)) {
             throw new java.nio.file.NoSuchFileException(expectedDirectory.toString());
         }
@@ -170,7 +209,7 @@ public final class LocalThemePackRepository {
         if (!packageId.equals(installed.manifest().id()) || !expectedDirectory.equals(installed.directory())) {
             throw new IOException("Theme-pack installation identity changed before deletion");
         }
-        ThemePackIoSupport.deleteTree(directory);
+        FileUtils.deleteWithMode(directory, Objects.requireNonNull(mode, "mode"), trashOperations);
     }
 
     /// Performs one complete archive import on the scheduled worker.

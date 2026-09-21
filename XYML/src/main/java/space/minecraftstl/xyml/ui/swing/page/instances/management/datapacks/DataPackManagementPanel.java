@@ -24,6 +24,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -859,18 +861,20 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Schedules one captured deletion request and retains it for retry.
+    /// Schedules one captured mode-aware deletion request and retains it for retry.
     ///
     /// @param context stable selected-world context
     /// @param selected immutable selected packs
+    /// @param mode selected deletion behavior
     private void scheduleDataPacksDeletion(
             SelectedWorld context,
-            @Unmodifiable List<DataPack.Pack> selected) {
+            @Unmodifiable List<DataPack.Pack> selected,
+            DeletionMode mode) {
         @Unmodifiable List<DataPack.Pack> captured = List.copyOf(selected);
-        pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, captured);
+        pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, captured, mode);
         beginDataPackOperation();
         try {
-            executor.execute(() -> deleteDataPacksOnExecutor(context, captured));
+            executor.execute(() -> deleteDataPacksOnExecutor(context, captured, mode, true));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
@@ -966,7 +970,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Confirms and schedules permanent deletion of all selected loaded data-pack rows.
+    /// Chooses a mode and schedules deletion of all selected loaded data-pack rows.
     private void deleteSelectedDataPacks() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable SelectedWorld context = usableSelectedWorld();
@@ -974,33 +978,49 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (context == null || selected.isEmpty()) {
             return;
         }
-        boolean confirmed;
+        @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showFailure(failure);
             return;
         }
-        if (!confirmed) {
+        if (mode == null) {
             return;
         }
-        scheduleDataPacksDeletion(context, selected);
+        scheduleDataPacksDeletion(context, selected, mode);
     }
 
     /// Deletes selected packs through their owning Core data-pack manager outside the EDT.
     ///
     /// @param context stable selected-world data-pack context
     /// @param selected immutable durable selected pack rows
+    /// @param mode selected deletion behavior
+    /// @param allowFallback whether recycle-bin failure may prompt again
     private void deleteDataPacksOnExecutor(
             SelectedWorld context,
-            @Unmodifiable List<DataPack.Pack> selected) {
+            @Unmodifiable List<DataPack.Pack> selected,
+            DeletionMode mode,
+            boolean allowFallback) {
         try {
             requireBackgroundThread();
-            for (DataPack.Pack pack : selected) {
-                context.dataPack().deletePack(pack);
-            }
+            context.dataPack().deletePacks(selected, mode);
             finishDataPackOperation(context, null);
         } catch (IOException | RuntimeException failure) {
+            if (allowFallback && failure instanceof TrashMoveException) {
+                boolean[] approved = {false};
+                EdtDispatcher.executeAndWait(() -> approved[0] = interactions.confirmPermanentFallback(this, selected));
+                if (approved[0]) {
+                    pendingDataPackRetry = () -> scheduleDataPacksDeletion(
+                            context,
+                            selected,
+                            DeletionMode.PERMANENT);
+                    deleteDataPacksOnExecutor(context, selected, DeletionMode.PERMANENT, false);
+                } else {
+                    finishDataPackOperation(context, null);
+                }
+                return;
+            }
             finishDataPackOperation(context, failure);
         }
     }

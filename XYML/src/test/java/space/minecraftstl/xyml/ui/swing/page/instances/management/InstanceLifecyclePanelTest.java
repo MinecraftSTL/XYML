@@ -21,7 +21,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.FileSaver;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -29,6 +34,8 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -136,9 +143,9 @@ final class InstanceLifecyclePanelTest {
         }
     }
 
-    /// Requires confirmation for deletion and only schedules repository removal after it is granted.
+    /// Requires the configured deletion decision before scheduling repository removal.
     @Test
-    void deleteRequiresConfirmationBeforeBackgroundRemoval() throws Exception {
+    void deleteRequiresDecisionBeforeBackgroundRemoval() throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         RecordingService service = new RecordingService();
         RecordingInteractions interactions = new RecordingInteractions();
@@ -165,7 +172,7 @@ final class InstanceLifecyclePanelTest {
             assertEquals(0, service.deleteCount.get());
             assertEquals(1, completed.getCount());
 
-            interactions.deleteApproved.set(true);
+            interactions.deleteMode.set(DeletionMode.PERMANENT);
             EdtDispatcher.executeAndWait(() -> {
                 JButton delete = Objects.requireNonNull(
                         findNamed(panel, "instanceLifecycleDelete", JButton.class),
@@ -181,6 +188,48 @@ final class InstanceLifecyclePanelTest {
             assertFalse(service.mutationRanOnEdt.get());
             assertNull(service.reconciledSelection.get());
             assertEquals(0, completed.getCount());
+        } finally {
+            closePanel(panelReference.get());
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Retries permanent deletion only after the user approves the recycle-bin fallback warning.
+    @Test
+    void recycleFailureOffersPermanentFallback() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingService service = new RecordingService();
+        RecordingInteractions interactions = new RecordingInteractions();
+        interactions.deleteMode.set(DeletionMode.RECYCLE_BIN_FIRST);
+        interactions.fallbackApproved.set(true);
+        service.failNextTrashMove.set(true);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
+                    new GameInstanceID("source"),
+                    service,
+                    executor,
+                    InstanceLifecycleStrings.english(),
+                    interactions,
+                    completed::countDown)));
+            InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton delete = Objects.requireNonNull(
+                        findNamed(panel, "instanceLifecycleDelete", JButton.class),
+                        "delete button");
+                delete.doClick();
+            });
+            awaitBackgroundWork(executor);
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertEquals(List.of(DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.PERMANENT), service.deleteModes);
+            assertEquals(2, service.deleteCount.get());
+            assertEquals(1, interactions.fallbackRequests.get());
+            assertNull(service.reconciledSelection.get());
         } finally {
             closePanel(panelReference.get());
             executor.shutdownNow();
@@ -279,6 +328,12 @@ final class InstanceLifecyclePanelTest {
         /// Number of deletion requests.
         private final AtomicInteger deleteCount = new AtomicInteger();
 
+        /// Deletion modes observed in request order.
+        private final List<DeletionMode> deleteModes = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        /// Whether the next recycle-bin request should fail.
+        private final AtomicBoolean failNextTrashMove = new AtomicBoolean();
+
         /// Whether a blocking mutation accidentally ran on the Swing EDT.
         private final AtomicBoolean mutationRanOnEdt = new AtomicBoolean();
 
@@ -333,6 +388,25 @@ final class InstanceLifecyclePanelTest {
             deleteCount.incrementAndGet();
         }
 
+        /// Executes one exact deletion mode and optionally simulates one recycle-bin failure.
+        ///
+        /// @param sourceId source identifier
+        /// @param mode selected deletion behavior
+        /// @return background deletion task
+        @Override
+        public Task<@Nullable Void> deleteTask(GameInstanceID sourceId, DeletionMode mode) {
+            return Task.runAsync("Delete game instance", Schedulers.io(), () -> {
+                mutationRanOnEdt.compareAndSet(false, SwingUtilities.isEventDispatchThread());
+                deleteCount.incrementAndGet();
+                deleteModes.add(mode);
+                if (mode == DeletionMode.RECYCLE_BIN_FIRST && failNextTrashMove.compareAndSet(true, false)) {
+                    throw new TrashMoveException(List.of(Path.of(sourceId.id())));
+                }
+                EdtDispatcher.executeAndWait(() -> reconcileSelection(null));
+                FileSaver.waitForAllSaves();
+            });
+        }
+
         /// Records selection reconciliation and asserts it occurs on the EDT.
         ///
         /// @param preferredId preferred selection, or `null` after deletion
@@ -352,8 +426,14 @@ final class InstanceLifecyclePanelTest {
         /// Requested duplicate data, or `null` to simulate cancellation.
         private final AtomicReference<@Nullable InstanceLifecycleDuplicateRequest> duplicateRequest = new AtomicReference<>();
 
-        /// Whether deletion should be approved.
-        private final AtomicBoolean deleteApproved = new AtomicBoolean();
+        /// Configured deletion decision, or null for cancellation.
+        private final AtomicReference<@Nullable DeletionMode> deleteMode = new AtomicReference<>();
+
+        /// Whether permanent deletion fallback should be approved.
+        private final AtomicBoolean fallbackApproved = new AtomicBoolean();
+
+        /// Number of permanent-deletion fallback prompts.
+        private final AtomicInteger fallbackRequests = new AtomicInteger();
 
         /// Latest shown failure detail, or `null` when no failure was shown.
         private final AtomicReference<@Nullable String> failureDetail = new AtomicReference<>();
@@ -380,14 +460,25 @@ final class InstanceLifecyclePanelTest {
             return duplicateRequest.get();
         }
 
-        /// Returns the configured deletion approval.
+        /// Returns the configured deletion decision.
         ///
         /// @param owner unused dialog owner
         /// @param sourceId unused source identifier
-        /// @return configured deletion approval
+        /// @return configured deletion decision, or null
         @Override
-        public boolean confirmDelete(Component owner, GameInstanceID sourceId) {
-            return deleteApproved.get();
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, GameInstanceID sourceId) {
+            return deleteMode.get();
+        }
+
+        /// Returns the configured permanent-deletion fallback approval.
+        ///
+        /// @param owner unused dialog owner
+        /// @param sourceId unused source identifier
+        /// @return whether fallback deletion is approved
+        @Override
+        public boolean confirmPermanentFallback(Component owner, GameInstanceID sourceId) {
+            fallbackRequests.incrementAndGet();
+            return fallbackApproved.get();
         }
 
         /// Records one failure detail rather than opening a native dialog.

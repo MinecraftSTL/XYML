@@ -22,6 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -48,6 +50,31 @@ public interface DataPackManagementInteractions extends RetryableFailureInteract
     /// @param dataPacks selected durable data-pack entries
     /// @return whether the user explicitly accepted deletion
     boolean confirmDelete(Component owner, @Unmodifiable List<DataPack.Pack> dataPacks);
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param dataPacks selected durable data-pack entries
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteMode(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, dataPacks) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a data pack could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param dataPacks selected durable data-pack entries
+    /// @return whether permanent deletion was approved
+    default boolean confirmPermanentFallback(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        return confirmDelete(owner, dataPacks);
+    }
 
     /// Schedules creation and platform opening of one local directory outside the EDT.
     ///

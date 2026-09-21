@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.cleanroom.CleanroomVersionList;
 import space.minecraftstl.xyml.download.fabric.FabricAPIVersionList;
 import space.minecraftstl.xyml.download.fabric.FabricVersionList;
@@ -29,9 +30,8 @@ import space.minecraftstl.xyml.download.neoforge.NeoForgeOfficialVersionList;
 import space.minecraftstl.xyml.download.optifine.OptiFineBMCLVersionList;
 import space.minecraftstl.xyml.download.quilt.QuiltAPIVersionList;
 import space.minecraftstl.xyml.download.quilt.QuiltVersionList;
-import space.minecraftstl.xyml.util.io.NetworkUtils;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -71,13 +71,13 @@ public class MojangDownloadProvider implements DownloadProvider {
     }
 
     @Override
-    public List<URI> getVersionListURLs() {
-        return List.of(URI.create("https://piston-meta.mojang.com/mc/game/version_manifest.json"));
+    public @Unmodifiable List<WebURL> getVersionListURLs() {
+        return List.of(WebURL.parse("https://piston-meta.mojang.com/mc/game/version_manifest.json"));
     }
 
     @Override
-    public List<URI> getAssetObjectCandidates(String assetObjectLocation) {
-        return List.of(NetworkUtils.toURI("https://resources.download.minecraft.net/" + assetObjectLocation));
+    public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
+        return List.of(WebURL.parse("https://resources.download.minecraft.net/" + assetObjectLocation));
     }
 
     @Override

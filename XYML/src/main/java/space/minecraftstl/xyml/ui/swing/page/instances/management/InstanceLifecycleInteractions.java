@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.awt.Component;
 
@@ -44,12 +45,19 @@ public interface InstanceLifecycleInteractions extends RetryableFailureInteracti
     /// @return confirmed duplicate request, or `null` after cancellation
     @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, GameInstanceID sourceId);
 
-    /// Asks for explicit approval before deleting one instance.
+    /// Chooses recycle-bin-first deletion without a warning or warns before permanent deletion.
     ///
     /// @param owner native dialog owner
     /// @param sourceId current instance identifier
-    /// @return whether deletion is approved
-    boolean confirmDelete(Component owner, GameInstanceID sourceId);
+    /// @return selected deletion mode, or null when deletion was cancelled
+    @Nullable DeletionMode chooseDeleteMode(Component owner, GameInstanceID sourceId);
+
+    /// Shows the original deletion warning after a recycle-bin move failed.
+    ///
+    /// @param owner native dialog owner
+    /// @param sourceId current instance identifier
+    /// @return whether permanent deletion was approved
+    boolean confirmPermanentFallback(Component owner, GameInstanceID sourceId);
 
     /// Displays one terminal lifecycle failure.
     ///

@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -1229,6 +1230,26 @@ public final class ModCatalogPanelTest {
         public boolean confirmDeleteSelected(Component owner, int selectedCount) {
             batchDeleteCounts.add(selectedCount);
             return batchDeleteConfirmed;
+        }
+
+        /// Maps the single deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param target selected Mod
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+        }
+
+        /// Maps the batch deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param selectedCount selected Mod count
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
         }
 
         /// Records one exact reveal path.

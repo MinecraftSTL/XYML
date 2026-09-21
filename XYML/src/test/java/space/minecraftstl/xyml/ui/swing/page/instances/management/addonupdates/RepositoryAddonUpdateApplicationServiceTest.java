@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates;
 
+import org.glavo.url.WebURL;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -883,7 +884,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         ///
         /// @return empty endpoint list
         @Override
-        public @Unmodifiable List<URI> getVersionListURLs() {
+        public @Unmodifiable List<WebURL> getVersionListURLs() {
             return List.of();
         }
 
@@ -892,7 +893,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         /// @param assetObjectLocation ignored asset location
         /// @return empty candidate list
         @Override
-        public @Unmodifiable List<URI> getAssetObjectCandidates(String assetObjectLocation) {
+        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
             return List.of();
         }
 
@@ -911,8 +912,8 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         /// @param baseURL original remote artifact URL
         /// @return immutable candidate list
         @Override
-        public @Unmodifiable List<URI> injectURLWithCandidates(String baseURL) {
-            return List.of(URI.create(injectURL(baseURL)), URI.create(baseURL));
+        public @Unmodifiable List<WebURL> injectURLWithCandidates(String baseURL) {
+            return List.of(WebURL.parse(injectURL(baseURL)), WebURL.parse(baseURL));
         }
 
         /// Rejects metadata version-list access outside this service's scope.
@@ -963,7 +964,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         /// @return stopped deterministic staged download task
         @Override
         public Task<@Nullable Void> create(
-                @Unmodifiable List<URI> candidates,
+                @Unmodifiable List<WebURL> candidates,
                 Path stagingPath,
                 Path validationPath,
                 @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
@@ -1021,7 +1022,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         /// @return stopped blocking staged download task
         @Override
         public Task<@Nullable Void> create(
-                @Unmodifiable List<URI> candidates,
+                @Unmodifiable List<WebURL> candidates,
                 Path stagingPath,
                 Path validationPath,
                 @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
@@ -1076,7 +1077,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
         /// @return stopped blocking staged download task
         @Override
         public Task<@Nullable Void> create(
-                @Unmodifiable List<URI> candidates,
+                @Unmodifiable List<WebURL> candidates,
                 Path stagingPath,
                 Path validationPath,
                 @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
@@ -1148,7 +1149,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
     /// @param downloadName progress display name
     @NotNullByDefault
     private record DownloadRequest(
-            @Unmodifiable List<URI> candidates,
+            @Unmodifiable List<WebURL> candidates,
             Path stagingPath,
             Path validationPath,
             @Nullable FileDownloadTask.IntegrityCheck integrityCheck,

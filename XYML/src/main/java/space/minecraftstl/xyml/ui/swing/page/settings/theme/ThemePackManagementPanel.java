@@ -33,6 +33,8 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -488,9 +490,44 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     /// Confirms and deletes the complete installed package containing the current selection.
     private void deleteSelected() {
         @Nullable ThemePackItem selected = choiceList.getSelectedValue();
-        if (selected != null && model.canDelete(selected) && interactions.confirmDelete(this, selected)) {
-            model.delete(selected);
+        if (selected == null || !model.canDelete(selected)) {
+            return;
         }
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
+        if (mode != null) {
+            observeDeletion(selected, mode, true);
+        }
+    }
+
+    /// Starts one theme deletion and retries permanently only after the original warning is approved.
+    ///
+    /// @param selected selected installed item
+    /// @param mode selected deletion behavior
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void observeDeletion(ThemePackItem selected, DeletionMode mode, boolean allowFallback) {
+        model.delete(selected, mode).whenComplete((@Nullable ThemePackManagementSnapshot ignored, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> {
+                    if (failure == null) {
+                        return;
+                    }
+                    Throwable resolved = unwrapFailure(failure);
+                    if (allowFallback && resolved instanceof TrashMoveException
+                            && interactions.confirmPermanentFallback(this, selected)) {
+                        observeDeletion(selected, DeletionMode.PERMANENT, false);
+                    }
+                }));
+    }
+
+    /// Unwraps asynchronous completion wrappers before classifying the failure.
+    ///
+    /// @param failure observed failure
+    /// @return original failure
+    private static Throwable unwrapFailure(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /// Updates command state after one settled list selection event.

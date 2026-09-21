@@ -24,6 +24,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -56,6 +59,9 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
     /// Caller-owned executor for file-system and desktop work.
     private final Executor executor;
 
+    /// Platform recycle-bin capability and movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates production interactions.
     ///
     /// @param strings localized action text
@@ -63,8 +69,21 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
     public DefaultModCatalogInteractions(
             ModCatalogActionStrings strings,
             Executor executor) {
+        this(strings, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates production interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings localized action text
+    /// @param executor caller-owned background executor
+    /// @param trashOperations recycle-bin implementation
+    DefaultModCatalogInteractions(
+            ModCatalogActionStrings strings,
+            Executor executor,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Opens a JAR/ZIP/LITEMOD multi-selection chooser on the EDT.
@@ -125,6 +144,59 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
     @Override
     public boolean confirmDelete(Component owner, ModCatalogItem target) {
         EdtDispatcher.requireEventDispatchThread();
+        return confirmSingleDelete(owner, target);
+    }
+
+    /// Shows the legacy generic permanent-delete confirmation for a selected batch on the EDT.
+    @Override
+    public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmSelectedDelete(owner, selectedCount);
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(target, "target");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmSingleDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Chooses recycle-bin-first batch deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (trashOperations.isSupported()) {
+            requirePositiveSelectionCount(selectedCount);
+            Objects.requireNonNull(owner, "owner");
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmSelectedDelete(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original single-target warning after a recycle-bin failure.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, ModCatalogItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmSingleDelete(owner, target);
+    }
+
+    /// Shows the original batch warning after a recycle-bin failure.
+    @Override
+    public boolean confirmPermanentFallbackSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmSelectedDelete(owner, selectedCount);
+    }
+
+    /// Shows one single-target permanent deletion warning.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact loaded target
+    /// @return whether permanent deletion was approved
+    private boolean confirmSingleDelete(Component owner, ModCatalogItem target) {
         String message = strings.deleteConfirmationFormat().formatted(
                 Objects.requireNonNull(target, "target").fileName());
         return JOptionPane.showConfirmDialog(
@@ -135,20 +207,28 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
 
-    /// Shows the legacy generic permanent-delete confirmation for a selected batch on the EDT.
-    @Override
-    public boolean confirmDeleteSelected(Component owner, int selectedCount) {
-        EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(owner, "owner");
-        if (selectedCount <= 0) {
-            throw new IllegalArgumentException("selectedCount must be positive");
-        }
+    /// Shows one generic batch permanent deletion warning.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected target count
+    /// @return whether permanent batch deletion was approved
+    private boolean confirmSelectedDelete(Component owner, int selectedCount) {
+        requirePositiveSelectionCount(selectedCount);
         return JOptionPane.showConfirmDialog(
-                owner,
+                Objects.requireNonNull(owner, "owner"),
                 i18n("button.remove.confirm"),
                 i18n("button.remove"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Validates a positive batch selection count.
+    ///
+    /// @param selectedCount candidate count
+    private static void requirePositiveSelectionCount(int selectedCount) {
+        if (selectedCount <= 0) {
+            throw new IllegalArgumentException("selectedCount must be positive");
+        }
     }
 
     /// Submits exact file reveal to the background executor.

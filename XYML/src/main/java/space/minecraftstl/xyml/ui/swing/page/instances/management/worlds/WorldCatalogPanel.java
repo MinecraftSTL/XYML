@@ -35,7 +35,9 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -82,11 +84,12 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.function.Supplier;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -1589,12 +1592,93 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Confirms and delegates permanent deletion for one readable selected row.
+    /// Chooses a deletion mode and delegates one readable selected row.
     private void deleteSelectedWorld() {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
-        if (selected != null && selected.readable() && interactions.confirmDelete(this, selected)) {
-            observeRetryable(() -> model.deleteWorld(selected));
+        if (selected == null || !selected.readable()) {
+            return;
         }
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
+        if (mode != null) {
+            startDeletion(
+                    () -> model.deleteWorld(selected, mode),
+                    () -> model.deleteWorld(selected, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallback(this, selected),
+                    true);
+        }
+    }
+
+    /// Observes one world deletion and preserves recycle-bin fallback plus exact retry behavior.
+    ///
+    /// @param operation initial deletion operation
+    /// @param permanentRetry permanent retry operation
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void startDeletion(
+            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
+            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        Supplier<CompletionStage<WorldCatalogSnapshot>> capturedOperation =
+                Objects.requireNonNull(operation, "operation");
+        CompletionStage<WorldCatalogSnapshot> stage;
+        try {
+            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+        } catch (RuntimeException failure) {
+            handleDeletionFailure(capturedOperation, permanentRetry, confirmFallback, allowFallback, failure);
+            return;
+        }
+        stage.whenComplete((@Nullable WorldCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+            if (failure != null) {
+                Throwable resolved = unwrapFailure(failure);
+                EdtDispatcher.execute(() -> handleDeletionFailure(
+                        capturedOperation,
+                        permanentRetry,
+                        confirmFallback,
+                        allowFallback,
+                        resolved));
+            }
+        });
+    }
+
+    /// Handles one deletion failure on the EDT while preserving fallback and retry.
+    ///
+    /// @param operation exact deletion retry operation
+    /// @param permanentRetry permanent retry operation
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// @param failure original deletion failure
+    private void handleDeletionFailure(
+            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
+            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback,
+            Throwable failure) {
+        if (closed.get()) {
+            return;
+        }
+        if (allowFallback && failure instanceof TrashMoveException) {
+            if (confirmFallback.getAsBoolean()) {
+                startDeletion(permanentRetry, permanentRetry, confirmFallback, false);
+            }
+            return;
+        }
+        interactions.showRetryableFailure(
+                this,
+                strings.failureTitle(),
+                failureDetail(failure),
+                () -> startDeletion(operation, permanentRetry, confirmFallback, allowFallback));
+    }
+
+    /// Unwraps one completion exception when present.
+    ///
+    /// @param failure observed operation failure
+    /// @return original failure
+    private static Throwable unwrapFailure(Throwable failure) {
+        if (failure instanceof CompletionException && failure.getCause() != null) {
+            return failure.getCause();
+        }
+        return failure;
     }
 
     /// Invokes one local write request and captures the same supplier for retry.

@@ -24,6 +24,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -74,6 +77,9 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
     /// Injectable AWT desktop boundary.
     private final DesktopActions desktopActions;
 
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates production interactions with explicit localized text and background executor.
     ///
     /// @param strings localized action presentation
@@ -95,10 +101,27 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
             Executor executor,
             DialogActions dialogActions,
             DesktopActions desktopActions) {
+        this(strings, executor, dialogActions, desktopActions, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with deterministic dialog, desktop, and recycle-bin boundaries.
+    ///
+    /// @param strings localized action presentation
+    /// @param executor caller-owned executor suitable for desktop calls
+    /// @param dialogActions dialog boundary
+    /// @param desktopActions desktop boundary
+    /// @param trashOperations recycle-bin implementation
+    DefaultSchematicBrowserInteractions(
+            SchematicBrowserActionStrings strings,
+            Executor executor,
+            DialogActions dialogActions,
+            DesktopActions desktopActions,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.dialogActions = Objects.requireNonNull(dialogActions, "dialogActions");
         this.desktopActions = Objects.requireNonNull(desktopActions, "desktopActions");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Opens the configured multi-selection Litematic chooser on the event-dispatch thread.
@@ -149,6 +172,25 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
                 strings.deleteAction(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, SchematicBrowserItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(target, "target");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, SchematicBrowserItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, target);
     }
 
     /// Submits a platform reveal without blocking the caller.

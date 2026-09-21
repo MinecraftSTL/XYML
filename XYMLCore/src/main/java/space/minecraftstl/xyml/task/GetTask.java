@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.task;
 
 import com.google.gson.reflect.TypeToken;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
@@ -26,7 +27,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,25 +42,25 @@ import java.util.List;
 @NotNullByDefault
 public final class GetTask extends FetchTask<String> {
 
-    /// Creates a text fetch from one URI string.
+    /// Creates a text fetch from one URL string.
     ///
-    /// @param uri source URI string
-    public GetTask(String uri) {
-        this(NetworkUtils.toURI(uri));
+    /// @param url source URL string
+    public GetTask(String url) {
+        this(WebURL.parse(url));
     }
 
-    /// Creates a text fetch from one URI.
+    /// Creates a text fetch from one URL.
     ///
-    /// @param url source URI
-    public GetTask(URI url) {
+    /// @param url source URL
+    public GetTask(WebURL url) {
         this(List.of(url));
         setName(url.toString());
     }
 
-    /// Creates a text fetch from ordered candidate URIs.
+    /// Creates a text fetch from ordered candidate URLs.
     ///
-    /// @param url immutable candidate URI list
-    public GetTask(List<URI> url) {
+    /// @param url immutable candidate URL list
+    public GetTask(List<WebURL> url) {
         super(url);
         setName(url.get(0).toString());
         useCacheOperationResource();

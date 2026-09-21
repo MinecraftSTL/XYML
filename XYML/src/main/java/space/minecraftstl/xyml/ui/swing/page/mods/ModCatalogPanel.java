@@ -35,6 +35,8 @@ import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -73,6 +75,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
@@ -971,19 +975,27 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Confirms and permanently deletes the exact selected stable-key batch.
+    /// Chooses a mode and deletes the exact selected stable-key batch.
     private void deleteSelectedMods() {
         @Nullable ModCatalogSnapshot snapshot = currentWritableSnapshot();
         if (snapshot == null) {
             return;
         }
         @Unmodifiable List<String> selectedKeys = selectedLocalKeys();
-        if (selectedKeys.isEmpty()
-                || !interactions.confirmDeleteSelected(this, selectedKeys.size())) {
+        if (selectedKeys.isEmpty()) {
+            return;
+        }
+        int selectedCount = selectedKeys.size();
+        @Nullable DeletionMode mode = interactions.chooseDeleteModeSelected(this, selectedCount);
+        if (mode == null) {
             return;
         }
         if (isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
-            submitModsDeletion(selectedKeys);
+            observeDeletion(
+                    () -> model.deleteMods(selectedKeys, mode),
+                    mode,
+                    () -> model.deleteMods(selectedKeys, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallbackSelected(this, selectedCount));
         }
     }
 
@@ -1106,12 +1118,21 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Confirms and submits permanent deletion of the exact selected Mod.
+    /// Chooses a mode and deletes the exact selected Mod.
     private void deleteSelected() {
         @Nullable ModCatalogItem selected = singleSelectedItem();
-        if (selected != null && interactions.confirmDelete(this, selected)) {
-            submitModDeletion(selected.localKey());
+        if (selected == null) {
+            return;
         }
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
+        if (mode == null) {
+            return;
+        }
+        observeDeletion(
+                () -> model.deleteMod(selected.localKey(), mode),
+                mode,
+                () -> model.deleteMod(selected.localKey(), DeletionMode.PERMANENT),
+                () -> interactions.confirmPermanentFallback(this, selected));
     }
 
     /// Submits one enabled-state change from the checkbox.
@@ -1136,26 +1157,6 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 () -> submitModsEnabled(capturedKeys, enabled));
     }
 
-    /// Submits one exact deletion batch and captures the same request for retry.
-    ///
-    /// @param localKeys immutable stable keys
-    private void submitModsDeletion(@Unmodifiable List<String> localKeys) {
-        @Unmodifiable List<String> capturedKeys = List.copyOf(localKeys);
-        observeFailure(
-                model.deleteMods(capturedKeys),
-                () -> submitModsDeletion(capturedKeys));
-    }
-
-    /// Submits one exact single deletion and captures the same request for retry.
-    ///
-    /// @param localKey stable target key
-    private void submitModDeletion(String localKey) {
-        String capturedKey = Objects.requireNonNull(localKey, "localKey");
-        observeFailure(
-                model.deleteMod(capturedKey),
-                () -> submitModDeletion(capturedKey));
-    }
-
     /// Submits one exact enabled-state change and captures the same request for retry.
     ///
     /// @param localKey stable target key
@@ -1165,6 +1166,86 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         observeFailure(
                 model.setModEnabled(capturedKey, enabled),
                 () -> submitModEnabled(capturedKey, enabled));
+    }
+
+    /// Observes one deletion and preserves recycle-bin fallback plus exact retry behavior.
+    ///
+    /// @param operation initial deletion operation
+    /// @param mode mode used by the initial operation
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback fallback confirmation
+    private void observeDeletion(
+            Supplier<CompletionStage<?>> operation,
+            DeletionMode mode,
+            Supplier<CompletionStage<?>> permanentRetry,
+            BooleanSupplier confirmFallback) {
+        Supplier<CompletionStage<?>> capturedOperation = Objects.requireNonNull(operation, "operation");
+        CompletionStage<?> stage;
+        try {
+            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+        } catch (RuntimeException failure) {
+            handleDeletionFailure(capturedOperation, mode, permanentRetry, confirmFallback, failure);
+            return;
+        }
+        stage.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
+            if (failure != null) {
+                Throwable cause = unwrapFailure(failure);
+                EdtDispatcher.execute(() -> handleDeletionFailure(
+                        capturedOperation,
+                        mode,
+                        permanentRetry,
+                        confirmFallback,
+                        cause));
+            }
+        });
+    }
+
+    /// Handles one deletion failure after restoring the Swing failure boundary.
+    ///
+    /// @param operation exact deletion retry operation
+    /// @param mode mode used by the failed operation
+    /// @param permanentRetry permanent deletion retry
+    /// @param confirmFallback fallback confirmation
+    /// @param failure original deletion failure
+    private void handleDeletionFailure(
+            Supplier<CompletionStage<?>> operation,
+            DeletionMode mode,
+            Supplier<CompletionStage<?>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            Throwable failure) {
+        if (closed) {
+            return;
+        }
+        if (mode == DeletionMode.RECYCLE_BIN_FIRST && hasTrashMoveFailure(failure)) {
+            if (confirmFallback.getAsBoolean()) {
+                observeDeletion(
+                        permanentRetry,
+                        DeletionMode.PERMANENT,
+                        permanentRetry,
+                        confirmFallback);
+            }
+            return;
+        }
+        interactions.showRetryableFailure(
+                this,
+                actionStrings.errorTitle(),
+                failureDetail(failure),
+                () -> observeDeletion(operation, mode, permanentRetry, confirmFallback));
+    }
+
+    /// Detects a recycle-bin failure through asynchronous wrappers.
+    ///
+    /// @param failure unwrapped operation failure
+    /// @return whether a [TrashMoveException] exists in the cause chain
+    private static boolean hasTrashMoveFailure(Throwable failure) {
+        @Nullable Throwable current = failure;
+        while (current != null) {
+            if (current instanceof TrashMoveException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /// Shows asynchronous model or desktop failures exactly once while open.

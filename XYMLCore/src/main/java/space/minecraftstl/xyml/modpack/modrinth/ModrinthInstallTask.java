@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.modrinth;
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -34,7 +35,6 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -172,7 +172,7 @@ public class ModrinthInstallTask extends Task<Void> {
         dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), subDirectories, any -> true, config).withStage("xyml.modpack"));
         dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), subDirectories, manifest, ModrinthModpackProvider.INSTANCE, manifest.getName(), manifest.getVersionId(), repository.getModpackConfiguration(instanceId)).withStage("xyml.modpack"));
 
-        @Nullable URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
+        @Nullable WebURL iconUri = NetworkUtils.toWebURLOrNull(iconUrl);
         if (iconUri != null) {
             String ext = FileUtils.getExtension(StringUtils.substringAfter(iconUri.getPath(), '/')).toLowerCase(Locale.ROOT);
             if (Modpack.SUPPORTED_ICON_EXTS.contains(ext)) {

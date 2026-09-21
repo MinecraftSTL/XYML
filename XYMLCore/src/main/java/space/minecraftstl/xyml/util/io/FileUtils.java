@@ -505,23 +505,43 @@ public final class FileUtils {
         Objects.requireNonNull(paths, "paths");
         DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         TrashOperations trash = Objects.requireNonNull(trashOperations, "trashOperations");
-        if (requestedMode == DeletionMode.PERMANENT) {
-            for (Path path : paths) {
-                deleteWithMode(path, requestedMode, trash);
-            }
-            return;
-        }
-
         List<Path> failedPaths = new ArrayList<>();
+        List<IOException> failures = new ArrayList<>();
         for (Path path : paths) {
             try {
                 deleteWithMode(path, requestedMode, trash);
             } catch (TrashMoveException exception) {
                 failedPaths.addAll(exception.failedPaths());
+                failures.add(exception);
+            } catch (IOException exception) {
+                failedPaths.add(path);
+                failures.add(exception);
             }
         }
-        if (!failedPaths.isEmpty()) {
-            throw new TrashMoveException(failedPaths);
+        if (failedPaths.isEmpty()) {
+            return;
+        }
+        if (requestedMode == DeletionMode.RECYCLE_BIN_FIRST) {
+            TrashMoveException aggregate = new TrashMoveException(failedPaths);
+            addSuppressedFailures(aggregate, failures);
+            throw aggregate;
+        }
+        DeletionBatchException aggregate = new DeletionBatchException(failedPaths);
+        addSuppressedFailures(aggregate, failures);
+        throw aggregate;
+    }
+
+    /// Adds individual batch failures without changing the aggregate public contract.
+    ///
+    /// @param aggregate aggregate failure
+    /// @param failures individual failures
+    private static void addSuppressedFailures(
+            IOException aggregate,
+            List<? extends IOException> failures) {
+        for (IOException failure : failures) {
+            if (failure != aggregate) {
+                aggregate.addSuppressed(failure);
+            }
         }
     }
 

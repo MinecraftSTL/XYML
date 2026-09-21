@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.FileSaver;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -321,12 +322,23 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @return unstarted task covering deletion and terminal repository refresh
     @Override
     public Task<@Nullable Void> deleteTask(GameInstanceID sourceId) {
+        return deleteTask(sourceId, DeletionMode.PERMANENT);
+    }
+
+    /// Creates a deletion task that uses the exact recycle-bin or permanent mode chosen by the caller.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param mode selected deletion behavior
+    /// @return unstarted task covering deletion and terminal repository refresh
+    @Override
+    public Task<@Nullable Void> deleteTask(GameInstanceID sourceId, DeletionMode mode) {
         GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         PathSnapshot paths = paths(source, source);
         AtomicBoolean committed = new AtomicBoolean();
         Task<@Nullable Void> mutation = Task.runAsync("Delete game instance", Schedulers.io(), () -> {
             repository.withStableBaseDirectory(paths.repositoryDirectory(), () -> {
-                deleteWithoutRefresh(source);
+                deleteWithoutRefresh(source, requestedMode);
                 committed.set(true);
             });
         })
@@ -344,6 +356,21 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
         if (!repository.removeInstanceFromDiskWithoutRefresh(source)) {
             throw new IOException("The instance could not be deleted");
+        }
+    }
+
+    /// Removes an existing instance without repository refresh using the selected deletion mode.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param mode selected deletion behavior
+    /// @throws IOException when the selected removal fails
+    public void deleteWithoutRefresh(GameInstanceID sourceId, DeletionMode mode) throws IOException {
+        GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
+        if (requestedMode == DeletionMode.RECYCLE_BIN_FIRST) {
+            repository.removeInstanceToTrashWithoutRefresh(source);
+        } else {
+            repository.removeInstancePermanentlyWithoutRefresh(source);
         }
     }
 

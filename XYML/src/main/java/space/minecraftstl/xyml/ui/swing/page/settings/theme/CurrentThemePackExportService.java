@@ -41,6 +41,7 @@ import space.minecraftstl.xyml.util.io.NetworkUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import org.glavo.url.WebURL;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -403,7 +404,7 @@ public final class CurrentThemePackExportService {
             throw new IOException("Current network background URL must use HTTP or HTTPS");
         }
         long maximumBytes = ThemePackArchiveLimits.launcherDefaults().maximumSingleAssetBytes();
-        URLConnection opened = NetworkUtils.createConnection(uri);
+        URLConnection opened = NetworkUtils.createConnection(WebURL.of(uri));
         URLConnection connection = opened instanceof HttpURLConnection http
                 ? NetworkUtils.resolveConnection(http)
                 : opened;

@@ -25,7 +25,7 @@ import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.task.Task;
 
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -132,7 +132,7 @@ final class DownloadProviderGameLoaderCatalogSourceTest {
         ///
         /// @return empty immutable URL list
         @Override
-        public @Unmodifiable List<URI> getVersionListURLs() {
+        public @Unmodifiable List<WebURL> getVersionListURLs() {
             return List.of();
         }
 
@@ -141,7 +141,7 @@ final class DownloadProviderGameLoaderCatalogSourceTest {
         /// @param assetObjectLocation unused asset location
         /// @return empty immutable URL list
         @Override
-        public @Unmodifiable List<URI> getAssetObjectCandidates(String assetObjectLocation) {
+        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
             return List.of();
         }
 

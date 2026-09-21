@@ -30,7 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,7 +60,7 @@ public final class FetchTaskTest {
 
         try (TestHttpServer server = TestHttpServer.start(exchange -> sendBytes(exchange, 200, data))) {
             FileDownloadTask task = new FileDownloadTask(
-                    server.uri(),
+                    server.url(),
                     target,
                     new FileDownloadTask.IntegrityCheck("SHA-1", "0000000000000000000000000000000000000000")
             );
@@ -100,7 +100,7 @@ public final class FetchTaskTest {
             }
         })) {
             Path target = tempDir.resolve("target.bin");
-            FileDownloadTask task = new FileDownloadTask(server.uri(), target);
+            FileDownloadTask task = new FileDownloadTask(server.url(), target);
             task.setCacheRepository(newRepository(tempDir));
             task.setRetry(3);
 
@@ -140,7 +140,7 @@ public final class FetchTaskTest {
             }
         })) {
             Path target = tempDir.resolve("target.bin");
-            FileDownloadTask task = new FileDownloadTask(server.uri(), target);
+            FileDownloadTask task = new FileDownloadTask(server.url(), target);
             task.setCacheRepository(newRepository(tempDir));
             task.setRetry(3);
 
@@ -187,7 +187,7 @@ public final class FetchTaskTest {
             }
         })) {
             Path target = tempDir.resolve("target.bin");
-            FileDownloadTask task = new FileDownloadTask(server.uri(), target);
+            FileDownloadTask task = new FileDownloadTask(server.url(), target);
             task.setCacheRepository(newRepository(tempDir));
             task.setRetry(3);
 
@@ -229,7 +229,7 @@ public final class FetchTaskTest {
                 }
             }
         })) {
-            TextFetchTask task = new TextFetchTask(server.uri());
+            TextFetchTask task = new TextFetchTask(server.url());
             task.setCacheRepository(newRepository(tempDir));
             task.setRetry(2);
 
@@ -241,9 +241,9 @@ public final class FetchTaskTest {
 
     /// Text fetch task that avoids JavaFX progress updates in isolated unit tests.
     private static final class TextFetchTask extends FetchTask<String> {
-        /// Creates a text fetch task for one URI.
-        TextFetchTask(URI uri) {
-            super(List.of(uri));
+        /// Creates a text fetch task for one URL.
+        TextFetchTask(WebURL url) {
+            super(List.of(url));
         }
 
         @Override
@@ -316,9 +316,9 @@ public final class FetchTaskTest {
             return new TestHttpServer(server);
         }
 
-        /// Returns the file endpoint URI.
-        URI uri() {
-            return URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/file");
+        /// Returns the file endpoint URL.
+        WebURL url() {
+            return WebURL.parse("http://127.0.0.1:" + server.getAddress().getPort() + "/file");
         }
 
         @Override

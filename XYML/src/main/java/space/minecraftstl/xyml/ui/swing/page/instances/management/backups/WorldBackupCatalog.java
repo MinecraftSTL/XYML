@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
@@ -54,6 +55,17 @@ public interface WorldBackupCatalog {
     /// @param archive backup archive selected by the user
     /// @return terminal immutable shallow snapshot after successful deletion
     CompletionStage<WorldBackupSnapshot> deleteBackup(WorldBackupArchive archive);
+
+    /// Deletes one selected archive using the selected recycle-bin or permanent mode.
+    ///
+    /// @param archive backup archive selected by the user
+    /// @param mode selected deletion behavior
+    /// @return terminal immutable shallow snapshot after deletion
+    default CompletionStage<WorldBackupSnapshot> deleteBackup(
+            WorldBackupArchive archive,
+            DeletionMode mode) {
+        return deleteBackup(archive);
+    }
 
     /// Restores one selected archive into a new directory below the managed saves directory.
     ///
