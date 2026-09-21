@@ -190,6 +190,7 @@ final class DefaultGameInstallServiceTest {
         try {
             GameInstallSession session = service.install(request("preparing-cancel"));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(session.snapshot().cancelable());
             assertTrue(session.cancel());
             assertCancelled(session);
             assertEquals(Boolean.FALSE, session.submittedProperty().getValue());

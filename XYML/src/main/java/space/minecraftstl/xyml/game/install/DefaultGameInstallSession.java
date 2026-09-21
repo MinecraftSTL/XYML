@@ -133,7 +133,7 @@ final class DefaultGameInstallSession implements GameInstallSession {
                 waitingPhase,
                 OptionalDouble.empty(),
                 TaskStatus.WAITING,
-                false,
+                true,
                 "");
     }
 
