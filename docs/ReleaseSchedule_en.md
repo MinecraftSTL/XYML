@@ -121,10 +121,15 @@ For a selective Dev promotion, suppose A is `1.0.0.0.0.0` and the following B is
 producing `1.0.0.0.1`. B remains `1.0.0.0.0.1`; the first subsequent Dev commit C, made after that Alpha promotion,
 starts the new epoch at `1.0.0.0.1.0`.
 
-Feature and detached builds keep the six-component Dev shape `x.y.z.0.0.d`. Their `d` is the first-parent distance
-from the Alpha merge base to the newest reachable commit on `dev`'s first-parent history. This keeps the third Dev
-commit at `.3`; commits made only on the feature branch and uncommitted changes do not advance it. Other official build
-invocations still reject missing or malformed release inputs.
+Feature, fix, hotfix, and detached builds use the complete channel version of their reachable release-branch base and
+append `.`. Resolution prefers the channel closest to Dev in the order `dev > alpha > beta > main`, then selects the
+topologically latest reachable merge or branch point within that channel. The base may be the three-component `main`,
+four-component `beta`, five-component `alpha`, or six-component `dev` version; for example, Dev base `1.0.4.1.0.6`
+produces `1.0.4.1.0.6.`. Commits made only on the feature branch and uncommitted changes do not alter this version.
+When no release-branch base can be found, the version is exactly `0.0.0.0.0.0.`. The permanent `main`, `beta`, `alpha`,
+and `dev` branches keep their normal unmarked channel versions. Marked versions still use the `dev` build channel and
+therefore do not receive automatic updates; artifact filenames replace the trailing `.` with `-`, for example
+`XYML-1.0.4.1.0.6-.jar`.
 
 The Github Release publishing workflow runs only from `main`. It creates a Stable release and updates only the Stable
 channel descriptor; it does not publish Beta, Alpha, or Dev releases. Official-website distribution follows the table

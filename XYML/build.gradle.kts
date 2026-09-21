@@ -48,7 +48,9 @@ base {
 val currentReleaseType = ReleaseType.fromName(rootProject.extra["xymlReleaseChannel"] as String)
 val currentBranchName = (rootProject.extra["xymlBranchName"] as String).takeIf { it.isNotEmpty() }
 
-version = rootProject.extra["xymlReleaseVersion"] as String
+version = rootProject.extra["xymlArtifactVersion"] as String
+val xymlDisplayVersion = rootProject.extra["xymlReleaseVersion"] as String
+val xymlDebianVersion = xymlDisplayVersion.removeSuffix(".")
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
@@ -142,7 +144,7 @@ tasks.compileJava {
 }
 
 val xymlProperties = buildList {
-    add("xyml.version" to project.version.toString())
+    add("xyml.version" to xymlDisplayVersion)
     System.getenv("GITHUB_SHA")?.let {
         add("xyml.version.hash" to it)
     }
@@ -203,7 +205,7 @@ tasks.shadowJar {
 
     manifest.attributes(
         "Created-By" to "Copyright(c) 2013-2025 huangyuhui.",
-        "Implementation-Version" to project.version.toString(),
+        "Implementation-Version" to xymlDisplayVersion,
         "Main-Class" to "space.minecraftstl.xyml.Main",
         "Multi-Release" to "true",
         "Add-Opens" to runtimeOpens.joinToString(" "),
@@ -955,7 +957,7 @@ val makeDeb = tasks.register("makeDeb", CreateDeb::class) {
 
     val debFile = layout.file(provider { artifactFile("deb") })
 
-    version.set(project.version.toString())
+    version.set(xymlDebianVersion)
     releaseType.set(currentReleaseType)
     launcherClassName.set("space.minecraftstl.xyml.Launcher")
     appShFile.set(layout.file(provider { artifactFile("sh") }))

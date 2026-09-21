@@ -41,9 +41,9 @@ import java.util.function.Supplier;
 /// from a more stable channel snapshots the parent's counters and clears the target channel's counter. The promotion's
 /// committer timestamp lets that epoch apply to the next lower-channel commit without a reverse merge; histories
 /// without an identifiable boundary retain the legacy merge-base calculation.
-/// Feature versions retain the six-component `x.y.z.0.0.d` shape. Their `d` component is the first-parent distance
-/// from the Alpha merge base to the newest Dev first-parent commit reachable from the feature; commits made only on
-/// the feature branch are deliberately ignored.
+/// Feature and detached versions use the complete release version at the newest reachable first-parent commit on a
+/// release branch. Sources are preferred in the order Dev, Alpha, Beta, Stable; the selected release version receives
+/// a trailing `.` marker. If no release branch is reachable, the fixed fallback is `0.0.0.0.0.0.`.
 @NotNullByDefault
 public final class GitVersionResolver {
     /// Keeps read-only Git command results for one public resolution call.
@@ -51,6 +51,17 @@ public final class GitVersionResolver {
 
     /// Git pretty-format record used to read merge parents and timestamps.
     private static final String MERGE_RECORD_FORMAT = "--format=%H%x09%ct%x09%P%x7f";
+
+    /// Release channels ordered from the preferred feature base to the fallback base.
+    private static final @Unmodifiable List<ReleaseType> FEATURE_SOURCE_PRIORITY =
+            List.of(ReleaseType.DEV, ReleaseType.ALPHA, ReleaseType.BETA, ReleaseType.STABLE);
+
+    /// Release-ref namespaces considered independently for feature bases.
+    private static final @Unmodifiable List<String> FEATURE_REF_NAMESPACES =
+            List.of("refs/heads/", "refs/remotes/origin/");
+
+    /// Fixed marker version returned when no release branch is reachable.
+    private static final String FEATURE_VERSION_FALLBACK = "0.0.0.0.0.0.";
 
     /// Memoizes Git queries while one version is being resolved.
     ///
@@ -123,6 +134,22 @@ public final class GitVersionResolver {
             String secondParent) {
     }
 
+    /// One release branch's newest reachable base for a feature version.
+    ///
+    /// @param channel source release channel
+    /// @param commit selected release-branch commit
+    /// @param timestamp committer timestamp in seconds since the Unix epoch
+    /// @param version release version at the selected commit
+    /// @param refNamespace local or origin namespace supplying every release ref
+    @NotNullByDefault
+    private record FeatureBase(
+            ReleaseType channel,
+            String commit,
+            long timestamp,
+            String version,
+            String refNamespace) {
+    }
+
     /// A first-parent commit and its committer timestamp.
     ///
     /// @param commit first-parent commit
@@ -166,19 +193,176 @@ public final class GitVersionResolver {
         };
     }
 
-    /// Resolves the current checkout as a feature version relative to the local release branches.
+    /// Resolves the current checkout as a marked non-release feature version.
     ///
-    /// A local `dev`/`alpha` pair takes precedence over the matching origin-tracking pair. Both refs are always selected
-    /// from one namespace so a stale remote branch cannot be combined with current local history.
+    /// Release bases from local and origin namespaces are considered independently. Within each namespace, release
+    /// channels are preferred in the order Dev, Alpha, Beta, and Stable; candidates from the same channel are ordered
+    /// by topology and committer time.
     ///
     /// @param repository Git repository root
     /// @param stableVersion stable version stored by the current checkout
-    /// @return six-component feature version using the Dev version shape
+    /// @return marked feature version, or `0.0.0.0.0.0.` when no release base is reachable
     public static String resolveCurrentFeatureVersion(Path repository, String stableVersion) {
-        String refNamespace = preferredFeatureRefNamespace(repository);
-        String devRef = releaseBranchRef(repository, ReleaseType.DEV, refNamespace);
-        String alphaRef = releaseBranchRef(repository, ReleaseType.ALPHA, refNamespace);
-        return resolveFeatureVersion(repository, stableVersion, "HEAD", devRef, alphaRef);
+        return withResolutionCache(repository, () -> {
+            ReleaseVersionResolver.validateVersion(ReleaseType.STABLE, stableVersion);
+            return resolveFeatureVersionUncached(repository, stableVersion, "HEAD");
+        });
+    }
+
+    /// Resolves a feature or detached commit from one explicit release-ref namespace.
+    ///
+    /// The feature branch's own commits do not advance the result. The selected release version is the newest
+    /// reachable release-branch commit in the requested namespace after applying channel priority.
+    ///
+    /// @param repository Git repository root
+    /// @param stableVersion stable version stored by the current checkout
+    /// @param headRef feature commit or ref
+    /// @param refNamespace local or origin release-ref namespace
+    /// @return marked feature version, or `0.0.0.0.0.0.` when no release base is reachable
+    public static String resolveFeatureVersion(
+            Path repository,
+            String stableVersion,
+            String headRef,
+            String refNamespace) {
+        return withResolutionCache(repository, () -> {
+            ReleaseVersionResolver.validateVersion(ReleaseType.STABLE, stableVersion);
+            return resolveFeatureVersionUncached(repository, stableVersion, headRef, refNamespace);
+        });
+    }
+
+    /// Finds the highest-priority release base across local and origin namespaces.
+    ///
+    /// @param repository Git repository root
+    /// @param stableVersion stable version stored by the current checkout
+    /// @param headRef feature commit or ref
+    /// @return marked feature version or the fixed fallback
+    private static String resolveFeatureVersionUncached(Path repository, String stableVersion, String headRef) {
+        for (ReleaseType channel : FEATURE_SOURCE_PRIORITY) {
+            @Nullable FeatureBase selected = null;
+            for (String refNamespace : FEATURE_REF_NAMESPACES) {
+                @Nullable FeatureBase candidate = featureBase(
+                        repository, stableVersion, headRef, refNamespace, channel);
+                if (candidate != null) {
+                    selected = newestFeatureBase(repository, selected, candidate);
+                }
+            }
+            if (selected != null) {
+                return markedFeatureVersion(selected.version());
+            }
+        }
+        return FEATURE_VERSION_FALLBACK;
+    }
+
+    /// Finds the highest-priority release base in one release-ref namespace.
+    ///
+    /// @param repository Git repository root
+    /// @param stableVersion stable version stored by the current checkout
+    /// @param headRef feature commit or ref
+    /// @param refNamespace local or origin release-ref namespace
+    /// @return marked feature version or the fixed fallback
+    private static String resolveFeatureVersionUncached(
+            Path repository,
+            String stableVersion,
+            String headRef,
+            String refNamespace) {
+        for (ReleaseType channel : FEATURE_SOURCE_PRIORITY) {
+            @Nullable FeatureBase candidate = featureBase(
+                    repository, stableVersion, headRef, refNamespace, channel);
+            if (candidate != null) {
+                return markedFeatureVersion(candidate.version());
+            }
+        }
+        return FEATURE_VERSION_FALLBACK;
+    }
+
+    /// Resolves one release-branch candidate for a feature version.
+    ///
+    /// @param repository Git repository root
+    /// @param stableVersion stable version stored by the current checkout
+    /// @param headRef feature commit or ref
+    /// @param refNamespace local or origin release-ref namespace
+    /// @param channel release channel being tested
+    /// @return release base, or `null` when the channel has no valid reachable base
+    private static @Nullable FeatureBase featureBase(
+            Path repository,
+            String stableVersion,
+            String headRef,
+            String refNamespace,
+            ReleaseType channel) {
+        @Nullable String releaseRef = optionalRef(repository, refNamespace + releaseBranchName(channel));
+        if (releaseRef == null) {
+            return null;
+        }
+        @Nullable String adjacentRef = channel == ReleaseType.STABLE
+                ? null
+                : optionalRef(repository, refNamespace + releaseBranchName(parentReleaseType(channel)));
+        if (channel != ReleaseType.STABLE && adjacentRef == null) {
+            return null;
+        }
+        @Unmodifiable Set<String> parentHistory = adjacentRef == null
+                ? Set.of()
+                : Set.copyOf(firstParentCommits(repository, adjacentRef));
+        @Nullable String candidate = firstParentCommonCommit(repository, releaseRef, headRef, parentHistory);
+        if (candidate == null) {
+            return null;
+        }
+
+        String version;
+        try {
+            version = resolveReleaseVersion(repository, channel, stableVersion, candidate, adjacentRef);
+        } catch (IllegalArgumentException | IllegalStateException expected) {
+            return null;
+        }
+        return new FeatureBase(channel, candidate, commitTimestamp(repository, candidate), version, refNamespace);
+    }
+
+    /// Selects the newest candidate for one release channel.
+    ///
+    /// @param repository Git repository root
+    /// @param current previously selected candidate, or `null`
+    /// @param candidate new candidate
+    /// @return newer candidate, preferring local refs when topology and time tie
+    private static FeatureBase newestFeatureBase(
+            Path repository,
+            @Nullable FeatureBase current,
+            FeatureBase candidate) {
+        if (current == null) {
+            return candidate;
+        }
+        if (candidate.commit().equals(current.commit())) {
+            return isLocalNamespace(candidate.refNamespace()) ? candidate : current;
+        }
+        if (isAncestor(repository, current.commit(), candidate.commit())) {
+            return candidate;
+        }
+        if (isAncestor(repository, candidate.commit(), current.commit())) {
+            return current;
+        }
+        if (candidate.timestamp() > current.timestamp()) {
+            return candidate;
+        }
+        if (candidate.timestamp() < current.timestamp()) {
+            return current;
+        }
+        return isLocalNamespace(candidate.refNamespace()) ? candidate : current;
+    }
+
+    /// Returns whether a namespace contains local branches.
+    ///
+    /// @param refNamespace local or origin release-ref namespace
+    /// @return whether the namespace is `refs/heads/`
+    private static boolean isLocalNamespace(String refNamespace) {
+        return "refs/heads/".equals(refNamespace);
+    }
+
+    /// Applies and validates the trailing feature marker.
+    ///
+    /// @param releaseVersion selected release version
+    /// @return marked feature version
+    private static String markedFeatureVersion(String releaseVersion) {
+        String version = releaseVersion + ".";
+        ReleaseVersionResolver.validateFeatureVersion(version);
+        return version;
     }
 
     /// Resolves the checked-out release branch from its first-parent distance to the adjacent stable branch.
@@ -204,47 +388,6 @@ public final class GitVersionResolver {
                 ? null
                 : releaseBranchRef(repository, parentReleaseType(releaseType), refNamespace);
         return resolveReleaseVersion(repository, releaseType, stableVersion, "HEAD", adjacentRef);
-    }
-
-    /// Resolves a feature or detached commit relative to its Dev merge base.
-    ///
-    /// The feature branch's own commits, including merge commits, do not advance the returned counter. The counter is
-    /// the first-parent distance from the Alpha merge base to the candidate's Dev base. This preserves the historical
-    /// feature suffix (for example, the third Dev commit remains `.3`) while excluding work that exists only on the
-    /// feature branch.
-    ///
-    /// @param repository Git repository root
-    /// @param stableVersion stable version prefix
-    /// @param headRef feature commit or ref
-    /// @param devRef Dev branch ref used to find the feature base
-    /// @param alphaRef Alpha branch ref used to infer the Dev counter at that base
-    /// @return inferred feature version
-    public static String resolveFeatureVersion(
-            Path repository,
-            String stableVersion,
-            String headRef,
-            String devRef,
-            String alphaRef) {
-        return withResolutionCache(repository, () -> {
-            String devBase = firstParentCommonCommit(repository, devRef, headRef);
-            String alphaBase = mergeBase(repository, alphaRef, devBase);
-            Set<String> synchronizationCommits = new HashSet<>();
-            for (EpochMerge syncMerge : findSyncMerges(
-                    repository,
-                    devBase,
-                    alphaRef,
-                    ReleaseType.DEV)) {
-                synchronizationCommits.add(syncMerge.commit());
-            }
-            int devDistance = firstParentDistanceExcluding(
-                    repository,
-                    alphaBase,
-                    devBase,
-                    synchronizationCommits);
-            String featureVersion = stableVersion + ".0.0." + devDistance;
-            ReleaseVersionResolver.validateVersion(ReleaseType.DEV, featureVersion);
-            return featureVersion;
-        });
     }
 
     /// Resolves a release-channel version for an arbitrary target commit.
@@ -319,23 +462,6 @@ public final class GitVersionResolver {
         return git(repository, "rev-parse", "--verify", ref + "^{commit}");
     }
 
-    /// Selects one release-ref namespace for feature inference.
-    ///
-    /// Local `dev` and `alpha` branches are preferred as a pair. Returning a mixed local/origin set would make the
-    /// inherited epoch depend on unrelated checkout state.
-    ///
-    /// @param repository Git repository root
-    /// @return `refs/heads/` or `refs/remotes/origin/`
-    private static String preferredFeatureRefNamespace(Path repository) {
-        if (hasReleaseRefPair(repository, "refs/heads/", ReleaseType.DEV, ReleaseType.ALPHA)) {
-            return "refs/heads/";
-        }
-        if (hasReleaseRefPair(repository, "refs/remotes/origin/", ReleaseType.DEV, ReleaseType.ALPHA)) {
-            return "refs/remotes/origin/";
-        }
-        throw new IllegalStateException("Cannot find local or origin dev/alpha release refs in one namespace");
-    }
-
     /// Selects a consistent namespace for a checked-out release branch and its adjacent parent.
     ///
     /// The current branch and its adjacent channel must both exist in the selected namespace.
@@ -393,25 +519,26 @@ public final class GitVersionResolver {
     /// Finds the newest commit on a release branch's first-parent chain that is reachable from another ref.
     ///
     /// Unlike a regular merge base, this cannot move onto feature-only commits after the feature has been merged back
-    /// with `--no-ff`. It also lets a feature inherit a newer Dev epoch after explicitly merging Dev into itself.
+    /// with `--no-ff`. It also lets a feature inherit a newer release base after explicitly merging that branch.
     ///
     /// @param repository Git repository root
     /// @param releaseRef release branch whose first-parent history defines valid bases
     /// @param descendantRef feature or detached ref
-    /// @return newest shared release first-parent commit
-    private static String firstParentCommonCommit(
+    /// @param excludedCommits release commits that belong to a more stable branch
+    /// @return newest eligible shared release first-parent commit, or `null` when none exists
+    private static @Nullable String firstParentCommonCommit(
             Path repository,
             String releaseRef,
-            String descendantRef) {
+            String descendantRef,
+            Set<String> excludedCommits) {
         @Unmodifiable Set<String> descendantHistory = Set.copyOf(
                 git(repository, "rev-list", descendantRef).lines().toList());
         for (String releaseCommit : firstParentCommits(repository, releaseRef)) {
-            if (descendantHistory.contains(releaseCommit)) {
+            if (!excludedCommits.contains(releaseCommit) && descendantHistory.contains(releaseCommit)) {
                 return releaseCommit;
             }
         }
-        throw new IllegalStateException(
-                "Cannot find a shared first-parent commit between " + releaseRef + " and " + descendantRef);
+        return null;
     }
 
     /// Counts target commits along the first-parent chain after an ancestor.
@@ -427,37 +554,6 @@ public final class GitVersionResolver {
         } catch (NumberFormatException exception) {
             throw new IllegalStateException("Git returned an invalid first-parent distance: " + value, exception);
         }
-    }
-
-    /// Counts first-parent commits in a range while excluding structural synchronization merges.
-    ///
-    /// The Alpha merge base can be the second parent of an Alpha-to-Dev synchronization and therefore need not lie on
-    /// Dev's own first-parent chain. Reading the range explicitly keeps that topology valid while still removing the
-    /// synchronization commit and any unrelated pre-synchronization Dev history from a feature suffix.
-    ///
-    /// @param repository Git repository root
-    /// @param ancestor exclusive range ancestor
-    /// @param target target commit or ref
-    /// @param excludedCommits commits that do not consume a feature distance
-    /// @return number of non-excluded first-parent commits in the range
-    private static int firstParentDistanceExcluding(
-            Path repository,
-            String ancestor,
-            String target,
-            Set<String> excludedCommits) {
-        String output = git(
-                repository,
-                "rev-list",
-                "--first-parent",
-                "--ancestry-path",
-                ancestor + ".." + target);
-        int count = 0;
-        for (String commit : output.lines().toList()) {
-            if (!excludedCommits.contains(commit)) {
-                count++;
-            }
-        }
-        return count;
     }
 
     /// Resolves all hierarchical counters at a release-channel commit.

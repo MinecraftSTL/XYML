@@ -59,17 +59,19 @@ final class GitVersionResolverTest {
                 repository, ReleaseType.ALPHA, stableVersion, "refs/heads/alpha", "refs/heads/beta"));
         assertEquals("1.2.3.0.1.2", GitVersionResolver.resolveReleaseVersion(
                 repository, ReleaseType.DEV, stableVersion, "refs/heads/dev", "refs/heads/alpha"));
-        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        assertEquals("1.2.3.0.1.2.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
 
         Files.writeString(repository.resolve("uncommitted.txt"), "dirty\n", StandardCharsets.UTF_8);
-        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        assertEquals("1.2.3.0.1.2.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
 
         Files.delete(repository.resolve("uncommitted.txt"));
         git(repository, "checkout", "dev");
         commit(repository, "dev-3");
         merge(repository, "feature/versioning", "integrate feature into dev");
         git(repository, "checkout", "feature/versioning");
-        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        assertEquals("1.2.3.0.1.2.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        merge(repository, "dev", "merge latest dev into feature");
+        assertEquals("1.2.3.0.1.4.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
     }
 
     /// Resolves versions from the checked-out permanent release branches.
@@ -108,16 +110,14 @@ final class GitVersionResolverTest {
         assertNull(GitVersionResolver.releaseTypeForBranch(null));
     }
 
-    /// Fails closed instead of combining release refs from different namespaces.
+    /// Falls back to a complete Origin release base instead of mixing local Dev with Origin Alpha.
     @Test
-    void rejectsMixedFeatureReleaseRefs() throws IOException {
+    void keepsFeatureReleaseNamespacesSeparate() throws IOException {
         Path repository = createLegacyRepository();
         git(repository, "update-ref", "refs/remotes/origin/alpha", "refs/heads/alpha");
         git(repository, "branch", "-D", "alpha");
 
-        assertThrows(
-                IllegalStateException.class,
-                () -> GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+        assertEquals("1.2.3.2.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
     }
 
     /// Prefers a current local Dev/Alpha pair over a complete but stale origin namespace.
@@ -131,9 +131,46 @@ final class GitVersionResolverTest {
         commit(repository, "local-dev-3");
         git(repository, "checkout", "-b", "feature/local-dev");
         commit(repository, "local-feature-only");
-        git(repository, "branch", "-D", "main", "beta");
+        assertEquals("1.2.3.0.1.3.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+    }
 
-        assertEquals("1.2.3.0.0.3", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+    /// Uses Alpha as the base when no Dev or Beta history is reachable.
+    @Test
+    void featureVersionUsesAlphaBase() throws IOException {
+        Path repository = createLegacyRepository();
+        git(repository, "checkout", "-b", "feature/from-alpha", "alpha");
+        commit(repository, "feature-from-alpha");
+
+        assertEquals("1.2.3.0.1.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+    }
+
+    /// Uses Beta as the base when no Dev or Alpha history is reachable.
+    @Test
+    void featureVersionUsesBetaBase() throws IOException {
+        Path repository = createLegacyRepository();
+        git(repository, "checkout", "-b", "feature/from-beta", "beta");
+        commit(repository, "feature-from-beta");
+
+        assertEquals("1.2.3.2.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+    }
+
+    /// Uses Stable as the base when no testing-channel history is reachable.
+    @Test
+    void featureVersionUsesStableBase() throws IOException {
+        Path repository = createLegacyRepository();
+        git(repository, "checkout", "-b", "feature/from-main", "main");
+        commit(repository, "feature-from-main");
+
+        assertEquals("1.2.3.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
+    }
+
+    /// Returns the fixed fallback when no release branch exists.
+    @Test
+    void featureVersionFallsBackWithoutReleaseRefs() throws IOException {
+        Path repository = createLegacyRepository();
+        git(repository, "branch", "-D", "main", "beta", "alpha", "dev");
+
+        assertEquals("0.0.0.0.0.0.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "1.2.3"));
     }
 
     /// Keeps B in A's old epoch while the first Dev commit after promoting A starts the new Alpha epoch at zero.
@@ -161,7 +198,7 @@ final class GitVersionResolverTest {
         git(repository, "checkout", "-b", "feature/from-b", commitB);
         commit(repository, "feature-from-b-1");
         commit(repository, "feature-from-b-2");
-        assertEquals("1.2.3.0.0.1", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        assertEquals("1.2.3.0.0.1.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
     }
 
     /// Falls back to merge-base history when Git timestamps cannot order a promotion and a Dev commit.
@@ -203,7 +240,7 @@ final class GitVersionResolverTest {
         commit(repository, "feature-only-2");
         commit(repository, "feature-only-3");
 
-        assertEquals("1.2.3.0.0.3", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
+        assertEquals("1.2.3.0.0.3.", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
     }
 
     /// Propagates later Beta and Alpha promotions to Dev without routine reverse synchronization.
@@ -335,7 +372,7 @@ final class GitVersionResolverTest {
 
         git(repository, "checkout", "-b", "feature/after-stable-sync");
         commit(repository, "feature-only-after-stable-sync");
-        assertEquals("2.0.0.0.0.0", GitVersionResolver.resolveCurrentFeatureVersion(repository, "2.0.0"));
+        assertEquals("2.0.0.0.0.0.", GitVersionResolver.resolveCurrentFeatureVersion(repository, "2.0.0"));
     }
 
     /// Clears counters when a Beta candidate becomes Stable before the unchanged baseline returns through Beta.

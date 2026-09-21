@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
 /// Stable, beta, alpha, and development releases contain exactly three, four, five, and six canonical decimal
 /// components respectively. An explicit release version is used for promotions whose parent counters are already
 /// known. A build number supplies the last component for ordinary channel builds, with zero placeholders for parent
-/// channels that have not yet produced a candidate. Git-derived feature versions are handled by
+/// channels that have not yet produced a candidate. Git-derived feature versions may instead contain three to six
+/// canonical decimal components followed by a trailing dot marker; they are validated separately by
 /// [GitVersionResolver].
 @NotNullByDefault
 public final class ReleaseVersionResolver {
@@ -93,6 +94,24 @@ public final class ReleaseVersionResolver {
             throw new IllegalArgumentException(
                     channel.getName() + " versions must contain exactly " + channel.getVersionComponentCount()
                             + " canonical decimal components: " + version);
+        }
+    }
+
+    /// Validates a marked feature version produced for a non-release branch.
+    ///
+    /// @param version complete feature version ending in a marker dot
+    /// @throws IllegalArgumentException when the marker or decimal shape is invalid
+    public static void validateFeatureVersion(String version) {
+        if (!version.endsWith(".")) {
+            throw new IllegalArgumentException("Feature versions must end with a trailing dot: " + version);
+        }
+        String releaseVersion = version.substring(0, version.length() - 1);
+        String[] components = releaseVersion.split("\\.", -1);
+        if (components.length < 3 || components.length > 6
+                || Arrays.stream(components).anyMatch(component -> !DECIMAL_COMPONENT.matcher(component).matches())) {
+            throw new IllegalArgumentException(
+                    "Feature versions must contain three to six canonical decimal components followed by a dot: "
+                            + version);
         }
     }
 
