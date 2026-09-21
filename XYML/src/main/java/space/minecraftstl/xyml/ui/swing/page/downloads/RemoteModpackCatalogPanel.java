@@ -39,6 +39,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
@@ -102,6 +103,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Progress host for one selected-version install task at a time.
     private final TaskProgressHostPanel progressHost;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
 
     /// Source selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteModpackCatalogSource> sourceBox = new JComboBox<>(
@@ -261,6 +265,31 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 null);
     }
 
+    /// Creates a production catalog using shared confirmed-task navigation.
+    ///
+    /// @param strings visible catalog text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle text
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public RemoteModpackCatalogPanel(
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
+                new CoreRemoteModpackCatalogBackend(),
+                new DefaultRemoteModpackInstallLauncher(),
+                Schedulers.io(),
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                null,
+                taskLaunchController);
+    }
+
     /// Creates a production repository catalog fixed to one existing modpack instance.
     ///
     /// @param fixedInstanceId existing instance that receives the selected remote version
@@ -285,6 +314,27 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 animator,
                 progressAnimationDuration,
                 Objects.requireNonNull(fixedInstanceId, "fixedInstanceId"));
+    }
+
+    /// Creates a production repository catalog with shared confirmed-task navigation.
+    public RemoteModpackCatalogPanel(
+            GameInstanceID fixedInstanceId,
+            RemoteModpackInstallLauncher installLauncher,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
+                new CoreRemoteModpackCatalogBackend(),
+                installLauncher,
+                Schedulers.io(),
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                Objects.requireNonNull(fixedInstanceId, "fixedInstanceId"),
+                taskLaunchController);
     }
 
     /// Creates a catalog with explicit Core and task boundaries for focused headless verification.
@@ -337,6 +387,29 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             @Nullable GameInstanceID fixedInstanceId) {
+        this(
+                backend,
+                installLauncher,
+                workerExecutor,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                fixedInstanceId,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a catalog with explicit task navigation ownership.
+    RemoteModpackCatalogPanel(
+            RemoteModpackCatalogBackend backend,
+            RemoteModpackInstallLauncher installLauncher,
+            Executor workerExecutor,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable GameInstanceID fixedInstanceId,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -346,6 +419,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.fixedInstanceId = fixedInstanceId;
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         iconCache = new RemoteAddonIconCache(this.workerExecutor);
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
@@ -593,7 +667,6 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         statusLabel.addMouseListener(statusMouseListener);
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteModpackInstallProgress");
-        add(progressHost, "growx");
     }
 
     /// Configures the editable game-version selector with the launcher's common version choices.
@@ -1191,8 +1264,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         setStatus(strings.installingStatus());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, strings.installingStatus(), () -> { });
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start selected remote modpack installation", startFailure);
             cleanupFailedTaskStart(presentation, completionSubscription);

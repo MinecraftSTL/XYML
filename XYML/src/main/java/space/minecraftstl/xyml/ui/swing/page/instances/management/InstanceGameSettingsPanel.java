@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
@@ -514,30 +515,30 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Returns the snapshot currently represented by the UI controls.
-    ///
-    /// @return displayed settings snapshot
     public InstanceGameSettingsSnapshot displayedSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         return Objects.requireNonNull(displayedSnapshot, "initial game settings snapshot was not applied");
     }
 
-    /// Replaces the rendered controls with the latest snapshot supplied by the backing store.
-    ///
-    /// Embedded global-preset editors call this after changing which preset their store represents.
+    /// Replaces controls with the latest snapshot supplied by the backing store.
     public void reloadFromStore() {
         reloadSnapshot();
     }
 
-    /// Enables or freezes every editor control while preserving the current draft values.
-    ///
-    /// @param enabled whether users may interact with the editor
+    /// Enables or freezes every editor control while preserving draft values.
     public void setInteractionEnabled(boolean enabled) {
         EdtDispatcher.requireEventDispatchThread();
         interactionEnabled = enabled && !closed;
         updateEditingAvailability();
     }
 
-    /// Releases this panel and prevents further persistence requests.
+    /// Installs the shared task navigation controller.
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        footerControls.setTaskLaunchController(controller);
+    }
+
+    /// Releases this panel.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
@@ -897,12 +898,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
     }
 
-    /// Reads every editor and validates user-controlled values before storage.
-    ///
-    /// This is the persistence boundary used by embedded global-preset presentation; it never mutates the backing
-    /// store by itself.
-    ///
-    /// @return complete edited snapshot
+    /// Reads every editor and validates values without mutating the backing store.
     public InstanceGameSettingsSnapshot editedSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {

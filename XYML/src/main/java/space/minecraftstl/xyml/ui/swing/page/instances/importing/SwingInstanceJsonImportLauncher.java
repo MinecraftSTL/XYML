@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.shell.AppShellPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.event.WindowAdapter;
@@ -78,6 +79,25 @@ public final class SwingInstanceJsonImportLauncher implements AutoCloseable {
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        return install(
+                frame,
+                repositorySupplier,
+                ioExecutor,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Installs the production JSON import route with explicit task navigation.
+    public static SwingInstanceJsonImportLauncher install(
+            AppShellFrame frame,
+            Supplier<XYMLGameRepository> repositorySupplier,
+            Executor ioExecutor,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         AppShellFrame owner = Objects.requireNonNull(frame, "frame");
         Supplier<XYMLGameRepository> repositories = Objects.requireNonNull(
                 repositorySupplier,
@@ -103,6 +123,7 @@ public final class SwingInstanceJsonImportLauncher implements AutoCloseable {
                                     executor),
                             strings,
                             progressStrings,
+                            taskLaunchController,
                             animator,
                             duration,
                             closedObserver));

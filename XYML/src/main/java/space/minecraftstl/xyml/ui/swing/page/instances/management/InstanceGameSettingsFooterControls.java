@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -79,6 +80,9 @@ final class InstanceGameSettingsFooterControls {
     private boolean writable;
     private boolean interactive;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
+
     /// Creates production footer controls with a native destructive-action confirmation.
     ///
     /// @param store backing instance settings store
@@ -116,6 +120,14 @@ final class InstanceGameSettingsFooterControls {
     /// @return configured footer
     JPanel component() {
         return component;
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Replaces the concise footer status.
@@ -179,7 +191,7 @@ final class InstanceGameSettingsFooterControls {
                 }
             });
             updateAvailability(writable, interactive);
-            executor.start();
+            taskLaunchController.launch(executor, i18n("settings.file.force_write"), () -> { });
         } catch (RuntimeException exception) {
             if (forceOverwriteSubscription != null) {
                 forceOverwriteSubscription.unsubscribe();

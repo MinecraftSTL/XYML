@@ -73,6 +73,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -597,6 +598,7 @@ class SwingApplicationCompositionTest {
                 instanceManagement,
                 gameVersions,
                 gameInstaller,
+                new TaskLaunchController(() -> { }),
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
                 ownedResources);

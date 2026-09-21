@@ -53,6 +53,7 @@ import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatus;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
@@ -149,6 +150,7 @@ final class DefaultInstanceManagementViewTest {
                             executor),
                     () -> returned.set(true),
                     presentation.taskProgress(),
+                    new TaskLaunchController(() -> { }),
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),
@@ -273,6 +275,7 @@ final class DefaultInstanceManagementViewTest {
                             executor),
                     () -> { },
                     presentation.taskProgress(),
+                    new TaskLaunchController(() -> { }),
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),

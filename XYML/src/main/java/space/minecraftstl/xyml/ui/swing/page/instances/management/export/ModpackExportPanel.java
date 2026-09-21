@@ -45,6 +45,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -211,6 +212,9 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// Owns exactly one current export progress presentation.
     private final TaskProgressHostPanel progressHost;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
     /// Receives file-tree expansion events and schedules child enumeration away from the EDT.
     private final TreeWillExpandListener expansionListener = new FileTreeExpansionListener();
 
@@ -270,7 +274,8 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 directoryExecutor,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
     }
 
     /// Creates a page with explicit filesystem and task seams for deterministic Swing verification.
@@ -292,8 +297,32 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                runDirectoryResolver,
+                instanceId,
+                exportTaskFactory,
+                outputFileChooser,
+                directoryExecutor,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a page with explicit filesystem, task, and navigation seams for Swing verification.
+    ModpackExportPanel(
+            RunDirectoryResolver runDirectoryResolver,
+            GameInstanceID instanceId,
+            ModpackExportTaskFactory exportTaskFactory,
+            OutputFileChooser outputFileChooser,
+            Executor directoryExecutor,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         this.runDirectoryResolver = Objects.requireNonNull(runDirectoryResolver, "runDirectoryResolver");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.exportTaskFactory = Objects.requireNonNull(exportTaskFactory, "exportTaskFactory");
@@ -566,7 +595,6 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         exportButton.setPreferredSize(new Dimension(128, 40));
         footer.add(exportButton, "right, h 40!, wrap");
         progressHost.setName("modpackExportProgress");
-        footer.add(progressHost, "span 2, growx");
         return footer;
     }
 
@@ -922,8 +950,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         setStatus(i18n("modpack.export"));
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, i18n("modpack.export"), () -> { });
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start a local modpack export task", startFailure);
             cleanupFailedTaskStart(presentation, completionSubscription);

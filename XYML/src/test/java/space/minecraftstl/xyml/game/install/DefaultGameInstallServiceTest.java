@@ -76,6 +76,7 @@ final class DefaultGameInstallServiceTest {
             assertEquals(TaskStatus.RUNNING, first.snapshot().status());
             assertEquals("Downloading vanilla files", first.snapshot().phase());
             assertTrue(first.snapshot().cancelable());
+            assertEquals(Boolean.TRUE, first.submittedProperty().getValue());
 
             GameInstallRequest secondRequest = request("second");
             GameInstallAlreadyRunningException conflict = assertThrows(
@@ -163,6 +164,41 @@ final class DefaultGameInstallServiceTest {
         assertFalse(session.cancel());
         assertThrows(IllegalStateException.class, () -> service.install(request("after-close")));
         release.countDown();
+    }
+
+    /// Cancellation before preparation finishes never reports a submitted task.
+    @Test
+    @Timeout(10)
+    void cancellationBeforeStartDoesNotReportSubmission() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService preparationExecutor = Executors.newSingleThreadExecutor();
+        DefaultGameInstallService service = new DefaultGameInstallService(
+                request -> {
+                    entered.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new CancellationException("preparation interrupted");
+                    }
+                    return new CompletedInstallTask();
+                },
+                preparationExecutor,
+                "Install game",
+                "Preparing installation");
+        try {
+            GameInstallSession session = service.install(request("preparing-cancel"));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(session.snapshot().cancelable());
+            assertTrue(session.cancel());
+            assertCancelled(session);
+            assertEquals(Boolean.FALSE, session.submittedProperty().getValue());
+        } finally {
+            release.countDown();
+            service.close();
+            preparationExecutor.shutdownNow();
+        }
     }
 
     /// Cancellation while the factory is blocked prevents its late task from ever starting.

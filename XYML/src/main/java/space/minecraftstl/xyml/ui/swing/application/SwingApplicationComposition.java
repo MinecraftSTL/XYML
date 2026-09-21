@@ -56,6 +56,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalog
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
@@ -94,6 +95,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementM
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementStrings;
 import space.minecraftstl.xyml.ui.swing.page.tasks.TaskManagerPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
@@ -459,7 +461,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         presentation.taskProgress(),
                         animator,
                         presentation.taskProgressAnimationDuration(),
-                        models.instances()));
+                        models.instances(),
+                        models.taskLaunchController()));
         factories.put(ShellPageId.TASKS, TaskManagerPanel::new);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
@@ -518,10 +521,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw failure;
         }
         try {
-            return SettingsCenterPanel.createForCurrentSettings(
+            SettingsCenterPanel settings = SettingsCenterPanel.createForCurrentSettings(
                     appearancePanel,
                     family -> themeManager.updateDefaultFontFamily(
                             SwingLauncherFontManager.effectiveLauncherFontFamily(family)));
+            settings.setTaskLaunchController(models.taskLaunchController());
+            return settings;
         } catch (RuntimeException | Error failure) {
             appearancePanel.close();
             throw failure;
@@ -555,6 +560,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SystemThemeDetector systemThemeDetector) {
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         ThemeRuntimeController themeRuntime = new ThemeRuntimeController(
                 bindings.settings(),
                 new BuiltinThemePackCatalog(),
@@ -623,6 +630,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 resourcePackInteractions,
                                 () -> navigateCommand.accept(ShellPageId.INSTANCES),
                                 presentation.taskProgress(),
+                                taskLaunchController,
                                 animator,
                                 presentation.taskProgressAnimationDuration(),
                                 worldQuickPlayActions,
@@ -756,6 +764,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(stateResources, "stateResources");
         Objects.requireNonNull(navigateCommand, "navigateCommand");
         Runnable addInstanceCommand = () -> navigateCommand.accept(ShellPageId.DOWNLOADS);
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         List<AutoCloseable> services = new ArrayList<>(1);
         List<AutoCloseable> models = new ArrayList<>(7);
         List<AutoCloseable> sources = new ArrayList<>(1);
@@ -808,6 +818,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     instanceManagement,
                     gameVersions,
                     gameInstaller,
+                    taskLaunchController,
                     accounts,
                     appearance,
                     resources,
@@ -938,13 +949,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 animator,
                 presentation.pageTransitionDuration(),
                 presentation.taskProgressAnimationDuration());
+        frame.shellPanel().setDroppedModpackInstallLauncher((owner, archive) ->
+                SwingLocalModpackInstallDialog.show(
+                        owner,
+                        archive,
+                        presentation.taskProgress(),
+                        models.taskLaunchController(),
+                        animator,
+                        presentation.taskProgressAnimationDuration()));
         SwingInstanceJsonImportLauncher.install(
                 frame,
                 GameDirectoryManager::getSelectedRepository,
                 Schedulers.io(),
                 presentation.taskProgress(),
                 animator,
-                presentation.taskProgressAnimationDuration());
+                presentation.taskProgressAnimationDuration(),
+                models.taskLaunchController());
         SwingShellNBTDropLauncher.install(frame, Schedulers.io());
         SwingCrashReportDropLauncher.install(frame, Schedulers.io());
         return new AppShellApplicationWindow(frame);

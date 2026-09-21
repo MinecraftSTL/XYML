@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 
@@ -122,6 +123,9 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Prevents concurrent refresh, desktop, and icon mutations from racing the UI state.
     private final AtomicBoolean operationPending = new AtomicBoolean();
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Last complete directory and icon availability result, or `null` while initial loading is pending.
     private @Nullable InstanceSnapshot snapshot;
@@ -268,6 +272,14 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @return non-blank tab title
     public String title() {
         return strings.title();
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Returns the restored directory menu for focused integration checks.
@@ -721,7 +733,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
                             retryAction));
                 }
             });
-            taskExecutor.start();
+            taskLaunchController.launch(taskExecutor, strings.title(), () -> { });
         } catch (RuntimeException failure) {
             operationCompleted(failure, capturedSuccess, retryAction);
         } catch (Error failure) {

@@ -28,7 +28,6 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
-import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
@@ -37,7 +36,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
-import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
@@ -122,8 +121,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Viewport-driven result list that materializes only visible retained project rows.
     private final ViewportChoiceList<RemoteAddonCatalogItem> choiceList;
 
-    /// Presentation host for one active selected-artifact task at a time.
-    private final TaskProgressHostPanel progressHost;
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Provider selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteAddonCatalogSource> sourceBox = new JComboBox<>(
@@ -228,9 +227,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Active acquisition executor, or null while the catalog accepts a future task.
     private @Nullable TaskExecutor activeExecutor;
 
-    /// Active task presentation retained until another task replaces it or the panel closes.
-    private @Nullable TaskExecutorPresentationModel activePresentation;
-
     /// Terminal-listener subscription for the active executor, or null while no task is live.
     private @Nullable Subscription activeCompletionSubscription;
 
@@ -330,6 +326,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 : new LauncherRemoteAddonInstallTargetResolver();
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Creates a production catalog with an explicit destination policy.
     ///
     /// This variant is used by the world catalog so its acquisition command opens a save-as chooser
@@ -396,6 +400,33 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             @Nullable InstancesModel instancesModel) {
+        this(
+                kind,
+                backend,
+                installLauncher,
+                targetResolver,
+                workerExecutor,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                instancesModel,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a catalog with explicit task navigation ownership.
+    RemoteAddonCatalogPanel(
+            RemoteAddonCatalogKind kind,
+            RemoteAddonCatalogBackend backend,
+            RemoteAddonInstallLauncher installLauncher,
+            RemoteAddonInstallTargetResolver targetResolver,
+            Executor workerExecutor,
+            RemoteAddonCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -406,6 +437,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver");
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         targetInstanceSelector = this.kind == RemoteAddonCatalogKind.WORLD || instancesModel == null
                 ? null
                 : new RemoteAddonTargetInstanceSelector(instancesModel);
@@ -437,10 +469,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                         item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
                         item -> item.addon().pageUrl()));
         choiceList.getViewport().addChangeListener(viewportListener);
-        progressHost = new TaskProgressHostPanel(
-                resolvedTaskProgressStrings,
-                animator,
-                resolvedProgressAnimationDuration);
         configureComponents();
         updateControls();
         setStatus(strings.initialStatus());
@@ -779,8 +807,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         statusLabel.setName("remoteAddonStatus");
         statusLabel.addMouseListener(statusMouseListener);
         add(statusLabel, "growx, h 24!");
-        progressHost.setName("remoteAddonInstallProgress");
-        add(progressHost, "growx");
         addHierarchyListener(showingListener);
     }
 
@@ -1573,7 +1599,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
 
-        releaseCompletedPresentation();
         final Task<?> task;
         try {
             setStatus(strings.preparingInstallStatus());
@@ -1586,23 +1611,17 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
 
         TaskExecutor executor = task.executor();
-        TaskExecutorPresentationModel presentation = new TaskExecutorPresentationModel(
-                executor,
-                strings.installingStatus(),
-                strings.preparingInstallStatus());
         Subscription completionSubscription = executor.subscribeTaskListener(
                 new RemoteAddonInstallCompletionListener(executor, this::installCompleted));
         activeExecutor = executor;
-        activePresentation = presentation;
         activeCompletionSubscription = completionSubscription;
         setStatus(strings.installingStatus());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, strings.installingStatus(), () -> { });
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start selected remote add-on installation", startFailure);
-            cleanupFailedTaskStart(presentation, completionSubscription);
+            cleanupFailedTaskStart(completionSubscription);
             setStatus(strings.installFailedStatus());
             updateControls();
         }
@@ -1620,42 +1639,19 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             unsubscribe(activeCompletionSubscription);
             activeCompletionSubscription = null;
             activeExecutor = null;
-            releaseCompletedPresentation();
             setStatus(succeeded ? strings.installSucceededStatus() : strings.installFailedStatus());
             updateControls();
             schedulePendingSearchCheck();
         });
     }
 
-    /// Clears a terminal task presentation before constructing a later acquisition task.
-    private void releaseCompletedPresentation() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (activeExecutor != null) {
-            return;
-        }
-        @Nullable TaskExecutorPresentationModel previousPresentation = activePresentation;
-        activePresentation = null;
-        progressHost.clear();
-        if (previousPresentation != null) {
-            previousPresentation.close();
-        }
-    }
-
     /// Releases task resources when executor startup fails before a terminal callback can arrive.
     ///
-    /// @param presentation presentation created for the failed executor
     /// @param completionSubscription terminal listener created for the failed executor
-    private void cleanupFailedTaskStart(
-            TaskExecutorPresentationModel presentation,
-            Subscription completionSubscription) {
+    private void cleanupFailedTaskStart(Subscription completionSubscription) {
         unsubscribe(completionSubscription);
         activeCompletionSubscription = null;
         activeExecutor = null;
-        if (activePresentation == presentation) {
-            activePresentation = null;
-        }
-        progressHost.clear();
-        presentation.close();
         schedulePendingSearchCheck();
     }
 
@@ -1902,11 +1898,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         unsubscribe(activeCompletionSubscription);
         activeCompletionSubscription = null;
-        @Nullable TaskExecutorPresentationModel presentation = activePresentation;
-        activePresentation = null;
-        if (presentation != null) {
-            presentation.close();
-        }
         searchField.getDocument().removeDocumentListener(criteriaListener);
         SwingTextFields.textEditor(gameVersionField).getDocument().removeDocumentListener(criteriaListener);
         choiceList.getViewport().removeChangeListener(viewportListener);
@@ -1914,7 +1905,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         removeHierarchyListener(showingListener);
         choiceList.close();
         pageCache.clear();
-        progressHost.close();
         sourceBox.setEnabled(false);
         searchField.setEnabled(false);
         gameVersionField.setEnabled(false);

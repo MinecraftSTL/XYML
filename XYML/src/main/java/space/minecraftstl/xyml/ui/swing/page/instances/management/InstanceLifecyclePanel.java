@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.BorderFactory;
@@ -64,6 +65,9 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
 
     /// Coordinator command that returns from the now-stale management view after a mutation.
     private final Runnable mutationCompletedCommand;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Visible current source identifier.
     private final JLabel instanceIdValue = new JLabel();
@@ -142,6 +146,14 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @return non-blank lifecycle page title
     public String title() {
         return strings.title();
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Releases controls and ignores late executor completions exactly once.
@@ -349,7 +361,9 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
                             kind, destinationId, copySaves, deletionMode, terminalFailure));
                 }
             });
-            taskExecutor.start();
+            String title = failureTitle(kind);
+            EdtDispatcher.executeAndWait(
+                    () -> taskLaunchController.launch(taskExecutor, title, () -> { }));
         } catch (Exception failure) {
             EdtDispatcher.execute(() -> completeMutation(
                     kind, destinationId, copySaves, deletionMode, failure));

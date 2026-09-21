@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -86,6 +87,9 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// Whether this panel no longer accepts user actions or worker-to-EDT feedback.
     private volatile boolean closed;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
     /// Creates every content category without starting network work or opening platform applications.
     ///
     /// @param taskProgressStrings localized task lifecycle controls for local modpack imports
@@ -110,8 +114,30 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             @Nullable InstancesModel instancesModel) {
+        this(
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                instancesModel,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates every content category with explicit task navigation ownership.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls for local modpack imports
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public DownloadCategoryPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[grow,fill]8[]"));
         EdtDispatcher.requireEventDispatchThread();
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         setOpaque(false);
         setMinimumSize(new Dimension(0, 0));
 
@@ -123,25 +149,29 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                taskLaunchController);
         modsCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.MOD,
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                instancesModel);
+                instancesModel,
+                taskLaunchController);
         resourcePackCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.RESOURCE_PACK,
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                instancesModel);
+                instancesModel,
+                taskLaunchController);
         shaderPackCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.SHADER_PACK,
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                instancesModel);
+                instancesModel,
+                taskLaunchController);
         worldDownloadPanel = new WorldDownloadPanel(
                 taskProgressStrings,
                 animator,
@@ -244,20 +274,24 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// @param taskProgressStrings localized task lifecycle controls
     /// @param animator optional shared determinate-progress animator
     /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @return configured native remote catalog
     private static RemoteAddonCatalogPanel createRemoteCatalog(
             RemoteAddonCatalogKind kind,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
-            @Nullable InstancesModel instancesModel) {
-        return new RemoteAddonCatalogPanel(
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
+        RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
                 Objects.requireNonNull(kind, "kind"),
                 RemoteAddonCatalogStrings.launcherLocalized(kind),
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
                 Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
                 instancesModel);
+        panel.setTaskLaunchController(Objects.requireNonNull(taskLaunchController, "taskLaunchController"));
+        return panel;
     }
 
     /// Builds the modpack tab with its real local import surface and external catalog route.
