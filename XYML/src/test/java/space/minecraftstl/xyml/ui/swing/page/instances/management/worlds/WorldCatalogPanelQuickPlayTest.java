@@ -44,6 +44,7 @@ import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -168,8 +169,8 @@ final class WorldCatalogPanelQuickPlayTest {
             JButton launchScript = findNamed(panel, "worldsLaunchScript", JButton.class);
             JButton chunkBase = findNamed(panel, "worldsChunkBase", JButton.class);
             JCheckBox showAll = findNamed(panel, "worldsShowAll", JCheckBox.class);
-            JLabel directory = findNamed(panel, "worldsDirectory", JLabel.class);
-            JLabel path = findNamed(panel, "worldsPath", JLabel.class);
+            JTextArea directory = findNamed(panel, "worldsDirectory", JTextArea.class);
+            JTextArea path = findNamed(panel, "worldsPath", JTextArea.class);
             assertNotNull(quickPlay.getIcon());
             assertNotNull(launchScript.getIcon());
             assertNotNull(chunkBase.getIcon());
@@ -277,6 +278,10 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.setSize(720, 980);
             layoutRecursively(panel);
             JScrollPane scroll = findNamed(panel, "worldsDetailsScroll", JScrollPane.class);
+            JTextArea path = findNamed(panel, "worldsPath", JTextArea.class);
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
+            assertTrue(path.getLineWrap());
+            assertFalse(path.getWrapStyleWord());
             int largeMaximum = scroll.getVerticalScrollBar().getMaximum();
             int largeVisibleAmount = scroll.getVerticalScrollBar().getVisibleAmount();
 
@@ -340,6 +345,8 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.setSize(960, 620);
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+            assertTrue(split.getLeftComponent().getMinimumSize().width > 0);
+            assertTrue(split.getRightComponent().getMinimumSize().width > 0);
 
             panel.setSize(600, 420);
             panel.invalidate();
@@ -405,7 +412,7 @@ final class WorldCatalogPanelQuickPlayTest {
             assertEquals("123456", new String(seed.getPassword()));
             assertTrue(seed.getEchoChar() != 0);
             assertEquals("showRevealButton: true", seed.getClientProperty(FlatClientProperties.STYLE));
-            assertEquals("(10, 70, -5)", findNamed(panel, "worldsSpawn", JLabel.class).getText());
+            assertEquals("(10, 70, -5)", findNamed(panel, "worldsSpawn", JTextArea.class).getText());
             assertNotNull(findNamed(panel, "worldsIcon", JLabel.class).getIcon());
             JTextField name = findNamed(panel, "worldsWorldName", JTextField.class);
             JCheckBox cheats = findNamed(panel, "worldsAllowCheats", JCheckBox.class);

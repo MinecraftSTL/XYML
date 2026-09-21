@@ -27,9 +27,11 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -49,6 +51,7 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
@@ -62,6 +65,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Image;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
@@ -91,9 +95,6 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
-    /// Minimum page width for keeping the world list and details surfaces side by side.
-    private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
-
     /// Fallback icon used when a world has no readable embedded PNG.
     private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/image.svg",
@@ -158,25 +159,25 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JLabel operationLabel = new JLabel();
 
     /// Selected world primary label.
-    private final JLabel detailTitle = new JLabel();
+    private final JTextArea detailTitle = SwingTextAreas.wrappingValue();
 
     /// Selected directory name.
-    private final JLabel directoryValue = new JLabel();
+    private final JTextArea directoryValue = SwingTextAreas.wrappingToken();
 
     /// Selected complete path.
-    private final JLabel pathValue = new JLabel();
+    private final JTextArea pathValue = SwingTextAreas.wrappingToken();
 
     /// Selected recorded game version.
-    private final JLabel gameVersionValue = new JLabel();
+    private final JTextArea gameVersionValue = SwingTextAreas.wrappingToken();
 
     /// Selected last-played timestamp.
-    private final JLabel lastPlayedValue = new JLabel();
+    private final JTextArea lastPlayedValue = SwingTextAreas.wrappingValue();
 
     /// Selected session-lock state.
-    private final JLabel lockedValue = new JLabel();
+    private final JTextArea lockedValue = SwingTextAreas.wrappingValue();
 
     /// Selected Core metadata readability state.
-    private final JLabel readabilityValue = new JLabel();
+    private final JTextArea readabilityValue = SwingTextAreas.wrappingValue();
 
     /// Selected world icon preview loaded with its viewport row.
     private final JLabel worldIconValue = new JLabel();
@@ -194,10 +195,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JPasswordField seedValue = new JPasswordField(18);
 
     /// Selected world spawn position.
-    private final JLabel worldSpawnValue = new JLabel();
+    private final JTextArea worldSpawnValue = SwingTextAreas.wrappingToken();
 
     /// Selected played-time duration.
-    private final JLabel playedTimeValue = new JLabel();
+    private final JTextArea playedTimeValue = SwingTextAreas.wrappingValue();
 
     /// Editable cheat and command permission.
     private final JCheckBox allowCheatsCheckBox = new JCheckBox();
@@ -213,13 +214,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JCheckBox difficultyLockedCheckBox = new JCheckBox();
 
     /// Selected player's current position.
-    private final JLabel playerLocationValue = new JLabel();
+    private final JTextArea playerLocationValue = SwingTextAreas.wrappingToken();
 
     /// Selected player's last death position.
-    private final JLabel playerLastDeathValue = new JLabel();
+    private final JTextArea playerLastDeathValue = SwingTextAreas.wrappingToken();
 
     /// Selected player's bed or respawn-anchor position.
-    private final JLabel playerSpawnValue = new JLabel();
+    private final JTextArea playerSpawnValue = SwingTextAreas.wrappingToken();
 
     /// Editable player game mode.
     private final JComboBox<WorldCatalogDetails.GameMode> playerGameModeBox = new JComboBox<>(
@@ -461,6 +462,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.getList().setOpaque(false);
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         listSurface.add(choiceList, BorderLayout.CENTER);
+        Insets listInsets = listSurface.getInsets();
+        listSurface.setMinimumSize(new Dimension(
+                SwingTextAreas.minimumTextWidth(choiceList)
+                        + listInsets.left
+                        + listInsets.right,
+                0));
 
         return new ResponsiveCatalogSplitPane(
                 listSurface,
@@ -471,7 +478,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     ///
     /// @return transparent vertically scrollable detail surface
     private JComponent createDetailsSurface() {
-        JPanel details = new JPanel(new MigLayout(
+        JPanel details = new ViewportTrackingPanel(new MigLayout(
                 "insets 8 16 8 12, fillx, wrap 2",
                 "[140!][grow,fill]",
                 "[]8[]"));
@@ -479,7 +486,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         details.setOpaque(false);
         detailTitle.setName("worldsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
-        details.add(detailTitle, "span 2, growx");
+        details.add(detailTitle, "span 2, growx, wmin 0");
 
         addSectionTitle(details, i18n("world.info.basic"));
         JPanel iconControls = new JPanel(new MigLayout(
@@ -654,7 +661,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
         actions.add(editLevelDataButton, "w 40!, h 40!");
-        details.add(actions, "span 2, right");
+        details.add(actions, "span 2, right, wmin 0");
 
         JScrollPane scroll = new JScrollPane(details);
         scroll.setName("worldsDetailsScroll");
@@ -662,7 +669,14 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-        scroll.setMinimumSize(new Dimension(0, 0));
+        int valueMinimumWidth = SwingTextAreas.maximumMinimumTextWidth(
+                detailTitle, directoryValue, pathValue, gameVersionValue,
+                worldSpawnValue, lastPlayedValue, playedTimeValue,
+                playerLocationValue, playerLastDeathValue, playerSpawnValue,
+                lockedValue, readabilityValue);
+        int detailsMinimumWidth = Math.max(140 + 8 + valueMinimumWidth, 184) + 28;
+        int scrollBarWidth = scroll.getVerticalScrollBar().getPreferredSize().width;
+        scroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);
         return scroll;
     }
@@ -689,10 +703,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param labelText non-blank static label
     /// @param value reusable value label
     /// @param name deterministic component name
-    private static void addDetailRow(JPanel panel, String labelText, JLabel value, String name) {
+    private static void addDetailRow(JPanel panel, String labelText, JTextArea value, String name) {
         panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
         value.setName(Objects.requireNonNull(name, "name"));
-        panel.add(value, "growx");
+        value.getAccessibleContext().setAccessibleName(labelText);
+        panel.add(value, "growx, wmin 0");
     }
 
     /// Adds one label and arbitrary value control to the aligned detail grid.
@@ -702,7 +717,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param value reusable value control
     private static void addDetailComponentRow(JPanel panel, String labelText, JComponent value) {
         panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
-        panel.add(Objects.requireNonNull(value, "value"), "growx");
+        panel.add(Objects.requireNonNull(value, "value"), "growx, wmin 0");
     }
 
     /// Adds one compact section heading without introducing nested card surfaces.
@@ -1687,34 +1702,64 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         /// Whether the divider ratio has been initialized for the current orientation.
         private boolean orientationInitialized;
 
+        /// List surface whose horizontal minimum is applied only in side-by-side mode.
+        private final JComponent leftComponent;
+
+        /// Details surface whose horizontal minimum is applied only in side-by-side mode.
+        private final JComponent rightComponent;
+
+        /// Computed minimum width of the list surface.
+        private final int leftMinimumWidth;
+
+        /// Computed minimum width of the details surface.
+        private final int rightMinimumWidth;
+
         /// Creates a borderless split whose children may shrink to the allocated host width.
         ///
-        /// @param list list and filter surface
+        /// @param list list surface
         /// @param details selected-world details surface
         private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
-            // Start stacked so the first preferred-size calculation cannot add both wide child surfaces.
             super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("worldsCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
             setContinuousLayout(true);
             setResizeWeight(0.46D);
+            leftComponent = list;
+            rightComponent = details;
+            leftMinimumWidth = list.getMinimumSize().width;
+            rightMinimumWidth = details.getMinimumSize().width;
+            leftComponent.setMinimumSize(new Dimension(0, 0));
+            rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
-        /// Selects side-by-side or stacked presentation before child layout occurs.
+        /// Selects side-by-side or stacked presentation from the children's required widths.
         ///
         /// @param availableWidth width allocated by the owning page
         private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            boolean horizontal = availableWidth >= horizontalMinimumWidth();
             int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
             if (getOrientation() != desiredOrientation) {
                 setOrientation(desiredOrientation);
                 orientationInitialized = false;
+                leftComponent.setMinimumSize(horizontal
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(horizontal
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
             }
             setResizeWeight(horizontal ? 0.46D : 0.48D);
         }
 
-        /// Initializes the divider only after the split has a real extent.
+        /// Returns the width required to display both panes and the divider.
+        ///
+        /// @return horizontal layout minimum width
+        private int horizontalMinimumWidth() {
+            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
+        }
+
+        /// Initializes and clamps the divider only after the split has a real horizontal extent.
         @Override
         public void doLayout() {
             boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
@@ -1724,6 +1769,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 if (usableExtent > 1) {
                     setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.46D : 0.48D)));
                     orientationInitialized = true;
+                }
+            }
+            if (horizontal && getWidth() > 0) {
+                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
+                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
+                if (location != getDividerLocation()) {
+                    setDividerLocation(location);
                 }
             }
             super.doLayout();

@@ -36,7 +36,9 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
@@ -468,6 +470,13 @@ public final class SchematicBrowserPanelTest {
         onEventDispatchThread(() -> {
             JTextArea details = assertInstanceOf(
                     JTextArea.class, findComponent(panel, "schematicsDetailsText"));
+            JTextArea heading = assertInstanceOf(
+                    JTextArea.class, findComponent(panel, "schematicsDetailsTitle"));
+            JScrollPane detailsScroll = assertInstanceOf(
+                    JScrollPane.class, findComponent(panel, "schematicsDetailsScroll"));
+            assertTrue(heading.getLineWrap());
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
             details.setText("closed details sentinel");
             ListDataEvent lateListEvent = new ListDataEvent(
                     panel.choiceList().getChoiceModel(), ListDataEvent.CONTENTS_CHANGED, 0, 0);

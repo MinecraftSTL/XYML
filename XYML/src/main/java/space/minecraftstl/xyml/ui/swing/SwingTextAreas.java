@@ -64,6 +64,18 @@ public final class SwingTextAreas {
                 + insets.right;
     }
 
+    /// Returns the largest sixteen-character minimum among the supplied components.
+    ///
+    /// @param components components participating in one shared layout column
+    /// @return largest minimum component width
+    public static int maximumMinimumTextWidth(JComponent... components) {
+        int maximum = 0;
+        for (JComponent component : components) {
+            maximum = Math.max(maximum, minimumTextWidth(component));
+        }
+        return maximum;
+    }
+
     /// Read-only text area whose width follows its parent and whose height follows the resulting wrapped lines.
     @NotNullByDefault
     private static final class WrappingTextArea extends JTextArea {

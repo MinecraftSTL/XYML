@@ -26,11 +26,13 @@ import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
@@ -201,7 +203,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private final JTextArea emptyText;
 
     /// Exact file or directory name for the loaded selection.
-    private final JLabel fileNameValue;
+    private final JTextArea fileNameValue;
 
     /// Normalized absolute path for the loaded selection.
     private final JTextArea pathArea;
@@ -210,10 +212,10 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private final JTextArea descriptionArea;
 
     /// Compatibility text for the managed game version.
-    private final JLabel compatibilityValue;
+    private final JTextArea compatibilityValue;
 
     /// Whether Minecraft options currently enable the loaded selection.
-    private final JLabel enabledValue;
+    private final JTextArea enabledValue;
 
     /// Responsive split that changes from side-by-side to stacked at narrow widths.
     private final ResponsiveCatalogSplitPane catalogSplit;
@@ -329,11 +331,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             failedText = stateText("resourcePacksFailed");
             unsupportedText = stateText("resourcePacksUnsupported");
             emptyText = stateText("resourcePacksEmpty");
-            fileNameValue = new JLabel();
+            fileNameValue = SwingTextAreas.wrappingToken();
             pathArea = new JTextArea();
             descriptionArea = new JTextArea();
-            compatibilityValue = new JLabel();
-            enabledValue = new JLabel();
+            compatibilityValue = SwingTextAreas.wrappingValue();
+            enabledValue = SwingTextAreas.wrappingValue();
             listDataListener = createListDataListener();
             selectionListener = this::selectionChanged;
             searchListener = createSearchListener();
@@ -721,7 +723,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     ///
     /// @return configured details panel
     private JComponent createDetailsPanel() {
-        JPanel details = new JPanel(new MigLayout(
+        JPanel details = new ViewportTrackingPanel(new MigLayout(
                 "insets 12 16, fillx, wrap 2",
                 "[][grow,fill]",
                 "[]8[]6[]6[]8[]4[]8[]4[]8[]"));
@@ -737,19 +739,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         fileNameLabel.setLabelFor(fileNameValue);
         details.add(fileNameLabel);
         fileNameValue.setName("resourcePacksFileName");
-        details.add(fileNameValue, "growx");
+        details.add(fileNameValue, "growx, wmin 0");
 
         JLabel compatibilityLabel = new JLabel(strings.compatibilityLabel());
         compatibilityLabel.setLabelFor(compatibilityValue);
         details.add(compatibilityLabel);
         compatibilityValue.setName("resourcePacksCompatibility");
-        details.add(compatibilityValue, "growx");
+        details.add(compatibilityValue, "growx, wmin 0");
 
         JLabel enabledLabel = new JLabel(strings.enabledLabel());
         enabledLabel.setLabelFor(enabledValue);
         details.add(enabledLabel);
         enabledValue.setName("resourcePacksEnabled");
-        details.add(enabledValue, "growx");
+        details.add(enabledValue, "growx, wmin 0");
 
         JLabel pathLabel = new JLabel(strings.pathLabel());
         pathLabel.setLabelFor(pathArea);
@@ -759,7 +761,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         JScrollPane pathScroll = new JScrollPane(pathArea);
         pathScroll.setName("resourcePacksPathScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(pathScroll);
-        details.add(pathScroll, "span 2, growx, hmin 52");
+        pathScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        pathScroll.setMinimumSize(new Dimension(0, 0));
+        details.add(pathScroll, "span 2, growx, wmin 0, hmin 52");
 
         JLabel descriptionLabel = new JLabel(strings.descriptionLabel());
         descriptionLabel.setLabelFor(descriptionArea);
@@ -769,7 +773,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("resourcePacksDescriptionScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        details.add(descriptionScroll, "span 2, growx");
+        descriptionScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        descriptionScroll.setMinimumSize(new Dimension(0, 0));
+        details.add(descriptionScroll, "span 2, growx, wmin 0");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -802,13 +808,26 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 actionStrings.deleteTooltip(),
                 this::confirmAndDeleteSelectedResourcePack);
         actions.add(deleteButton, "w 40!, h 40!");
-        details.add(actions, "span 2, growx");
+        details.add(actions, "span 2, growx, wmin 0");
 
         JScrollPane detailsScroll = createTransparentScrollPane(details, "resourcePacksDetailsScroll");
         detailsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         detailsScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         detailsScroll.getVerticalScrollBar().setUnitIncrement(16);
-        detailsScroll.setMinimumSize(new Dimension(0, 0));
+        int labelMinimumWidth = Math.max(
+                fileNameLabel.getPreferredSize().width,
+                Math.max(compatibilityLabel.getPreferredSize().width,
+                        enabledLabel.getPreferredSize().width));
+        int valueMinimumWidth = SwingTextAreas.maximumMinimumTextWidth(
+                fileNameValue, compatibilityValue, enabledValue, pathArea, descriptionArea);
+        int actionMinimumWidth = enabledToggle.getMinimumSize().width
+                + 8
+                + revealButton.getMinimumSize().width
+                + 8
+                + deleteButton.getMinimumSize().width;
+        int detailsMinimumWidth = Math.max(labelMinimumWidth + 8 + valueMinimumWidth, actionMinimumWidth) + 32;
+        int scrollBarWidth = detailsScroll.getVerticalScrollBar().getPreferredSize().width;
+        detailsScroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         return detailsScroll;
     }
 
@@ -1804,6 +1823,18 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         /// Whether the divider ratio has been initialized for the current orientation.
         private boolean orientationInitialized;
 
+        /// List surface whose horizontal minimum is applied only in side-by-side mode.
+        private final JComponent leftComponent;
+
+        /// Details surface whose horizontal minimum is applied only in side-by-side mode.
+        private final JComponent rightComponent;
+
+        /// Computed minimum width of the list surface.
+        private final int leftMinimumWidth;
+
+        /// Computed minimum width of the details surface.
+        private final int rightMinimumWidth;
+
         /// Creates a borderless responsive split using stable list and details components.
         ///
         /// @param list viewport-driven list
@@ -1817,23 +1848,41 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             setBorder(BorderFactory.createEmptyBorder());
             setContinuousLayout(true);
             setResizeWeight(0.42D);
+            leftComponent = list;
+            rightComponent = details;
+            leftMinimumWidth = SwingTextAreas.minimumTextWidth(list);
+            rightMinimumWidth = details.getMinimumSize().width;
+            leftComponent.setMinimumSize(new Dimension(0, 0));
+            rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
         /// Selects an orientation from the page width that the shell actually allocated.
         ///
         /// @param availableWidth allocated page width
         private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            boolean horizontal = availableWidth >= horizontalMinimumWidth();
             int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            boolean orientationChanged = getOrientation() != desiredOrientation;
-            if (orientationChanged) {
+            if (getOrientation() != desiredOrientation) {
                 setOrientation(desiredOrientation);
                 orientationInitialized = false;
+                leftComponent.setMinimumSize(horizontal
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(horizontal
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
             }
             setResizeWeight(horizontal ? 0.42D : 0.48D);
         }
 
-        /// Lays out children and initializes the divider ratio for the selected orientation.
+        /// Returns the width required to display both panes and the divider.
+        ///
+        /// @return horizontal layout minimum width
+        private int horizontalMinimumWidth() {
+            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
+        }
+
+        /// Lays out children and initializes or clamps the divider for the selected orientation.
         @Override
         public void doLayout() {
             boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
@@ -1844,6 +1893,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     double ratio = horizontal ? 0.42D : 0.48D;
                     setDividerLocation((int) Math.round(usableExtent * ratio));
                     orientationInitialized = true;
+                }
+            }
+            if (horizontal && getWidth() > 0) {
+                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
+                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
+                if (location != getDividerLocation()) {
+                    setDividerLocation(location);
                 }
             }
             super.doLayout();
