@@ -26,10 +26,13 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
@@ -37,6 +40,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -44,6 +48,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
@@ -166,7 +171,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     private final JLabel statusLabel = new JLabel();
 
     /// Heading for the selected-row detail region.
-    private final JLabel detailsHeading = new JLabel();
+    private final JTextArea detailsHeading = SwingTextAreas.wrappingValue();
 
     /// Read-only responsive metadata and parse-error text.
     private final JTextArea detailsArea = new JTextArea();
@@ -417,7 +422,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         list.addMouseListener(directoryOpenMouseListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
 
-        JPanel detailsPanel = new JPanel(new MigLayout(
+        JPanel detailsPanel = new ViewportTrackingPanel(new MigLayout(
                 "insets 12, fill, wrap 1",
                 "[grow,fill]",
                 "[]8[grow,fill]8[]"));
@@ -426,7 +431,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsHeading.setName("schematicsDetailsTitle");
         detailsHeading.setText(strings.detailsTitle());
         detailsHeading.setFont(detailsHeading.getFont().deriveFont(Font.BOLD));
-        detailsPanel.add(detailsHeading, "growx");
+        detailsPanel.add(detailsHeading, "growx, wmin 0");
 
         detailsArea.setName("schematicsDetailsText");
         detailsArea.setEditable(false);
@@ -437,8 +442,10 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsArea.setText(strings.noSelectionText());
         JScrollPane detailsScroll = new JScrollPane(detailsArea);
         detailsScroll.setName("schematicsDetailsScroll");
+        detailsScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        detailsScroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(detailsScroll);
-        detailsPanel.add(detailsScroll, "grow");
+        detailsPanel.add(detailsScroll, "grow, wmin 0");
 
         ResponsiveActionStrip selectedActions = new ResponsiveActionStrip();
         configureActionButton(
@@ -468,20 +475,27 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         deleteButton.addActionListener(event -> confirmAndDeleteSelectedItem());
         selectedActions.addAction(deleteButton);
         detailsPanel.add(selectedActions, "growx, wmin 0, h 40!");
+        int headingMinimumWidth = SwingTextAreas.minimumTextWidth(detailsHeading);
+        int detailsTextMinimumWidth = SwingTextAreas.minimumTextWidth(detailsArea);
+        int detailsActionMinimumWidth = 40 + 8 + 40 + 8 + 40;
+        int detailsMinimumWidth = Math.max(
+                Math.max(headingMinimumWidth, detailsTextMinimumWidth),
+                detailsActionMinimumWidth) + 24;
+        int scrollBarWidth = detailsScroll.getVerticalScrollBar().getPreferredSize().width;
+        detailsScroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
 
-        JSplitPane browserSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, choiceList, detailsPanel);
-        browserSplit.setName("schematicsBrowserSplit");
-        browserSplit.setOpaque(false);
-        browserSplit.setBorder(BorderFactory.createEmptyBorder());
-        browserSplit.setContinuousLayout(true);
-        browserSplit.setResizeWeight(0.62D);
+        ResponsiveBrowserSplitPane responsiveSplit = new ResponsiveBrowserSplitPane(choiceList, detailsPanel);
 
         loadingLabel.setText(strings.idleText());
         emptyLabel.setText(strings.emptyText());
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(errorPanel, ERROR_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
-        contentCards.add(browserSplit, BROWSER_CARD);
+        SwingHorizontalScrollPane browserScroll = new SwingHorizontalScrollPane(
+                responsiveSplit,
+                "schematicsCatalogScroll",
+                responsiveSplit.requiredMinimumWidth());
+        contentCards.add(browserScroll, BROWSER_CARD);
         contentCards.setOpaque(false);
         add(contentCards, "grow");
 
@@ -1505,4 +1519,89 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             throw error;
         }
     }
+
+    /// Keeps the schematic list/details split horizontal while preserving user-adjustable minimum widths.
+    @NotNullByDefault
+    private static final class ResponsiveBrowserSplitPane extends JSplitPane {
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
+
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
+        private final JComponent leftComponent;
+
+        /// Details surface whose minimum width is applied when space permits.
+        private final JComponent rightComponent;
+
+        /// Computed minimum width of the list surface.
+        private final int leftMinimumWidth;
+
+        /// Computed minimum width of the details surface.
+        private final int rightMinimumWidth;
+
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
+        ///
+        /// @param list viewport-driven browser list
+        /// @param details selected-entry details surface
+        private ResponsiveBrowserSplitPane(JComponent list, JComponent details) {
+            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            setName("schematicsBrowserSplit");
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder());
+            setContinuousLayout(true);
+            setResizeWeight(0.62D);
+            leftComponent = list;
+            rightComponent = details;
+            leftMinimumWidth = SwingTextAreas.minimumTextWidth(list);
+            rightMinimumWidth = Math.max(
+                    SwingTextAreas.minimumTextWidth(details),
+                    details.getMinimumSize().width);
+            leftComponent.setMinimumSize(new Dimension(0, 0));
+            rightComponent.setMinimumSize(new Dimension(0, 0));
+        }
+
+        /// Returns the width required by both columns and the divider.
+        ///
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
+            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
+        }
+
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
+        @Override
+        public void doLayout() {
+            boolean canApplyMinimums = getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
+            }
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.62D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
+                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
+                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
+                if (location != getDividerLocation()) {
+                    setDividerLocation(location);
+                }
+            }
+            super.doLayout();
+        }
+
+        /// Allows the card layout to constrain both children without honoring their preferred widths.
+        @Override
+        public Dimension getMinimumSize() {
+            return new Dimension(0, 0);
+        }
+    }
+
 }

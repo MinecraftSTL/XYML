@@ -320,15 +320,15 @@ public final class ResourcePackCatalogPanelTest {
                     () -> assertTrue(requested.length() < rows.size()),
                     () -> assertEquals(List.of(selected.path()), model.selectedPaths()),
                     () -> assertEquals(selected.fileName(),
-                            findComponent(panel, "resourcePacksFileName", javax.swing.JLabel.class).getText()),
+                            findComponent(panel, "resourcePacksFileName", javax.swing.JTextArea.class).getText()),
                     () -> assertEquals(selected.path().toString(),
                             findTextArea(panel, "resourcePacksPath").getText()),
                     () -> assertEquals(selected.description(),
                             findTextArea(panel, "resourcePacksDescription").getText()),
                     () -> assertEquals(STRINGS.compatibleText(),
-                            findComponent(panel, "resourcePacksCompatibility", javax.swing.JLabel.class).getText()),
+                            findComponent(panel, "resourcePacksCompatibility", javax.swing.JTextArea.class).getText()),
                     () -> assertEquals(STRINGS.disabledText(),
-                            findComponent(panel, "resourcePacksEnabled", javax.swing.JLabel.class).getText()));
+                            findComponent(panel, "resourcePacksEnabled", javax.swing.JTextArea.class).getText()));
 
             list.clearSelection();
             assertAll(
@@ -396,7 +396,12 @@ public final class ResourcePackCatalogPanelTest {
                     panel,
                     "resourcePacksDetailsScroll",
                     JScrollPane.class);
+            JTextArea fileName = findTextArea(panel, "resourcePacksFileName");
             assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertEquals(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
+            assertTrue(fileName.getLineWrap());
+            assertFalse(fileName.getWrapStyleWord());
             panel.setSize(new Dimension(980, 620));
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
@@ -421,12 +426,12 @@ public final class ResourcePackCatalogPanelTest {
                     detailsScroll.getVerticalScrollBar().getMaximum()
                             <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
 
-            panel.setSize(new Dimension(600, 420));
+            panel.setSize(new Dimension(360, 420));
             panel.invalidate();
             layoutRecursively(panel);
             assertAll(
                     () -> assertEquals(
-                            JSplitPane.VERTICAL_SPLIT,
+                            JSplitPane.HORIZONTAL_SPLIT,
                             split.getOrientation(),
                             () -> "panel=" + panel.getSize() + ", split=" + split.getSize()),
                     () -> assertTrue(split.getTopComponent().getHeight() > 0),

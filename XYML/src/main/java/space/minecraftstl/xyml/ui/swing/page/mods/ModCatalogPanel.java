@@ -27,10 +27,13 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
@@ -48,6 +51,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.JTextArea;
+import javax.swing.JViewport;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
@@ -61,6 +65,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Insets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -81,9 +86,6 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// interaction contracts. No JavaFX type or network-capable service is referenced.
 @NotNullByDefault
 public final class ModCatalogPanel extends JPanel implements AutoCloseable {
-    /// Minimum page width for keeping the list and details surfaces side by side.
-    private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
-
     /// Shared row icon that remains available in headless and high-DPI Swing sessions.
     private static final Icon MOD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/format-list-bulleted.svg",
@@ -109,7 +111,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     private final ViewportChoiceList<ModCatalogItem> choiceList;
 
     /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
-    private final ResponsiveCatalogSplitPane catalogSplit;
+    private final JComponent catalogSplit;
 
     /// Search field applied to the in-memory index.
     private final JTextField searchField = new JTextField();
@@ -154,25 +156,25 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     private final JLabel writeStatusLabel = new JLabel();
 
     /// Selected Mod primary title or empty-selection placeholder.
-    private final JLabel detailTitle = new JLabel();
+    private final JTextArea detailTitle = SwingTextAreas.wrappingValue();
 
     /// Selected Mod identifier value.
-    private final JLabel idValue = new JLabel();
+    private final JTextArea idValue = SwingTextAreas.wrappingToken();
 
     /// Selected Mod version value.
-    private final JLabel versionValue = new JLabel();
+    private final JTextArea versionValue = SwingTextAreas.wrappingToken();
 
     /// Selected target game version value.
-    private final JLabel gameVersionValue = new JLabel();
+    private final JTextArea gameVersionValue = SwingTextAreas.wrappingToken();
 
     /// Selected detected loader value.
-    private final JLabel loaderValue = new JLabel();
+    private final JTextArea loaderValue = SwingTextAreas.wrappingToken();
 
     /// Selected authors value.
-    private final JLabel authorsValue = new JLabel();
+    private final JTextArea authorsValue = SwingTextAreas.wrappingValue();
 
     /// Selected current file value.
-    private final JLabel fileValue = new JLabel();
+    private final JTextArea fileValue = SwingTextAreas.wrappingToken();
 
     /// Selected complete plain-text description.
     private final JTextArea descriptionArea = new JTextArea();
@@ -299,13 +301,6 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         return choiceList;
     }
 
-    /// Selects the list/details orientation from the width allocated by the instance shell.
-    @Override
-    public void doLayout() {
-        catalogSplit.updateForAvailableWidth(getWidth());
-        super.doLayout();
-    }
-
     /// Returns the latest snapshot rendered by the panel.
     ///
     /// @return displayed snapshot
@@ -416,7 +411,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Creates list controls and single-selection details in one stable split.
     ///
     /// @return borderless split pane
-    private ResponsiveCatalogSplitPane createCatalogSplit() {
+    private JComponent createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout(0, 8));
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
@@ -438,20 +433,42 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         filterBox.setRenderer(new FilterRenderer(strings));
         filterBox.getAccessibleContext().setAccessibleName(strings.filterLabel());
         filters.add(filterBox, "growx");
+        JComponent batchToolbar = createBatchToolbar();
         JPanel listControls = new JPanel(new BorderLayout(0, 6));
         listControls.setOpaque(false);
         listControls.add(filters, BorderLayout.NORTH);
-        listControls.add(createBatchToolbar(), BorderLayout.SOUTH);
+        listControls.add(batchToolbar, BorderLayout.SOUTH);
         listSurface.add(listControls, BorderLayout.NORTH);
         choiceList.setName("modsChoiceList");
         SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         choiceList.getList().setName("modsList");
         choiceList.getList().setOpaque(false);
         listSurface.add(choiceList, BorderLayout.CENTER);
+        int filterMinimumWidth = searchLabel.getPreferredSize().width
+                + SwingTextAreas.minimumTextWidth(searchField)
+                + 8
+                + filterLabel.getPreferredSize().width
+                + 140
+                + 16;
+        int toolbarMinimumWidth = selectAllButton.getMinimumSize().width
+                + enableSelectedButton.getMinimumSize().width
+                + disableSelectedButton.getMinimumSize().width
+                + deleteSelectedButton.getMinimumSize().width
+                + 18;
+        Insets listInsets = listSurface.getInsets();
+        listSurface.setMinimumSize(new Dimension(
+                Math.max(filterMinimumWidth, toolbarMinimumWidth)
+                        + listInsets.left
+                        + listInsets.right,
+                0));
 
-        return new ResponsiveCatalogSplitPane(
+        ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
+        return new SwingHorizontalScrollPane(
+                split,
+                "modsCatalogScroll",
+                split.requiredMinimumWidth());
     }
 
     /// Creates compact logical-selection commands without materializing off-screen rows.
@@ -495,7 +512,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     ///
     /// @return compact details panel with an as-needed transparent vertical scrollbar
     private JComponent createDetailsSurface() {
-        JPanel details = new JPanel(new MigLayout(
+        JPanel details = new ViewportTrackingPanel(new MigLayout(
                 "insets 8 16 8 12, fillx, wrap 2",
                 "[110!][grow,fill]",
                 "[]8[][][][][][]8[]8[]"));
@@ -503,7 +520,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         details.setOpaque(false);
         detailTitle.setName("modsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
-        details.add(detailTitle, "span 2, growx");
+        details.add(detailTitle, "span 2, growx, wmin 0");
         addDetailRow(details, strings.idLabel(), idValue, "modsDetailId");
         addDetailRow(details, strings.versionLabel(), versionValue, "modsDetailVersion");
         addDetailRow(details, strings.gameVersionLabel(), gameVersionValue, "modsDetailGameVersion");
@@ -522,14 +539,16 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("modsDescriptionScroll");
         descriptionScroll.setBorder(BorderFactory.createEmptyBorder());
+        descriptionScroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        details.add(descriptionScroll, "growx");
+        details.add(descriptionScroll, "growx, wmin 0");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[grow,fill][]8[]",
                 "[40!]"));
         actions.setOpaque(false);
+        actions.setMinimumSize(new Dimension(0, 0));
         enabledToggle.setName("modsEnabled");
         actions.add(enabledToggle, "growx, h 40!");
         configureIconButton(
@@ -548,7 +567,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 actionStrings.deleteTooltip(),
                 this::deleteSelected);
         actions.add(deleteButton, "w 40!, h 40!");
-        details.add(actions, "span 2, growx");
+        details.add(actions, "span 2, growx, wmin 0");
 
         JScrollPane scroll = new JScrollPane(details);
         scroll.setName("modsDetailsScroll");
@@ -556,7 +575,20 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-        scroll.setMinimumSize(new Dimension(0, 0));
+        int valueMinimumWidth = maximumMinimumTextWidth(
+                idValue, versionValue, gameVersionValue,
+                loaderValue, authorsValue, fileValue);
+        int labeledContentWidth = 110 + 8 + valueMinimumWidth;
+        int actionMinimumWidth = enabledToggle.getMinimumSize().width
+                + 8
+                + revealButton.getMinimumSize().width
+                + 8
+                + deleteButton.getMinimumSize().width;
+        int detailsMinimumWidth = Math.max(
+                Math.max(labeledContentWidth, actionMinimumWidth),
+                valueMinimumWidth) + 28;
+        int scrollBarWidth = scroll.getVerticalScrollBar().getPreferredSize().width;
+        scroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);
         return scroll;
     }
@@ -577,20 +609,33 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         return statusBand;
     }
 
-    /// Adds one read-only details label and value row.
+    /// Returns the largest sixteen-character minimum among the supplied detail values.
+    ///
+    /// @param values detail values participating in the right-column minimum
+    /// @return largest minimum content width
+    private static int maximumMinimumTextWidth(JTextArea... values) {
+        int maximum = 0;
+        for (JTextArea value : values) {
+            maximum = Math.max(maximum, SwingTextAreas.minimumTextWidth(value));
+        }
+        return maximum;
+    }
+
+    /// Adds one read-only details label and wrapping value row.
     ///
     /// @param panel target details panel
     /// @param labelText localized label
-    /// @param value reusable value label
+    /// @param value reusable wrapping value area
     /// @param valueName deterministic component name
     private static void addDetailRow(
             JPanel panel,
             String labelText,
-            JLabel value,
+            JTextArea value,
             String valueName) {
         panel.add(new JLabel(labelText));
         value.setName(valueName);
-        panel.add(value, "growx");
+        value.getAccessibleContext().setAccessibleName(labelText);
+        panel.add(value, "growx, wmin 0");
     }
 
     /// Installs list listeners used for sparse loading and stable selection.
@@ -1183,49 +1228,121 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         model.close();
     }
 
-    /// Switches the Mod catalog between side-by-side and stacked layouts from actual host width.
+    /// Keeps the Mod catalog split horizontal while preserving user-adjustable minimum widths.
     @NotNullByDefault
     private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Whether the divider ratio has been initialized for the current orientation.
-        private boolean orientationInitialized;
+        /// Original responsive breakpoint retained from the pre-existing page layout.
+        private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
 
-        /// Creates a borderless split whose children may shrink to the allocated host width.
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
+
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
+        private final JComponent leftComponent;
+
+        /// Details surface whose minimum width is applied when space permits.
+        private final JComponent rightComponent;
+
+        /// Computed minimum width of the list surface.
+        private final int leftMinimumWidth;
+
+        /// Computed minimum width of the details surface.
+        private final int rightMinimumWidth;
+
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
         ///
         /// @param list list and filter surface
         /// @param details selected-Mod details surface
         private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
-            // Start stacked so the first preferred-size calculation cannot add both wide child surfaces.
             super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("modsCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
             setContinuousLayout(true);
             setResizeWeight(0.44D);
+            leftComponent = list;
+            rightComponent = details;
+            leftMinimumWidth = list.getMinimumSize().width;
+            rightMinimumWidth = details.getMinimumSize().width;
+            leftComponent.setMinimumSize(new Dimension(0, 0));
+            rightComponent.setMinimumSize(new Dimension(0, 0));
         }
 
-        /// Selects side-by-side or stacked presentation before child layout occurs.
+        /// Returns the nearest outer viewport width or the split width without a viewport.
         ///
-        /// @param availableWidth width allocated by the owning page
-        private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
-            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desiredOrientation) {
-                setOrientation(desiredOrientation);
-                orientationInitialized = false;
+        /// @return available host width
+        private int availableViewportWidth() {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof JViewport viewport
+                        && viewport.getWidth() > 0) {
+                    return viewport.getWidth();
+                }
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    return scroll.getWidth();
+                }
+                parent = parent.getParent();
             }
-            setResizeWeight(horizontal ? 0.44D : 0.48D);
+            return getWidth();
         }
 
-        /// Initializes the divider only after the split has a real extent.
+        /// Enables the page-level horizontal fallback only while this split is horizontal.
+        ///
+        /// @param horizontal whether the original page threshold selects horizontal presentation
+        private void updateOuterHorizontalScroll(boolean horizontal) {
+            Component parent = getParent();
+            while (parent != null) {
+                if (parent instanceof SwingHorizontalScrollPane scroll) {
+                    scroll.setMinimumContentWidth(horizontal ? requiredMinimumWidth() : 0);
+                    return;
+                }
+                parent = parent.getParent();
+            }
+        }
+
+        /// Returns the width required by both columns and the divider.
+        ///
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
+            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
+        }
+
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
         @Override
         public void doLayout() {
-            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
-            if (!orientationInitialized) {
-                int extent = horizontal ? getWidth() : getHeight();
-                int usableExtent = extent - getDividerSize();
-                if (usableExtent > 1) {
-                    setDividerLocation((int) Math.round(usableExtent * (horizontal ? 0.44D : 0.48D)));
-                    orientationInitialized = true;
+            int availableWidth = availableViewportWidth();
+            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
+            int desired = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
+            if (getOrientation() != desired) {
+                setOrientation(desired);
+                dividerInitialized = false;
+                minimumsApplied = false;
+            }
+            updateOuterHorizontalScroll(horizontal);
+            boolean canApplyMinimums = getOrientation() == HORIZONTAL_SPLIT
+                    && getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
+            }
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.44D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
+                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
+                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
+                if (location != getDividerLocation()) {
+                    setDividerLocation(location);
                 }
             }
             super.doLayout();

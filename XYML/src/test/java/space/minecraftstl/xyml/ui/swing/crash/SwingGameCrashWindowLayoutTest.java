@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import javax.swing.JEditorPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import java.awt.Component;
@@ -79,11 +80,19 @@ class SwingGameCrashWindowLayoutTest {
                     layout(content);
                 }
 
+                JScrollPane informationScroll = Objects.requireNonNull(
+                        findScrollPane(content, "gameCrashInformationScroll"),
+                        "information scroll pane");
                 JScrollPane reasonScroll = Objects.requireNonNull(
-                        findTrackingScrollPane(content),
+                        findScrollPane(content, "gameCrashReasonScroll"),
                         "reason scroll pane");
-                assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+                assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                        informationScroll.getHorizontalScrollBarPolicy());
+                assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
                         reasonScroll.getHorizontalScrollBarPolicy());
+                assertTrue(informationScroll.getViewport().getView() instanceof JTextArea information
+                        && information.getLineWrap()
+                        && information.getWrapStyleWord());
                 assertTrue(reasonScroll.getViewport().getView().getWidth()
                         <= reasonScroll.getViewport().getExtentSize().width + 1);
 
@@ -150,6 +159,26 @@ class SwingGameCrashWindowLayoutTest {
         Field field = SwingGameCrashWindow.class.getDeclaredField("content");
         field.setAccessible(true);
         return (JPanel) Objects.requireNonNull(field.get(window), "content");
+    }
+
+    /// Finds one named scroll pane below a component tree.
+    ///
+    /// @param component component tree root
+    /// @param name deterministic component name
+    /// @return matching scroll pane, or null
+    private static @Nullable JScrollPane findScrollPane(Component component, String name) {
+        if (component instanceof JScrollPane scrollPane && name.equals(scrollPane.getName())) {
+            return scrollPane;
+        }
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                @Nullable JScrollPane result = findScrollPane(child, name);
+                if (result != null) {
+                    return result;
+                }
+            }
+        }
+        return null;
     }
 
     /// Finds the width-tracking diagnosis viewport.

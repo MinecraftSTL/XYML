@@ -22,12 +22,14 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.countly.CrashReport;
 
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import java.awt.BorderLayout;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies crash headline selection without opening a desktop window.
@@ -75,6 +77,12 @@ class SwingCrashReportWindowTest {
         JPanel rendered = content.join();
         JTextArea headline = (JTextArea) Objects.requireNonNull(
                 ((BorderLayout) rendered.getLayout()).getLayoutComponent(BorderLayout.NORTH));
+        JScrollPane detailsScroll = (JScrollPane) Objects.requireNonNull(
+                ((BorderLayout) rendered.getLayout()).getLayoutComponent(BorderLayout.CENTER));
+        JTextArea details = (JTextArea) Objects.requireNonNull(detailsScroll.getViewport().getView());
         assertEquals(i18n("launcher.crash.xyml_outdated"), headline.getText());
+        assertFalse(details.getLineWrap());
+        assertEquals(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+                detailsScroll.getHorizontalScrollBarPolicy());
     }
 }
