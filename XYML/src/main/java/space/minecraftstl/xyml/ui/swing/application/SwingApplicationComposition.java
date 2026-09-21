@@ -94,6 +94,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementM
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementStrings;
 import space.minecraftstl.xyml.ui.swing.page.tasks.TaskManagerPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
@@ -459,7 +460,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         presentation.taskProgress(),
                         animator,
                         presentation.taskProgressAnimationDuration(),
-                        models.instances()));
+                        models.instances(),
+                        models.taskLaunchController()));
         factories.put(ShellPageId.TASKS, TaskManagerPanel::new);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
@@ -555,6 +557,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SystemThemeDetector systemThemeDetector) {
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         ThemeRuntimeController themeRuntime = new ThemeRuntimeController(
                 bindings.settings(),
                 new BuiltinThemePackCatalog(),
@@ -623,6 +627,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 resourcePackInteractions,
                                 () -> navigateCommand.accept(ShellPageId.INSTANCES),
                                 presentation.taskProgress(),
+                                taskLaunchController,
                                 animator,
                                 presentation.taskProgressAnimationDuration(),
                                 worldQuickPlayActions,
@@ -756,6 +761,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(stateResources, "stateResources");
         Objects.requireNonNull(navigateCommand, "navigateCommand");
         Runnable addInstanceCommand = () -> navigateCommand.accept(ShellPageId.DOWNLOADS);
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         List<AutoCloseable> services = new ArrayList<>(1);
         List<AutoCloseable> models = new ArrayList<>(7);
         List<AutoCloseable> sources = new ArrayList<>(1);
@@ -808,6 +815,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     instanceManagement,
                     gameVersions,
                     gameInstaller,
+                    taskLaunchController,
                     accounts,
                     appearance,
                     resources,

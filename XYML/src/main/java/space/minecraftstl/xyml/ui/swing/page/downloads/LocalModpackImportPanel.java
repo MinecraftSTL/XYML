@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -91,6 +92,9 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
     /// Progress surface that owns one task-presentation panel at a time.
     private final TaskProgressHostPanel progressHost;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
     /// Listener that reevaluates whether the selected archive and name form a valid request.
     private final DocumentListener inputListener = new ImportInputListener();
 
@@ -118,11 +122,30 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a local modpack importer with explicit task navigation ownership.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public LocalModpackImportPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout(
                 "insets 0, fill, wrap 2",
                 "[grow,fill][grow,fill]",
                 "[40!]8[40!]8[40!]8[40!]8[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         setOpaque(false);
         setMinimumSize(new Dimension(0, 0));
 
@@ -161,7 +184,6 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         statusLabel.setName("localModpackImportStatus");
         add(statusLabel, "span 2, growx, h 24!");
         progressHost.setName("localModpackImportProgress");
-        add(progressHost, "span 2, grow");
         updateImportButton();
     }
 
@@ -356,8 +378,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         activePresentation = presentation;
         activeCompletionSubscription = completionSubscription;
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, i18n("modpack.installing"), () -> { });
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start local modpack installation", startFailure);
             cleanupFailedTaskStart(presentation, completionSubscription);

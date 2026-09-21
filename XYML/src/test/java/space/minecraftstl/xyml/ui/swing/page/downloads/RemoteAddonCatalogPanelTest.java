@@ -387,10 +387,9 @@ final class RemoteAddonCatalogPanelTest {
                 JComponent progressHost = findNamed(panel, "remoteAddonInstallProgress", JComponent.class);
                 JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
                 JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
-                assertNotNull(progressHost);
+                assertNull(progressHost);
                 assertNotNull(searchField);
                 assertNotNull(search);
-                assertEquals(0, progressHost.getComponentCount());
                 searchField.setText("fixture-mod-again");
                 prepareViewport(panel.choiceList(), 160);
                 assertTrue(search.isEnabled());

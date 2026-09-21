@@ -63,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -191,10 +192,9 @@ final class RemoteModpackCatalogPanelTest {
                 JComponent progressHost = findNamed(panel, "remoteModpackInstallProgress", JComponent.class);
                 JTextField searchField = findNamed(panel, "remoteModpackSearch", JTextField.class);
                 JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
-                assertNotNull(progressHost);
+                assertNull(progressHost);
                 assertNotNull(searchField);
                 assertNotNull(search);
-                assertEquals(0, progressHost.getComponentCount());
                 searchField.setText("fixture-pack-again");
                 prepareViewport(panel.choiceList());
                 assertTrue(search.isEnabled());

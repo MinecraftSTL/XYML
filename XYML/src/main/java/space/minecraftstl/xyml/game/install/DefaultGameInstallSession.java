@@ -70,6 +70,10 @@ final class DefaultGameInstallSession implements GameInstallSession {
     private final SimpleObjectProperty<GameInstallStatus> statusProperty =
             new SimpleObjectProperty<>(this, "status", GameInstallStatus.PREPARING);
 
+    /// Observable handoff state set after the task executor has been registered and started.
+    private final SimpleObjectProperty<Boolean> submittedProperty =
+            new SimpleObjectProperty<>(this, "submitted", false);
+
     /// Stable session-level task-presentation publisher.
     private final ValueChangeSupport<TaskSnapshot> presentationChanges = new ValueChangeSupport<>(this);
 
@@ -198,6 +202,14 @@ final class DefaultGameInstallSession implements GameInstallSession {
             return;
         }
 
+        boolean submitted;
+        synchronized (stateLock) {
+            submitted = !cancellationRequested;
+        }
+        if (submitted) {
+            submittedProperty.setValue(true);
+        }
+
         @Nullable TaskExecutor executorToCancel = markExecutorStartCompleted(prepared.executor());
         if (executorToCancel != null) {
             try {
@@ -264,6 +276,12 @@ final class DefaultGameInstallSession implements GameInstallSession {
     @Override
     public ReadOnlyProperty<GameInstallStatus> statusProperty() {
         return statusProperty;
+    }
+
+    /// Returns the observable task-submission transition.
+    @Override
+    public ReadOnlyProperty<Boolean> submittedProperty() {
+        return submittedProperty;
     }
 
     /// Returns the latest stable task presentation.

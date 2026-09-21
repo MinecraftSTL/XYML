@@ -50,6 +50,7 @@ import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogSt
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -105,6 +106,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
     /// @param returnCommand shell command opening the instance-list side page
     /// @param taskProgressStrings localized task-progress labels for long-running instance operations
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param animator optional shared motion-aware progress animator
     /// @param progressAnimationDuration non-negative progress animation duration for instance operations
     /// @param worldQuickPlayActions non-blocking launch and script commands bound to this instance's worlds
@@ -128,6 +130,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogInteractions resourcePackInteractions,
             Runnable returnCommand,
             TaskProgressStrings taskProgressStrings,
+            TaskLaunchController taskLaunchController,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             WorldQuickPlayActions worldQuickPlayActions,
@@ -167,6 +170,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         Runnable requiredReturnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
         TaskProgressStrings requiredTaskProgressStrings =
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+        TaskLaunchController requiredTaskLaunchController =
+                Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         Duration requiredAnimationDuration =
                 Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
         WorldQuickPlayActions requiredWorldQuickPlayActions =
@@ -217,6 +222,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     new OperationPageDependencies(
                             requiredReturnCommand,
                             requiredTaskProgressStrings,
+                            requiredTaskLaunchController,
                             animator,
                             requiredAnimationDuration,
                             requiredWorldQuickPlayActions,
@@ -555,6 +561,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     ///
     /// @param returnCommand command opening the instance list after destructive lifecycle work
     /// @param taskProgressStrings localized long-running task labels
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param animator optional shared motion-aware animator
     /// @param progressAnimationDuration non-negative task animation duration
     /// @param worldQuickPlayActions world launch and script commands
@@ -563,6 +570,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     private record OperationPageDependencies(
             Runnable returnCommand,
             TaskProgressStrings taskProgressStrings,
+            TaskLaunchController taskLaunchController,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             WorldQuickPlayActions worldQuickPlayActions,
@@ -571,6 +579,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         private OperationPageDependencies {
             Objects.requireNonNull(returnCommand, "returnCommand");
             Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+            Objects.requireNonNull(taskLaunchController, "taskLaunchController");
             Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
             Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
             if (progressAnimationDuration.isNegative()) {
