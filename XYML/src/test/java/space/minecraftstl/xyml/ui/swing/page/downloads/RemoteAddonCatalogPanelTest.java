@@ -1035,13 +1035,22 @@ final class RemoteAddonCatalogPanelTest {
                 JComponent criteriaBand = findNamed(panel, "remoteAddonCriteriaBand", JComponent.class);
                 JComponent pageBand = findNamed(panel, "remoteAddonPageBand", JComponent.class);
                 JComponent results = findNamed(panel, "remoteAddonResults", JComponent.class);
+                JComponent installBand = findNamed(panel, "remoteAddonInstallBand", JComponent.class);
+                JComponent version = findNamed(panel, "remoteAddonVersion", JComponent.class);
+                JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
+                JComponent status = findNamed(panel, "remoteAddonStatus", JComponent.class);
                 assertNotNull(filterBand);
                 assertNotNull(searchBand);
                 assertNotNull(criteriaBand);
                 assertNotNull(pageBand);
                 assertNotNull(results);
+                assertNotNull(installBand);
+                assertNotNull(version);
+                assertNotNull(install);
+                assertNotNull(status);
 
                 for (Dimension size : List.of(
+                        new Dimension(1040, 508),
                         new Dimension(960, 600),
                         new Dimension(720, 720),
                         new Dimension(480, 720))) {
@@ -1056,7 +1065,7 @@ final class RemoteAddonCatalogPanelTest {
                                     + ", results=" + results.getBounds());
                     assertComponentInside(searchBand, findNamed(panel, "remoteAddonSearchAction", JButton.class));
                     assertFilterControlUsesRemainingWidth(
-                            searchBand,
+                            criteriaBand,
                             "remoteAddonSource");
                     assertFilterControlUsesRemainingWidth(
                             searchBand,
@@ -1071,6 +1080,17 @@ final class RemoteAddonCatalogPanelTest {
                             criteriaBand,
                             "remoteAddonSort");
                     assertComponentInside(pageBand, findNamed(panel, "remoteAddonLastPage", JButton.class));
+                    assertComponentInside(panel, installBand);
+                    assertComponentInside(installBand, version);
+                    assertComponentInside(installBand, install);
+                    assertTrue(version.getWidth() > 0 && version.getHeight() > 0);
+                    assertTrue(install.getWidth() > 0 && install.getHeight() > 0);
+                    assertFalse(version.getBounds().intersects(install.getBounds()));
+                    assertTrue(installBand.getY() + installBand.getHeight() <= status.getY(),
+                            () -> "size=" + size + ", install=" + installBand.getBounds()
+                                    + ", status=" + status.getBounds());
+                    assertTrue(results.getHeight() > 0,
+                            () -> "size=" + size + ", results=" + results.getBounds());
                 }
             });
         } finally {
@@ -1091,8 +1111,13 @@ final class RemoteAddonCatalogPanelTest {
             JComponent band,
             String controlName) {
         JComponent control = Objects.requireNonNull(findNamed(band, controlName, JComponent.class), controlName);
+        Component parent = Objects.requireNonNull(control.getParent(), "control parent");
+        assertTrue(parent instanceof JComponent, () -> controlName + " parent=" + parent.getClass());
+        JComponent field = (JComponent) parent;
+        assertComponentInside(band, field);
+
         @Nullable JLabel label = null;
-        Component[] children = band.getComponents();
+        Component[] children = field.getComponents();
         for (int index = 1; index < children.length; index++) {
             if (children[index] == control && children[index - 1] instanceof JLabel precedingLabel) {
                 label = precedingLabel;
@@ -1100,12 +1125,12 @@ final class RemoteAddonCatalogPanelTest {
             }
         }
         JLabel resolvedLabel = Objects.requireNonNull(label, "label for " + controlName);
-        assertComponentInside(band, control);
+        assertComponentInside(field, control);
         int labelEnd = resolvedLabel.getX() + resolvedLabel.getWidth();
         int labelToControlGap = control.getX() - labelEnd;
         assertTrue(labelToControlGap >= 0);
         assertTrue(labelToControlGap <= 16, () -> controlName + " gap=" + labelToControlGap);
-        assertTrue(control.getWidth() > resolvedLabel.getWidth());
+        assertTrue(field.getWidth() > resolvedLabel.getWidth());
     }
 
     /// Gives a detached sparse list measurable result geometry without invoking a source request.
