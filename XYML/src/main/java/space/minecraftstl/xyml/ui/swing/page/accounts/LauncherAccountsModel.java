@@ -210,6 +210,29 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
         accountStore.removeAccount(accountId, allowReadOnlyOverwrite);
     }
 
+    /// Reports whether one known account can move within its current portable/global group.
+    @Override
+    public boolean canMoveAccount(String accountId, int targetIndex) {
+        Objects.requireNonNull(accountId, "accountId");
+        synchronized (stateLock) {
+            requireOpen();
+            return canMove(state.source().items(), accountId, targetIndex);
+        }
+    }
+
+    /// Validates one same-group target before delegating the account move.
+    @Override
+    public void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
+        Objects.requireNonNull(accountId, "accountId");
+        synchronized (stateLock) {
+            requireOpen();
+            if (!canMove(state.source().items(), accountId, targetIndex)) {
+                throw new IllegalArgumentException("Invalid account move target: " + targetIndex);
+            }
+        }
+        accountStore.moveAccount(accountId, targetIndex, allowReadOnlyOverwrite);
+    }
+
     /// Validates one stable identifier before starting caller-owned asynchronous reauthentication.
     @Override
     public CompletionStage<Void> refreshAccount(String accountId) {
@@ -357,9 +380,27 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
                     descriptor.title(),
                     descriptor.detail(),
                     descriptor.profileId(),
+                    descriptor.portable(),
                     descriptor.avatarSource()));
         }
         return List.copyOf(items);
+    }
+
+    /// Tests one final source index against the current immutable account rows.
+    ///
+    /// @param items immutable account rows
+    /// @param accountId stable account identifier
+    /// @param targetIndex final zero-based source index
+    /// @return true when the source and target exist in the same storage group and differ
+    private static boolean canMove(
+            @Unmodifiable List<AccountListItem> items,
+            String accountId,
+            int targetIndex) {
+        int sourceIndex = indexOf(items, accountId);
+        if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= items.size() || sourceIndex == targetIndex) {
+            return false;
+        }
+        return items.get(sourceIndex).portable() == items.get(targetIndex).portable();
     }
 
     /// Finds the selected identifier in current immutable source order.

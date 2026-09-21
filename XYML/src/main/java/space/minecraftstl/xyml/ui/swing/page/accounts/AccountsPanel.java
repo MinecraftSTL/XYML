@@ -30,17 +30,25 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.task.Schedulers;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.DropMode;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
@@ -88,6 +96,12 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
 
     /// Profile UUID clipboard command for the loaded selection.
     private final JButton copyUuidButton = new JButton();
+
+    /// Move-selected-account-earlier command.
+    private final JButton moveUpButton = new JButton();
+
+    /// Move-selected-account-later command.
+    private final JButton moveDownButton = new JButton();
 
     /// Offline-skin management command for the selected loaded offline account.
     private final JButton offlineSkinButton = new JButton();
@@ -195,6 +209,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                 closed = true;
                 modelSubscription.unsubscribe();
                 choiceList.getChoiceModel().removeListDataListener(listDataListener);
+                choiceList.getList().setTransferHandler(null);
                 choiceList.close();
                 updateActionAvailability();
             }
@@ -234,10 +249,26 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx, hidemode 3",
-                "[grow][][][][][][]",
+                "[grow][][][][][][][][]",
                 "[]"));
         actions.setOpaque(false);
         actions.add(new JLabel(), "growx, pushx");
+
+        configureActionButton(
+                moveUpButton,
+                "accountsMoveUp",
+                "assets/swing/icons/arrow-up.svg",
+                i18n("account.move_up"));
+        moveUpButton.addActionListener(event -> moveSelectedAccountInList(-1));
+        actions.add(moveUpButton, "w 36!, h 36!");
+
+        configureActionButton(
+                moveDownButton,
+                "accountsMoveDown",
+                "assets/swing/icons/arrow-down.svg",
+                i18n("account.move_down"));
+        moveDownButton.addActionListener(event -> moveSelectedAccountInList(1));
+        actions.add(moveDownButton, "w 36!, h 36!");
 
         configureActionButton(
                 refreshButton,
@@ -298,6 +329,9 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         list.setName("accountsListView");
         list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setDragEnabled(true);
+        list.setDropMode(DropMode.INSERT);
+        list.setTransferHandler(new AccountReorderTransferHandler());
         list.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !applyingSnapshot) {
                 pendingUserSelectionIndex = list.getSelectedIndex();
@@ -578,6 +612,56 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         updateActionAvailability();
     }
 
+    /// Moves the loaded selection one position earlier or later within its storage group.
+    ///
+    /// @param offset either -1 for earlier or 1 for later
+    private void moveSelectedAccountInList(int offset) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || refreshInProgress || offset != -1 && offset != 1) {
+            return;
+        }
+        @Nullable AccountListItem selected = selectedItem();
+        int sourceIndex = choiceList.getList().getSelectedIndex();
+        if (selected == null || sourceIndex < 0) {
+            return;
+        }
+        moveAccountToIndex(selected, sourceIndex + offset);
+    }
+
+    /// Applies one already-validated same-group account move with read-only recovery consent.
+    ///
+    /// @param selected selected loaded account row
+    /// @param targetIndex final zero-based list index
+    /// @return true when the model accepted the move
+    private boolean moveAccountToIndex(AccountListItem selected, int targetIndex) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!model.canMoveAccount(selected.accountId(), targetIndex)) {
+            return false;
+        }
+        try {
+            model.moveAccount(selected.accountId(), targetIndex, false);
+            return true;
+        } catch (AccountStorageOverwriteRequiredException failure) {
+            if (!selected.accountId().equals(failure.accountId())) {
+                showActionFailure(failure);
+                return false;
+            }
+            if (!interaction.confirmReadOnlyOverwrite(this)) {
+                return false;
+            }
+            try {
+                model.moveAccount(selected.accountId(), targetIndex, true);
+                return true;
+            } catch (RuntimeException retryFailure) {
+                showActionFailure(retryFailure);
+                return false;
+            }
+        } catch (RuntimeException failure) {
+            showActionFailure(failure);
+            return false;
+        }
+    }
+
     /// Opens local validation and preview for an upload-capable online account.
     private void openOnlineSkinUpload() {
         EdtDispatcher.requireEventDispatchThread();
@@ -618,6 +702,14 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         boolean hasSelection = !closed && !refreshInProgress && selectedItem() != null;
         refreshButton.setEnabled(hasSelection);
         copyUuidButton.setEnabled(hasSelection);
+        @Nullable AccountListItem selected = selectedItem();
+        int selectedIndex = choiceList.getList().getSelectedIndex();
+        moveUpButton.setEnabled(hasSelection
+                && selected != null
+                && model.canMoveAccount(selected.accountId(), selectedIndex - 1));
+        moveDownButton.setEnabled(hasSelection
+                && selected != null
+                && model.canMoveAccount(selected.accountId(), selectedIndex + 1));
         removeButton.setEnabled(hasSelection);
         addButton.setEnabled(!closed && !refreshInProgress);
         authlibServersButton.setEnabled(
@@ -636,7 +728,6 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                             : "account.move_to_portable"));
         }
         onlineSkinButton.setVisible(model.accountSkinUploadStore().isPresent());
-        @Nullable AccountListItem selected = selectedItem();
         onlineSkinButton.setEnabled(hasSelection
                 && selected != null
                 && model.accountSkinUploadStore()
@@ -694,6 +785,113 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
             current = current.getCause();
         }
         return current;
+    }
+
+    /// Reorders one loaded account through Swing list drag-and-drop within its storage group.
+    @NotNullByDefault
+    private final class AccountReorderTransferHandler extends TransferHandler {
+        /// Source list of the active account drag, or null when no drag is active.
+        private @Nullable Component dragSource;
+
+        /// Stable identifier captured when the active drag starts, or null outside a drag.
+        private @Nullable String draggedAccountId;
+
+        /// Immutable row captured when the active drag starts, or null outside a drag.
+        private @Nullable AccountListItem draggedAccount;
+
+        /// Creates the transferable account identifier for one list drag.
+        @Override
+        protected Transferable createTransferable(JComponent component) {
+            if (closed || refreshInProgress || component != choiceList.getList()) {
+                return null;
+            }
+            @Nullable AccountListItem selected = selectedItem();
+            if (selected == null) {
+                return null;
+            }
+            dragSource = component;
+            draggedAccountId = selected.accountId();
+            draggedAccount = selected;
+            return new StringSelection(selected.accountId());
+        }
+
+        /// Enables move semantics for the source account list.
+        @Override
+        public int getSourceActions(JComponent component) {
+            return MOVE;
+        }
+
+        /// Accepts drops only within the same account group and originating list.
+        @Override
+        public boolean canImport(TransferSupport support) {
+            if (closed || refreshInProgress || !choiceList.getList().isEnabled()
+                    || !support.isDrop()
+                    || !support.isDataFlavorSupported(DataFlavor.stringFlavor)
+                    || support.getComponent() != dragSource
+                    || dragSource != choiceList.getList()) {
+                return false;
+            }
+            @Nullable String accountId = transferredAccountId(support);
+            if (accountId == null || !accountId.equals(draggedAccountId)) {
+                return false;
+            }
+            int sourceIndex = model.stableItemIds().indexOf(accountId);
+            JList.DropLocation dropLocation = (JList.DropLocation) support.getDropLocation();
+            int targetIndex = dropTargetIndex(sourceIndex, dropLocation.getIndex());
+            return targetIndex >= 0 && model.canMoveAccount(accountId, targetIndex);
+        }
+
+        /// Applies one accepted same-group reorder with the existing read-only recovery flow.
+        @Override
+        public boolean importData(TransferSupport support) {
+            if (!canImport(support)) {
+                return false;
+            }
+            @Nullable AccountListItem account = draggedAccount;
+            if (account == null) {
+                return false;
+            }
+            int sourceIndex = model.stableItemIds().indexOf(account.accountId());
+            JList.DropLocation dropLocation = (JList.DropLocation) support.getDropLocation();
+            int targetIndex = dropTargetIndex(sourceIndex, dropLocation.getIndex());
+            return moveAccountToIndex(account, targetIndex);
+        }
+
+        /// Clears one completed or cancelled drag.
+        @Override
+        protected void exportDone(JComponent source, Transferable data, int action) {
+            dragSource = null;
+            draggedAccountId = null;
+            draggedAccount = null;
+            super.exportDone(source, data, action);
+        }
+
+        /// Reads the dragged account identifier from the current transfer data.
+        ///
+        /// @param support current transfer support
+        /// @return account identifier, or null when unavailable
+        private @Nullable String transferredAccountId(TransferSupport support) {
+            try {
+                Object value = support.getTransferable().getTransferData(DataFlavor.stringFlavor);
+                return value instanceof String accountId && !accountId.isBlank() ? accountId : null;
+            } catch (UnsupportedFlavorException | IOException failure) {
+                return null;
+            }
+        }
+
+        /// Converts one insertion gap into the final zero-based source index.
+        ///
+        /// @param sourceIndex current source index, or -1 when absent
+        /// @param dropIndex insertion gap reported by the list
+        /// @return final target index, or -1 when no target exists
+        private int dropTargetIndex(int sourceIndex, int dropIndex) {
+            int itemCount = model.snapshot().itemCount();
+            if (sourceIndex < 0 || itemCount == 0) {
+                return -1;
+            }
+            int targetIndex = dropIndex > sourceIndex ? dropIndex - 1 : dropIndex;
+            return Math.max(0, Math.min(itemCount - 1, targetIndex));
+        }
     }
 
     /// Configures one fixed icon-only account command with tooltip and accessibility text.

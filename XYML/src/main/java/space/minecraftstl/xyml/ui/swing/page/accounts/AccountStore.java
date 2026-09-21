@@ -49,4 +49,13 @@ public interface AccountStore {
     /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make newer storage writable
     /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
     void removeAccount(String accountId, boolean allowReadOnlyOverwrite);
+
+    /// Moves one account to a final source index without crossing its portable/global storage group.
+    ///
+    /// @param accountId stable account identifier
+    /// @param targetIndex final zero-based source index after the move
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make storage writable
+    /// @throws IllegalArgumentException when the account or target ordering is invalid
+    /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
+    void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite);
 }

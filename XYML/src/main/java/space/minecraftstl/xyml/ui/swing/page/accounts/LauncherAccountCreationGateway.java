@@ -166,7 +166,7 @@ public final class LauncherAccountCreationGateway implements AccountCreationGate
             authenticatedAccount.setPortable(prepared.portable());
             int oldIndex = Accounts.getAccounts().indexOf(authenticatedAccount);
             if (oldIndex < 0) {
-                Accounts.getAccounts().add(authenticatedAccount);
+                Accounts.addAccount(authenticatedAccount);
             } else {
                 Accounts.getAccounts().set(oldIndex, authenticatedAccount);
             }

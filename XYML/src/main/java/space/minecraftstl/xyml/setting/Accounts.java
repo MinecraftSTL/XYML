@@ -480,6 +480,54 @@ public final class Accounts {
         return accountValues;
     }
 
+    /// Appends an account to the end of its portable or global storage group.
+    ///
+    /// The account's portability flag must already be set to its target group.
+    ///
+    /// @param account account to append
+    public static void addAccount(Account account) {
+        Objects.requireNonNull(account, "account");
+        int insertionIndex = accountValues.size();
+        if (account.isPortable()) {
+            insertionIndex = 0;
+            for (int index = 0; index < accountValues.size(); index++) {
+                if (accountValues.get(index).isPortable()) {
+                    insertionIndex = index + 1;
+                }
+            }
+        }
+        accountValues.add(insertionIndex, account);
+    }
+
+    /// Moves an account to a final index while preserving the portable/global group boundary.
+    ///
+    /// @param account account to move
+    /// @param targetIndex final zero-based list index after the move
+    /// @throws IllegalArgumentException when the account is absent, the index is invalid,
+    ///     or the target belongs to the other storage group
+    public static void moveAccount(Account account, int targetIndex) {
+        Objects.requireNonNull(account, "account");
+        int sourceIndex = accountValues.indexOf(account);
+        if (sourceIndex < 0) {
+            throw new IllegalArgumentException("Unknown account: " + account);
+        }
+        if (targetIndex < 0 || targetIndex >= accountValues.size()) {
+            throw new IllegalArgumentException("Account target index out of range: " + targetIndex);
+        }
+        if (sourceIndex == targetIndex) {
+            return;
+        }
+        Account target = accountValues.get(targetIndex);
+        if (account.isPortable() != target.isPortable()) {
+            throw new IllegalArgumentException("Account cannot cross storage groups");
+        }
+
+        List<Account> reordered = new ArrayList<>(accountValues);
+        reordered.remove(sourceIndex);
+        reordered.add(targetIndex, account);
+        accountValues.setAll(reordered);
+    }
+
     /// Returns the selected account from the toolkit-neutral state model.
     ///
     /// @return selected account, or `null` when no account is available
