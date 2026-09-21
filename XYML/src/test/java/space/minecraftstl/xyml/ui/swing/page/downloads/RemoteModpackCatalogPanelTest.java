@@ -382,10 +382,10 @@ final class RemoteModpackCatalogPanelTest {
                 assertNotNull(gameVersionBox);
                 assertNotNull(search);
                 assertNotNull(previous);
-                assertEquals(searchBand, search.getParent());
-                assertEquals(criteriaBand, categoryBox.getParent());
-                assertEquals(criteriaBand, sortBox.getParent());
-                assertEquals(pageBand, previous.getParent());
+                assertTrue(search.getParent() == searchBand);
+                assertTrue(categoryBox.getParent().getParent() == criteriaBand);
+                assertTrue(sortBox.getParent().getParent() == criteriaBand);
+                assertTrue(previous.getParent() == pageBand);
                 assertEquals(3, categoryBox.getItemCount());
                 assertEquals(6, sortBox.getItemCount());
                 assertEquals(RemoteAddonRepository.SortType.POPULARITY, sortBox.getSelectedItem());
@@ -545,13 +545,24 @@ final class RemoteModpackCatalogPanelTest {
                 JComponent criteriaBand = findNamed(panel, "remoteModpackCriteriaBand", JComponent.class);
                 JComponent pageBand = findNamed(panel, "remoteModpackPageBand", JComponent.class);
                 JComponent results = findNamed(panel, "remoteModpackResults", JComponent.class);
+                JComponent installBand = findNamed(panel, "remoteModpackInstallBand", JComponent.class);
+                JComponent version = findNamed(panel, "remoteModpackVersion", JComponent.class);
+                JComponent instanceName = findNamed(panel, "remoteModpackInstanceName", JComponent.class);
+                JButton install = findNamed(panel, "remoteModpackInstall", JButton.class);
+                JComponent status = findNamed(panel, "remoteModpackStatus", JComponent.class);
                 assertNotNull(filterBand);
                 assertNotNull(searchBand);
                 assertNotNull(criteriaBand);
                 assertNotNull(pageBand);
                 assertNotNull(results);
+                assertNotNull(installBand);
+                assertNotNull(version);
+                assertNotNull(instanceName);
+                assertNotNull(install);
+                assertNotNull(status);
 
                 for (Dimension panelSize : List.of(
+                        new Dimension(1040, 508),
                         new Dimension(640, 600),
                         new Dimension(960, 600),
                         new Dimension(960, 720),
@@ -559,8 +570,8 @@ final class RemoteModpackCatalogPanelTest {
                     panel.setSize(panelSize);
                     layoutTree(panel);
 
-                    assertTrue(searchBand.getWidth() > 0 && searchBand.getHeight() > 40);
-                    assertTrue(criteriaBand.getWidth() > 0 && criteriaBand.getHeight() > 40);
+                    assertTrue(searchBand.getWidth() > 0 && searchBand.getHeight() >= 40);
+                    assertTrue(criteriaBand.getWidth() > 0 && criteriaBand.getHeight() >= 40);
                     assertTrue(pageBand.getWidth() > 0 && pageBand.getHeight() >= 40);
                     assertComponentInside(filterBand, searchBand);
                     assertComponentInside(filterBand, criteriaBand);
@@ -571,6 +582,19 @@ final class RemoteModpackCatalogPanelTest {
                     assertChildrenInside(searchBand);
                     assertChildrenInside(criteriaBand);
                     assertChildrenInside(pageBand);
+                    assertComponentInside(panel, installBand);
+                    assertComponentInside(installBand, version);
+                    assertComponentInside(installBand, instanceName);
+                    assertComponentInside(installBand, install);
+                    assertTrue(version.getWidth() > 0 && version.getHeight() > 0);
+                    assertTrue(instanceName.getWidth() > 0 && instanceName.getHeight() > 0);
+                    assertTrue(install.getWidth() > 0 && install.getHeight() > 0);
+                    assertFalse(version.getBounds().intersects(install.getBounds()));
+                    assertTrue(installBand.getY() + installBand.getHeight() <= status.getY(),
+                            () -> "size=" + panelSize + ", install=" + installBand.getBounds()
+                                    + ", status=" + status.getBounds());
+                    assertTrue(results.getHeight() > 0,
+                            () -> "size=" + panelSize + ", results=" + results.getBounds());
                 }
             });
         } finally {

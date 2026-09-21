@@ -340,7 +340,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]8[pref!,shrink 0]8[grow,fill]8[]8[]8[]"));
+                "[]8[pref!,shrink 0]8[grow,fill,shrink 100]8[pref!,shrink 0]8[pref!,shrink 0]8[pref!,shrink 0]8[pref!,shrink 0]"));
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
@@ -430,88 +430,78 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
-                "[pref!]8[pref!]"));
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
+                "[40!]8[40!]8[40!]"));
         filterBand.setName("remoteModpackFilterBand");
         filterBand.setOpaque(false);
         filterBand.setMinimumSize(new Dimension(0, 0));
 
-        JPanel searchBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
-                "[40!]8[40!]8[40!]"));
-        searchBand.setName("remoteModpackSearchBand");
-        searchBand.setOpaque(false);
-        searchBand.setMinimumSize(new Dimension(0, 0));
-
-        JLabel sourceLabel = new JLabel(strings.sourceLabel());
-        sourceLabel.setLabelFor(sourceBox);
-        searchBand.add(sourceLabel);
-        sourceBox.setName("remoteModpackSource");
-        sourceBox.addActionListener(event -> sourceChanged());
-        sourceBox.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(sourceBox, "growx, wmin 0, h 40!");
-
-        JLabel searchLabel = new JLabel(strings.searchLabel());
-        searchLabel.setLabelFor(searchField);
-        searchBand.add(searchLabel);
-        searchField.setName("remoteModpackSearch");
-        SwingTextFields.showClearButton(searchField);
-        searchField.getDocument().addDocumentListener(criteriaListener);
-        searchField.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(searchField, "growx, wmin 0, h 40!");
-
-        searchButton.setName("remoteModpackSearchAction");
-        searchButton.setText(strings.searchAction());
-        searchButton.addActionListener(event -> submitFirstPageSearch());
-        searchButton.setMinimumSize(new Dimension(0, 0));
-        searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
-        filterBand.add(searchBand, "growx, wmin 0");
-
         JPanel criteriaBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
-                "[40!]8[40!]8[40!]"));
+                "insets 0, fillx, wrap 4",
+                "[grow,fill][grow,fill][grow,fill][grow,fill]",
+                "[40!]"));
         criteriaBand.setName("remoteModpackCriteriaBand");
         criteriaBand.setOpaque(false);
         criteriaBand.setMinimumSize(new Dimension(0, 0));
 
+        JLabel sourceLabel = new JLabel(strings.sourceLabel());
+        sourceLabel.setLabelFor(sourceBox);
+        sourceBox.setName("remoteModpackSource");
+        sourceBox.addActionListener(event -> sourceChanged());
+        criteriaBand.add(RemoteCatalogFilterField.create(sourceLabel, sourceBox), "growx, wmin 0");
+
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
-        criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteModpackGameVersion");
         configureGameVersionSelector();
-        gameVersionField.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
+        criteriaBand.add(RemoteCatalogFilterField.create(gameVersionLabel, gameVersionField), "growx, wmin 0");
 
         RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
         JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
         categoryLabel.setLabelFor(categoryBox);
-        criteriaBand.add(categoryLabel);
         categoryBox.setName("remoteModpackCategory");
         categoryBox.setRenderer(new RemoteCatalogCategoryRenderer(
                 () -> selectedSource() == RemoteModpackCatalogSource.MODRINTH,
                 filterStrings));
         resetCategoryOptions();
         categoryBox.addActionListener(event -> categoryChanged());
-        categoryBox.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(categoryBox, "growx, wmin 0, h 40!");
+        criteriaBand.add(RemoteCatalogFilterField.create(categoryLabel, categoryBox), "growx, wmin 0");
 
         JLabel sortLabel = new JLabel(filterStrings.sortLabel());
         sortLabel.setLabelFor(sortBox);
-        criteriaBand.add(sortLabel);
         sortBox.setName("remoteModpackSort");
         sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
         resetSortOptions();
         sortBox.addActionListener(event -> sortChanged());
-        sortBox.setMinimumSize(new Dimension(0, 0));
-        criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
+        criteriaBand.add(RemoteCatalogFilterField.create(sortLabel, sortBox), "growx, wmin 0");
         filterBand.add(criteriaBand, "growx, wmin 0");
+
+        JPanel searchBand = new JPanel(new MigLayout(
+                "insets 0, fillx, wrap 4",
+                "[grow,fill][grow,fill][grow,fill][grow,fill]",
+                "[40!]"));
+        searchBand.setName("remoteModpackSearchBand");
+        searchBand.setOpaque(false);
+        searchBand.setMinimumSize(new Dimension(0, 0));
+
+        JLabel searchLabel = new JLabel(strings.searchLabel());
+        searchLabel.setLabelFor(searchField);
+        searchField.setName("remoteModpackSearch");
+        SwingTextFields.showClearButton(searchField);
+        searchField.getDocument().addDocumentListener(criteriaListener);
+        searchBand.add(RemoteCatalogFilterField.create(searchLabel, searchField), "span 3, growx, wmin 0");
+
+        searchButton.setName("remoteModpackSearchAction");
+        searchButton.setText(strings.searchAction());
+        searchButton.addActionListener(event -> submitFirstPageSearch());
+        searchButton.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(searchButton, "grow, wmin 0, h 40!");
+        filterBand.add(searchBand, "growx, wmin 0");
 
         JPanel pageBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][120,shrink 100]8[120,shrink 100]8[120,shrink 100]8[120,shrink 100]",
+                "[grow,fill][grow,fill][grow,fill][grow,fill]",
                 "[40!]"));
         pageBand.setName("remoteModpackPageBand");
         pageBand.setOpaque(false);
@@ -537,7 +527,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
         lastPageButton.setMinimumSize(new Dimension(0, 0));
         pageBand.add(lastPageButton, "grow, wmin 0, h 40!");
-        filterBand.add(pageBand, "span 2, growx, wmin 0");
+        filterBand.add(pageBand, "growx, wmin 0");
         add(filterBand, "growx");
 
         choiceList.setName("remoteModpackResults");
@@ -555,9 +545,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(choiceList, "grow");
 
         JPanel installBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 2",
-                "[grow,fill][grow,fill]",
-                "[40!]8[40!]8[40!]8[40!]"));
+                "insets 0, fillx, wrap 6",
+                "[pref!][grow,fill][pref!][grow,fill][pref!][grow,fill]",
+                "[40!]8[40!]"));
+        installBand.setName("remoteModpackInstallBand");
         installBand.setOpaque(false);
         installBand.setMinimumSize(new Dimension(0, 0));
         JLabel versionLabel = new JLabel(strings.versionLabel());
@@ -595,7 +586,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         installButton.setText(strings.installAction());
         installButton.addActionListener(event -> beginInstall());
         installButton.setMinimumSize(new Dimension(0, 0));
-        installBand.add(installButton, "span 2, grow, wmin 0, h 40!");
+        installBand.add(installButton, "span 6, grow, wmin 0, h 40!");
         add(installBand, "growx");
 
         statusLabel.setName("remoteModpackStatus");
