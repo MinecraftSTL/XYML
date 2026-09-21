@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.log.LauncherLogPanel;
 import space.minecraftstl.xyml.ui.swing.page.nbt.NBTSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.update.UpdateCheckRequest;
 import space.minecraftstl.xyml.ui.swing.update.UpdateCheckResult;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
@@ -460,6 +461,14 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 setInteractiveControlsEnabled(false);
             }
         });
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        javaManagementPanel.setTaskLaunchController(controller);
     }
 
     /// Creates every functional settings tab and configures component interactions.

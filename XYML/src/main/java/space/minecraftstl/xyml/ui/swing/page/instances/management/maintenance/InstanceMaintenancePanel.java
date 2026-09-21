@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -89,6 +90,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Task-progress host shared by Core repair tasks and test-launch sessions.
     private final TaskProgressHostPanel progressHost;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Starts one diagnostic game launch.
     private final JButton testLaunchButton = new JButton();
@@ -310,6 +314,14 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @return non-blank page title
     public String title() {
         return strings.title();
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Returns the latest successful local snapshot, or null before activation succeeds.
@@ -798,8 +810,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         statusLabel.setText(strings.workingStatus());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, requireNonBlank(title, "title"), () -> { });
         } catch (RuntimeException startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);

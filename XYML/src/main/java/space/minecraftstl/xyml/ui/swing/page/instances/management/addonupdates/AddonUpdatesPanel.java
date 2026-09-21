@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.RemoteAddonChangelogDialog;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -131,6 +132,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
 
     /// Owns the one current update-task presentation.
     private final TaskProgressHostPanel progressHost;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Owned table selection listener detached during closure.
     private final ListSelectionListener selectionListener;
@@ -281,6 +285,14 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         return strings.title();
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Starts one explicit background scan when no check is already running.
     ///
     /// This is the only page entry point that can contact a network add-on source.
@@ -402,7 +414,6 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         updateButton.addActionListener(event -> applySelectedUpdates());
         status.add(updateButton, "h 36!");
 
-        status.add(progressHost, "newline, span 3, growx");
         return status;
     }
 
@@ -663,8 +674,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         statusLabel.setText(strings.updatingText());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            taskExecutor.start();
+            taskLaunchController.launch(taskExecutor, strings.title(), () -> { });
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentTaskFailure(startFailure);

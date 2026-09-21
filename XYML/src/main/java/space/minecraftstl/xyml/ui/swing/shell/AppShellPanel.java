@@ -36,6 +36,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -108,7 +109,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     private final SwingButtonRippleSupport buttonRippleSupport;
 
     /// Injected boundary opening the native local-modpack installation window.
-    private final DroppedModpackInstallLauncher droppedModpackInstallLauncher;
+    private DroppedModpackInstallLauncher droppedModpackInstallLauncher;
 
     /// Shell route accepting modpack archives only on instance-management and download pages.
     private final ShellFileDropHandler.RouteRegistration modpackDropRegistration;
@@ -162,10 +163,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 animator,
                 pageTransitionDuration,
                 progressAnimationDuration,
+                new TaskLaunchController(() -> { }),
                 (owner, archive) -> SwingLocalModpackInstallDialog.show(
                         owner,
                         archive,
                         taskProgressStrings,
+                        new TaskLaunchController(() -> { }),
                         animator,
                         progressAnimationDuration));
     }
@@ -181,6 +184,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param animator the shared Swing animator
     /// @param pageTransitionDuration the non-negative caller-selected transition duration
     /// @param progressAnimationDuration non-negative launch progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param droppedModpackInstallLauncher injected native-window launcher
     AppShellPanel(
             String windowTitle,
@@ -192,6 +196,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             SwingAnimator animator,
             Duration pageTransitionDuration,
             Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController,
             DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(pagePresentations, "pagePresentations");
@@ -204,6 +209,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         this.droppedModpackInstallLauncher = Objects.requireNonNull(
                 droppedModpackInstallLauncher,
                 "droppedModpackInstallLauncher");
+        Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         navigationState = new ShellNavigationState();
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
         pageDeck = new ShellPageDeck(animator, pageTransitionDuration);
@@ -252,6 +258,32 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         defaultDropTargetSuppressor = ShellDefaultDropTargetSuppressor.install(this);
     }
 
+    /// Creates the shell with an injected dropped-modpack boundary and default task navigation.
+    AppShellPanel(
+            String windowTitle,
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
+            ShellPagePresentations pagePresentations,
+            ShellToolbarModels toolbarModels,
+            HomeStrings homeStrings,
+            TaskProgressStrings taskProgressStrings,
+            SwingAnimator animator,
+            Duration pageTransitionDuration,
+            Duration progressAnimationDuration,
+            DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
+        this(
+                windowTitle,
+                pageFactories,
+                pagePresentations,
+                toolbarModels,
+                homeStrings,
+                taskProgressStrings,
+                animator,
+                pageTransitionDuration,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }),
+                droppedModpackInstallLauncher);
+    }
+
     /// Replaces the renderer-ready background and schedules repainting.
     ///
     /// @param background newest decoded background
@@ -270,6 +302,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         windowBackground = windowBackground.withWindowTransparency(transparent);
         setOpaque(!transparent);
         repaint();
+    }
+
+    /// Replaces the dropped-modpack workflow with explicit task navigation ownership.
+    ///
+    /// @param launcher native-window installation boundary
+    public void setDroppedModpackInstallLauncher(DroppedModpackInstallLauncher launcher) {
+        EdtDispatcher.requireEventDispatchThread();
+        droppedModpackInstallLauncher = Objects.requireNonNull(launcher, "launcher");
     }
 
     /// Paints a cover-cropped image or bounds-aware paint beneath all shell controls.
@@ -687,7 +727,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Opens the native installation window for one dropped modpack archive.
     @NotNullByDefault
     @FunctionalInterface
-    interface DroppedModpackInstallLauncher {
+    public interface DroppedModpackInstallLauncher {
         /// Opens one installer owned by the shell.
         ///
         /// @param owner visible shell owner

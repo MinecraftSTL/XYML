@@ -41,6 +41,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionLi
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -93,6 +94,9 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
 
     /// Host owning visual presentation of the single active Core task.
     private final TaskProgressHostPanel progressHost;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Stable top-level navigation between installed-state and online-loader workflows.
     private final JTabbedPane tabs = new AnimatedTabbedPane();
@@ -236,6 +240,14 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         return i18n("install.change_version.title", instanceId.id());
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Returns the latest successfully rendered installer snapshot, or null before loading succeeds.
     ///
     /// @return immutable current snapshot, or null while inactive, loading, or after failure
@@ -308,7 +320,6 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         root.add(tabs, "grow, push");
 
         progressHost.setName("instanceInstallerTaskProgress");
-        root.add(progressHost, "growx");
         statusLabel.setName("instanceInstallerStatus");
         root.add(statusLabel, "growx, h 24!");
         add(root, BorderLayout.CENTER);
@@ -708,8 +719,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         statusLabel.setText(i18n("message.doing"));
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);

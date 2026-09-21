@@ -56,6 +56,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalog
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
@@ -520,10 +521,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw failure;
         }
         try {
-            return SettingsCenterPanel.createForCurrentSettings(
+            SettingsCenterPanel settings = SettingsCenterPanel.createForCurrentSettings(
                     appearancePanel,
                     family -> themeManager.updateDefaultFontFamily(
                             SwingLauncherFontManager.effectiveLauncherFontFamily(family)));
+            settings.setTaskLaunchController(models.taskLaunchController());
+            return settings;
         } catch (RuntimeException | Error failure) {
             appearancePanel.close();
             throw failure;
@@ -946,13 +949,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 animator,
                 presentation.pageTransitionDuration(),
                 presentation.taskProgressAnimationDuration());
+        frame.shellPanel().setDroppedModpackInstallLauncher((owner, archive) ->
+                SwingLocalModpackInstallDialog.show(
+                        owner,
+                        archive,
+                        presentation.taskProgress(),
+                        models.taskLaunchController(),
+                        animator,
+                        presentation.taskProgressAnimationDuration()));
         SwingInstanceJsonImportLauncher.install(
                 frame,
                 GameDirectoryManager::getSelectedRepository,
                 Schedulers.io(),
                 presentation.taskProgress(),
                 animator,
-                presentation.taskProgressAnimationDuration());
+                presentation.taskProgressAnimationDuration(),
+                models.taskLaunchController());
         SwingShellNBTDropLauncher.install(frame, Schedulers.io());
         SwingCrashReportDropLauncher.install(frame, Schedulers.io());
         return new AppShellApplicationWindow(frame);

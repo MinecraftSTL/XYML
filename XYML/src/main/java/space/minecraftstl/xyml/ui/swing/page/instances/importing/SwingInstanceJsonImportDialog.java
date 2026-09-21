@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -61,6 +62,7 @@ final class SwingInstanceJsonImportDialog extends JDialog
             InstanceJsonImportService service,
             InstanceJsonImportStrings strings,
             TaskProgressStrings taskProgressStrings,
+            TaskLaunchController taskLaunchController,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             Consumer<SwingInstanceJsonImportLauncher.ImportWindow> closedObserver) {
@@ -72,7 +74,9 @@ final class SwingInstanceJsonImportDialog extends JDialog
                 Objects.requireNonNull(strings, "strings"),
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                Objects.requireNonNull(taskLaunchController, "taskLaunchController"),
+                this::dismissSubmittedWindow);
         setName("instanceJsonImportDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setContentPane(panel);
@@ -90,6 +94,14 @@ final class SwingInstanceJsonImportDialog extends JDialog
                 finishClose();
             }
         });
+    }
+
+    /// Disposes the confirmation window after the task has been handed to global task management.
+    private void dismissSubmittedWindow() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!closed) {
+            dispose();
+        }
     }
 
     /// Replaces the selected source while the hosted workflow is idle.
