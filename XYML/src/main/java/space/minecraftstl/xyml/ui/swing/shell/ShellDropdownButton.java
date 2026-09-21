@@ -31,6 +31,8 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.RenderingHints;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.MouseEvent;
 import java.util.Objects;
 
@@ -42,6 +44,9 @@ import java.util.Objects;
 final class ShellDropdownButton extends JButton implements PopupMenuListener {
     /// Horizontal space reserved for the disclosure chevron.
     private static final int DISCLOSURE_WIDTH = 22;
+
+    /// Maximum preferred width contributed by one selected value.
+    private static final int MAX_PREFERRED_WIDTH = 180;
 
     /// Popup controlled by this button, or `null` before a selector binds one.
     private @Nullable JPopupMenu popup;
@@ -58,6 +63,12 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
     /// Whether the bound popup is expanded and the disclosure chevron must point upward.
     private boolean popupExpanded;
 
+    /// Complete selected text retained independently of the ellipsized rendered text.
+    private String fullText = "";
+
+    /// Prevents visible-text updates from re-entering the public text setter.
+    private boolean applyingVisibleText;
+
     /// Creates one left-aligned popup button.
     ShellDropdownButton() {
         setOpaque(false);
@@ -69,6 +80,97 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
                         + "pressedBackground: fade($Button.pressedBackground,28%)");
         setHorizontalAlignment(LEFT);
         setMargin(new Insets(4, 10, 4, 8 + DISCLOSURE_WIDTH));
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent event) {
+                updateVisibleText();
+            }
+        });
+    }
+
+    /// Stores complete selected text and renders only the portion fitting the current width.
+    @Override
+    public void setText(String text) {
+        fullText = Objects.requireNonNull(text, "text");
+        updateVisibleText();
+    }
+
+    /// Returns complete selected text before width-based ellipsis.
+    ///
+    /// @return complete selected text
+    String fullText() {
+        return fullText;
+    }
+
+    /// Prevents full selected text from expanding the fixed title-bar columns.
+    @Override
+    public java.awt.Dimension getPreferredSize() {
+        java.awt.Dimension preferred = super.getPreferredSize();
+        return new java.awt.Dimension(Math.min(preferred.width, MAX_PREFERRED_WIDTH), preferred.height);
+    }
+
+    /// Allows the surrounding fixed-width selector to shrink independently of its full text.
+    @Override
+    public java.awt.Dimension getMinimumSize() {
+        java.awt.Dimension minimum = super.getMinimumSize();
+        return new java.awt.Dimension(0, minimum.height);
+    }
+
+    /// Recomputes text after the surrounding layout assigns the final button width.
+    @Override
+    public void doLayout() {
+        updateVisibleText();
+        super.doLayout();
+        updateVisibleText();
+    }
+
+    /// Recomputes visible text from the current component geometry.
+    private void updateVisibleText() {
+        if (applyingVisibleText) {
+            return;
+        }
+        String replacement = ellipsize(fullText, availableTextWidth());
+        if (replacement.equals(super.getText())) {
+            return;
+        }
+        applyingVisibleText = true;
+        try {
+            super.setText(replacement);
+        } finally {
+            applyingVisibleText = false;
+        }
+    }
+
+    /// Returns horizontal space available to the text portion of the button.
+    private int availableTextWidth() {
+        int width = getWidth();
+        if (width <= 0) {
+            return 0;
+        }
+        Insets insets = getInsets();
+        int iconWidth = getIcon() == null ? 0 : getIcon().getIconWidth() + getIconTextGap();
+        return Math.max(0, width - insets.left - insets.right - iconWidth - DISCLOSURE_WIDTH);
+    }
+
+    /// Ellipsizes one string to the supplied pixel budget.
+    private String ellipsize(String text, int width) {
+        if (width <= 0) {
+            return text;
+        }
+        java.awt.FontMetrics metrics = getFontMetrics(getFont());
+        if (metrics.stringWidth(text) <= width) {
+            return text;
+        }
+        String suffix = "...";
+        int suffixWidth = metrics.stringWidth(suffix);
+        if (suffixWidth > width) {
+            return "";
+        }
+        int end = text.length();
+        while (end > 0 && metrics.stringWidth(text.substring(0, end)) + suffixWidth > width) {
+            end--;
+        }
+        return text.substring(0, end) + suffix;
     }
 
     /// Binds one reusable popup and installs the button's show-or-hide action.

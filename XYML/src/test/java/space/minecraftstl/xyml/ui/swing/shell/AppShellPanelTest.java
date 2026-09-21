@@ -546,6 +546,38 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Long player and instance-folder names ellipsize without overlapping the launch command.
+    @Test
+    public void ellipsizesLongSelectorValuesAtMinimumWidth() {
+        AppShellPanel panel = createPanel(creationCounts());
+        String playerName = "PlayerName-" + "very-long-segment-".repeat(8);
+        String instanceName = "InstanceFolder-" + "very-long-segment-".repeat(8);
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.setSize(new Dimension(AppShellPanel.MINIMUM_WIDTH, RENDER_HEIGHT));
+                ShellToolbarPanel toolbar = panel.toolbar();
+                toolbar.accountSelector().setSelectedText(playerName, "Microsoft");
+                toolbar.instanceSelector().setSelectedText(instanceName, "Minecraft");
+                layoutTree(panel);
+
+                ShellDropdownButton account = toolbar.accountSelector().valueButton();
+                ShellDropdownButton instance = toolbar.instanceSelector().valueButton();
+                assertAll(
+                        () -> assertEquals(playerName, account.fullText()),
+                        () -> assertTrue(account.getText().endsWith("...")),
+                        () -> assertTrue(account.getToolTipText().contains(playerName)),
+                        () -> assertEquals(instanceName, instance.fullText()),
+                        () -> assertTrue(instance.getText().endsWith("...")),
+                        () -> assertTrue(instance.getToolTipText().contains(instanceName)),
+                        () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Empty account state keeps the full selector and management route reachable.
     @Test
     public void keepsEmptyAccountSelectorReachable() {
