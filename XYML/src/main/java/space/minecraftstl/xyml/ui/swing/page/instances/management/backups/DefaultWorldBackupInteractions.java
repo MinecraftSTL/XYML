@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -41,6 +42,21 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// scheduled on the caller-owned background executor and reject accidental EDT execution.
 @NotNullByDefault
 public final class DefaultWorldBackupInteractions implements WorldBackupInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Caller-owned worker used for platform file-manager integration.
     private final Executor executor;
 

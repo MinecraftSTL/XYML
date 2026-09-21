@@ -960,7 +960,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         @Unmodifiable List<String> selectedKeys = selectedLocalKeys();
         if (!selectedKeys.isEmpty()
                 && isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
-            observeFailure(model.setModsEnabled(selectedKeys, enabled));
+            submitModsEnabled(selectedKeys, enabled);
         }
     }
 
@@ -976,7 +976,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
-            observeFailure(model.deleteMods(selectedKeys));
+            submitModsDeletion(selectedKeys);
         }
     }
 
@@ -1056,7 +1056,11 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             }
             return;
         }
-        interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+        interactions.showRetryableFailure(
+                this,
+                actionStrings.errorTitle(),
+                failureDetail(failure),
+                () -> submitImport(sources, conflictActions));
     }
 
     /// Returns whether this writable page accepts one dropped Mod path.
@@ -1099,7 +1103,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     private void deleteSelected() {
         @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null && interactions.confirmDelete(this, selected)) {
-            observeFailure(model.deleteMod(selected.localKey()));
+            submitModDeletion(selected.localKey());
         }
     }
 
@@ -1110,22 +1114,83 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
         @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
-            observeFailure(model.setModEnabled(selected.localKey(), enabledToggle.isSelected()));
+            submitModEnabled(selected.localKey(), enabledToggle.isSelected());
         }
+    }
+
+    /// Submits one exact enabled-state batch and captures the same request for retry.
+    ///
+    /// @param localKeys immutable stable keys
+    /// @param enabled desired enabled state
+    private void submitModsEnabled(@Unmodifiable List<String> localKeys, boolean enabled) {
+        @Unmodifiable List<String> capturedKeys = List.copyOf(localKeys);
+        observeFailure(
+                model.setModsEnabled(capturedKeys, enabled),
+                () -> submitModsEnabled(capturedKeys, enabled));
+    }
+
+    /// Submits one exact deletion batch and captures the same request for retry.
+    ///
+    /// @param localKeys immutable stable keys
+    private void submitModsDeletion(@Unmodifiable List<String> localKeys) {
+        @Unmodifiable List<String> capturedKeys = List.copyOf(localKeys);
+        observeFailure(
+                model.deleteMods(capturedKeys),
+                () -> submitModsDeletion(capturedKeys));
+    }
+
+    /// Submits one exact single deletion and captures the same request for retry.
+    ///
+    /// @param localKey stable target key
+    private void submitModDeletion(String localKey) {
+        String capturedKey = Objects.requireNonNull(localKey, "localKey");
+        observeFailure(
+                model.deleteMod(capturedKey),
+                () -> submitModDeletion(capturedKey));
+    }
+
+    /// Submits one exact enabled-state change and captures the same request for retry.
+    ///
+    /// @param localKey stable target key
+    /// @param enabled desired enabled state
+    private void submitModEnabled(String localKey, boolean enabled) {
+        String capturedKey = Objects.requireNonNull(localKey, "localKey");
+        observeFailure(
+                model.setModEnabled(capturedKey, enabled),
+                () -> submitModEnabled(capturedKey, enabled));
     }
 
     /// Shows asynchronous model or desktop failures exactly once while open.
     ///
     /// @param stage observed asynchronous operation
     private void observeFailure(CompletionStage<?> stage) {
+        observeFailure(stage, null);
+    }
+
+    /// Shows one asynchronous failure with an optional exact retry request.
+    ///
+    /// @param stage observed asynchronous operation
+    /// @param retryAction captured retry request, or null for a terminal failure
+    private void observeFailure(
+            CompletionStage<?> stage,
+            @Nullable Runnable retryAction) {
         stage.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
                 EdtDispatcher.execute(() -> {
                     if (!closed) {
-                        interactions.showFailure(
-                                this,
-                                actionStrings.errorTitle(),
-                                failureDetail(failure));
+                        String detail = failureDetail(failure);
+                        if (retryAction == null) {
+                            interactions.showFailure(
+                                    this,
+                                    actionStrings.errorTitle(),
+                                    detail);
+                        } else {
+                            interactions.showRetryableFailure(
+                                    this,
+                                    actionStrings.errorTitle(),
+                                    detail,
+                                    retryAction);
+                        }
                     }
                 });
             }

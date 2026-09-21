@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -48,6 +49,21 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// run on the caller-provided background executor so they cannot freeze Swing event processing.
 @NotNullByDefault
 public final class DefaultDataPackManagementInteractions implements DataPackManagementInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Stable visible text used by all native interactions.
     private final DataPackManagementStrings strings;
 

@@ -252,6 +252,30 @@ public final class ModCatalogPanelTest {
         });
     }
 
+    /// A failed import presents one Retry action that replays the exact captured batch.
+    @Test
+    public void retriesFailedImportWithExactCapturedBatch() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        model.replaceImportFailure(new IOException("locked"));
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            @Nullable Runnable retryAction = interactions.retryAction();
+            assertNotNull(retryAction);
+            retryAction.run();
+
+            assertEquals(2, model.imports().size());
+            assertEquals(model.imports().get(0), model.imports().get(1));
+            assertEquals(
+                    model.importConflictActions().get(0),
+                    model.importConflictActions().get(1));
+            panel.close();
+        });
+    }
+
     /// A conflict discovered during background preflight returns to the same choice flow and retries.
     @Test
     public void resolvesLateImportConflictAndRetriesMutation() throws Exception {
@@ -807,6 +831,9 @@ public final class ModCatalogPanelTest {
         /// Conflict surfaced only when an import without its decision reaches the fake backend.
         private @Nullable Path lateImportConflict;
 
+        /// One-shot asynchronous import failure.
+        private @Nullable Throwable importFailure;
+
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
 
@@ -944,6 +971,11 @@ public final class ModCatalogPanelTest {
             @Nullable Path conflict = lateImportConflict;
             if (conflict != null && !conflictActions.containsKey(conflict)) {
                 return CompletableFuture.failedFuture(new ModImportConflictException(conflict));
+            }
+            @Nullable Throwable failure = importFailure;
+            importFailure = null;
+            if (failure != null) {
+                return CompletableFuture.failedFuture(failure);
             }
             return CompletableFuture.completedFuture(snapshot);
         }
@@ -1087,6 +1119,13 @@ public final class ModCatalogPanelTest {
             lateImportConflict = conflict.toAbsolutePath().normalize();
         }
 
+        /// Configures one one-shot asynchronous import failure.
+        ///
+        /// @param failure failure retained for the next import call
+        private void replaceImportFailure(Throwable failure) {
+            importFailure = Objects.requireNonNull(failure, "failure");
+        }
+
         /// Returns deleted keys.
         ///
         /// @return immutable keys
@@ -1129,6 +1168,9 @@ public final class ModCatalogPanelTest {
 
         /// Deterministic import conflict response.
         private ModImportConflictAction importConflictAction = ModImportConflictAction.REPLACE;
+
+        /// Latest captured retry request.
+        private @Nullable Runnable retryAction;
 
         /// Returns one deterministic import choice.
         @Override
@@ -1176,6 +1218,16 @@ public final class ModCatalogPanelTest {
             throw new AssertionError(title + ": " + detail);
         }
 
+        /// Captures one explicit retry request without showing a dialog.
+        @Override
+        public void showRetryableFailure(
+                Component owner,
+                String title,
+                String detail,
+                Runnable retryAction) {
+            this.retryAction = Objects.requireNonNull(retryAction, "retryAction");
+        }
+
         /// Returns latest revealed path.
         ///
         /// @return revealed path, or `null`
@@ -1202,6 +1254,13 @@ public final class ModCatalogPanelTest {
         /// @return immutable conflict sources
         private @Unmodifiable List<Path> importConflictSources() {
             return List.copyOf(importConflictSources);
+        }
+
+        /// Returns the latest captured retry request.
+        ///
+        /// @return retry request, or null when none was presented
+        private @Nullable Runnable retryAction() {
+            return retryAction;
         }
 
         /// Replaces the deterministic conflict response.

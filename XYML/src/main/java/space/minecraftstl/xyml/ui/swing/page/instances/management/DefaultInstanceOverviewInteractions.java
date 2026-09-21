@@ -24,6 +24,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -45,6 +46,21 @@ import java.util.concurrent.Executor;
 /// on the supplied executor so opening a slow file browser never stalls the management view.
 @NotNullByDefault
 public final class DefaultInstanceOverviewInteractions implements InstanceOverviewInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Text used for native dialog configuration.
     private final InstanceOverviewStrings strings;
 

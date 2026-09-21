@@ -114,6 +114,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     /// Whether an index or mutation currently controls page availability.
     private boolean operationPending;
 
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Runnable pendingRetry;
+
     /// Creates a production page for one repository instance.
     ///
     /// @param repository managed game repository
@@ -323,12 +326,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (source == null || closed.get() || operationPending) {
             return;
         }
-        long request = beginOperation(i18n("world.backup.processing"));
-        try {
-            observeSnapshot(catalog.createBackup(source), request, i18n("swing.world_backup.created"));
-        } catch (RuntimeException exception) {
-            completeFailure(request, exception);
-        }
+        createBackup(source);
     }
 
     /// Opens the backup directory through the background desktop boundary.
@@ -355,12 +353,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (archive == null || closed.get() || operationPending || !interactions.confirmDelete(this, archive)) {
             return;
         }
-        long request = beginOperation(i18n("swing.world_backup.deleting"));
-        try {
-            observeSnapshot(catalog.deleteBackup(archive), request, i18n("swing.world_backup.deleted"));
-        } catch (RuntimeException exception) {
-            completeFailure(request, exception);
-        }
+        deleteBackup(archive);
     }
 
     /// Prompts for a new save name, confirms it, and schedules actual archive restoration.
@@ -374,6 +367,41 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (destinationName == null || !interactions.confirmRestore(this, archive, destinationName)) {
             return;
         }
+        restoreBackup(archive, destinationName);
+    }
+
+    /// Schedules one exact backup creation and captures the same request for retry.
+    ///
+    /// @param source exact selected backup source
+    private void createBackup(WorldBackupSource source) {
+        pendingRetry = () -> createBackup(source);
+        long request = beginOperation(i18n("world.backup.processing"));
+        try {
+            observeSnapshot(catalog.createBackup(source), request, i18n("swing.world_backup.created"));
+        } catch (RuntimeException exception) {
+            completeFailure(request, exception);
+        }
+    }
+
+    /// Schedules one exact backup deletion and captures the same request for retry.
+    ///
+    /// @param archive exact selected backup archive
+    private void deleteBackup(WorldBackupArchive archive) {
+        pendingRetry = () -> deleteBackup(archive);
+        long request = beginOperation(i18n("swing.world_backup.deleting"));
+        try {
+            observeSnapshot(catalog.deleteBackup(archive), request, i18n("swing.world_backup.deleted"));
+        } catch (RuntimeException exception) {
+            completeFailure(request, exception);
+        }
+    }
+
+    /// Schedules one exact backup restoration and captures the same request for retry.
+    ///
+    /// @param archive exact selected backup archive
+    /// @param destinationName confirmed destination save name
+    private void restoreBackup(WorldBackupArchive archive, String destinationName) {
+        pendingRetry = () -> restoreBackup(archive, destinationName);
         long request = beginOperation(i18n("swing.world_backup.restoring"));
         try {
             observeSnapshot(
@@ -414,6 +442,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                     } else if (snapshot == null) {
                         completeFailure(request, new IllegalStateException(i18n("swing.world_backup.missing_index")));
                     } else {
+                        pendingRetry = null;
                         operationPending = false;
                         applySnapshot(snapshot);
                         statusLabel.setText(snapshot.archives().isEmpty()
@@ -433,10 +462,20 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (closed.get() || request != requestSequence) {
             return;
         }
+        @Nullable Runnable retryAction = pendingRetry;
+        pendingRetry = null;
         operationPending = false;
         statusLabel.setText(i18n("message.failed"));
         updateControls();
-        showFailureIfOpen(failure);
+        if (retryAction == null) {
+            showFailureIfOpen(failure);
+        } else {
+            interactions.showRetryableFailure(
+                    this,
+                    i18n("world.backup"),
+                    failureDetail(failure),
+                    retryAction);
+        }
     }
 
     /// Applies a new shallow index while preserving selection by filesystem path when possible.
@@ -598,6 +637,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
         operationPending = false;
+        pendingRetry = null;
         sourceModel.removeAllElements();
         archiveModel.clear();
         archiveDetailLabel.setText("");

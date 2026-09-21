@@ -276,6 +276,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether a model write command remains locally outstanding.
     private boolean writePending;
 
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> activeWriteOperation;
+
     /// Model-notification revision captured immediately before the current write invocation.
     private long writeStartUpdateRevision;
 
@@ -1363,6 +1366,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         writePending = true;
+        activeWriteOperation = Objects.requireNonNull(operation, "operation");
         synchronized (stateLock) {
             writeStartUpdateRevision = updateRevision;
         }
@@ -1388,6 +1392,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @param failure asynchronous wrapper or original failure, or null after success
     private void writeCompleted(@Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> retryOperation =
+                activeWriteOperation;
+        activeWriteOperation = null;
         if (!isOpen()) {
             return;
         }
@@ -1399,10 +1406,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         Throwable resolved = unwrapCompletionFailure(failure);
         if (!(resolved instanceof CancellationException)
                 && !currentWriteFailureWasPublished()) {
-            interactions.showFailure(
-                    this,
-                    actionStrings.operationFailedTitle(),
-                    failureText(resolved));
+            String detail = failureText(resolved);
+            if (retryOperation == null) {
+                interactions.showFailure(
+                        this,
+                        actionStrings.operationFailedTitle(),
+                        detail);
+            } else {
+                interactions.showRetryableFailure(
+                        this,
+                        actionStrings.operationFailedTitle(),
+                        detail,
+                        () -> startWrite(retryOperation));
+            }
         }
     }
 

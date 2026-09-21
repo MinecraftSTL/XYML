@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -31,8 +32,9 @@ import java.util.concurrent.CompletionStage;
 ///
 /// Production implementations keep native Swing dialogs on the EDT and schedule desktop operations
 /// elsewhere. Test implementations can record calls without requiring a graphical desktop.
+
 @NotNullByDefault
-public interface DataPackManagementInteractions {
+public interface DataPackManagementInteractions extends RetryableFailureInteraction {
     /// Opens a ZIP-only chooser for a local data-pack archive.
     ///
     /// @param owner dialog owner

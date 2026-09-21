@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -27,7 +28,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Owns Swing dialogs and desktop integration outside the pure world catalog model.
 @NotNullByDefault
-public interface WorldCatalogInteractions extends AutoCloseable {
+public interface WorldCatalogInteractions extends AutoCloseable, RetryableFailureInteraction {
     /// Opens a single ZIP archive chooser on the EDT.
     ///
     /// @param owner dialog owner

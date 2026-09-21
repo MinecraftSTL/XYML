@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -140,6 +141,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
 
     /// Guards one in-flight CSV write and prevents duplicate export commands.
     private final AtomicBoolean exporting = new AtomicBoolean();
+
+    /// Whether a terminal partial failure requested an exact retry before rescanning.
+    private boolean retryRequested;
 
     /// Guards one in-flight changelog request and prevents duplicate dialog loads.
     private final AtomicBoolean changelogLoading = new AtomicBoolean();
@@ -637,6 +641,22 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
             updateControls();
             return;
         }
+        beginUpdateApplication(selectedUpdates);
+    }
+
+    /// Starts one exact update batch and leaves terminal handling to the application listener.
+    ///
+    /// @param updates immutable exact update batch
+    private void beginUpdateApplication(@Unmodifiable List<AddonUpdateItem> updates) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || scanning.get() || activeExecutor != null) {
+            return;
+        }
+        @Unmodifiable List<AddonUpdateItem> selectedUpdates = List.copyOf(updates);
+        if (selectedUpdates.isEmpty()) {
+            updateControls();
+            return;
+        }
         releaseCompletedPresentation();
 
         final Task<AddonUpdateApplicationResult> task;
@@ -696,6 +716,11 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
                             "Add-on update task completed without an application result"));
                 } else {
                     handleApplicationResult(result);
+                    if (retryRequested) {
+                        retryRequested = false;
+                        updateControls();
+                        return;
+                    }
                     checkForUpdates();
                     return;
                 }
@@ -719,14 +744,45 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         if (outcome.hasFailures()) {
             pendingCompletionStatus = strings.failedDownloadText()
                     + " (" + outcome.successfulUpdates().size() + "/" + outcome.attemptedCount() + ")";
-            interactions.showFailure(
-                    this,
-                    strings.failureDialogTitle(),
-                    formatApplicationFailures(outcome.failures()));
+            @Unmodifiable List<AddonUpdateItem> retryable = retryableUpdates(outcome.failures());
+            String detail = formatApplicationFailures(outcome.failures());
+            if (retryable.isEmpty()) {
+                interactions.showFailure(this, strings.failureDialogTitle(), detail);
+            } else {
+                retryRequested = false;
+                interactions.showRetryableFailure(
+                        this,
+                        strings.failureDialogTitle(),
+                        detail,
+                        () -> {
+                            retryRequested = true;
+                            beginUpdateApplication(retryable);
+                        });
+            }
         } else {
             pendingCompletionStatus = strings.updateSucceededText()
                     + " (" + outcome.successfulUpdates().size() + ")";
         }
+    }
+
+    /// Returns failed updates whose rolled-back local file still exists in its original state.
+    ///
+    /// @param failures immutable failed update outcomes
+    /// @return immutable retryable update batch in original order
+    private static @Unmodifiable List<AddonUpdateItem> retryableUpdates(
+            @Unmodifiable List<AddonUpdateApplicationFailure> failures) {
+        List<AddonUpdateItem> retryable = new ArrayList<>();
+        for (AddonUpdateApplicationFailure failure
+                : Objects.requireNonNull(failures, "failures")) {
+            AddonUpdateItem item = Objects.requireNonNull(failure, "failure").updateItem();
+            String fileName = Objects.requireNonNull(
+                    item.update().localAddonFile().getFile().getFileName(),
+                    "local add-on file name").toString();
+            if (!fileName.endsWith(LocalAddonManager.OLD_EXTENSION)) {
+                retryable.add(item);
+            }
+        }
+        return List.copyOf(retryable);
     }
 
     /// Removes exact update objects that became stale as soon as their application task completed.

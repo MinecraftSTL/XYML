@@ -82,6 +82,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
@@ -1153,7 +1154,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             }
             @Nullable String targetName = interactions.chooseWorldName(this, candidate);
             if (targetName != null) {
-                observeFailure(model.installWorld(candidate, targetName));
+                observeRetryable(() -> model.installWorld(candidate, targetName));
             }
         }));
     }
@@ -1188,7 +1189,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             showFailure(failure);
             return;
         }
-        observeFailure(model.updateWorldDetails(selected, update));
+        observeRetryable(() -> model.updateWorldDetails(selected, update));
     }
 
     /// Builds one validated update while preserving unsupported-field absence.
@@ -1295,7 +1296,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (source != null) {
-            observeFailure(model.replaceWorldIcon(selected, source));
+            observeRetryable(() -> model.replaceWorldIcon(selected, source));
         }
     }
 
@@ -1304,7 +1305,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = mutableDetailsSelection();
         if (selected != null
                 && Objects.requireNonNull(selected.details()).hasIcon()) {
-            observeFailure(model.resetWorldIcon(selected));
+            observeRetryable(() -> model.resetWorldIcon(selected));
         }
     }
 
@@ -1566,7 +1567,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (targetName != null) {
-            observeFailure(model.copyWorld(selected, targetName));
+            observeRetryable(() -> model.copyWorld(selected, targetName));
         }
     }
 
@@ -1584,7 +1585,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (archive != null) {
-            observeFailure(model.exportWorld(selected, archive));
+            observeRetryable(() -> model.exportWorld(selected, archive));
         }
     }
 
@@ -1592,7 +1593,21 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private void deleteSelectedWorld() {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
         if (selected != null && selected.readable() && interactions.confirmDelete(this, selected)) {
-            observeFailure(model.deleteWorld(selected));
+            observeRetryable(() -> model.deleteWorld(selected));
+        }
+    }
+
+    /// Invokes one local write request and captures the same supplier for retry.
+    ///
+    /// @param operation deferred local write operation
+    private void observeRetryable(Supplier<CompletionStage<?>> operation) {
+        Supplier<CompletionStage<?>> capturedOperation = Objects.requireNonNull(operation, "operation");
+        try {
+            observeFailure(
+                    Objects.requireNonNull(capturedOperation.get(), "operation returned null"),
+                    () -> observeRetryable(capturedOperation));
+        } catch (RuntimeException failure) {
+            showRetryableFailure(failure, () -> observeRetryable(capturedOperation));
         }
     }
 
@@ -1600,11 +1615,25 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     ///
     /// @param stage observed stage
     private void observeFailure(CompletionStage<?> stage) {
+        observeFailure(stage, null);
+    }
+
+    /// Shows one asynchronous failure with an optional exact retry request.
+    ///
+    /// @param stage observed stage
+    /// @param retryAction captured retry request, or null for a terminal failure
+    private void observeFailure(
+            CompletionStage<?> stage,
+            @Nullable Runnable retryAction) {
         Objects.requireNonNull(stage, "stage").whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
                 EdtDispatcher.execute(() -> {
                     if (!closed.get()) {
-                        showFailure(failure);
+                        if (retryAction == null) {
+                            showFailure(failure);
+                        } else {
+                            showRetryableFailure(failure, retryAction);
+                        }
                     }
                 });
             }
@@ -1616,6 +1645,18 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param failure original synchronous or asynchronous failure
     private void showFailure(Throwable failure) {
         interactions.showFailure(this, strings.failureTitle(), failureDetail(failure));
+    }
+
+    /// Displays one failure with an exact captured retry request on the EDT.
+    ///
+    /// @param failure original synchronous or asynchronous failure
+    /// @param retryAction captured retry request
+    private void showRetryableFailure(Throwable failure, Runnable retryAction) {
+        interactions.showRetryableFailure(
+                this,
+                strings.failureTitle(),
+                failureDetail(failure),
+                retryAction);
     }
 
     /// Formats an epoch timestamp for the current desktop locale, with a stable fallback.

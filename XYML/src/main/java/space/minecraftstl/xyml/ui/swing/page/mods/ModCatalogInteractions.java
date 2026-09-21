@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -28,7 +29,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Owns Mod interactions that cross Swing dialog and platform desktop boundaries.
 @NotNullByDefault
-public interface ModCatalogInteractions {
+public interface ModCatalogInteractions extends RetryableFailureInteraction {
     /// Opens a multi-selection Mod archive chooser on the EDT.
     ///
     /// @param owner dialog owner
