@@ -17,7 +17,8 @@
  */
 package space.minecraftstl.xyml.download;
 
-import java.net.URI;
+import org.glavo.url.WebURL;
+import org.jetbrains.annotations.Unmodifiable;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -58,10 +59,11 @@ public final class AutoDownloadProvider implements DownloadProvider {
         return fileProviders.get(0);
     }
 
-    private static List<URI> getAll(
+    /// Collects candidates in provider order, removing duplicates by normalized URL equality.
+    private static @Unmodifiable List<WebURL> getAll(
             List<DownloadProvider> providers,
-            Function<DownloadProvider, List<URI>> function) {
-        LinkedHashSet<URI> result = new LinkedHashSet<>();
+            Function<DownloadProvider, List<WebURL>> function) {
+        LinkedHashSet<WebURL> result = new LinkedHashSet<>();
         for (DownloadProvider provider : providers) {
             result.addAll(function.apply(provider));
         }
@@ -69,7 +71,7 @@ public final class AutoDownloadProvider implements DownloadProvider {
     }
 
     @Override
-    public List<URI> getVersionListURLs() {
+    public @Unmodifiable List<WebURL> getVersionListURLs() {
         return getAll(versionListProviders, DownloadProvider::getVersionListURLs);
     }
 
@@ -79,17 +81,17 @@ public final class AutoDownloadProvider implements DownloadProvider {
     }
 
     @Override
-    public List<URI> getAssetObjectCandidates(String assetObjectLocation) {
+    public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
         return getAll(fileProviders, provider -> provider.getAssetObjectCandidates(assetObjectLocation));
     }
 
     @Override
-    public List<URI> injectURLWithCandidates(String baseURL) {
+    public @Unmodifiable List<WebURL> injectURLWithCandidates(String baseURL) {
         return getAll(fileProviders, provider -> provider.injectURLWithCandidates(baseURL));
     }
 
     @Override
-    public List<URI> injectURLsWithCandidates(List<String> urls) {
+    public @Unmodifiable List<WebURL> injectURLsWithCandidates(List<String> urls) {
         return getAll(fileProviders, provider -> provider.injectURLsWithCandidates(urls));
     }
 

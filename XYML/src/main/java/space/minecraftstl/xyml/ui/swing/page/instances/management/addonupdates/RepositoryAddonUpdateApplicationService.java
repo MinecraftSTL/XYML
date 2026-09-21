@@ -31,7 +31,7 @@ import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -235,7 +235,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                     remoteVersion.file(),
                     "update.targetVersion.file");
             String remoteUrl = Objects.requireNonNull(remoteFile.url(), "remote file URL");
-            @Unmodifiable List<URI> candidates = List.copyOf(
+            @Unmodifiable List<WebURL> candidates = List.copyOf(
                     downloadProvider.injectURLWithCandidates(remoteUrl));
             if (candidates.isEmpty()) {
                 throw new IOException("Download provider returned no candidates for " + remoteUrl);
@@ -648,7 +648,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
     /// @param downloadName stable progress display name
     /// @return stopped Core download task
     private static Task<@Nullable Void> createDownloadTask(
-            @Unmodifiable List<URI> candidates,
+            @Unmodifiable List<WebURL> candidates,
             Path stagingPath,
             Path validationPath,
             @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
@@ -1044,7 +1044,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             PlannedUpdate plan,
             LocalAddonFile localAddonFile,
             Path stagingPath,
-            @Unmodifiable List<URI> candidates,
+            @Unmodifiable List<WebURL> candidates,
             @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
             String downloadName,
             boolean disabled) {
@@ -1385,7 +1385,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         /// @param downloadName stable progress display name
         /// @return stopped staged download task
         Task<@Nullable Void> create(
-                @Unmodifiable List<URI> candidates,
+                @Unmodifiable List<WebURL> candidates,
                 Path stagingPath,
                 Path validationPath,
                 @Nullable FileDownloadTask.IntegrityCheck integrityCheck,

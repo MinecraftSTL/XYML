@@ -32,6 +32,8 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
+import org.glavo.url.WebURL;
+
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -137,7 +139,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
             ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(
                     repository.getModpackConfiguration(instanceId));
             if (isServerManifestSource(updateSource)) {
-                GetTask fetch = new GetTask(updateSource);
+                GetTask fetch = new GetTask(WebURL.of(updateSource));
                 TaskResource cacheResource = fetch.getResources().iterator().next();
                 Task<ServerModpackManifest> parsedManifest = fetch
                         .thenGetJsonAsync(ServerModpackManifest.class)
@@ -158,7 +160,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
             Path temporaryDirectory = repository.getInstanceStateDirectory(instanceId).resolve("maintenance");
             Files.createDirectories(temporaryDirectory);
             Path temporaryArchive = Files.createTempFile(temporaryDirectory, "modpack-update-", ".zip");
-            FileDownloadTask downloadTask = new FileDownloadTask(updateSource, temporaryArchive);
+            FileDownloadTask downloadTask = new FileDownloadTask(WebURL.of(updateSource), temporaryArchive);
             downloadTask.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
             Task<@Nullable Void> acquisition = downloadTask.thenApplyAsync(ioExecutor, ignored -> (Void) null)
                     .setResources(instanceResource(), TaskResource.downloadTarget(temporaryArchive));

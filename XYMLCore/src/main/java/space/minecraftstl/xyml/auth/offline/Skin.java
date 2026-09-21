@@ -22,6 +22,7 @@ import com.google.gson.annotations.SerializedName;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.task.GetTask;
@@ -282,11 +283,11 @@ public record Skin(
     /// Downloads one remote texture into memory while retaining repository ETag caching.
     @NotNullByDefault
     private static final class FetchBytesTask extends FetchTask<InputStream> {
-        /// Creates a fetch task for one absolute texture URI.
+        /// Creates a fetch task for one absolute texture URL.
         ///
-        /// @param uri absolute texture URI
-        private FetchBytesTask(String uri) {
-            super(List.of(NetworkUtils.toURI(uri)));
+        /// @param url absolute texture URL
+        private FetchBytesTask(String url) {
+            super(List.of(WebURL.parse(url)));
             useCacheOperationResource();
         }
 

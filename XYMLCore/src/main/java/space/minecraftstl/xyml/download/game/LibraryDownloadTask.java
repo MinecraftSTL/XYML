@@ -19,20 +19,21 @@ package space.minecraftstl.xyml.download.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.DownloadException;
-import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.FileDownloadTask.IntegrityCheck;
+import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -146,8 +147,8 @@ public class LibraryDownloadTask extends Task<Void> {
         }
 
 
-        List<URI> uris = dependencyManager.getDownloadProvider().injectURLWithCandidates(url);
-        task = new FileDownloadTask(uris, jar,
+        @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider().injectURLWithCandidates(url);
+        task = new FileDownloadTask(urls, jar,
                 library.getDownload().getSha1() != null ? new IntegrityCheck("SHA-1", library.getDownload().getSha1()) : null);
         task.setCacheRepository(cacheRepository);
         task.setCaching(true);

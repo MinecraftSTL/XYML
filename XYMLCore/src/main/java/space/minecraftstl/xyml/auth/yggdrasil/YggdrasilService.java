@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.auth.yggdrasil;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
+import org.glavo.url.WebURL;
 import org.glavo.uuid.UUIDs;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -37,7 +38,6 @@ import space.minecraftstl.xyml.observable.cache.ObservableOptionalCache;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -318,16 +318,16 @@ public class YggdrasilService {
 
     /// Performs a GET for a `null` payload or a JSON POST for a non-null payload.
     ///
-    /// @param uri endpoint URI
+    /// @param url endpoint URL
     /// @param payload optional request payload
     /// @return response body
     /// @throws AuthenticationException if the request cannot be completed
-    private static String request(URI uri, @Nullable Object payload) throws AuthenticationException {
+    private static String request(WebURL url, @Nullable Object payload) throws AuthenticationException {
         try {
             if (payload == null)
-                return NetworkUtils.doGet(uri);
+                return NetworkUtils.doGet(url);
             else
-                return NetworkUtils.doPost(uri, payload instanceof String ? (String) payload : GSON.toJson(payload), "application/json");
+                return NetworkUtils.doPost(url, payload instanceof String ? (String) payload : GSON.toJson(payload), "application/json");
         } catch (IOException e) {
             throw new ServerDisconnectException(e);
         }

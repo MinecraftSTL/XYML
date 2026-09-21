@@ -26,7 +26,7 @@ import space.minecraftstl.xyml.util.CacheRepository;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -129,7 +129,7 @@ public final class TaskResourceLockManagerTest {
     @Test
     public void fileDownloadDeclaresExactTargetResource() {
         Path targetPath = temporaryDirectory.resolve("downloads/../game.jar");
-        FileDownloadTask task = new FileDownloadTask(URI.create("https://example.invalid/game.jar"), targetPath);
+        FileDownloadTask task = new FileDownloadTask(WebURL.parse("https://example.invalid/game.jar"), targetPath);
 
         assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), task.getResources());
         assertEquals(targetPath, task.getPath());
@@ -141,7 +141,7 @@ public final class TaskResourceLockManagerTest {
         Path commonDirectory = temporaryDirectory.resolve("fetch-cache");
         CacheRepository cacheRepository = new CacheRepository();
         cacheRepository.changeDirectory(commonDirectory);
-        URI source = URI.create("https://example.invalid/metadata.json");
+        WebURL source = WebURL.parse("https://example.invalid/metadata.json");
         GetTask text = new GetTask(source);
         BoundedTextFetchTask bounded = new BoundedTextFetchTask(List.of(source), 1_024L);
         CacheFileTask cachedFile = new CacheFileTask(source);
@@ -171,7 +171,7 @@ public final class TaskResourceLockManagerTest {
     public void cacheOnlyFetcherRejectsChangedCacheDirectory() {
         CacheRepository cacheRepository = new CacheRepository();
         cacheRepository.changeDirectory(temporaryDirectory.resolve("first-cache-root"));
-        GetTask task = new GetTask(URI.create("https://example.invalid/metadata.json"));
+        GetTask task = new GetTask(WebURL.parse("https://example.invalid/metadata.json"));
         task.setCacheRepository(cacheRepository);
 
         cacheRepository.changeDirectory(temporaryDirectory.resolve("second-cache-root"));

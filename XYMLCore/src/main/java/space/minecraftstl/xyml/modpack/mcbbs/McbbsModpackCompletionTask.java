@@ -21,9 +21,10 @@ import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
-import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
@@ -220,7 +221,7 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
                                                 McbbsModpackManifest.CurseFile file = (McbbsModpackManifest.CurseFile) rawFile;
                                                 if (StringUtils.isBlank(file.getFileName())) {
                                                     try {
-                                                        return file.withFileName(NetworkUtils.detectFileName(NetworkUtils.toURI(file.getUrl())));
+                                                        return file.withFileName(NetworkUtils.detectFileName(WebURL.parse(file.getUrl())));
                                                     } catch (IOException e) {
                                                         try {
                                                             String result = NetworkUtils.doGet(String.format("https://cursemeta.dries007.net/%d/%d.json", file.getProjectID(), file.getFileID()));

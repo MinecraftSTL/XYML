@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.download.game;
 
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.FileDownloadTask;
@@ -26,9 +27,9 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -112,9 +113,9 @@ public final class GameAssetDownloadTask extends Task<Void> {
                 LOG.warning("Unable to calc hash value of file " + file, e);
             }
             if (download) {
-                List<URI> uris = dependencyManager.getDownloadProvider().getAssetObjectCandidates(assetObject.getLocation());
+                @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider().getAssetObjectCandidates(assetObject.getLocation());
 
-                var task = new FileDownloadTask(uris, file, new FileDownloadTask.IntegrityCheck("SHA-1", assetObject.hash()));
+                var task = new FileDownloadTask(urls, file, new FileDownloadTask.IntegrityCheck("SHA-1", assetObject.hash()));
                 task.setName(assetObject.hash());
                 task.setCandidate(dependencyManager.getCacheRepository().getCommonDirectory()
                         .resolve("assets").resolve("objects").resolve(assetObject.getLocation()));

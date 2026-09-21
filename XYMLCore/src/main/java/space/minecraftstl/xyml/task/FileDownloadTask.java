@@ -19,14 +19,13 @@ package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.ChecksumMismatchException;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
-import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.FileSystem;
@@ -81,57 +80,55 @@ public class FileDownloadTask extends FetchTask<Void> {
     private @Nullable Path candidate;
     private final ArrayList<IntegrityCheckHandler> integrityCheckHandlers = new ArrayList<>();
 
-    /**
-     * @param uri  the URI of remote file.
-     * @param path the location that download to.
-     */
-    public FileDownloadTask(String uri, Path path) {
-        this(List.of(NetworkUtils.toURI(uri)), path, null);
+    /// Creates a download task for an absolute URL string.
+    ///
+    /// @param url  the URL of remote file.
+    /// @param path the location that download to.
+    public FileDownloadTask(String url, Path path) {
+        this(List.of(WebURL.parse(url)), path, null);
     }
 
-    /// Creates a download task from one textual URI and an optional integrity check.
+    /// Creates a download task from one textual URL and an optional integrity check.
     ///
-    /// @param uri remote URI
+    /// @param url remote URL
     /// @param path download destination
     /// @param integrityCheck integrity check, or null to disable digest comparison
-    public FileDownloadTask(String uri, Path path, @Nullable IntegrityCheck integrityCheck) {
-        this(List.of(NetworkUtils.toURI(uri)), path, integrityCheck);
+    public FileDownloadTask(String url, Path path, @Nullable IntegrityCheck integrityCheck) {
+        this(List.of(WebURL.parse(url)), path, integrityCheck);
     }
 
-    /**
-     * @param uri  the URI of remote file.
-     * @param path the location that download to.
-     */
-    public FileDownloadTask(URI uri, Path path) {
-        this(uri, path, null);
-    }
-
-    /// Creates a download task from one URI and an optional integrity check.
+    /// Creates a download task for one URL.
     ///
-    /// @param uri remote URI
+    /// @param url  the URL of remote file.
+    /// @param path the location that download to.
+    public FileDownloadTask(WebURL url, Path path) {
+        this(url, path, null);
+    }
+
+    /// Creates a download task from one URL and an optional integrity check.
+    ///
+    /// @param url remote URL
     /// @param path download destination
     /// @param integrityCheck integrity check, or null to disable digest comparison
-    public FileDownloadTask(URI uri, Path path, @Nullable IntegrityCheck integrityCheck) {
-        this(List.of(uri), path, integrityCheck);
+    public FileDownloadTask(WebURL url, Path path, @Nullable IntegrityCheck integrityCheck) {
+        this(List.of(url), path, integrityCheck);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param uris uris of remote file, will be attempted in order.
-     * @param file the location that download to.
-     */
-    public FileDownloadTask(List<URI> uris, Path file) {
-        this(uris, file, null);
+    /// Creates a download task with a snapshot of nonempty candidate URLs.
+    ///
+    /// @param urls candidate URLs of the remote file, attempted in order
+    /// @param file the location that download to.
+    public FileDownloadTask(List<WebURL> urls, Path file) {
+        this(urls, file, null);
     }
 
     /// Creates a download task and snapshots its exact destination as a semantic resource.
     ///
-    /// @param uris remote candidates attempted in order
+    /// @param urls remote candidates attempted in order
     /// @param path download destination
     /// @param integrityCheck integrity check, or null to accept the response without a digest comparison
-    public FileDownloadTask(List<URI> uris, Path path, @Nullable IntegrityCheck integrityCheck) {
-        super(uris);
+    public FileDownloadTask(List<WebURL> urls, Path path, @Nullable IntegrityCheck integrityCheck) {
+        super(urls);
         this.file = path;
         this.integrityCheck = integrityCheck;
 
@@ -170,7 +167,7 @@ public class FileDownloadTask extends FetchTask<Void> {
             if (cache.isPresent()) {
                 try {
                     FileUtils.copyFile(cache.get(), file);
-                    LOG.trace("Successfully verified file " + file + " from " + uris.get(0));
+                    LOG.trace("Successfully verified file " + file + " from " + urls.get(0));
                     return EnumCheckETag.CACHED;
                 } catch (IOException e) {
                     LOG.warning("Failed to copy cache files", e);
@@ -183,8 +180,8 @@ public class FileDownloadTask extends FetchTask<Void> {
     }
 
     @Override
-    protected void beforeDownload(URI uri) {
-        LOG.trace("Downloading " + uri + " to " + file);
+    protected void beforeDownload(WebURL url) {
+        LOG.trace("Downloading " + url + " to " + file);
     }
 
     @Override

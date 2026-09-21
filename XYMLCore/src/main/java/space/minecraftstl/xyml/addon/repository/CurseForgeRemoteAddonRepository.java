@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.addon.repository;
 import com.google.gson.reflect.TypeToken;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
@@ -37,7 +38,6 @@ import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
@@ -166,8 +166,8 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
             Response<List<CurseAddon>> response = null;
 
             IOException exception = null;
-            List<URI> candidates = downloadProvider.injectURLWithCandidates(NetworkUtils.withQuery(PREFIX + "/v1/mods/search", query));
-            for (URI candidate : candidates) {
+            List<WebURL> candidates = downloadProvider.injectURLWithCandidates(NetworkUtils.withQuery(PREFIX + "/v1/mods/search", query));
+            for (WebURL candidate : candidates) {
                 LOG.info("Fetching " + candidate);
                 try {
                     response = withApiKey(HttpRequest.GET(candidate.toString()))
