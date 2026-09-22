@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.DropMode;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -221,9 +222,9 @@ public final class AccountsPanelTest {
         });
     }
 
-    /// Reorder controls respect group boundaries and reuse read-only recovery confirmation.
+    /// Reordering uses only the right-side handle and reuses read-only recovery confirmation.
     @Test
-    public void movesSelectedAccountWithinGroupAndConfirmsReadOnlyRecovery() {
+    public void usesDragHandleWithoutWholeRowDraggingAndConfirmsReadOnlyRecovery() {
         FakeAccountsModel model = FakeAccountsModel.immediate(groupedItems(), snapshot(0, 4, 0L));
         model.setMoveRequiresOverwrite(true);
         RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
@@ -238,33 +239,41 @@ public final class AccountsPanelTest {
 
         onEventDispatchThread(() -> {
             JList<ChoiceListEntry<AccountListItem>> list = panel.choiceList().getList();
-            AbstractButton moveUp = findButton(panel, "accountsMoveUp");
-            AbstractButton moveDown = findButton(panel, "accountsMoveDown");
+            ChoicePage<AccountListItem> firstPage = model.load(
+                    new IndexRange(0, 1), new LoadCancellation()).toCompletableFuture().join();
+            AccountListItem first = firstPage.items().get(0);
+            ListCellRenderer<? super ChoiceListEntry<AccountListItem>> renderer = list.getCellRenderer();
+            JComponent loadedRow = (JComponent) renderer.getListCellRendererComponent(
+                    list, ChoiceListEntry.loaded(0, first), 0, false, false);
+            JLabel loadedHandle = (JLabel) findComponent(loadedRow, "accountListDragHandle");
+            boolean loadedHandleEnabled = loadedHandle.isEnabled();
+            Icon loadedHandleIcon = loadedHandle.getIcon();
+            JComponent loadingRow = (JComponent) renderer.getListCellRendererComponent(
+                    list, ChoiceListEntry.loading(0), 0, false, false);
+            JLabel loadingHandle = (JLabel) findComponent(loadingRow, "accountListDragHandle");
             assertAll(
-                    () -> assertFalse(moveUp.isEnabled()),
-                    () -> assertTrue(moveDown.isEnabled()),
-                    () -> assertTrue(list.getDragEnabled()),
+                    () -> assertFalse(list.getDragEnabled()),
                     () -> assertEquals(DropMode.INSERT, list.getDropMode()),
-                    () -> assertTrue(list.getTransferHandler() != null));
+                    () -> assertTrue(list.getTransferHandler() != null),
+                    () -> assertTrue(loadedHandleEnabled),
+                    () -> assertTrue(loadedHandleIcon != null),
+                    () -> assertFalse(loadingHandle.isEnabled()),
+                    () -> assertFalse(hasComponent(panel, "accountsMoveUp")),
+                    () -> assertFalse(hasComponent(panel, "accountsMoveDown")));
 
             interaction.allowOverwrite = false;
-            moveDown.doClick();
+            panel.moveAccountToIndex(first, 1);
             assertAll(
                     () -> assertEquals(List.of(), model.movedIds()),
                     () -> assertEquals(1, interaction.overwriteConfirmations.get()));
 
             interaction.allowOverwrite = true;
-            moveDown.doClick();
+            panel.moveAccountToIndex(first, 1);
             assertAll(
                     () -> assertEquals(List.of("account-0"), model.movedIds()),
                     () -> assertEquals(List.of(1), model.moveTargets()),
                     () -> assertEquals(List.of(true), model.moveOverwritePermissions()),
                     () -> assertEquals(2, interaction.overwriteConfirmations.get()));
-
-            list.setSelectedIndex(3);
-            assertAll(
-                    () -> assertTrue(moveUp.isEnabled()),
-                    () -> assertFalse(moveDown.isEnabled()));
             panel.close();
         });
     }
@@ -649,6 +658,23 @@ public final class AccountsPanelTest {
             }
         }
         throw new IllegalArgumentException("Missing component: " + name);
+    }
+
+    /// Reports whether one named component exists in a Swing hierarchy.
+    ///
+    /// @param root hierarchy root
+    /// @param name stable component name
+    /// @return true when the component exists
+    private static boolean hasComponent(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (Objects.equals(name, child.getName())) {
+                return true;
+            }
+            if (child instanceof Container nested && hasComponent(nested, name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Runs a value-producing operation synchronously on the EDT.

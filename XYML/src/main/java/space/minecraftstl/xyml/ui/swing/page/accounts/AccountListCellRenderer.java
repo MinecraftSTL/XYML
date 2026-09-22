@@ -39,7 +39,9 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.util.Objects;
 
 /// Renders account rows with a lazy real-skin avatar, two text lines, and full-row selection highlight.
 @NotNullByDefault
@@ -47,6 +49,21 @@ public final class AccountListCellRenderer extends JPanel
         implements ListCellRenderer<ChoiceListEntry<AccountListItem>> {
     /// Stable row height used for loading, loaded, and failed sparse entries.
     public static final int ROW_HEIGHT = 64;
+
+    /// Preferred width of the right-side drag handle.
+    private static final int DRAG_HANDLE_WIDTH = 28;
+
+    /// Preferred height of the right-side drag handle.
+    private static final int DRAG_HANDLE_HEIGHT = 32;
+
+    /// Horizontal hit width around the right-side drag handle.
+    private static final int DRAG_HANDLE_HIT_WIDTH = 44;
+
+    /// Vertical hit height around the right-side drag handle.
+    private static final int DRAG_HANDLE_HIT_HEIGHT = 40;
+
+    /// Right inset between the cell edge and the drag handle.
+    private static final int DRAG_HANDLE_RIGHT_INSET = 10;
 
     /// Loading-state icon occupying the stable avatar slot.
     private static final Icon LOADING_ICON = new AccountStateIcon(false);
@@ -68,6 +85,9 @@ public final class AccountListCellRenderer extends JPanel
 
     /// Secondary account-provider and storage label.
     private final JLabel detailLabel = new JLabel();
+
+    /// Right-side drag handle used to start account reordering.
+    private final JLabel dragHandleLabel = new JLabel();
 
     /// List whose UI paints the current selection background, or `null` before first configuration.
     private @Nullable JList<?> selectionOwner;
@@ -103,8 +123,18 @@ public final class AccountListCellRenderer extends JPanel
         labels.add(nameLabel);
         labels.add(detailLabel);
 
+        Dimension dragHandleSize = new Dimension(DRAG_HANDLE_WIDTH, DRAG_HANDLE_HEIGHT);
+        dragHandleLabel.setName("accountListDragHandle");
+        dragHandleLabel.setPreferredSize(dragHandleSize);
+        dragHandleLabel.setMinimumSize(dragHandleSize);
+        dragHandleLabel.setMaximumSize(dragHandleSize);
+        dragHandleLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        dragHandleLabel.setVerticalAlignment(SwingConstants.CENTER);
+        dragHandleLabel.setIcon(new DragHandleIcon());
+
         add(avatarLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);
+        add(dragHandleLabel, BorderLayout.LINE_END);
     }
 
     /// Configures the reusable renderer for one sparse account row.
@@ -134,6 +164,8 @@ public final class AccountListCellRenderer extends JPanel
         setToolTipText(null);
 
         @Nullable AccountListItem item = entry.value();
+        dragHandleLabel.setEnabled(
+                list.isEnabled() && entry.status() == ChoiceLoadStatus.LOADED && item != null);
         if (entry.status() == ChoiceLoadStatus.LOADED && item != null) {
             nameLabel.setText(item.displayName());
             detailLabel.setText(item.detailText().isBlank() ? " " : item.detailText());
@@ -202,9 +234,58 @@ public final class AccountListCellRenderer extends JPanel
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
+        dragHandleLabel.setForeground(foreground);
         setBorder(BorderFactory.createCompoundBorder(
                 RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
+    }
+
+    /// Returns the list-coordinate hit area that starts dragging one loaded account row.
+    ///
+    /// @param cellBounds bounds of the row in list coordinates
+    /// @return mutable drag-handle hit rectangle
+    public static Rectangle dragHandleBounds(Rectangle cellBounds) {
+        Objects.requireNonNull(cellBounds, "cellBounds");
+        int x = cellBounds.x + cellBounds.width - DRAG_HANDLE_RIGHT_INSET - DRAG_HANDLE_HIT_WIDTH;
+        int y = cellBounds.y + Math.max(0, (cellBounds.height - DRAG_HANDLE_HIT_HEIGHT) / 2);
+        return new Rectangle(x, y, DRAG_HANDLE_HIT_WIDTH, DRAG_HANDLE_HIT_HEIGHT);
+    }
+
+    /// Paints the six-dot drag affordance using the owning row foreground.
+    @NotNullByDefault
+    private static final class DragHandleIcon implements Icon {
+        /// Paints the six-dot affordance with enabled or disabled theme color.
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D copy = (Graphics2D) graphics.create();
+            try {
+                copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                @Nullable Color themed = component.isEnabled()
+                        ? component.getForeground()
+                        : UIManager.getColor("Label.disabledForeground");
+                Color marker = themed == null ? Color.GRAY : themed;
+                copy.setColor(new Color(marker.getRed(), marker.getGreen(), marker.getBlue(), 150));
+                for (int row = 0; row < 3; row++) {
+                    for (int column = 0; column < 2; column++) {
+                        copy.fillOval(x + 4 + column * 6, y + 6 + row * 6, 3, 3);
+                    }
+                }
+            } finally {
+                copy.dispose();
+            }
+        }
+
+        /// Returns the icon width.
+        @Override
+        public int getIconWidth() {
+            return 18;
+        }
+
+        /// Returns the icon height.
+        @Override
+        public int getIconHeight() {
+            return 24;
+        }
     }
 
     /// Fixed theme-aware placeholder for account avatar loading and failure states.
