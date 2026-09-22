@@ -107,6 +107,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Shared confirmed-task submission and navigation controller.
     private final TaskLaunchController taskLaunchController;
 
+    /// Action dismissing the current confirmation surface after one install task starts.
+    private Runnable taskLaunchDismissAction = () -> { };
+
     /// Source selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteModpackCatalogSource> sourceBox = new JComboBox<>(
             RemoteModpackCatalogSource.values());
@@ -242,6 +245,14 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Whether this panel has rejected future user commands and worker callbacks.
     private volatile boolean closed;
+
+    /// Installs the action that closes a containing confirmation surface after task startup.
+    ///
+    /// @param dismissAction action hiding the current dialog or overlay
+    public void setTaskLaunchDismissAction(Runnable dismissAction) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchDismissAction = Objects.requireNonNull(dismissAction, "dismissAction");
+    }
 
     /// Creates a production catalog using Core sources, the shared I/O scheduler, and task-backed installation.
     ///
@@ -1264,7 +1275,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         setStatus(strings.installingStatus());
         updateControls();
         try {
-            taskLaunchController.launch(executor, strings.installingStatus(), () -> { });
+            taskLaunchController.launch(executor, strings.installingStatus(), taskLaunchDismissAction);
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start selected remote modpack installation", startFailure);
             cleanupFailedTaskStart(presentation, completionSubscription);

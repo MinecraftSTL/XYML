@@ -453,7 +453,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         executor,
                         operationDependencies.taskProgressStrings(),
                         operationDependencies.animator(),
-                        operationDependencies.progressAnimationDuration());
+                        operationDependencies.progressAnimationDuration(),
+                        operationDependencies.taskLaunchController());
                 return new InstanceManagementPage(panel, panel::activate, panel::close);
             });
             factories.put(InstanceManagementPageId.INSTANCE_OPERATIONS, () -> {
@@ -475,8 +476,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             availableMaintenanceActions,
                             operationDependencies.taskProgressStrings(),
                             operationDependencies.animator(),
-                            operationDependencies.progressAnimationDuration());
-                    panel.setTaskLaunchController(operationDependencies.taskLaunchController());
+                            operationDependencies.progressAnimationDuration(),
+                            operationDependencies.taskLaunchController());
                     return new InstanceManagementPage(panel, panel::activate, panel::close);
                 });
             }

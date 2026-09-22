@@ -25,7 +25,9 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.export.ModpackExportFormat;
 import space.minecraftstl.xyml.game.export.ModpackExportRequest;
 import space.minecraftstl.xyml.game.export.ModpackExportTaskFactory;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
@@ -281,6 +283,47 @@ final class ModpackExportPanelTest {
         });
         assertNotNull(panelReference.get());
         assertEquals(0, executor.pendingCount());
+    }
+
+    /// A confirmed export starts its task and opens the shared task manager.
+    @Test
+    void navigatesToTaskManagerAfterStartingExport() throws Exception {
+        Files.writeString(runDirectory.resolve("selected.txt"), "selected");
+        QueuedExecutor directoryExecutor = new QueuedExecutor();
+        AtomicInteger taskNavigations = new AtomicInteger();
+        AtomicReference<@Nullable ModpackExportPanel> panelReference = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = new ModpackExportPanel(
+                    ignored -> runDirectory,
+                    new GameInstanceID("instance"),
+                    request -> Task.completed(null),
+                    fixedOutputChooser(runDirectory.resolve("bundle")),
+                    directoryExecutor,
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO,
+                    new TaskLaunchController(taskNavigations::incrementAndGet));
+            panelReference.set(panel);
+            panel.activate();
+        });
+        directoryExecutor.runNext();
+
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+            JTree tree = findNamed(panel, "modpackExportFiles", JTree.class);
+            DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
+            tree.setSelectionPath(new TreePath(childNamed(root, "selected.txt").getPath()));
+            findNamed(panel, "modpackExportFormat", JComboBox.class).setSelectedItem(ModpackExportFormat.MODRINTH);
+            findNamed(panel, "modpackExportVersion", JTextField.class).setText("1.0.0");
+            findNamed(panel, "modpackExportChooseOutput", JButton.class).doClick();
+            JButton export = findNamed(panel, "modpackExportStart", JButton.class);
+            assertTrue(export.isEnabled());
+            export.doClick();
+            panel.close();
+        });
+
+        assertEquals(1, taskNavigations.get());
     }
 
     /// Restores format-specific advanced fields and forwards exact MCBBS metadata to the task request.

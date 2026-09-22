@@ -175,7 +175,8 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         worldDownloadPanel = new WorldDownloadPanel(
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                taskLaunchController);
         for (DownloadCategory category : DownloadCategory.values()) {
             categoryTabs.addTab(
                     i18n(category.titleKey()),

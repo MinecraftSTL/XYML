@@ -92,7 +92,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     private final TaskProgressHostPanel progressHost;
 
     /// Shared confirmed-task submission and navigation controller.
-    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
+    private TaskLaunchController taskLaunchController;
 
     /// Starts one diagnostic game launch.
     private final JButton testLaunchButton = new JButton();
@@ -188,10 +188,12 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         instanceId,
                         taskProgressStrings,
                         animator,
-                        progressAnimationDuration),
+                        progressAnimationDuration,
+                        new TaskLaunchController(() -> { })),
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
     }
 
     /// Creates a production maintenance page around an already bound application launch command adapter.
@@ -210,6 +212,33 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         this(
+                repository,
+                instanceId,
+                launchActions,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a production maintenance page whose confirmed operations open the shared task manager.
+    ///
+    /// @param repository repository containing the fixed instance
+    /// @param instanceId stable fixed instance identifier
+    /// @param launchActions test-launch and script commands bound to this exact instance
+    /// @param taskProgressStrings localized task progress text
+    /// @param animator optional shared motion-aware animator
+    /// @param progressAnimationDuration non-negative determinate progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public InstanceMaintenancePanel(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            InstanceMaintenanceLaunchActions launchActions,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
                 instanceId,
                 Objects.requireNonNull(repository, "repository").getRunDirectory(instanceId),
                 new RepositoryInstanceMaintenanceService(repository, instanceId),
@@ -222,10 +251,12 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         instanceId,
                         taskProgressStrings,
                         animator,
-                        progressAnimationDuration),
+                        progressAnimationDuration,
+                        taskLaunchController),
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                taskLaunchController);
     }
 
     /// Creates a maintenance page around explicit deterministic collaborators.
@@ -259,7 +290,8 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 owner -> { },
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
     }
 
     /// Creates a maintenance page with an explicit repository-update catalog command.
@@ -274,6 +306,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param taskProgressStrings localized task progress text
     /// @param animator optional shared animator
     /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     private InstanceMaintenancePanel(
             GameInstanceID instanceId,
             Path runDirectory,
@@ -284,7 +317,8 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             Consumer<Component> repositoryUpdateCommand,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
-            Duration progressAnimationDuration) {
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
@@ -296,6 +330,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         this.repositoryUpdateCommand = Objects.requireNonNull(
                 repositoryUpdateCommand,
                 "repositoryUpdateCommand");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         Duration animationDuration = Objects.requireNonNull(
                 progressAnimationDuration,
                 "progressAnimationDuration");
