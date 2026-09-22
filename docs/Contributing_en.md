@@ -98,6 +98,11 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 | `test` | Tests the current checkout using the same branch and version inference as `build`. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
 | `run` | Always rebuilds `XYML`, `XYMLCore`, and `XYMLBoot`, then runs the current checkout artifact. |
+| `releasePromoteAlpha` | Promotes the local `dev` branch into `alpha` with a two-parent `--no-ff` merge, without pushing. |
+| `releasePromoteBeta` | Promotes the local `alpha` branch into `beta` with a two-parent `--no-ff` merge, without pushing. |
+| `releasePromoteMain` | Promotes the local `beta` branch into `main`, prepares the new stable version, and syncs `main -> beta -> alpha -> dev`, without pushing. |
+
+The `releasePromote*` tasks read only local `main`, `beta`, `alpha`, and `dev` refs. They build every candidate commit in an isolated temporary worktree, run the release gates on the staged merge before the merge commit exists, and move the local refs in one atomic transaction; a failing gate aborts the merge and no remote ref is ever changed. Stable promotions require `-Pxyml.release.stableIncrement=major`, `minor`, or `patch`. Optional properties: `-Pxyml.release.verify=standard` or `full`, `-Pxyml.release.skipTests=true`, and `-Pxyml.release.dryRun=true`.
 
 The `build`, `test`, and `run` tasks always use the current repository root, including on `main`, `beta`, `alpha`, and
 `dev` checkouts. None of these tasks switches branches or delegates to a channel task. Without CI version inputs, the current
