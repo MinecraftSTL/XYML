@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -116,7 +117,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private final DefaultListModel<JavaRuntime> runtimeListModel = new DefaultListModel<>();
 
     /// Single-selection list of active Java runtimes.
-    private final JList<JavaRuntime> runtimeList = new JList<>(runtimeListModel);
+    private final JList<JavaRuntime> runtimeList = new RowBoundsCheckedList<>(runtimeListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Mutable disabled-runtime list model rendered from immutable snapshots.
     private final DefaultListModel<DisabledJavaRuntimeEntry> disabledListModel = new DefaultListModel<>();
@@ -128,7 +129,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private final Set<String> failedDisabledRestores = new HashSet<>();
 
     /// Single-selection list of disabled Java records.
-    private final JList<DisabledJavaRuntimeEntry> disabledList = new JList<>(disabledListModel);
+    private final JList<DisabledJavaRuntimeEntry> disabledList = new RowBoundsCheckedList<>(disabledListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Layout switching between active and disabled runtime management.
     private final CardLayout cardLayout = new CardLayout();

@@ -113,7 +113,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private final JButton addSelectionButton = new JButton();
 
     /// Displays selected loader components in dependency-safe order.
-    private final JList<GameLoaderCatalogItem> selectedLoaderList = new JList<>(selectedLoaderListModel);
+    private final JList<GameLoaderCatalogItem> selectedLoaderList = new RowBoundsCheckedList<>(selectedLoaderListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Removes the selected installer component when doing so preserves API parent requirements.
     private final JButton removeSelectionButton = new JButton();

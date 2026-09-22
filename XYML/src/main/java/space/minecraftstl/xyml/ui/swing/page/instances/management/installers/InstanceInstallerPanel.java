@@ -44,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -105,13 +106,13 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     private final DefaultListModel<InstanceInstallerEntry> installedLoaderModel = new DefaultListModel<>();
 
     /// List rendering recognized installed loaders without inferring removal eligibility.
-    private final JList<InstanceInstallerEntry> installedLoaderList = new JList<>(installedLoaderModel);
+    private final JList<InstanceInstallerEntry> installedLoaderList = new RowBoundsCheckedList<>(installedLoaderModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Mutable model for third-party libraries that Core allows the page to describe.
     private final DefaultListModel<InstanceOtherLibraryEntry> otherLibraryModel = new DefaultListModel<>();
 
     /// Single-choice list of third-party libraries, where only clear entries are removable.
-    private final JList<InstanceOtherLibraryEntry> otherLibraryList = new JList<>(otherLibraryModel);
+    private final JList<InstanceOtherLibraryEntry> otherLibraryList = new RowBoundsCheckedList<>(otherLibraryModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Displays the detected base Minecraft version or a localized unavailable state.
     private final JLabel gameVersionValue = new JLabel();

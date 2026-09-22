@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
@@ -80,7 +81,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private final JComboBox<WorldBackupSource> sourceBox = new JComboBox<>(sourceModel);
 
     /// Displays existing backup archives and drives archive-specific commands.
-    private final JList<WorldBackupArchive> archiveList = new JList<>(archiveModel);
+    private final JList<WorldBackupArchive> archiveList = new RowBoundsCheckedList<>(archiveModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Starts a fresh shallow directory index.
     private final JButton refreshButton = new JButton();
