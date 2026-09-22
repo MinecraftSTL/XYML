@@ -1476,7 +1476,6 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             reveal.setVisible(true);
             String message = i18n("message.success");
             setOperationStatusOnEdt(message);
-            showMessageOnEdt(message, i18n("message.success"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
