@@ -113,7 +113,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
 
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> {
+                (navigateCommand, downloadsNavigation) -> {
                     navigation.set(navigateCommand);
                     return createModels(resources, gameVersions, gameInstaller);
                 },
@@ -169,7 +169,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
         RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(resources, gameVersions, gameInstaller),
+                (navigateCommand, downloadsNavigation) -> createModels(resources, gameVersions, gameInstaller),
                 presentation(),
                 themeManager(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
@@ -194,7 +194,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
         AtomicInteger applicationCloseCalls = new AtomicInteger();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         resources,
                         new RecordingGameVersionCatalogModel(),
                         gameInstaller),
@@ -228,7 +228,7 @@ class SwingApplicationCompositionTest {
         List<CountingCloseable> resources = createResources(closeOrder);
         AtomicInteger applicationCloseCalls = new AtomicInteger();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         resources,
                         new RecordingGameVersionCatalogModel(),
                         gameInstaller),
@@ -256,7 +256,7 @@ class SwingApplicationCompositionTest {
         List<String> closeOrder = new ArrayList<>();
         IllegalStateException repeatedFailure = new IllegalStateException("shared close failure");
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         createResources(closeOrder),
                         new RecordingGameVersionCatalogModel(),
                         failingCloseGameInstallService(
@@ -289,7 +289,7 @@ class SwingApplicationCompositionTest {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
                 () -> SwingApplicationComposition.createForCollaborators(
-                        navigateCommand -> createModels(resources, gameVersions, gameInstaller),
+                        (navigateCommand, downloadsNavigation) -> createModels(resources, gameVersions, gameInstaller),
                         presentation(),
                         themeManager(),
                         new SwingAnimator(MotionPolicy.OFF, 16),
@@ -312,7 +312,7 @@ class SwingApplicationCompositionTest {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
                 () -> SwingApplicationComposition.createForCollaborators(
-                        navigateCommand -> createModels(
+                        (navigateCommand, downloadsNavigation) -> createModels(
                                 createResources(closeOrder),
                                 new RecordingGameVersionCatalogModel(),
                                 failingCloseGameInstallService(

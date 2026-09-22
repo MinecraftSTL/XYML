@@ -73,6 +73,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -139,11 +140,18 @@ public final class ModCatalogPanelTest {
     public void delegatesSingleSelectionAndAllLocalCommands() throws Exception {
         RecordingModel model = new RecordingModel(items(100));
         RecordingInteractions interactions = new RecordingInteractions();
+        AtomicInteger downloads = new AtomicInteger();
+        AtomicInteger checks = new AtomicInteger();
         AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
 
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(
-                    model, STRINGS, ACTION_STRINGS, interactions);
+                    model,
+                    STRINGS,
+                    ACTION_STRINGS,
+                    interactions,
+                    downloads::incrementAndGet,
+                    checks::incrementAndGet);
             panelReference.set(panel);
             panel.setSize(new Dimension(900, 620));
             layoutRecursively(panel);
@@ -165,6 +173,10 @@ public final class ModCatalogPanelTest {
             assertEquals(Map.of(), model.importConflictActions().get(0));
             findButton(panel, "modsOpenDirectory").doClick();
             assertEquals(1, interactions.openCount());
+            findButton(panel, "modsCheckUpdates").doClick();
+            findButton(panel, "modsDownload").doClick();
+            assertEquals(1, checks.get());
+            assertEquals(1, downloads.get());
             findButton(panel, "modsReveal").doClick();
             assertEquals(model.items().get(1).path(), interactions.revealedPath());
             findButton(panel, "modsDelete").doClick();

@@ -25,10 +25,10 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.export.ModpackExportPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.installers.InstanceInstallerPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
@@ -134,7 +134,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             WorldQuickPlayActions worldQuickPlayActions,
-            @Nullable InstanceMaintenanceLaunchActions maintenanceLaunchActions) {
+            @Nullable InstanceMaintenanceLaunchActions maintenanceLaunchActions,
+            InstanceContentNavigation contentNavigation) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -176,6 +177,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
         WorldQuickPlayActions requiredWorldQuickPlayActions =
                 Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
+        InstanceContentNavigation requiredContentNavigation =
+                Objects.requireNonNull(contentNavigation, "contentNavigation");
         if (requiredAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
@@ -228,6 +231,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             requiredAnimationDuration,
                             requiredWorldQuickPlayActions,
                             maintenanceLaunchActions),
+                    requiredContentNavigation,
+                    this::selectPage,
                     createdOverview,
                     () -> workingDirectoryChanged(pageDeckReference, overviewReference)));
             pageDeckReference.set(createdPageDeck);
@@ -354,6 +359,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ModPageDependencies modDependencies,
             ResourcePackPageDependencies resourcePackDependencies,
             OperationPageDependencies operationDependencies,
+            InstanceContentNavigation contentNavigation,
+            java.util.function.Consumer<InstanceManagementPageId> pageSelector,
             InstanceOverviewPanel overview,
             Runnable workingDirectoryChanged) {
         EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> factories =
@@ -370,7 +377,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             modDependencies.statusStrings()),
                     modDependencies.strings(),
                     modDependencies.actionStrings(),
-                    modDependencies.interactions());
+                    modDependencies.interactions(),
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.MODS),
+                    () -> pageSelector.accept(InstanceManagementPageId.FILE_UPDATE_CHECK));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.RESOURCE_PACKS, () -> {
@@ -384,6 +393,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     resourcePackDependencies.actionStrings(),
                     resourcePackDependencies.interactions(),
                     repository.getResourcePackDirectory(instanceId));
+            panel.setContentCommands(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.RESOURCE_PACKS),
+                    () -> pageSelector.accept(InstanceManagementPageId.FILE_UPDATE_CHECK));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.WORLDS, () -> {
@@ -392,10 +404,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     instanceId,
                     executor,
                     operationDependencies.worldQuickPlayActions());
-            return new InstanceManagementPage(panel, panel::activate, panel::close);
-        });
-        factories.put(InstanceManagementPageId.DATA_PACKS, () -> {
-            DataPackManagementPanel panel = new DataPackManagementPanel(repository, instanceId, executor);
+            panel.setOpenDownloadsCommand(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.WORLDS));
             return new InstanceManagementPage(panel, panel::activate, panel::close);
         });
         factories.put(InstanceManagementPageId.SCHEMATICS, () -> {
@@ -408,6 +418,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     schematicDependencies.interactions(),
                     () -> { },
                     false);
+            panel.setOpenProjectionModCommand(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.MODS));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.BACKUPS, () -> {

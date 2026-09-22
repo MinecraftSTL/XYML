@@ -226,6 +226,19 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         modsCatalog.openMissingDependencySearch(searchText, gameVersion);
     }
 
+    /// Selects one content category and activates its lazy workflow.
+    ///
+    /// @param target requested download category
+    public void selectTarget(DownloadPageTarget target) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(target, "target");
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(target.ordinal());
+        activateSelectedCategory();
+    }
+
     /// Selects the local-modpack category and displays a dropped archive.
     ///
     /// @param archive local modpack archive

@@ -92,6 +92,12 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     /// Command returning to the instance list rather than a schematic parent directory.
     private final JButton returnButton = new JButton();
 
+    /// Command opening the Mods download catalog for projection mods.
+    private Runnable openProjectionModCommand = () -> { };
+
+    /// Whether the projection-mod destination command was supplied.
+    private boolean projectionModAvailable;
+
     /// Command retrying only failed schematic-root resolution.
     private final JButton retryButton = new JButton();
 
@@ -201,6 +207,22 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     public JComponent component() {
         EdtDispatcher.requireEventDispatchThread();
         return this;
+    }
+
+    /// Enables the browser's projection-mod shortcut.
+    ///
+    /// @param command command opening the Mods download catalog
+    public void setOpenProjectionModCommand(Runnable command) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            throw new IllegalStateException("Schematic management is closed");
+        }
+        openProjectionModCommand = Objects.requireNonNull(command, "command");
+        projectionModAvailable = true;
+        @Nullable SchematicBrowserPanel current = browserPanel;
+        if (current != null) {
+            current.setOpenProjectionModCommand(openProjectionModCommand);
+        }
     }
 
     /// Cancels active resolution and synchronously releases every EDT-owned resource exactly once.
@@ -401,6 +423,9 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
         @Nullable SchematicBrowserPanel created = null;
         try {
             created = new SchematicBrowserPanel(model, browserStrings, browserInteractions);
+            if (projectionModAvailable) {
+                created.setOpenProjectionModCommand(openProjectionModCommand);
+            }
             created.setName("schematicInstanceBrowser");
             contentCards.add(created, BROWSER_CARD);
             browserPanel = created;

@@ -294,6 +294,53 @@ final class DataPackManagementPanelTest {
         });
     }
 
+    /// World-bound mode removes the selector and loads only the supplied world's data packs.
+    @Test
+    void boundWorldModeLoadsOnlyTheExactWorldDirectory() throws Exception {
+        Path savesDirectory = Files.createDirectories(temporaryDirectory.resolve("bound-run").resolve("saves"));
+        Path worldDirectory = createWorldDirectory(savesDirectory, "bound-world");
+        Path dataPacksDirectory = Files.createDirectories(worldDirectory.resolve("datapacks"));
+        createDirectoryDataPack(dataPacksDirectory, "bound-pack");
+        WorldCatalogItem world = new WorldCatalogItem(
+                worldDirectory,
+                "bound-world",
+                "Bound World",
+                1L,
+                "1.20.1",
+                false,
+                null);
+        SingleWorldCatalogModel model = new SingleWorldCatalogModel(savesDirectory, world);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable DataPackManagementPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new DataPackManagementPanel(
+                    model,
+                    DataPackManagementStrings.english(),
+                    new RecordingInteractions(temporaryDirectory.resolve("unused.zip")),
+                    executor,
+                    worldDirectory)));
+            DataPackManagementPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                assertNull(findNamed(panel, "dataPackManagementSplit", JSplitPane.class));
+                panel.activate();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                assertEquals(1, panel.dataPackChoiceList().getList().getModel().getSize());
+                panel.close();
+            });
+        } finally {
+            @Nullable DataPackManagementPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Gives a detached viewport list deterministic geometry and requests its visible rows.
     ///
     /// @param choiceList detached list whose source should receive a viewport demand

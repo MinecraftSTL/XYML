@@ -127,6 +127,12 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Full-index refresh command.
     private final JButton refreshButton = new JButton();
 
+    /// Opens the configured remote Mod catalog.
+    private final JButton downloadButton = new JButton();
+
+    /// Opens the instance update checker.
+    private final JButton checkUpdatesButton = new JButton();
+
     /// Local Mod import command.
     private final JButton importButton = new JButton();
 
@@ -211,6 +217,12 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Whether lifecycle teardown has completed.
     private boolean closed;
 
+    /// Command opening the remote Mod catalog.
+    private Runnable openDownloadsCommand = () -> { };
+
+    /// Command opening the instance update checker.
+    private Runnable checkUpdatesCommand = () -> { };
+
     /// Creates a production page backed by the real repository and default platform interactions.
     ///
     /// The caller owns the executor and must keep it available until this panel is closed.
@@ -252,11 +264,31 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             ModCatalogStrings strings,
             ModCatalogActionStrings actionStrings,
             ModCatalogInteractions interactions) {
+        this(model, strings, actionStrings, interactions, () -> { }, () -> { });
+    }
+
+    /// Creates a page with upstream-compatible remote content commands.
+    ///
+    /// @param model installed-Mod model
+    /// @param strings localized page labels
+    /// @param actionStrings localized commands
+    /// @param interactions dialog and desktop interactions
+    /// @param openDownloadsCommand command opening the remote Mod catalog
+    /// @param checkUpdatesCommand command opening the instance update checker
+    public ModCatalogPanel(
+            ModCatalogModel model,
+            ModCatalogStrings strings,
+            ModCatalogActionStrings actionStrings,
+            ModCatalogInteractions interactions,
+            Runnable openDownloadsCommand,
+            Runnable checkUpdatesCommand) {
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.actionStrings = Objects.requireNonNull(actionStrings, "actionStrings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.openDownloadsCommand = Objects.requireNonNull(openDownloadsCommand, "openDownloadsCommand");
+        this.checkUpdatesCommand = Objects.requireNonNull(checkUpdatesCommand, "checkUpdatesCommand");
         modsDirectory = model.modsDirectory().toAbsolutePath().normalize();
         displayedSnapshot = model.snapshot();
         enabledToggle = new JCheckBox(strings.enabledLabel());
@@ -410,6 +442,22 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 actionStrings.openDirectoryTooltip(),
                 this::openDirectory);
         headingBand.add(openDirectoryButton, "w 40!, h 40!");
+        configureIconButton(
+                checkUpdatesButton,
+                "modsCheckUpdates",
+                "assets/swing/icons/refresh.svg",
+                i18n("addon.check_update.button"),
+                i18n("addon.check_update.button"),
+                () -> checkUpdatesCommand.run());
+        headingBand.add(checkUpdatesButton, "w 40!, h 40!");
+        configureIconButton(
+                downloadButton,
+                "modsDownload",
+                "assets/swing/icons/nav-downloads.svg",
+                i18n("mods.download"),
+                i18n("mods.download"),
+                () -> openDownloadsCommand.run());
+        headingBand.add(downloadButton, "w 40!, h 40!");
         return headingBand;
     }
 
@@ -817,6 +865,8 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             refreshButton.setEnabled(snapshot.refreshEnabled());
             importButton.setEnabled(snapshot.status() == ModCatalogStatus.READY && mutationIdle);
             openDirectoryButton.setEnabled(mutationIdle);
+            checkUpdatesButton.setEnabled(mutationIdle);
+            downloadButton.setEnabled(mutationIdle);
         } finally {
             synchronizing = false;
         }
@@ -1365,6 +1415,8 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         searchField.setEnabled(false);
         filterBox.setEnabled(false);
         refreshButton.setEnabled(false);
+        checkUpdatesButton.setEnabled(false);
+        downloadButton.setEnabled(false);
         importButton.setEnabled(false);
         openDirectoryButton.setEnabled(false);
         enabledToggle.setEnabled(false);

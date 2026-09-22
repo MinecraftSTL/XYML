@@ -48,10 +48,8 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.JViewport;
 import javax.swing.ListSelectionModel;
 import javax.swing.KeyStroke;
 import javax.swing.event.DocumentEvent;
@@ -61,7 +59,6 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.CardLayout;
-import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.HierarchyEvent;
@@ -172,6 +169,12 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Theme-aware source refresh command.
     private final JButton refreshButton;
 
+    /// Opens the remote resource-pack catalog.
+    private final JButton downloadButton;
+
+    /// Opens the instance update checker.
+    private final JButton checkUpdatesButton;
+
     /// Retry command available only after a failed local scan.
     private final JButton retryButton;
 
@@ -273,6 +276,12 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether EDT-owned component and model resources have been released.
     private boolean resourcesClosed;
 
+    /// Command opening the remote resource-pack catalog.
+    private Runnable openDownloadsCommand = () -> { };
+
+    /// Command opening the instance update checker.
+    private Runnable checkUpdatesCommand = () -> { };
+
     /// Whether programmatic checkbox reconciliation suppresses user commands.
     private boolean applyingEnabledToggle;
 
@@ -323,6 +332,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     "[]8[]12[grow,fill]8[]"));
             contentCards = new JPanel(new CardLayout());
             refreshButton = new JButton();
+            downloadButton = new JButton();
+            checkUpdatesButton = new JButton();
             retryButton = new JButton();
             importButton = new JButton();
             openDirectoryButton = new JButton();
@@ -402,6 +413,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         dropRegistration = Objects.requireNonNull(acquiredDropRegistration);
     }
 
+    /// Installs navigation commands without changing local catalog behavior.
+    ///
+    /// @param openDownloadsCommand command opening the remote resource-pack catalog
+    /// @param checkUpdatesCommand command opening the instance update checker
+    public void setContentCommands(Runnable openDownloadsCommand, Runnable checkUpdatesCommand) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Resource-pack catalog is closed");
+        }
+        this.openDownloadsCommand = Objects.requireNonNull(openDownloadsCommand, "openDownloadsCommand");
+        this.checkUpdatesCommand = Objects.requireNonNull(checkUpdatesCommand, "checkUpdatesCommand");
+    }
+
     /// Returns the immutable snapshot currently represented by the page.
     ///
     /// @return displayed catalog state
@@ -472,7 +496,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         setOpaque(false);
         JPanel headingBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][][][]",
+                "[grow,fill][][][][][]",
                 "[40!]"));
         headingBand.setOpaque(false);
 
@@ -498,6 +522,24 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 actionStrings.openDirectoryTooltip(),
                 this::openResourcePackDirectory);
         headingBand.add(openDirectoryButton, "w 40!, h 40!");
+
+        configureIconButton(
+                checkUpdatesButton,
+                "resourcePacksCheckUpdates",
+                "assets/swing/icons/refresh.svg",
+                i18n("addon.check_update.button"),
+                i18n("addon.check_update.button"),
+                () -> checkUpdatesCommand.run());
+        headingBand.add(checkUpdatesButton, "w 40!, h 40!");
+
+        configureIconButton(
+                downloadButton,
+                "resourcePacksDownload",
+                "assets/swing/icons/nav-downloads.svg",
+                i18n("resourcepack.download"),
+                i18n("resourcepack.download"),
+                () -> openDownloadsCommand.run());
+        headingBand.add(downloadButton, "w 40!, h 40!");
 
         refreshButton.setName("resourcePacksRefresh");
         refreshButton.setText(null);
@@ -940,6 +982,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 : strings.refreshAction();
         refreshButton.getAccessibleContext().setAccessibleName(refreshName);
         refreshButton.setEnabled(snapshot.refreshEnabled());
+        checkUpdatesButton.setEnabled(snapshot.refreshEnabled());
+        downloadButton.setEnabled(snapshot.refreshEnabled());
         retryButton.setEnabled(snapshot.status() == ResourcePackCatalogStatus.FAILED
                 && snapshot.refreshEnabled());
         String visibleStatus = snapshot.writeStatus() == ResourcePackCatalogWriteStatus.IDLE
@@ -1667,6 +1711,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     () -> searchField.getDocument().removeDocumentListener(searchListener));
             failure = attemptCleanup(failure, () -> removeHierarchyListener(showingListener));
             failure = attemptCleanup(failure, () -> refreshButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> checkUpdatesButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> downloadButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> retryButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> importButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> openDirectoryButton.setEnabled(false));
@@ -1867,134 +1913,4 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             throw new IllegalStateException("Unexpected checked cleanup failure", failure);
         }
     }
-
-    /// Keeps the resource-pack catalog split horizontal while preserving user-adjustable minimum widths.
-    @NotNullByDefault
-    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Original responsive breakpoint retained from the pre-existing page layout.
-        private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
-
-        /// Whether the divider ratio has been initialized.
-        private boolean dividerInitialized;
-
-        /// Whether the configured side minima currently fit the allocated width.
-        private boolean minimumsApplied;
-
-        /// List surface whose minimum width is applied when space permits.
-        private final JComponent leftComponent;
-
-        /// Details surface whose minimum width is applied when space permits.
-        private final JComponent rightComponent;
-
-        /// Computed minimum width of the list surface.
-        private final int leftMinimumWidth;
-
-        /// Computed minimum width of the details surface.
-        private final int rightMinimumWidth;
-
-        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
-        ///
-        /// @param list viewport-driven list
-        /// @param details read-only details surface
-        private ResponsiveCatalogSplitPane(
-                ViewportChoiceList<ResourcePackCatalogItem> list,
-                JComponent details) {
-            super(JSplitPane.VERTICAL_SPLIT, list, details);
-            setName("resourcePacksCatalogSplit");
-            setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder());
-            setContinuousLayout(true);
-            setResizeWeight(0.42D);
-            leftComponent = list;
-            rightComponent = details;
-            leftMinimumWidth = SwingTextAreas.minimumTextWidth(list);
-            rightMinimumWidth = details.getMinimumSize().width;
-            leftComponent.setMinimumSize(new Dimension(0, 0));
-            rightComponent.setMinimumSize(new Dimension(0, 0));
-        }
-
-        /// Returns the nearest outer viewport width or the split width without a viewport.
-        ///
-        /// @return available host width
-        private int availableViewportWidth() {
-            Component parent = getParent();
-            while (parent != null) {
-                if (parent instanceof JViewport viewport
-                        && viewport.getWidth() > 0) {
-                    return viewport.getWidth();
-                }
-                if (parent instanceof SwingHorizontalScrollPane scroll) {
-                    return scroll.getWidth();
-                }
-                parent = parent.getParent();
-            }
-            return getWidth();
-        }
-
-        /// Enables the page-level horizontal fallback only while this split is horizontal.
-        ///
-        /// @param horizontal whether the original page threshold selects horizontal presentation
-        private void updateOuterHorizontalScroll(boolean horizontal) {
-            Component parent = getParent();
-            while (parent != null) {
-                if (parent instanceof SwingHorizontalScrollPane scroll) {
-                    scroll.setMinimumContentWidth(horizontal ? requiredMinimumWidth() : 0);
-                    return;
-                }
-                parent = parent.getParent();
-            }
-        }
-
-        /// Returns the width required by both columns and the divider.
-        ///
-        /// @return complete workspace minimum width
-        private int requiredMinimumWidth() {
-            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
-        }
-
-        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
-        @Override
-        public void doLayout() {
-            int availableWidth = availableViewportWidth();
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
-            int desired = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desired) {
-                setOrientation(desired);
-                dividerInitialized = false;
-                minimumsApplied = false;
-            }
-            updateOuterHorizontalScroll(horizontal);
-            boolean canApplyMinimums = getOrientation() == HORIZONTAL_SPLIT
-                    && getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
-            if (canApplyMinimums != minimumsApplied) {
-                minimumsApplied = canApplyMinimums;
-                leftComponent.setMinimumSize(canApplyMinimums
-                        ? new Dimension(leftMinimumWidth, 0)
-                        : new Dimension(0, 0));
-                rightComponent.setMinimumSize(canApplyMinimums
-                        ? new Dimension(rightMinimumWidth, 0)
-                        : new Dimension(0, 0));
-            }
-            if (!dividerInitialized && getWidth() > 1) {
-                setDividerLocation((int) Math.round(
-                        (getWidth() - getDividerSize()) * 0.42D));
-                dividerInitialized = true;
-            }
-            if (canApplyMinimums && getWidth() > 0) {
-                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
-                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
-                if (location != getDividerLocation()) {
-                    setDividerLocation(location);
-                }
-            }
-            super.doLayout();
-        }
-
-        /// Allows the shell to constrain both children without honoring their preferred widths.
-        @Override
-        public Dimension getMinimumSize() {
-            return new Dimension(0, 0);
-        }
-    }
-
 }
