@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
@@ -447,7 +448,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                         item -> remoteModpackRowDetail(item.addon()),
                         item -> item.source().displayName(),
                         item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
-                        item -> item.addon().pageUrl()));
+                        item -> item.addon().pageUrl()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         progressHost = new TaskProgressHostPanel(
                 resolvedTaskProgressStrings,
                 animator,

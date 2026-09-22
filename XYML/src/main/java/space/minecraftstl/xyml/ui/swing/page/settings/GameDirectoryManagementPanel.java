@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.PortablePath;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -76,7 +77,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     private final DefaultListModel<GameDirectoryManagementEntry> directoryListModel = new DefaultListModel<>();
 
     /// Single-selection list that changes the process-wide current game directory.
-    private final JList<GameDirectoryManagementEntry> directoryList = new JList<>(directoryListModel);
+    private final JList<GameDirectoryManagementEntry> directoryList = new RowBoundsCheckedList<>(directoryListModel, RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
     /// Starts creation of a new local or user-level directory entry.
     private final JButton addButton = new JButton(i18n("game_directory.new"));

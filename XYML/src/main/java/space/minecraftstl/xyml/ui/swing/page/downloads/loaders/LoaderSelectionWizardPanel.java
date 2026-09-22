@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.DefaultListCellRenderer;
@@ -112,7 +113,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private final JButton addSelectionButton = new JButton();
 
     /// Displays selected loader components in dependency-safe order.
-    private final JList<GameLoaderCatalogItem> selectedLoaderList = new JList<>(selectedLoaderListModel);
+    private final JList<GameLoaderCatalogItem> selectedLoaderList = new RowBoundsCheckedList<>(selectedLoaderListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Removes the selected installer component when doing so preserves API parent requirements.
     private final JButton removeSelectionButton = new JButton();
@@ -185,7 +186,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         this.catalogModel = Objects.requireNonNull(catalogModel, "catalogModel");
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
         this.strings = Objects.requireNonNull(strings, "strings");
-        versionChoiceList = new ViewportChoiceList<>(versionDataSource, this::formatCatalogItem);
+        versionChoiceList = new ViewportChoiceList<>(versionDataSource, this::formatCatalogItem, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         configureComponents();
         setStatus(strings.awaitingGameVersionStatus());
         refreshView();

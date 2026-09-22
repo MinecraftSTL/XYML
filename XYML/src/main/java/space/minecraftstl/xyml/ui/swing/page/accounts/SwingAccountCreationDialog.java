@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.log.SwingLogFontPreferences;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
@@ -807,7 +808,7 @@ public final class SwingAccountCreationDialog extends JDialog
     /// @param roles immutable role choices
     /// @return selected UUID text, or null on cancellation
     private @Nullable String showRolePrompt(@Unmodifiable List<AccountRoleOption> roles) {
-        JList<AccountRoleOption> list = new JList<>(roles.toArray(AccountRoleOption[]::new));
+        JList<AccountRoleOption> list = new RowBoundsCheckedList<>(roles.toArray(AccountRoleOption[]::new), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(roleRenderer());
         list.clearSelection();

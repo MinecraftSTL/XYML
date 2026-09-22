@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
@@ -227,7 +228,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         this.managementCoordinator = Objects.requireNonNull(managementCoordinator, "managementCoordinator");
         rootTransition = new SwingContentTransition(this);
         filteredSource = new FilteredInstancesDataSource(model);
-        choiceList = new ViewportChoiceList<>(filteredSource, new InstanceListCellRenderer());
+        choiceList = new ViewportChoiceList<>(filteredSource, new InstanceListCellRenderer(), RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
         @Nullable Subscription createdModelSubscription = null;
         @Nullable Subscription createdManagementHostLease = null;

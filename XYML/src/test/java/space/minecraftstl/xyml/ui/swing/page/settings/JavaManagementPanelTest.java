@@ -48,6 +48,10 @@ import javax.swing.JTextField;
 import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -111,6 +115,49 @@ public final class JavaManagementPanelTest {
                     () -> assertInstanceOf(FlatSVGIcon.class, refresh.getIcon()),
                     () -> assertEquals("", refresh.getText()),
                     () -> assertEquals(i18n("button.refresh"), refresh.getToolTipText()));
+            panel.close();
+        });
+    }
+
+    /// Clicking blank space below the optional runtime list clears the current selection.
+    @Test
+    public void blankClickClearsOptionalRuntimeSelection() {
+        JavaRuntime java17 = runtime("C:/java/17/bin/java.exe", "17.0.12", "Temurin", false);
+        JavaRuntime java21 = runtime("C:/java/21/bin/java.exe", "21.0.4", "Oracle", false);
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(java17, java21), List.of()));
+        JavaManagementPanel panel = onEventDispatchThread(() ->
+                new JavaManagementPanel(service, new FakeJavaManagementInteractions()));
+
+        onEventDispatchThread(() -> {
+            JList<?> runtimes = findComponent(panel, "javaManagementRuntimeList", JList.class);
+            runtimes.setSize(new Dimension(300, 180));
+            runtimes.setSelectedIndex(0);
+            Rectangle lastRow = Objects.requireNonNull(runtimes.getCellBounds(1, 1));
+            Point blankPoint = new Point(lastRow.x + 4, lastRow.y + lastRow.height + 5);
+            long when = System.currentTimeMillis();
+            runtimes.dispatchEvent(new MouseEvent(
+                    runtimes,
+                    MouseEvent.MOUSE_PRESSED,
+                    when,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+            runtimes.dispatchEvent(new MouseEvent(
+                    runtimes,
+                    MouseEvent.MOUSE_RELEASED,
+                    when + 1L,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+
+            assertEquals(-1, runtimes.getSelectedIndex());
             panel.close();
         });
     }

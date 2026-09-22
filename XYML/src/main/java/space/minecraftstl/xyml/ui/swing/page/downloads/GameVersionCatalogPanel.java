@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionSnapshot;
@@ -570,7 +571,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         this.loaderSelectionPanel = Objects.requireNonNull(
                 loaderSelectionPanel,
                 "loaderSelectionPanel");
-        choiceList = new ViewportChoiceList<>(model, new GameVersionEntryRenderer());
+        choiceList = new ViewportChoiceList<>(model, new GameVersionEntryRenderer(), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         configureComponents();
         this.loaderSelectionPanel.addSelectionListener(loaderSelectionListener);

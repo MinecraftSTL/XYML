@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSe
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsStore;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -70,7 +71,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     private final DefaultListModel<GameSettingsPresetSnapshot> presetListModel = new DefaultListModel<>();
 
     /// Single-selection preset list.
-    private final JList<GameSettingsPresetSnapshot> presetList = new JList<>(presetListModel);
+    private final JList<GameSettingsPresetSnapshot> presetList = new RowBoundsCheckedList<>(presetListModel, RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
     /// Starts creation of a new automatic or custom-named preset.
     private final JButton createButton = new JButton(i18n("settings.type.global.preset.create"));

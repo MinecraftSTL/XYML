@@ -46,6 +46,9 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -274,6 +277,56 @@ public final class AccountsPanelTest {
                     () -> assertEquals(List.of(1), model.moveTargets()),
                     () -> assertEquals(List.of(true), model.moveOverwritePermissions()),
                     () -> assertEquals(2, interaction.overwriteConfirmations.get()));
+            panel.close();
+        });
+    }
+
+    /// A blank click below the account rows keeps the current account and action state unchanged.
+    @Test
+    public void blankClickKeepsCurrentAccountSelection() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<AccountListItem>> list = panel.choiceList().getList();
+            list.setSelectedIndex(0);
+            AbstractButton remove = findButton(panel, "accountsRemove");
+            Rectangle lastRow = Objects.requireNonNull(list.getCellBounds(1, 1));
+            Point blankPoint = new Point(lastRow.x + 4, lastRow.y + lastRow.height + 5);
+            long when = System.currentTimeMillis();
+
+            list.dispatchEvent(new MouseEvent(
+                    list,
+                    MouseEvent.MOUSE_PRESSED,
+                    when,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+            list.dispatchEvent(new MouseEvent(
+                    list,
+                    MouseEvent.MOUSE_RELEASED,
+                    when + 1L,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+
+            assertAll(
+                    () -> assertEquals(0, list.getSelectedIndex()),
+                    () -> assertTrue(remove.isEnabled()),
+                    () -> assertEquals(List.of(), model.selectedIds()));
             panel.close();
         });
     }

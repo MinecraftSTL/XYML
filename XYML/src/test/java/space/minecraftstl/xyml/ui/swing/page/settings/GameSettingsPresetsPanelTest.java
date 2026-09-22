@@ -50,6 +50,10 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -163,6 +167,48 @@ public final class GameSettingsPresetsPanelTest {
                                     true),
                             saved.nativeLibraries()),
                     () -> assertEquals(DefaultIsolationType.NEVER, saved.defaultIsolationType()));
+            panel.close();
+        });
+    }
+
+    /// Clicking blank space below the mandatory preset list keeps the current preset selected.
+    @Test
+    public void blankClickKeepsPresetSelection() {
+        GameSettingsPresetSnapshot first = preset("7", "Default", true);
+        GameSettingsPresetSnapshot second = preset("8", "Performance", false);
+        FakeGameSettingsPresetsStore store = new FakeGameSettingsPresetsStore(snapshot(1L, first, second));
+        GameSettingsPresetsPanel panel = onEventDispatchThread(
+                () -> new GameSettingsPresetsPanel(store, new StaticJavaRuntimeManagementService()));
+
+        onEventDispatchThread(() -> {
+            JList<?> presets = findComponent(panel, "gameSettingsPresetList", JList.class);
+            presets.setSize(new Dimension(240, 120));
+            presets.setSelectedIndex(0);
+            Rectangle lastRow = Objects.requireNonNull(presets.getCellBounds(1, 1));
+            Point blankPoint = new Point(lastRow.x + 4, lastRow.y + lastRow.height + 5);
+            long when = System.currentTimeMillis();
+            presets.dispatchEvent(new MouseEvent(
+                    presets,
+                    MouseEvent.MOUSE_PRESSED,
+                    when,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+            presets.dispatchEvent(new MouseEvent(
+                    presets,
+                    MouseEvent.MOUSE_RELEASED,
+                    when + 1L,
+                    0,
+                    blankPoint.x,
+                    blankPoint.y,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+
+            assertEquals(0, presets.getSelectedIndex());
             panel.close();
         });
     }
