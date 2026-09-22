@@ -161,11 +161,20 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Export action disabled while a bundle is being produced, accessed only on the EDT.
     private @Nullable JButton exportButton;
 
+    /// Reveal action for the latest successfully exported report, accessed only on the EDT.
+    private @Nullable JButton revealButton;
+
+    /// Latest successfully exported report, accessed only on the EDT.
+    private @Nullable Path exportedCrashReport;
+
     /// Current analysis stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<GameCrashAnalysis> analysisFuture;
 
     /// Current export stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<Path> exportFuture;
+
+    /// Current file-manager reveal stage retained for best-effort cancellation.
+    private @Nullable CompletableFuture<Void> revealFuture;
 
     /// Last reason assigned on the EDT, retained independently of native components for headless tests.
     private String displayedReason = i18n("game.crash.reason.analyzing");
@@ -660,31 +669,44 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     private Component createActionsOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
         JButton logs = new JButton(i18n("logwindow.title"));
+        logs.setName("gameCrashLogs");
         logs.addActionListener(event -> showGameLogsOnEdt());
 
         JButton help = new JButton(i18n("help"));
+        help.setName("gameCrashHelp");
         help.setToolTipText(i18n("logwindow.help"));
         help.addActionListener(event -> openLink(URI.create(Metadata.CONTACT_URL)));
 
         JLabel status = new JLabel(" ", SwingConstants.LEADING);
+        status.setName("gameCrashOperationStatus");
         operationStatus = status;
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
+        buttons.setName("gameCrashActionButtons");
         if (model.exportAllowed()) {
             JButton export = new JButton(i18n("logwindow.export_game_crash_logs"));
+            export.setName("gameCrashExport");
             export.addActionListener(event -> exportCrashLogsOnEdt());
             exportButton = export;
             buttons.add(export);
+
+            JButton reveal = new JButton(i18n("button.reveal_dir"));
+            reveal.setName("gameCrashReveal");
+            reveal.setToolTipText(i18n("reveal.in_file_manager"));
+            reveal.getAccessibleContext().setAccessibleName(i18n("reveal.in_file_manager"));
+            reveal.addActionListener(event -> revealExportedCrashReportOnEdt());
+            reveal.setVisible(false);
+            revealButton = reveal;
+            buttons.add(reveal);
         }
         buttons.add(logs);
         buttons.add(help);
 
-        JPanel toolbar = new JPanel();
-        toolbar.setLayout(new BoxLayout(toolbar, BoxLayout.X_AXIS));
+        JPanel toolbar = new JPanel(new BorderLayout(8, 0));
+        toolbar.setName("gameCrashActionsToolbar");
         toolbar.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, dividerColor()));
-        toolbar.add(status);
-        toolbar.add(Box.createHorizontalGlue());
-        toolbar.add(buttons);
+        toolbar.add(status, BorderLayout.CENTER);
+        toolbar.add(buttons, BorderLayout.EAST);
         return toolbar;
     }
 
@@ -1417,21 +1439,16 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             return;
         }
         JButton export = Objects.requireNonNull(exportButton, "export button");
+        JButton reveal = Objects.requireNonNull(revealButton, "reveal button");
+        exportedCrashReport = null;
+        reveal.setEnabled(true);
+        reveal.setVisible(false);
         export.setEnabled(false);
         setOperationStatusOnEdt(i18n("logwindow.export_game_crash_logs") + "...");
 
         CompletableFuture<Path> future;
         try {
-            future = actions.exportCrashLogs()
-                    .thenApplyAsync(path -> {
-                        try {
-                            actions.revealFile(path);
-                            return path;
-                        } catch (Exception exception) {
-                            throw new CompletionException(exception);
-                        }
-                    }, worker)
-                    .toCompletableFuture();
+            future = actions.exportCrashLogs().toCompletableFuture();
         } catch (RuntimeException failure) {
             finishExportOnEdt(null, failure);
             return;
@@ -1444,27 +1461,90 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Restores the export action and reports the terminal result unless the window already closed.
     ///
     /// @param result exported path, or null after failure
-    /// @param failure export or reveal failure, or null after success
+    /// @param failure export failure, or null after success
     private void finishExportOnEdt(@Nullable Path result, @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
             return;
         }
         JButton export = Objects.requireNonNull(exportButton, "export button");
+        JButton reveal = Objects.requireNonNull(revealButton, "reveal button");
         export.setEnabled(true);
         if (failure == null && result != null) {
-            String message = i18n("settings.launcher.launcher_log.export.success", result);
+            exportedCrashReport = result.toAbsolutePath();
+            reveal.setEnabled(true);
+            reveal.setVisible(true);
+            String message = i18n("message.success");
             setOperationStatusOnEdt(message);
-            showMessageOnEdt(message, i18n("message.success"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
+        exportedCrashReport = null;
+        reveal.setEnabled(true);
+        reveal.setVisible(false);
         Throwable exportFailure = unwrapFailure(failure);
         LOG.warning("Failed to export game crash info", exportFailure);
         String message = i18n("settings.launcher.launcher_log.export.failed");
         setOperationStatusOnEdt(message);
         showMessageOnEdt(
                 message + "\n" + StringUtils.getStackTrace(exportFailure),
+                i18n("message.error"),
+                JOptionPane.ERROR_MESSAGE);
+    }
+
+    /// Reveals the latest successfully exported report through the native file manager.
+    private void revealExportedCrashReportOnEdt() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        @Nullable Path report = exportedCrashReport;
+        @Nullable JButton reveal = revealButton;
+        if (report == null || reveal == null) {
+            return;
+        }
+        reveal.setEnabled(false);
+
+        CompletableFuture<Void> future;
+        try {
+            future = CompletableFuture.runAsync(() -> {
+                try {
+                    actions.revealFile(report);
+                } catch (Exception failure) {
+                    throw new CompletionException(failure);
+                }
+            }, worker);
+        } catch (RuntimeException failure) {
+            finishRevealOnEdt(failure);
+            return;
+        }
+        revealFuture = future;
+        future.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> finishRevealOnEdt(failure)));
+    }
+
+    /// Restores the reveal action and reports a file-manager failure unless the window already closed.
+    ///
+    /// @param failure reveal failure, or null after success
+    private void finishRevealOnEdt(@Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        revealFuture = null;
+        if (closed.get()) {
+            return;
+        }
+        @Nullable JButton reveal = revealButton;
+        if (reveal != null) {
+            reveal.setEnabled(true);
+        }
+        if (failure == null) {
+            return;
+        }
+
+        Throwable revealFailure = unwrapFailure(failure);
+        LOG.warning("Failed to reveal exported game crash report", revealFailure);
+        setOperationStatusOnEdt(i18n("message.failed"));
+        showMessageOnEdt(
+                i18n("message.failed") + "\n" + StringUtils.getStackTrace(revealFailure),
                 i18n("message.error"),
                 JOptionPane.ERROR_MESSAGE);
     }
@@ -1531,14 +1611,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
     }
 
-    /// Presents a native message dialog unless the runtime is headless or the window has closed.
+    /// Presents a native message dialog only while native presentation is enabled and the window remains live.
     ///
     /// @param message dialog body
     /// @param title dialog title
     /// @param messageType Swing message type constant
     private void showMessageOnEdt(String message, String title, int messageType) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || GraphicsEnvironment.isHeadless()) {
+        if (closed.get() || !nativePresentationEnabled || GraphicsEnvironment.isHeadless()) {
             return;
         }
         JOptionPane.showMessageDialog(content, message, title, messageType);
@@ -1559,6 +1639,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         reportQrCodeMarker = null;
         operationStatus = null;
         exportButton = null;
+        revealButton = null;
+        exportedCrashReport = null;
+        revealFuture = null;
         for (RepairRow row : repairRows.values()) {
             row.cancelOnClose();
         }

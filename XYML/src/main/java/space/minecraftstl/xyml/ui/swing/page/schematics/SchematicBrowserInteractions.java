@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import java.awt.Component;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
 /// Owns schematic browser interactions that cross the panel, dialog, and desktop boundary.
@@ -81,6 +82,19 @@ public interface SchematicBrowserInteractions extends RetryableFailureInteractio
     /// @param target exact row to reveal
     /// @return stage completed on success or failed with the original desktop or executor error
     CompletionStage<@Nullable Void> reveal(SchematicBrowserItem target);
+
+    /// Opens one exact directory through the same platform desktop boundary as reveal.
+    ///
+    /// @param directory exact directory to open
+    /// @return stage completed on success or failed with the original desktop or executor error
+    default CompletionStage<@Nullable Void> openDirectory(Path directory) {
+        Path normalized = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        @Nullable Path fileName = normalized.getFileName();
+        if (fileName == null) {
+            throw new IllegalArgumentException("Directory must have a file name: " + normalized);
+        }
+        return reveal(new SchematicDirectoryItem(normalized, fileName.toString()));
+    }
 
     /// Shows one failure message on the event-dispatch thread.
     ///

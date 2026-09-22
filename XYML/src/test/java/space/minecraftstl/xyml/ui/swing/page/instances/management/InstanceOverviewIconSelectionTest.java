@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -76,17 +77,21 @@ final class InstanceOverviewIconSelectionTest {
         ChoiceInteractions interactions = new ChoiceInteractions(
                 new InstanceIconChoice.BuiltIn(GameInstanceIconType.FORGE));
         ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicInteger navigationCount = new AtomicInteger();
         AtomicReference<@Nullable InstanceOverviewPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
                 UIManager.put("Component.arc", 20);
-                panelReference.set(new InstanceOverviewPanel(
+                InstanceOverviewPanel createdPanel = new InstanceOverviewPanel(
                         repository(),
                         new GameInstanceID("instance"),
                         executor,
                         InstanceOverviewStrings.english(),
                         interactions,
-                        iconStore));
+                        iconStore);
+                createdPanel.setTaskLaunchController(
+                        new TaskLaunchController(navigationCount::incrementAndGet));
+                panelReference.set(createdPanel);
             });
             InstanceOverviewPanel panel = Objects.requireNonNull(panelReference.get());
             awaitBackgroundWork(executor);
@@ -124,6 +129,7 @@ final class InstanceOverviewIconSelectionTest {
             assertEquals(GameInstanceIconType.DEFAULT, interactions.currentType.get());
             assertTrue(interactions.sawCustomImage.get());
             assertNull(interactions.failureDetail.get());
+            assertEquals(0, navigationCount.get());
 
             EdtDispatcher.executeAndWait(() -> {
                 JLabel preview = findNamed(panel, "instanceOverviewIconPreview", JLabel.class);

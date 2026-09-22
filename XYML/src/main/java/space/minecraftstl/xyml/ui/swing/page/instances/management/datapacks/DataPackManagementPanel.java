@@ -224,6 +224,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Current Core world and DataPack context, or `null` before a successful selection load.
     private @Nullable SelectedWorld selectedWorld;
 
+    /// Exact world bound to this subpage, or null when the page owns a world selector.
+    private final @Nullable Path boundWorldPath;
+
     /// Whether an import or deletion currently owns the selected data-pack manager.
     private boolean dataPackOperationPending;
 
@@ -239,6 +242,20 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// @param instanceId stable managed instance identifier
     /// @param executor caller-owned executor for Core and local filesystem work
     public DataPackManagementPanel(GameRepository repository, GameInstanceID instanceId, Executor executor) {
+        this(repository, instanceId, executor, null);
+    }
+
+    /// Creates a production data-pack manager bound to one exact world directory.
+    ///
+    /// @param repository repository used to resolve the instance's effective run directory
+    /// @param instanceId stable managed instance identifier
+    /// @param executor caller-owned executor for Core and local filesystem work
+    /// @param worldDirectory exact world directory
+    public DataPackManagementPanel(
+            GameRepository repository,
+            GameInstanceID instanceId,
+            Executor executor,
+            @Nullable Path worldDirectory) {
         this(
                 new DefaultWorldCatalogModel(
                         Objects.requireNonNull(repository, "repository"),
@@ -247,7 +264,8 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                         WorldCatalogStrings.localized()),
                 DataPackManagementStrings.localized(),
                 new DefaultDataPackManagementInteractions(DataPackManagementStrings.localized(), executor),
-                executor);
+                executor,
+                worldDirectory);
     }
 
     /// Creates a data-pack manager with explicit seams for focused Swing verification.
@@ -263,6 +281,22 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             DataPackManagementStrings strings,
             DataPackManagementInteractions interactions,
             Executor executor) {
+        this(worlds, strings, interactions, executor, null);
+    }
+
+    /// Creates a data-pack manager with an optional fixed-world selection seam.
+    ///
+    /// @param worlds lazy world catalog for one instance
+    /// @param strings stable visible text
+    /// @param interactions native dialog and desktop interaction boundary
+    /// @param executor caller-owned background executor for World and DataPack work
+    /// @param boundWorldPath exact world bound to this page, or null for selector mode
+    DataPackManagementPanel(
+            WorldCatalogModel worlds,
+            DataPackManagementStrings strings,
+            DataPackManagementInteractions interactions,
+            Executor executor,
+            @Nullable Path boundWorldPath) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -272,6 +306,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.boundWorldPath = boundWorldPath == null
+                ? null
+                : boundWorldPath.toAbsolutePath().normalize();
         displayedWorldSnapshot = this.worlds.snapshot();
         worldChoiceList = new ViewportChoiceList<>(
                 this.worlds,
@@ -337,7 +374,12 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         EdtDispatcher.requireEventDispatchThread();
         if (!closed.get() && !activated) {
             activated = true;
-            worlds.loadIfNeeded();
+            if (boundWorldPath == null) {
+                worlds.loadIfNeeded();
+            } else {
+                worldStatusLabel.setText(boundWorldPath.toString());
+                loadBoundWorld();
+            }
         }
     }
 
@@ -422,14 +464,18 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         packsPanel.add(createDataPackHeader(), BorderLayout.NORTH);
         packsPanel.add(dataPackChoiceList, BorderLayout.CENTER);
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, worldsPanel, packsPanel);
-        splitPane.setName("dataPackManagementSplit");
-        splitPane.setOpaque(false);
-        splitPane.setResizeWeight(0.42D);
-        splitPane.setBorder(BorderFactory.createEmptyBorder());
-        splitPane.setContinuousLayout(true);
-        splitPane.setMinimumSize(new Dimension(0, 0));
-        add(splitPane, "grow, push");
+        if (boundWorldPath == null) {
+            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, worldsPanel, packsPanel);
+            splitPane.setName("dataPackManagementSplit");
+            splitPane.setOpaque(false);
+            splitPane.setResizeWeight(0.42D);
+            splitPane.setBorder(BorderFactory.createEmptyBorder());
+            splitPane.setContinuousLayout(true);
+            splitPane.setMinimumSize(new Dimension(0, 0));
+            add(splitPane, "grow, push");
+        } else {
+            add(packsPanel, "grow, push");
+        }
 
         JPanel status = new JPanel(new MigLayout(
                 "insets 4 16 12 16, fillx, wrap 1",
@@ -630,9 +676,15 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             worldChoiceList.reloadData();
         }
         worldStatusLabel.setText(snapshot.statusText());
-        worldChoiceList.getList().setEnabled(snapshot.listEnabled() && !dataPackOperationPending);
-        refreshWorldsButton.setEnabled(snapshot.refreshEnabled() && !dataPackOperationPending);
-        openSavesButton.setEnabled(!snapshot.operationPending() && !dataPackOperationPending);
+        if (boundWorldPath == null) {
+            worldChoiceList.getList().setEnabled(snapshot.listEnabled() && !dataPackOperationPending);
+            refreshWorldsButton.setEnabled(snapshot.refreshEnabled() && !dataPackOperationPending);
+            openSavesButton.setEnabled(!snapshot.operationPending() && !dataPackOperationPending);
+        } else {
+            worldStatusLabel.setText(boundWorldPath.toString());
+            refreshWorldsButton.setEnabled(!dataPackOperationPending);
+            openSavesButton.setEnabled(!dataPackOperationPending);
+        }
         updateActionState();
     }
 
@@ -681,9 +733,16 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     ///
     /// @param selected loaded world row selected by the user
     private void loadSelectedWorldOnExecutor(WorldCatalogItem selected) {
+        loadWorldOnExecutor(selected.path());
+    }
+
+    /// Loads one exact world and its DataPack snapshot outside the EDT.
+    ///
+    /// @param path normalized world path
+    private void loadWorldOnExecutor(Path path) {
         try {
             requireBackgroundThread();
-            World world = new World(selected.path());
+            World world = new World(path);
             Path dataPackDirectory = world.getFile().resolve("datapacks").toAbsolutePath().normalize();
             DataPack dataPack = new DataPack(dataPackDirectory);
             if (world.supportDataPacks() && Files.isDirectory(dataPackDirectory)) {
@@ -691,9 +750,26 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             }
             List<DataPack.Pack> packs = dataPack.getPacks();
             SelectedWorld loaded = new SelectedWorld(world, dataPack, dataPackDirectory, world.supportDataPacks());
-            EdtDispatcher.execute(() -> applySelectedWorld(selected.path(), loaded, packs));
+            EdtDispatcher.execute(() -> applySelectedWorld(path, loaded, packs));
         } catch (IOException | RuntimeException failure) {
-            applySelectedWorldFailure(selected.path(), failure);
+            applySelectedWorldFailure(path, failure);
+        }
+    }
+
+    /// Starts loading the exact world fixed to this subpage.
+    private void loadBoundWorld() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || boundWorldPath == null || dataPackOperationPending) {
+            return;
+        }
+        clearSelectedWorld();
+        selectedWorldPath = boundWorldPath;
+        dataPackStatusLabel.setText(strings.loadingPacksText());
+        updateActionState();
+        try {
+            executor.execute(() -> loadWorldOnExecutor(boundWorldPath));
+        } catch (RuntimeException failure) {
+            applySelectedWorldFailure(boundWorldPath, failure);
         }
     }
 
@@ -760,7 +836,14 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Starts a fresh shallow world-directory index and discards stale selected-world data.
     private void refreshWorlds() {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || dataPackOperationPending || !displayedWorldSnapshot.refreshEnabled()) {
+        if (closed.get() || dataPackOperationPending) {
+            return;
+        }
+        if (boundWorldPath != null) {
+            loadBoundWorld();
+            return;
+        }
+        if (!displayedWorldSnapshot.refreshEnabled()) {
             return;
         }
         clearSelectedWorld();
@@ -1101,8 +1184,12 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         int visibleCount = dataPackSource.exactItemCount().orElse(0);
         worldChoiceList.getList().setEnabled(displayedWorldSnapshot.listEnabled() && !dataPackOperationPending);
         dataPackChoiceList.getList().setEnabled(usableWorld);
-        refreshWorldsButton.setEnabled(displayedWorldSnapshot.refreshEnabled() && !dataPackOperationPending);
-        openSavesButton.setEnabled(!displayedWorldSnapshot.operationPending() && !dataPackOperationPending);
+        refreshWorldsButton.setEnabled(
+                (boundWorldPath != null || displayedWorldSnapshot.refreshEnabled())
+                        && !dataPackOperationPending);
+        openSavesButton.setEnabled(
+                (boundWorldPath != null || !displayedWorldSnapshot.operationPending())
+                        && !dataPackOperationPending);
         importDataPackButton.setEnabled(usableWorld);
         openDataPacksButton.setEnabled(usableWorld);
         searchDataPacksField.setEnabled(usableWorld);

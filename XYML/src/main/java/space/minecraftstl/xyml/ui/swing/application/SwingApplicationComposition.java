@@ -54,6 +54,7 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountStore;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
@@ -66,6 +67,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.SelectedRepositoryInstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.importing.SwingInstanceJsonImportLauncher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.DefaultInstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceContentNavigation;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.CommandInstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
@@ -230,11 +232,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
 
         try {
             return createForCollaborators(
-                    navigateCommand -> createProductionModels(
+                    (navigateCommand, downloadsNavigation) -> createProductionModels(
                             bindings,
                             commands,
                             presentation,
                             navigateCommand,
+                            downloadsNavigation,
                             themeManager,
                             animator,
                             systemThemeDetector),
@@ -308,11 +311,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             }
             currentWindow.navigateTo(page);
         };
+        DownloadPageNavigation downloadsNavigation = new DownloadPageNavigation();
 
         final SwingApplicationPageModels models;
         try {
             models = Objects.requireNonNull(
-                    modelFactory.createModels(navigateCommand),
+                    modelFactory.createModels(navigateCommand, downloadsNavigation),
                     "modelFactory returned null");
         } catch (RuntimeException | Error failure) {
             closeAfterFailure(animator::cancelAll, failure);
@@ -320,7 +324,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
 
         @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories =
-                createPageFactories(models, presentation, animator, themeManager);
+                createPageFactories(models, presentation, animator, themeManager, downloadsNavigation);
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
@@ -444,7 +448,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingApplicationPageModels models,
             SwingApplicationPresentation presentation,
             SwingAnimator animator,
-            SwingThemeManager themeManager) {
+            SwingThemeManager themeManager,
+            DownloadPageNavigation downloadsNavigation) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(
@@ -453,16 +458,20 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 models.instanceManagement()));
         factories.put(
                 ShellPageId.DOWNLOADS,
-                () -> new GameVersionCatalogPanel(
-                        models.gameVersions(),
-                        models.gameInstaller(),
-                        presentation.gameVersions(),
-                        presentation.gameInstall(),
-                        presentation.taskProgress(),
-                        animator,
-                        presentation.taskProgressAnimationDuration(),
-                        models.instances(),
-                        models.taskLaunchController()));
+                () -> {
+                    GameVersionCatalogPanel panel = new GameVersionCatalogPanel(
+                            models.gameVersions(),
+                            models.gameInstaller(),
+                            presentation.gameVersions(),
+                            presentation.gameInstall(),
+                            presentation.taskProgress(),
+                            animator,
+                            presentation.taskProgressAnimationDuration(),
+                            models.instances(),
+                            models.taskLaunchController());
+                    panel.attachDownloadPageNavigation(downloadsNavigation);
+                    return panel;
+                });
         factories.put(ShellPageId.TASKS, TaskManagerPanel::new);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
@@ -557,6 +566,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingApplicationCommands commands,
             SwingApplicationPresentation presentation,
             Consumer<ShellPageId> navigateCommand,
+            DownloadPageNavigation downloadsNavigation,
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SystemThemeDetector systemThemeDetector) {
@@ -581,6 +591,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
         ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
                 presentation.modsActions(),
                 Schedulers.io());
+        InstanceContentNavigation contentNavigation = target -> {
+            navigateCommand.accept(ShellPageId.DOWNLOADS);
+            downloadsNavigation.request(target);
+        };
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
                         bindings.homeStore(),
@@ -634,7 +648,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 animator,
                                 presentation.taskProgressAnimationDuration(),
                                 worldQuickPlayActions,
-                                maintenanceLaunchActions);
+                                maintenanceLaunchActions,
+                                contentNavigation);
                 }),
                 (management, addInstanceCommand) -> new SelectedRepositoryInstancesModel(
                         Schedulers.io(),

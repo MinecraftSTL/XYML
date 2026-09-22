@@ -154,7 +154,8 @@ final class DefaultInstanceManagementViewTest {
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),
-                    null)));
+                    null,
+                    InstanceContentNavigation.disabled())));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -179,7 +180,6 @@ final class DefaultInstanceManagementViewTest {
                         InstanceManagementPageId.MODS,
                         InstanceManagementPageId.RESOURCE_PACKS,
                         InstanceManagementPageId.WORLDS,
-                        InstanceManagementPageId.DATA_PACKS,
                         InstanceManagementPageId.SCHEMATICS,
                         InstanceManagementPageId.BACKUPS,
                         InstanceManagementPageId.FILE_UPDATE_CHECK), navigation.availablePages());
@@ -279,7 +279,8 @@ final class DefaultInstanceManagementViewTest {
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),
-                    new UnusedMaintenanceLaunchActions())));
+                    new UnusedMaintenanceLaunchActions(),
+                    InstanceContentNavigation.disabled())));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
             awaitExecutor(executor);
             EdtDispatcher.executeAndWait(() -> { });

@@ -733,7 +733,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
                             retryAction));
                 }
             });
-            taskLaunchController.launch(taskExecutor, strings.title(), () -> { });
+            taskLaunchController.launchWithoutNavigation(taskExecutor, strings.title(), () -> { });
         } catch (RuntimeException failure) {
             operationCompleted(failure, capturedSuccess, retryAction);
         } catch (Error failure) {

@@ -93,6 +93,11 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `test` | 使用与 `build` 相同的分支和版本解析规则测试当前工作树。 |
 | `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
 | `run` | 始终重新构建 `XYML`、`XYMLCore` 和 `XYMLBoot`，然后运行当前工作树制品。 |
+| `releasePromoteAlpha` | 把本地 `dev` 以双亲 `--no-ff` 合并晋升到 `alpha`，不推送。 |
+| `releasePromoteBeta` | 把本地 `alpha` 以双亲 `--no-ff` 合并晋升到 `beta`，不推送。 |
+| `releasePromoteMain` | 把本地 `beta` 晋升到 `main` 并完成 `main -> beta -> alpha -> dev` 反向同步，不推送。需 `-Pxyml.release.stableIncrement`（`major`、`minor` 或 `patch`）。 |
+
+`releasePromoteAlpha`、`releasePromoteBeta`、`releasePromoteMain` 只读取本地 `main`、`beta`、`alpha`、`dev` 引用：先建立临时工作区，逐级生成双亲 `--no-ff` 合并，在合并提交创建前跑发布门禁，最后用一次事务原子更新本地引用，并输出推送与回退命令但不推送。可选属性：`-Pxyml.release.verify=standard` 或 `full`、`-Pxyml.release.skipTests=true`、`-Pxyml.release.dryRun=true`。
 
 即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`build`、`test` 和 `run` 也始终使用当前仓库根目录；这些任务都不会切换分支或委托渠道任务。
 没有 CI 版本输入时，制品版本由当前分支与 `HEAD` 拓扑决定；未提交改动会进入制品，但不会使版本号递增。从命令行调用时建议保留任务名前的 `:`（`:build` 或 `:test`）以精确指向根任务。IntelliJ 的 Gradle Tooling API 可能会发送裸 `build`；根构建脚本也会将这种聚合调用规范化为只组装子项目。

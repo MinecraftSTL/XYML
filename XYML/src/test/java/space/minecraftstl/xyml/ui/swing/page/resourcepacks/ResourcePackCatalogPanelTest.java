@@ -138,6 +138,8 @@ public final class ResourcePackCatalogPanelTest {
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
                 () -> newPanel(model));
+        AtomicInteger downloads = new AtomicInteger();
+        AtomicInteger checks = new AtomicInteger();
 
         assertAll(
                 () -> assertEquals(0, model.lazyLoads.get()),
@@ -163,6 +165,11 @@ public final class ResourcePackCatalogPanelTest {
             cardLayout.show(host, "resourcePacks");
             cardLayout.show(host, "other");
             cardLayout.show(host, "resourcePacks");
+            panel.setContentCommands(downloads::incrementAndGet, checks::incrementAndGet);
+            findButton(panel, "resourcePacksCheckUpdates").doClick();
+            findButton(panel, "resourcePacksDownload").doClick();
+            assertEquals(1, checks.get());
+            assertEquals(1, downloads.get());
             assertEquals(1, model.lazyLoads.get());
             panel.close();
             panel.close();

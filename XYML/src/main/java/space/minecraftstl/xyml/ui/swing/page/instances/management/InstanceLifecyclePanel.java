@@ -363,7 +363,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             });
             String title = failureTitle(kind);
             EdtDispatcher.executeAndWait(
-                    () -> taskLaunchController.launch(taskExecutor, title, () -> { }));
+                    () -> taskLaunchController.launchWithoutNavigation(taskExecutor, title, () -> { }));
         } catch (Exception failure) {
             EdtDispatcher.execute(() -> completeMutation(
                     kind, destinationId, copySaves, deletionMode, failure));

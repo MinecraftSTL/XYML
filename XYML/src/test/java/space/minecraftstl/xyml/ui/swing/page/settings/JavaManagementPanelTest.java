@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.ScrollDirection;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -237,6 +238,9 @@ public final class JavaManagementPanelTest {
                 snapshot(true, List.of(unmanaged, managed), List.of()));
         FakeJavaManagementInteractions interactions = new FakeJavaManagementInteractions();
         JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(service, interactions));
+        onEventDispatchThread(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
         AbstractButton runtimeAction = onEventDispatchThread(() ->
                 findComponent(panel, "javaManagementRuntimeAction", AbstractButton.class));
 
@@ -662,19 +666,24 @@ public final class JavaManagementPanelTest {
                 snapshot(true, List.of(), List.of()));
         FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
         acquisitionService.downloadedRuntime.set(downloadedRuntime);
+        AtomicInteger navigationCount = new AtomicInteger();
         JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
                 service,
                 acquisitionService,
                 new FakeJavaManagementInteractions()));
+        onEventDispatchThread(() -> panel.setTaskLaunchController(
+                new TaskLaunchController(navigationCount::incrementAndGet)));
 
         onEventDispatchThread(() ->
                 findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
         awaitCondition(() -> acquisitionService.loadStarts.get() == 1 && onEventDispatchThread(() ->
                 findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+        assertEquals(0, navigationCount.get());
         onEventDispatchThread(() -> {
             loadMojangChoices(panel, 2);
             findComponent(panel, "javaManagementAcquireMojangList", JList.class).setSelectedIndex(1);
             findComponent(panel, "javaManagementAcquireDownload", AbstractButton.class).doClick();
+            assertEquals(1, navigationCount.get());
         });
         awaitCondition(() -> acquisitionService.downloadCalls.get() == 1 && onEventDispatchThread(() ->
                 findComponent(panel, "javaManagementMainView", JPanel.class).isVisible()));

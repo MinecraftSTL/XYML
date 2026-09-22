@@ -667,7 +667,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
             return;
         }
         if (interactions.confirmRemoval(this, selected.libraryId())) {
-            startTask(() -> service.removeLibrary(instanceId, selected.libraryId()), i18n("button.remove"));
+            startLocalTask(() -> service.removeLibrary(instanceId, selected.libraryId()), i18n("button.remove"));
         }
     }
 
@@ -684,15 +684,32 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         }
         String libraryId = selected.kind().versionListId();
         if (interactions.confirmRemoval(this, libraryId)) {
-            startTask(() -> service.removeLibrary(instanceId, libraryId), i18n("button.remove"));
+            startLocalTask(() -> service.removeLibrary(instanceId, libraryId), i18n("button.remove"));
         }
+    }
+
+    /// Creates, presents, and starts one local mutation without opening the task manager.
+    ///
+    /// @param taskSupplier task-construction boundary called only once after panel validation
+    /// @param title localized task title
+    private void startLocalTask(TaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, false);
+    }
+
+    /// Creates, presents, and starts exactly one stopped Core mutation task and opens the task manager.
+    ///
+    /// @param taskSupplier task-construction boundary called only once after panel validation
+    /// @param title localized task title
+    private void startTask(TaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, true);
     }
 
     /// Creates, presents, and starts exactly one stopped Core mutation task.
     ///
     /// @param taskSupplier task-construction boundary called only once after panel validation
     /// @param title localized task title
-    private void startTask(TaskSupplier taskSupplier, String title) {
+    /// @param navigateToTaskManager whether successful startup should open the task manager
+    private void startTask(TaskSupplier taskSupplier, String title, boolean navigateToTaskManager) {
         EdtDispatcher.requireEventDispatchThread();
         if (!isReadyForMutation()) {
             return;
@@ -720,7 +737,14 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         statusLabel.setText(i18n("message.doing"));
         updateControls();
         try {
-            taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
+            if (navigateToTaskManager) {
+                taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
+            } else {
+                taskLaunchController.launchWithoutNavigation(
+                        executor,
+                        Objects.requireNonNull(title, "title"),
+                        () -> { });
+            }
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);

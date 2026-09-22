@@ -191,7 +191,7 @@ final class InstanceGameSettingsFooterControls {
                 }
             });
             updateAvailability(writable, interactive);
-            taskLaunchController.launch(executor, i18n("settings.file.force_write"), () -> { });
+            taskLaunchController.launchWithoutNavigation(executor, i18n("settings.file.force_write"), () -> { });
         } catch (RuntimeException exception) {
             if (forceOverwriteSubscription != null) {
                 forceOverwriteSubscription.unsubscribe();
