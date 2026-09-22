@@ -267,6 +267,33 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         this(
+                repository,
+                instanceId,
+                directoryExecutor,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a page whose confirmed export task opens the shared task manager.
+    ///
+    /// @param repository repository containing the source instance
+    /// @param instanceId stable non-blank source instance identifier
+    /// @param directoryExecutor caller-owned executor for lazy local directory enumeration
+    /// @param taskProgressStrings localized task-progress labels
+    /// @param animator optional shared motion-aware progress animator
+    /// @param progressAnimationDuration non-negative determinate progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public ModpackExportPanel(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            Executor directoryExecutor,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
                 Objects.requireNonNull(repository, "repository")::getRunDirectory,
                 instanceId,
                 new RepositoryModpackExportTaskFactory(repository),
@@ -275,7 +302,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                new TaskLaunchController(() -> { }));
+                taskLaunchController);
     }
 
     /// Creates a page with explicit filesystem and task seams for deterministic Swing verification.

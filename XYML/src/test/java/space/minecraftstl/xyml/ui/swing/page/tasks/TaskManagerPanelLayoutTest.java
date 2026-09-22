@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskExecutionLogEntry;
 import space.minecraftstl.xyml.task.TaskExecutionRegistry;
 import space.minecraftstl.xyml.task.TaskExecutionSnapshot;
@@ -31,6 +32,7 @@ import space.minecraftstl.xyml.task.TaskExecutionTaskStatus;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
+import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollBar;
@@ -56,6 +58,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalDouble;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -76,6 +79,50 @@ public final class TaskManagerPanelLayoutTest {
 
     /// Placement where the target row top is below the outer list viewport.
     private static final int ANCHOR_BELOW = 2;
+
+    /// A task published while the page is hidden is rendered when the page is shown again.
+    @Test
+    public void rendersTaskPublishedWhileHiddenAfterPageIsShown() throws Exception {
+        TaskExecutionRegistry registry = TaskExecutionRegistry.global();
+        registry.clear();
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<@Nullable JFrame> frameReference = new AtomicReference<>();
+        AtomicReference<@Nullable TaskManagerPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TaskManagerPanel panel = new TaskManagerPanel(registry);
+                panelReference.set(panel);
+                JFrame frame = new JFrame("task-manager-visibility-test");
+                frame.setUndecorated(true);
+                frame.setLocation(-10_000, -10_000);
+                frame.setSize(new Dimension(800, 600));
+                frame.setContentPane(panel);
+                frameReference.set(frame);
+            });
+            EdtDispatcher.executeAndWait(() -> {
+                TaskExecutor executor = Task.runAsync("Hidden active task", () -> release.await()).executor();
+                executor.setTaskExecutionPresentation("Hidden active task", true);
+                executor.start();
+            });
+            EdtDispatcher.executeAndWait(() -> { });
+            EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(frameReference.get()).setVisible(true));
+            EdtDispatcher.executeAndWait(() -> { });
+            TaskManagerPanel panel = Objects.requireNonNull(panelReference.get());
+            assertFalse(named(panel, "taskManagerRunningScroll", JScrollPane.class).isEmpty());
+            assertFalse(named(panel, "taskExecutionTitle", JTextArea.class).isEmpty());
+        } finally {
+            release.countDown();
+            @Nullable JFrame frame = frameReference.get();
+            if (frame != null) {
+                EdtDispatcher.executeAndWait(frame::dispose);
+            }
+            @Nullable TaskManagerPanel panel = panelReference.get();
+            if (panel != null) {
+                EdtDispatcher.executeAndWait(panel::close);
+            }
+            registry.clear();
+        }
+    }
 
     /// Repeated progress and terminal transitions reuse one top-level row component.
     @Test

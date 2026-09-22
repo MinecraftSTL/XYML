@@ -72,6 +72,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -298,16 +299,15 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             public void componentResized(ComponentEvent event) {
                 refreshLayoutForWidth();
             }
-
-            @Override
-            public void componentShown(ComponentEvent event) {
-                pageShowing = true;
-                flushPendingPublication();
+        });
+        addHierarchyListener(event -> {
+            if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) == 0) {
+                return;
             }
-
-            @Override
-            public void componentHidden(ComponentEvent event) {
-                pageShowing = false;
+            boolean showing = isShowing();
+            pageShowing = showing;
+            if (showing) {
+                flushPendingPublication();
             }
         });
     }

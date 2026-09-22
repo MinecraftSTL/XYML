@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
@@ -126,6 +127,8 @@ final class RemoteModpackCatalogPanelTest {
         RecordingBackend backend = new RecordingBackend(addon, version);
         RecordingInstallLauncher installLauncher = new RecordingInstallLauncher();
         ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicInteger taskNavigations = new AtomicInteger();
+        AtomicInteger dismissals = new AtomicInteger();
         AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteModpackCatalogPanel(
@@ -135,8 +138,11 @@ final class RemoteModpackCatalogPanelTest {
                     RemoteModpackCatalogStrings.english(),
                     TaskProgressStrings.english(),
                     null,
-                    Duration.ZERO)));
+                    Duration.ZERO,
+                    null,
+                    new TaskLaunchController(taskNavigations::incrementAndGet))));
             RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchDismissAction(dismissals::incrementAndGet));
 
             EdtDispatcher.executeAndWait(() -> {
                 prepareViewport(panel.choiceList());
@@ -210,6 +216,8 @@ final class RemoteModpackCatalogPanelTest {
             assertEquals(addon, request.item().addon());
             assertEquals(version, request.version());
             assertEquals(new GameInstanceID("fixture-pack"), request.instanceId());
+            assertEquals(1, taskNavigations.get());
+            assertEquals(1, dismissals.get());
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
             if (panel != null) {
