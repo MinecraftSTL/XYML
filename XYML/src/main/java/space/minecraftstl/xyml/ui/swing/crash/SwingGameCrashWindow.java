@@ -688,7 +688,6 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             export.setName("gameCrashExport");
             export.addActionListener(event -> exportCrashLogsOnEdt());
             exportButton = export;
-            buttons.add(export);
 
             JButton reveal = new JButton(i18n("button.reveal_dir"));
             reveal.setName("gameCrashReveal");
@@ -698,6 +697,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             reveal.setVisible(false);
             revealButton = reveal;
             buttons.add(reveal);
+            buttons.add(export);
         }
         buttons.add(logs);
         buttons.add(help);
