@@ -744,7 +744,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                             setStatus(i18n("java.install.failed.invalid"));
                         }
                     }
-                });
+                }, () -> { }, false);
     }
 
     /// Installs one pure acquisition surface into the persistent third card.
@@ -842,7 +842,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                 pendingSelectedBinary = result.getBinary();
                 selectRuntime(pendingSelectedBinary);
             }
-        });
+        }, () -> { }, false);
     }
 
     /// Opens the local Java archive chooser and forwards one accepted path to the pure acquisition panel.
@@ -889,7 +889,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                     if (acquisitionPanel == requestedPanel && result != null) {
                         requestedPanel.applyArchiveInspection(revision, result);
                     }
-                });
+                }, () -> { }, false);
     }
 
     /// Starts one explicitly selected built-in Mojang runtime download.
@@ -918,7 +918,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                     if (acquisitionPanel == requestedPanel && result != null) {
                         completeAcquisition(result);
                     }
-                });
+                }, () -> { }, true);
     }
 
     /// Delegates one independently cancellable inline third-party version fetch.
@@ -1062,7 +1062,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                     if (acquisitionPanel == requestedPanel && result != null) {
                         completeAcquisition(result);
                     }
-                });
+                }, () -> { }, true);
     }
 
     /// Opens one panel-provided external Java download destination through the native interaction boundary.
@@ -1163,7 +1163,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                     if (acquisitionPanel == requestedPanel && result != null) {
                         completeAcquisition(result);
                     }
-                });
+                }, () -> { }, true);
     }
 
     /// Returns to active runtimes while retaining the acquired binary for the next lifecycle snapshot.
@@ -1204,7 +1204,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             setStatus(i18n("message.failed"));
             return;
         }
-        startOperation(task, action, i18n("message.failed"), result -> { });
+        startOperation(task, action, i18n("message.failed"), result -> { }, () -> { }, false);
     }
 
     /// Restores the selected disabled record when the service resolved a valid executable.
@@ -1227,14 +1227,19 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             setStatus(i18n("message.failed"));
             return;
         }
-        startOperation(task, i18n("java.disabled.management.restore"), i18n("message.failed"), result -> {
-            if (result != null) {
-                failedDisabledRestores.remove(entry.configuredPath());
-                pendingSelectedBinary = result.getBinary();
-                showMainView();
-                selectRuntime(pendingSelectedBinary);
-            }
-        }, () -> failedDisabledRestores.add(entry.configuredPath()));
+        startOperation(
+                task,
+                i18n("java.disabled.management.restore"),
+                i18n("message.failed"),
+                result -> {
+                    if (result != null) {
+                        failedDisabledRestores.remove(entry.configuredPath());
+                        pendingSelectedBinary = result.getBinary();
+                        showMainView();
+                        selectRuntime(pendingSelectedBinary);
+                    }
+                },
+                () -> failedDisabledRestores.add(entry.configuredPath()), false);
     }
 
     /// Removes the selected disabled record after inspection rejected it or a valid-path restore failed.
@@ -1257,7 +1262,11 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             setStatus(i18n("message.failed"));
             return;
         }
-        startOperation(task, i18n("java.disabled.management.remove"), i18n("message.failed"), result -> { });
+        startOperation(
+                task,
+                i18n("java.disabled.management.remove"),
+                i18n("message.failed"),
+                result -> { }, () -> { }, false);
     }
 
     /// Starts filesystem and Java probing only after the user explicitly selects an unchecked disabled path.
@@ -1279,13 +1288,17 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             setStatus(i18n("message.failed"));
             return;
         }
-        startOperation(task, i18n("java.disabled.management"), i18n("message.failed"), result -> {
-            if (result != null && result.configuredPath().equals(entry.configuredPath())) {
-                failedDisabledRestores.remove(entry.configuredPath());
-                inspectedDisabledEntries.put(entry.configuredPath(), result);
-                replaceDisabledEntry(result);
-            }
-        });
+        startOperation(
+                task,
+                i18n("java.disabled.management"),
+                i18n("message.failed"),
+                result -> {
+                    if (result != null && result.configuredPath().equals(entry.configuredPath())) {
+                        failedDisabledRestores.remove(entry.configuredPath());
+                        inspectedDisabledEntries.put(entry.configuredPath(), result);
+                        replaceDisabledEntry(result);
+                    }
+                }, () -> { }, false);
     }
 
     /// Replaces one disabled list row by configured path while preserving its selection.
@@ -1345,35 +1358,22 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Starts one preconstructed task and binds its executor to the shared progress surface.
-    ///
-    /// @param task task constructed exactly once by the selected command
-    /// @param title localized operation title
-    /// @param failureStatus localized failure feedback
-    /// @param successAction EDT action consuming the task's possibly absent result
-    /// @param <T> task result type
-    private <T> void startOperation(
-            Task<T> task,
-            String title,
-            String failureStatus,
-            OperationSuccess<T> successAction) {
-        startOperation(task, title, failureStatus, successAction, () -> { });
-    }
-
-    /// Starts one preconstructed task with explicit success and failure callbacks.
+    /// Starts one preconstructed task with explicit success, failure, and navigation callbacks.
     ///
     /// @param task task constructed exactly once by the selected command
     /// @param title localized operation title
     /// @param failureStatus localized failure feedback
     /// @param successAction EDT action consuming the task's possibly absent result
     /// @param failureAction EDT action invoked after a non-cancellation failure
+    /// @param openTaskManager whether successful startup should open the task manager
     /// @param <T> task result type
     private <T> void startOperation(
             Task<T> task,
             String title,
             String failureStatus,
             OperationSuccess<T> successAction,
-            Runnable failureAction) {
+            Runnable failureAction,
+            boolean openTaskManager) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || activeExecutor != null) {
             return;
@@ -1399,7 +1399,14 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         setStatus(i18n("message.doing"));
         updateActionAvailability();
         try {
-            taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
+            if (openTaskManager) {
+                taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
+            } else {
+                taskLaunchController.launchWithoutNavigation(
+                        executor,
+                        Objects.requireNonNull(title, "title"),
+                        () -> { });
+            }
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             setStatus(failureStatus);

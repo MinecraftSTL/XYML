@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
@@ -72,6 +73,10 @@ final class InstanceLifecyclePanelTest {
                     interactions,
                     completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(
+                    new TaskLaunchController(() -> {
+                        throw new AssertionError("task navigation is not expected");
+                    })));
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton rename = Objects.requireNonNull(
@@ -118,6 +123,10 @@ final class InstanceLifecyclePanelTest {
                     interactions,
                     completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(
+                    new TaskLaunchController(() -> {
+                        throw new AssertionError("task navigation is not expected");
+                    })));
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton duplicate = Objects.requireNonNull(
@@ -160,6 +169,10 @@ final class InstanceLifecyclePanelTest {
                     interactions,
                     completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(
+                    new TaskLaunchController(() -> {
+                        throw new AssertionError("task navigation is not expected");
+                    })));
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton delete = Objects.requireNonNull(
@@ -215,6 +228,10 @@ final class InstanceLifecyclePanelTest {
                     interactions,
                     completed::countDown)));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(
+                    new TaskLaunchController(() -> {
+                        throw new AssertionError("task navigation is not expected");
+                    })));
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton delete = Objects.requireNonNull(
@@ -254,6 +271,10 @@ final class InstanceLifecyclePanelTest {
                     interactions,
                     () -> { })));
             InstanceLifecyclePanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(
+                    new TaskLaunchController(() -> {
+                        throw new AssertionError("task navigation is not expected");
+                    })));
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton rename = Objects.requireNonNull(

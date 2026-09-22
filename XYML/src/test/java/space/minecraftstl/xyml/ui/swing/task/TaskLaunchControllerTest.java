@@ -46,6 +46,38 @@ public final class TaskLaunchControllerTest {
         });
     }
 
+    /// A local launch starts and dismisses without opening the task manager.
+    @Test
+    public void launchesWithoutNavigationInOrder() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<String> events = new ArrayList<>();
+            TaskLaunchController controller = new TaskLaunchController(() -> events.add("navigate"));
+            TaskExecutor executor = new RecordingExecutor(events, false);
+
+            controller.launchWithoutNavigation(executor, "Local fixture", () -> events.add("dismiss"));
+
+            assertEquals(List.of("start", "dismiss"), events);
+        });
+    }
+
+    /// A failed local launch preserves the confirmation surface and never navigates.
+    @Test
+    public void launchWithoutNavigationStartFailureDoesNotDismiss() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<String> events = new ArrayList<>();
+            TaskLaunchController controller = new TaskLaunchController(() -> events.add("navigate"));
+            TaskExecutor executor = new RecordingExecutor(events, true);
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> controller.launchWithoutNavigation(
+                            executor,
+                            "Local fixture",
+                            () -> events.add("dismiss")));
+            assertEquals(List.of("start"), events);
+        });
+    }
+
     /// A start failure preserves the confirmation surface and never navigates.
     @Test
     public void startFailureDoesNotDismissOrNavigate() {

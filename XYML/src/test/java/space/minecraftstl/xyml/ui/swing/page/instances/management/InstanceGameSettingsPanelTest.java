@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.page.settings.DisabledJavaRuntimeEntry;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
@@ -268,12 +269,14 @@ final class InstanceGameSettingsPanelTest {
         RecordingStore store = new RecordingStore(withWritable(snapshot(), false));
         store.forceOverwriteAvailable = true;
         AtomicInteger reloads = new AtomicInteger();
+        AtomicInteger navigationCount = new AtomicInteger();
         EdtDispatcher.executeAndWait(() -> {
             InstanceGameSettingsFooterControls footer = new InstanceGameSettingsFooterControls(
                     store,
                     () -> { },
                     reloads::incrementAndGet,
                     () -> true);
+            footer.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet));
             footer.updateAvailability(false, true);
 
             findNamed(
@@ -285,6 +288,7 @@ final class InstanceGameSettingsPanelTest {
         awaitTaskCompletion();
         assertEquals(1, store.forceOverwriteCount.get());
         assertEquals(1, reloads.get());
+        assertEquals(0, navigationCount.get());
     }
 
     /// Ensures inherited properties expose overrides while Java uses explicit radio rows without old checkboxes.
