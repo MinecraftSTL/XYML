@@ -28,7 +28,9 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
+import javax.swing.JButton;
 import javax.swing.JEditorPane;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -36,6 +38,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.Scrollable;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Rectangle;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.nio.file.Path;
@@ -108,6 +111,55 @@ class SwingGameCrashWindowLayoutTest {
         }
     }
 
+    /// Keeps every action inside the toolbar when the status text is much wider than the window.
+    @Test
+    void anchorsActionButtonsToRightWithLongStatus() throws Exception {
+        CompletableFuture<GameCrashAnalysis> analysis = new CompletableFuture<>();
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        SwingGameCrashWindow window = new SwingGameCrashWindow(
+                model(),
+                (logAnalyzable, latestLog) -> analysis,
+                new GameCrashReasonFormatter(),
+                new NoOpActions(),
+                worker,
+                false);
+
+        try {
+            window.show();
+            EdtDispatcher.executeAndWait(() -> { });
+            analysis.complete(new GameCrashAnalysis(List.of(), Set.of()));
+            EdtDispatcher.executeAndWait(() -> { });
+
+            JPanel content = content(window);
+            EdtDispatcher.executeAndWait(() -> {
+                content.setSize(640, 400);
+                findComponent(content, "gameCrashReveal", JButton.class).setVisible(true);
+                findComponent(content, "gameCrashOperationStatus", JLabel.class)
+                        .setText("operation status ".repeat(256));
+                for (int i = 0; i < 3; i++) {
+                    layout(content);
+                }
+
+                JPanel toolbar = findComponent(content, "gameCrashActionsToolbar", JPanel.class);
+                JPanel buttons = findComponent(content, "gameCrashActionButtons", JPanel.class);
+                Rectangle groupBounds = convertTo(toolbar, buttons);
+                int rightEdge = toolbar.getWidth() - toolbar.getInsets().right;
+                assertEquals(rightEdge, groupBounds.x + groupBounds.width, 1);
+                assertTrue(groupBounds.x >= toolbar.getInsets().left);
+
+                for (String name : List.of("gameCrashExport", "gameCrashReveal", "gameCrashLogs", "gameCrashHelp")) {
+                    JButton button = findComponent(content, name, JButton.class);
+                    Rectangle bounds = convertTo(toolbar, button);
+                    assertTrue(bounds.x >= toolbar.getInsets().left);
+                    assertTrue(bounds.x + bounds.width <= rightEdge);
+                }
+            });
+        } finally {
+            window.close();
+            EdtDispatcher.executeAndWait(() -> { });
+        }
+    }
+
     /// Creates the immutable model used by the layout test.
     ///
     /// @return crash-window model with deterministic launch context
@@ -159,6 +211,40 @@ class SwingGameCrashWindowLayoutTest {
         Field field = SwingGameCrashWindow.class.getDeclaredField("content");
         field.setAccessible(true);
         return (JPanel) Objects.requireNonNull(field.get(window), "content");
+    }
+
+    /// Finds one named component below a component tree.
+    ///
+    /// @param root component tree root
+    /// @param name deterministic component name
+    /// @param type expected component type
+    /// @param <T> component type
+    /// @return matching component
+    private static <T extends Component> T findComponent(Component root, String name, Class<T> type) {
+        if (type.isInstance(root) && name.equals(root.getName())) {
+            return type.cast(root);
+        }
+        if (root instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                try {
+                    return findComponent(child, name, type);
+                } catch (AssertionError ignored) {
+                }
+            }
+        }
+        throw new AssertionError("Component not found: " + name);
+    }
+
+    /// Converts one component's bounds into an ancestor's coordinate space.
+    ///
+    /// @param ancestor target coordinate space
+    /// @param component component to convert
+    /// @return converted bounds
+    private static Rectangle convertTo(Container ancestor, Component component) {
+        return javax.swing.SwingUtilities.convertRectangle(
+                component.getParent(),
+                component.getBounds(),
+                ancestor);
     }
 
     /// Finds one named scroll pane below a component tree.
