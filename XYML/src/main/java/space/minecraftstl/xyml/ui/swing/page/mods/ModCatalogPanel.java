@@ -69,6 +69,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Insets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -1342,6 +1343,16 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @return original message or type name
     private static String failureDetail(Throwable failure) {
         Throwable current = unwrapFailure(failure);
+        if (current instanceof AccessDeniedException accessDenied) {
+            @Nullable String targetFile = accessDenied.getOtherFile();
+            if (targetFile != null && !targetFile.isBlank()) {
+                return i18n("exception.file_in_use", targetFile);
+            }
+            @Nullable String affectedFile = accessDenied.getFile();
+            return i18n(
+                    "exception.access_denied",
+                    affectedFile == null ? current.getClass().getSimpleName() : affectedFile);
+        }
         @Nullable String message = current.getMessage();
         return message == null || message.isBlank()
                 ? current.getClass().getSimpleName()

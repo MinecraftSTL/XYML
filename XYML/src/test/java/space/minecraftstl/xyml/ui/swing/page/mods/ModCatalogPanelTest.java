@@ -62,6 +62,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -84,6 +85,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Headless tests for the independent Swing Mod page and production constructor boundary.
 @NotNullByDefault
@@ -285,6 +287,27 @@ public final class ModCatalogPanelTest {
             assertEquals(
                     model.importConflictActions().get(0),
                     model.importConflictActions().get(1));
+            panel.close();
+        });
+    }
+
+    /// An access-denied publish failure identifies the target instead of showing the raw path pair.
+    @Test
+    public void explainsAccessDeniedWithTargetPath() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        Path target = Path.of("terra-1.0.0-both.jar").toAbsolutePath().normalize();
+        model.replaceImportFailure(new AccessDeniedException("publish.tmp", target.toString(), null));
+        String expectedDetail = i18n("exception.file_in_use", target.toString());
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            @Nullable String retryDetail = interactions.retryDetail();
+            assertEquals(expectedDetail, retryDetail);
+            assertTrue(Objects.requireNonNull(retryDetail).contains(target.toString()));
+            assertFalse(retryDetail.contains(" -> "));
             panel.close();
         });
     }
@@ -1218,6 +1241,9 @@ public final class ModCatalogPanelTest {
         /// Latest captured retry request.
         private @Nullable Runnable retryAction;
 
+        /// Detail supplied with the latest retry request.
+        private @Nullable String retryDetail;
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
@@ -1292,6 +1318,7 @@ public final class ModCatalogPanelTest {
                 String detail,
                 Runnable retryAction) {
             this.retryAction = Objects.requireNonNull(retryAction, "retryAction");
+            this.retryDetail = Objects.requireNonNull(detail, "detail");
         }
 
         /// Returns latest revealed path.
@@ -1327,6 +1354,13 @@ public final class ModCatalogPanelTest {
         /// @return retry request, or null when none was presented
         private @Nullable Runnable retryAction() {
             return retryAction;
+        }
+
+        /// Returns the detail supplied with the latest retry request.
+        ///
+        /// @return retry detail, or null when none was presented
+        private @Nullable String retryDetail() {
+            return retryDetail;
         }
 
         /// Replaces the deterministic conflict response.
