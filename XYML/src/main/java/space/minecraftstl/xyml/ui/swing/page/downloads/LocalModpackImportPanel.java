@@ -190,6 +190,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         statusLabel.setName("localModpackImportStatus");
         add(statusLabel, "span 2, growx, h 24!");
         progressHost.setName("localModpackImportProgress");
+        add(progressHost, "span 2, grow");
         updateImportButton();
     }
 

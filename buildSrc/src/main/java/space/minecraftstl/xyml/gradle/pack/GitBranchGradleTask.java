@@ -167,7 +167,6 @@ public abstract class GitBranchGradleTask extends DefaultTask {
         environment.put("RELEASE_VERSION", version);
         environment.put("STABLE_VERSION", stableVersion);
         environment.put("JAVA_HOME", System.getProperty("java.home"));
-        environment.put("GRADLE_USER_HOME", repository.resolve(".gradle-user-home").toString());
         if (windows) {
             getLogger().lifecycle("Allowing nested Gradle downloads to use the Windows system proxy.");
         }
