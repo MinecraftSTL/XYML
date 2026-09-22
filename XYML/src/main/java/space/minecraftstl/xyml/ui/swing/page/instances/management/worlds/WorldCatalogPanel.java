@@ -1277,7 +1277,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         JPanel host = new JPanel(new BorderLayout(0, 6));
         host.setOpaque(false);
         host.setName("worldsDataPacksHost");
-        JButton backButton = new JButton(i18n("schematics.return"));
+        JButton backButton = createDataPackBackButton();
         backButton.setName("worldsDataPacksBack");
         backButton.addActionListener(event -> showWorldCatalog());
         host.add(backButton, BorderLayout.NORTH);
@@ -1287,6 +1287,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         contentCards.add(host, DATA_PACKS_CARD);
         ((CardLayout) contentCards.getLayout()).show(contentCards, DATA_PACKS_CARD);
         panel.activate();
+    }
+
+    /// Creates the localized return action from the nested data-pack manager to the world list.
+    ///
+    /// @return button returning to the world list
+    static JButton createDataPackBackButton() {
+        return new JButton(i18n("swing.schematics.return"));
     }
 
     /// Returns from the nested data-pack manager to the world catalog.
