@@ -32,6 +32,7 @@ import java.util.Objects;
 /// @param exportLaunchScriptAction standalone launch-script command label
 /// @param launchAction normal launch command label
 /// @param launchingAction in-progress launch command label
+/// @param cancelLaunchAction launch-cancellation command label
 /// @param backToSelectionsAction command label for returning from task progress to launch selections
 @NotNullByDefault
 public record HomeStrings(
@@ -44,6 +45,7 @@ public record HomeStrings(
         String exportLaunchScriptAction,
         String launchAction,
         String launchingAction,
+        String cancelLaunchAction,
         String backToSelectionsAction) {
     /// Validates localized home-page text.
     public HomeStrings {
@@ -56,6 +58,7 @@ public record HomeStrings(
         Objects.requireNonNull(exportLaunchScriptAction, "exportLaunchScriptAction");
         Objects.requireNonNull(launchAction, "launchAction");
         Objects.requireNonNull(launchingAction, "launchingAction");
+        Objects.requireNonNull(cancelLaunchAction, "cancelLaunchAction");
         Objects.requireNonNull(backToSelectionsAction, "backToSelectionsAction");
     }
 }

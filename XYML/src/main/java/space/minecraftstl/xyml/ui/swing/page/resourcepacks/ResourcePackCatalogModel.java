@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -100,6 +101,15 @@ public interface ResourcePackCatalogModel
     /// @param path direct-child path belonging to the current complete catalog
     /// @return asynchronous completion after deletion and shallow reindexing
     CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path);
+
+    /// Deletes one current pack using the selected recycle-bin or permanent mode.
+    ///
+    /// @param path direct-child path belonging to the current complete catalog
+    /// @param mode selected deletion behavior
+    /// @return asynchronous completion after deletion and shallow reindexing
+    default CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path, DeletionMode mode) {
+        return deleteResourcePack(path);
+    }
 
     /// Closes commands and subscriptions, cancels index, viewport, and pre-commit write work.
     ///

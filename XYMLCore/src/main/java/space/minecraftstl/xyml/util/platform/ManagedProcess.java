@@ -40,6 +40,9 @@ public final class ManagedProcess {
     private final List<String> lines = new ArrayList<>();
     private final List<Thread> relatedThreads = new ArrayList<>();
 
+    /// Whether a caller requested immediate forced termination.
+    private volatile boolean forceStopRequested;
+
     public ManagedProcess(ProcessBuilder processBuilder) throws IOException {
         this.process = processBuilder.start();
         this.commands = processBuilder.command();
@@ -185,6 +188,30 @@ public final class ManagedProcess {
     public void stop() {
         process.destroy();
         destroyRelatedThreads();
+    }
+
+    /// Requests immediate termination of the managed process without terminating its descendants.
+    ///
+    /// The request is idempotent and is recorded before the operating-system kill so exit monitors can distinguish a
+    /// launcher-driven forced stop from an application crash. Related monitor threads are interrupted after the kill
+    /// request, including when the underlying process implementation rejects forced termination.
+    public synchronized void forceStop() {
+        if (forceStopRequested) {
+            return;
+        }
+        forceStopRequested = true;
+        try {
+            process.destroyForcibly();
+        } finally {
+            destroyRelatedThreads();
+        }
+    }
+
+    /// Returns whether [#forceStop()] has been called.
+    ///
+    /// @return true when forced termination was requested
+    public boolean isForceStopRequested() {
+        return forceStopRequested;
     }
 
     public void destroyRelatedThreads() {

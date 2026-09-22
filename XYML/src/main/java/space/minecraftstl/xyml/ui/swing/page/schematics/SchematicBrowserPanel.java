@@ -26,14 +26,24 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -41,6 +51,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
@@ -49,9 +60,11 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -63,6 +76,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /// Swing schematic browser backed by a shallow, viewport-driven toolkit-neutral model.
@@ -73,6 +87,21 @@ import java.util.function.Supplier;
 /// All worker-published model changes are coalesced and applied through [EdtDispatcher].
 @NotNullByDefault
 public final class SchematicBrowserPanel extends JPanel implements AutoCloseable {
+    /// Maximum preview side decoded for a single row icon.
+    private static final int MAX_ROW_PREVIEW_SIDE = 128;
+
+    /// Fallback icon for a parsed Litematic without preview pixels.
+    private static final Icon SCHEMATIC_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
+    /// Folder icon used for child-directory rows.
+    private static final Icon SCHEMATIC_DIRECTORY_ICON = new FlatSVGIcon(
+            "assets/swing/icons/folder-fill.svg",
+            32,
+            32);
+
     /// Card shown before loading and while a directory scan is active.
     private static final String LOADING_CARD = "loading";
 
@@ -146,7 +175,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     private final JLabel statusLabel = new JLabel();
 
     /// Heading for the selected-row detail region.
-    private final JLabel detailsHeading = new JLabel();
+    private final JTextArea detailsHeading = SwingTextAreas.wrappingValue();
 
     /// Read-only responsive metadata and parse-error text.
     private final JTextArea detailsArea = new JTextArea();
@@ -201,6 +230,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Snapshot currently represented by Swing controls, or null before initialization.
     private @Nullable SchematicBrowserSnapshot displayedSnapshot;
 
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Supplier<CompletionStage<SchematicBrowserSnapshot>> activeWriteOperation;
+
     /// Monotonic notification revision used to discard queued stale EDT updates.
     private long updateRevision;
 
@@ -233,7 +265,14 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
-        choiceList = new ViewportChoiceList<>(model, this::rowText);
+        choiceList = new ViewportChoiceList<>(
+                model,
+                new RichChoiceListCellRenderer<>(
+                        this::rowText,
+                        this::rowDetail,
+                        this::rowBadge,
+                        this::rowIcon,
+                        this::rowTooltip), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         configureComponents();
         modelSubscription = model.subscribe(this::modelChanged);
@@ -390,7 +429,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         list.addMouseListener(directoryOpenMouseListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
 
-        JPanel detailsPanel = new JPanel(new MigLayout(
+        JPanel detailsPanel = new ViewportTrackingPanel(new MigLayout(
                 "insets 12, fill, wrap 1",
                 "[grow,fill]",
                 "[]8[grow,fill]8[]"));
@@ -399,7 +438,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsHeading.setName("schematicsDetailsTitle");
         detailsHeading.setText(strings.detailsTitle());
         detailsHeading.setFont(detailsHeading.getFont().deriveFont(Font.BOLD));
-        detailsPanel.add(detailsHeading, "growx");
+        detailsPanel.add(detailsHeading, "growx, wmin 0");
 
         detailsArea.setName("schematicsDetailsText");
         detailsArea.setEditable(false);
@@ -410,8 +449,10 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsArea.setText(strings.noSelectionText());
         JScrollPane detailsScroll = new JScrollPane(detailsArea);
         detailsScroll.setName("schematicsDetailsScroll");
+        detailsScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        detailsScroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(detailsScroll);
-        detailsPanel.add(detailsScroll, "grow");
+        detailsPanel.add(detailsScroll, "grow, wmin 0");
 
         ResponsiveActionStrip selectedActions = new ResponsiveActionStrip();
         configureActionButton(
@@ -441,20 +482,27 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         deleteButton.addActionListener(event -> confirmAndDeleteSelectedItem());
         selectedActions.addAction(deleteButton);
         detailsPanel.add(selectedActions, "growx, wmin 0, h 40!");
+        int headingMinimumWidth = SwingTextAreas.minimumTextWidth(detailsHeading);
+        int detailsTextMinimumWidth = SwingTextAreas.minimumTextWidth(detailsArea);
+        int detailsActionMinimumWidth = 40 + 8 + 40 + 8 + 40;
+        int detailsMinimumWidth = Math.max(
+                Math.max(headingMinimumWidth, detailsTextMinimumWidth),
+                detailsActionMinimumWidth) + 24;
+        int scrollBarWidth = detailsScroll.getVerticalScrollBar().getPreferredSize().width;
+        detailsScroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
 
-        JSplitPane browserSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, choiceList, detailsPanel);
-        browserSplit.setName("schematicsBrowserSplit");
-        browserSplit.setOpaque(false);
-        browserSplit.setBorder(BorderFactory.createEmptyBorder());
-        browserSplit.setContinuousLayout(true);
-        browserSplit.setResizeWeight(0.62D);
+        ResponsiveBrowserSplitPane responsiveSplit = new ResponsiveBrowserSplitPane(choiceList, detailsPanel);
 
         loadingLabel.setText(strings.idleText());
         emptyLabel.setText(strings.emptyText());
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(errorPanel, ERROR_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
-        contentCards.add(browserSplit, BROWSER_CARD);
+        SwingHorizontalScrollPane browserScroll = new SwingHorizontalScrollPane(
+                responsiveSplit,
+                "schematicsCatalogScroll",
+                responsiveSplit.requiredMinimumWidth());
+        contentCards.add(browserScroll, BROWSER_CARD);
         contentCards.setOpaque(false);
         add(contentCards, "grow");
 
@@ -635,17 +683,21 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         }
         Path expectedDirectory = beforeDialog.currentDirectory();
         Path capturedPath = selected.path();
-        final boolean confirmed;
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (!confirmed || !isSelectedActionCurrent(expectedDirectory, capturedPath)) {
+        if (mode == null || !isSelectedActionCurrent(expectedDirectory, capturedPath)) {
             return;
         }
-        startWrite(() -> model.delete(capturedPath));
+        startDeletion(
+                model.delete(capturedPath, mode),
+                () -> model.delete(capturedPath, DeletionMode.PERMANENT),
+                () -> interactions.confirmPermanentFallback(this, selected),
+                true);
     }
 
     /// Starts one asynchronous platform reveal while keeping unrelated browser commands available.
@@ -677,6 +729,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     ///
     /// @param operation deferred model command
     private void startWrite(Supplier<CompletionStage<SchematicBrowserSnapshot>> operation) {
+        activeWriteOperation = Objects.requireNonNull(operation, "operation");
         final CompletionStage<SchematicBrowserSnapshot> completion;
         try {
             completion = Objects.requireNonNull(operation.get(), "schematic write returned null");
@@ -689,11 +742,48 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 @Nullable Throwable failure) -> EdtDispatcher.execute(() -> writeCompleted(failure)));
     }
 
+    /// Observes one deletion and retries permanently only after the original warning is approved.
+    ///
+    /// @param initial initial deletion stage
+    /// @param permanentRetry permanent retry stage
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void startDeletion(
+            CompletionStage<SchematicBrowserSnapshot> initial,
+            Supplier<CompletionStage<SchematicBrowserSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        final CompletionStage<SchematicBrowserSnapshot> completion;
+        try {
+            completion = Objects.requireNonNull(initial, "schematic deletion returned null");
+        } catch (RuntimeException failure) {
+            writeCompleted(failure);
+            return;
+        }
+        completion.whenComplete((@Nullable SchematicBrowserSnapshot ignored, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> {
+                    if (failure == null || !isOpen()) {
+                        return;
+                    }
+                    Throwable resolved = unwrapCompletionFailure(failure);
+                    if (allowFallback && resolved instanceof TrashMoveException) {
+                        if (confirmFallback.getAsBoolean()) {
+                            startDeletion(permanentRetry.get(), permanentRetry, confirmFallback, false);
+                        }
+                        return;
+                    }
+                    writeCompleted(failure);
+                }));
+    }
+
     /// Reports only write failures that were not already published in the browser status.
     ///
     /// @param failure asynchronous wrapper or original failure, or null after success
     private void writeCompleted(@Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Supplier<CompletionStage<SchematicBrowserSnapshot>> retryOperation =
+                activeWriteOperation;
+        activeWriteOperation = null;
         if (!isOpen() || failure == null) {
             return;
         }
@@ -701,10 +791,19 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         if (resolved instanceof CancellationException || isPublishedWriteFailure(resolved)) {
             return;
         }
-        interactions.showFailure(
-                this,
-                strings.actions().operationFailedTitle(),
-                failureText(resolved));
+        String detail = failureText(resolved);
+        if (retryOperation == null) {
+            interactions.showFailure(
+                    this,
+                    strings.actions().operationFailedTitle(),
+                    detail);
+        } else {
+            interactions.showRetryableFailure(
+                    this,
+                    strings.actions().operationFailedTitle(),
+                    detail,
+                    () -> startWrite(retryOperation));
+        }
     }
 
     /// Completes the local reveal gate and reports non-cancellation failures while still open.
@@ -1069,6 +1168,112 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 : fileName;
     }
 
+    /// Formats author, description, and dimensions already present in parsed metadata.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return compact metadata line
+    private String rowDetail(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem directory) {
+            return directory.fileName();
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        if (metadata == null) {
+            return firstNonBlankLine(file.failureMessage());
+        }
+        SchematicMetadataStrings labels = strings.metadata();
+        List<String> values = new ArrayList<>();
+        @Nullable String author = metadata.getAuthor();
+        if (author != null && !author.isBlank()) {
+            values.add(labels.authorLabel() + ": " + author);
+        }
+        @Nullable String description = metadata.getDescription();
+        String firstDescriptionLine = firstNonBlankLine(description);
+        if (!firstDescriptionLine.isBlank()) {
+            values.add(firstDescriptionLine);
+        }
+        @Nullable LitematicFile.EnclosingSize size = metadata.getEnclosingSize();
+        if (size != null) {
+            values.add(labels.enclosingSizeLabel() + ": " + size.x() + "x" + size.y() + "x" + size.z());
+        }
+        return values.isEmpty() ? file.fileName() : String.join(" | ", values);
+    }
+
+    /// Formats a compact format/block-count badge for a parsed schematic row.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return format version or unreadable marker
+    private String rowBadge(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem) {
+            return "";
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        if (metadata == null) {
+            return strings.unreadableText();
+        }
+        String version = formatVersion(metadata);
+        return metadata.getTotalBlocks() > 0
+                ? version + " | " + metadata.getTotalBlocks()
+                : version;
+    }
+
+    /// Converts an optional Litematic preview into a fixed-size Swing icon.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return preview icon, folder icon, or fallback icon
+    private Icon rowIcon(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem) {
+            return SCHEMATIC_DIRECTORY_ICON;
+        }
+        @Nullable LitematicFile metadata = ((SchematicFileItem) item).metadata();
+        if (metadata == null) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        int @Nullable [] pixels = metadata.getPreviewImageData();
+        if (pixels == null || pixels.length == 0) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        int side = (int) Math.sqrt(pixels.length);
+        if (side <= 0 || side > MAX_ROW_PREVIEW_SIDE || (long) side * side != pixels.length) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        BufferedImage image = new BufferedImage(side, side, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, side, side, pixels, 0, side);
+        Image scaled = image.getScaledInstance(40, 40, Image.SCALE_SMOOTH);
+        return new ImageIcon(scaled);
+    }
+
+    /// Supplies a tooltip containing the exact path and complete parsed description.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return durable path and optional description/failure
+    private String rowTooltip(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem directory) {
+            return directory.path().toString();
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        String detail = metadata == null ? file.failureMessage() : metadata.getDescription();
+        return detail == null || detail.isBlank()
+                ? file.path().toString()
+                : file.path() + "\n" + detail;
+    }
+
+    /// Returns the first meaningful line from optional multiline metadata.
+    ///
+    /// @param text nullable source text
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
+    }
+
     /// Returns whether commands may still reach the owned model.
     ///
     /// @return whether the panel remains open
@@ -1372,4 +1577,89 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             throw error;
         }
     }
+
+    /// Keeps the schematic list/details split horizontal while preserving user-adjustable minimum widths.
+    @NotNullByDefault
+    private static final class ResponsiveBrowserSplitPane extends JSplitPane {
+        /// Whether the divider ratio has been initialized.
+        private boolean dividerInitialized;
+
+        /// Whether the configured side minima currently fit the allocated width.
+        private boolean minimumsApplied;
+
+        /// List surface whose minimum width is applied when space permits.
+        private final JComponent leftComponent;
+
+        /// Details surface whose minimum width is applied when space permits.
+        private final JComponent rightComponent;
+
+        /// Computed minimum width of the list surface.
+        private final int leftMinimumWidth;
+
+        /// Computed minimum width of the details surface.
+        private final int rightMinimumWidth;
+
+        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
+        ///
+        /// @param list viewport-driven browser list
+        /// @param details selected-entry details surface
+        private ResponsiveBrowserSplitPane(JComponent list, JComponent details) {
+            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            setName("schematicsBrowserSplit");
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder());
+            setContinuousLayout(true);
+            setResizeWeight(0.62D);
+            leftComponent = list;
+            rightComponent = details;
+            leftMinimumWidth = SwingTextAreas.minimumTextWidth(list);
+            rightMinimumWidth = Math.max(
+                    SwingTextAreas.minimumTextWidth(details),
+                    details.getMinimumSize().width);
+            leftComponent.setMinimumSize(new Dimension(0, 0));
+            rightComponent.setMinimumSize(new Dimension(0, 0));
+        }
+
+        /// Returns the width required by both columns and the divider.
+        ///
+        /// @return complete workspace minimum width
+        private int requiredMinimumWidth() {
+            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
+        }
+
+        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
+        @Override
+        public void doLayout() {
+            boolean canApplyMinimums = getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
+            if (canApplyMinimums != minimumsApplied) {
+                minimumsApplied = canApplyMinimums;
+                leftComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(leftMinimumWidth, 0)
+                        : new Dimension(0, 0));
+                rightComponent.setMinimumSize(canApplyMinimums
+                        ? new Dimension(rightMinimumWidth, 0)
+                        : new Dimension(0, 0));
+            }
+            if (!dividerInitialized && getWidth() > 1) {
+                setDividerLocation((int) Math.round(
+                        (getWidth() - getDividerSize()) * 0.62D));
+                dividerInitialized = true;
+            }
+            if (canApplyMinimums && getWidth() > 0) {
+                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
+                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
+                if (location != getDividerLocation()) {
+                    setDividerLocation(location);
+                }
+            }
+            super.doLayout();
+        }
+
+        /// Allows the card layout to constrain both children without honoring their preferred widths.
+        @Override
+        public Dimension getMinimumSize() {
+            return new Dimension(0, 0);
+        }
+    }
+
 }

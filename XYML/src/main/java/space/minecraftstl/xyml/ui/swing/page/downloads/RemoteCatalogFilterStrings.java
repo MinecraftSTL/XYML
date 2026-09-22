@@ -35,6 +35,10 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param lastUpdatedSortLabel last-update sort option
 /// @param authorSortLabel author sort option
 /// @param totalDownloadsSortLabel total-download sort option
+/// @param versionSortLabel installable-version ordering label
+/// @param recommendedVersionSortLabel recommended version ordering option
+/// @param gameVersionSortLabel Minecraft-version ordering option
+/// @param modVersionSortLabel mod-version ordering option
 @NotNullByDefault
 public record RemoteCatalogFilterStrings(
         String categoryLabel,
@@ -45,7 +49,11 @@ public record RemoteCatalogFilterStrings(
         String dateCreatedSortLabel,
         String lastUpdatedSortLabel,
         String authorSortLabel,
-        String totalDownloadsSortLabel) {
+        String totalDownloadsSortLabel,
+        String versionSortLabel,
+        String recommendedVersionSortLabel,
+        String gameVersionSortLabel,
+        String modVersionSortLabel) {
     /// Validates the complete filter text bundle.
     public RemoteCatalogFilterStrings {
         Objects.requireNonNull(categoryLabel, "categoryLabel");
@@ -57,6 +65,10 @@ public record RemoteCatalogFilterStrings(
         Objects.requireNonNull(lastUpdatedSortLabel, "lastUpdatedSortLabel");
         Objects.requireNonNull(authorSortLabel, "authorSortLabel");
         Objects.requireNonNull(totalDownloadsSortLabel, "totalDownloadsSortLabel");
+        Objects.requireNonNull(versionSortLabel, "versionSortLabel");
+        Objects.requireNonNull(recommendedVersionSortLabel, "recommendedVersionSortLabel");
+        Objects.requireNonNull(gameVersionSortLabel, "gameVersionSortLabel");
+        Objects.requireNonNull(modVersionSortLabel, "modVersionSortLabel");
     }
 
     /// Returns the visible label for one Core-supported catalog sort.
@@ -74,6 +86,18 @@ public record RemoteCatalogFilterStrings(
         };
     }
 
+    /// Returns the visible label for one installable-version ordering mode.
+    ///
+    /// @param mode version ordering mode
+    /// @return localized visible version-order label
+    public String versionSortModeLabel(RemoteAddonVersionSortMode mode) {
+        return switch (Objects.requireNonNull(mode, "mode")) {
+            case RECOMMENDED -> recommendedVersionSortLabel;
+            case GAME_VERSION -> gameVersionSortLabel;
+            case MOD_VERSION -> modVersionSortLabel;
+        };
+    }
+
     /// Creates deterministic English filter text for focused tests and standalone panels.
     ///
     /// @return immutable English filter text
@@ -87,7 +111,11 @@ public record RemoteCatalogFilterStrings(
                 "Date created",
                 "Last updated",
                 "Author",
-                "Total downloads");
+                "Total downloads",
+                "Version order",
+                "Recommended",
+                "Game version",
+                "Mod version");
     }
 
     /// Resolves filter labels from the launcher's existing translation keys.
@@ -103,6 +131,10 @@ public record RemoteCatalogFilterStrings(
                 i18n("curse.sort.date_created"),
                 i18n("curse.sort.last_updated"),
                 i18n("curse.sort.author"),
-                i18n("curse.sort.total_downloads"));
+                i18n("curse.sort.total_downloads"),
+                i18n("swing.download.version_sort"),
+                i18n("swing.download.version_sort.recommended"),
+                i18n("swing.download.version_sort.game"),
+                i18n("swing.download.version_sort.mod"));
     }
 }

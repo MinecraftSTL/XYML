@@ -27,18 +27,25 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
@@ -50,11 +57,15 @@ import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -145,7 +156,7 @@ public final class ModCatalogPanelTest {
 
             list.setSelectedIndex(1);
             assertEquals("mod-1", model.selectedKeys().get(0));
-            assertEquals("Mod 1", findLabel(panel, "modsDetailTitle").getText());
+            assertEquals("Mod 1", findTextArea(panel, "modsDetailTitle").getText());
 
             findButton(panel, "modsEnabled").doClick();
             assertEquals("mod-1:false", model.enabledCommands().get(0));
@@ -173,6 +184,53 @@ public final class ModCatalogPanelTest {
         assertNotNull(panelReference.get());
     }
 
+    /// Renders an explicitly disabled Mod row with a muted surface and its embedded logo.
+    @Test
+    public void rendersDisabledModSurfaceAndArchiveIcon() throws Exception {
+        ModCatalogItem disabledItem = new ModCatalogItem(
+                "disabled",
+                Path.of("mods", "disabled.jar"),
+                "disabled",
+                "Disabled Mod",
+                "Description",
+                "Author",
+                "1.0",
+                "1.21.1",
+                ModLoaderType.FABRIC,
+                "disabled.jar",
+                onePixelLogo(),
+                false);
+        RecordingModel model = new RecordingModel(List.of(disabledItem));
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS,
+                    new RecordingInteractions());
+            JList<ChoiceListEntry<ModCatalogItem>> list = panel.choiceList().getList();
+            list.setSize(new Dimension(48, 68));
+            ListCellRenderer<? super ChoiceListEntry<ModCatalogItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, disabledItem),
+                    0,
+                    false,
+                    false);
+            assertFalse(row.isOpaque());
+            assertEquals(list.getBackground(), row.getBackground());
+            assertEquals("", findLabel(row, "richChoiceListBadge").getText());
+            assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
+            panel.close();
+        });
+    }
+
+    /// Creates a deterministic one-pixel PNG payload for the archive-logo row test.
+    ///
+    /// @return Base64-encoded one-pixel PNG
+    private static String onePixelLogo() throws IOException {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
     /// Same-key imports prompt for a decision and submit that exact decision with the source batch.
     @Test
     public void resolvesImportConflictsBeforeSubmittingMutation() throws Exception {
@@ -191,6 +249,30 @@ public final class ModCatalogPanelTest {
             assertEquals(
                     Map.of(conflict, ModImportConflictAction.KEEP),
                     model.importConflictActions().get(0));
+            panel.close();
+        });
+    }
+
+    /// A failed import presents one Retry action that replays the exact captured batch.
+    @Test
+    public void retriesFailedImportWithExactCapturedBatch() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        model.replaceImportFailure(new IOException("locked"));
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            @Nullable Runnable retryAction = interactions.retryAction();
+            assertNotNull(retryAction);
+            retryAction.run();
+
+            assertEquals(2, model.imports().size());
+            assertEquals(model.imports().get(0), model.imports().get(1));
+            assertEquals(
+                    model.importConflictActions().get(0),
+                    model.importConflictActions().get(1));
             panel.close();
         });
     }
@@ -226,7 +308,7 @@ public final class ModCatalogPanelTest {
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(
                     model, STRINGS, ACTION_STRINGS, new RecordingInteractions());
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
 
@@ -287,6 +369,39 @@ public final class ModCatalogPanelTest {
         });
     }
 
+    /// A supported drop is accepted and installed when the catalog has no visible rows.
+    @Test
+    public void importsSupportedDroppedModsIntoEmptyCatalog() throws Exception {
+        RecordingModel model = new RecordingModel(items(0));
+        RecordingInteractions interactions = new RecordingInteractions();
+        AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panelReference.set(panel);
+            assertTrue(findButton(panel, "modsImport").isEnabled());
+            assertFalse(findButton(panel, "modsSelectAll").isEnabled());
+
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    new File("empty-target.jar"),
+                    new File("notes.txt")));
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertTrue(model.imports().isEmpty());
+        });
+        SwingUtilities.invokeAndWait(() -> { });
+        SwingUtilities.invokeAndWait(() -> {
+            assertEquals(1, model.imports().size());
+            assertEquals(
+                    List.of(Path.of("empty-target.jar").toAbsolutePath().normalize()),
+                    model.imports().get(0));
+
+            ModCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            panel.close();
+        });
+    }
+
     /// Logical select-all and batch commands use stable keys without loading off-screen rows.
     @Test
     public void batchesFilteredStableKeysWithoutWideningViewportLoads() throws Exception {
@@ -295,7 +410,7 @@ public final class ModCatalogPanelTest {
 
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
             int rangeRequestCount = model.requestedRanges().size();
@@ -373,7 +488,7 @@ public final class ModCatalogPanelTest {
             JPanel details = findComponent(panel, "modsDetails", JPanel.class);
             AbstractButton deleteButton = findButton(panel, "modsDelete");
 
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             layoutRecursively(panel);
             assertTrue(
                     detailsScroll.getVerticalScrollBar().getMaximum()
@@ -385,7 +500,7 @@ public final class ModCatalogPanelTest {
                     panel.choiceList().getVerticalScrollBar().getUnitIncrement() * 2);
             assertTrue(panel.choiceList().getVerticalScrollBar().getValue() > 0);
 
-            panel.setSize(new Dimension(900, 280));
+            panel.setSize(new Dimension(1120, 280));
             panel.invalidate();
             layoutRecursively(panel);
             assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
@@ -401,12 +516,105 @@ public final class ModCatalogPanelTest {
                     details);
             assertTrue(detailsScroll.getViewport().getViewRect().intersects(deleteBounds));
 
-            panel.setSize(new Dimension(900, 620));
+            panel.setSize(new Dimension(1120, 620));
             panel.invalidate();
             layoutRecursively(panel);
             assertTrue(
                     detailsScroll.getVerticalScrollBar().getMaximum()
                             <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
+    /// Switches the first layout to a stacked catalog when the instance shell is narrow.
+    @Test
+    public void switchesResponsiveOrientationAtNarrowWidth() throws Exception {
+        RecordingModel model = new RecordingModel(items(4));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+
+            panel.setSize(new Dimension(1120, 620));
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+
+            panel.setSize(new Dimension(480, 420));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertTrue(split.getTopComponent().getWidth() <= split.getWidth());
+            assertTrue(split.getBottomComponent().getWidth() <= split.getWidth());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
+    /// Wraps long values, keeps detail actions contained, and clamps a user-adjusted divider.
+    @Test
+    public void wrapsLongDetailsAndClampsTheDivider() throws Exception {
+        ModCatalogItem longItem = new ModCatalogItem(
+                "very-long-mod-key-without-natural-breaks",
+                Path.of("mods", "very-long-mod-file-name-without-natural-breaks.jar"),
+                "very-long-mod-id-without-natural-breaks",
+                "A very long Mod display title that must wrap inside the details pane",
+                "A very long description that remains readable in the scrollable description area",
+                "First Author, Second Author, Third Author, Fourth Author",
+                "26.2.1-alpha.123456789",
+                "1.21.1-neoforge-very-long-version",
+                ModLoaderType.FABRIC,
+                "very-long-mod-file-name-without-natural-breaks.jar",
+                true);
+        RecordingModel model = new RecordingModel(List.of(longItem));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panel.setSize(new Dimension(1120, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            layoutRecursively(panel);
+
+            JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
+            JScrollPane detailsScroll = findComponent(panel, "modsDetailsScroll", JScrollPane.class);
+            JTextArea title = findTextArea(panel, "modsDetailTitle");
+            JTextArea file = findTextArea(panel, "modsDetailFile");
+            AbstractButton reveal = findButton(panel, "modsReveal");
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
+            assertTrue(title.getLineWrap());
+            assertTrue(title.getWrapStyleWord());
+            assertTrue(file.getLineWrap());
+            assertFalse(file.getWrapStyleWord());
+
+            int divider = split.getDividerLocation();
+            title.setText(title.getText() + " " + "extra-long-title-segment".repeat(8));
+            layoutRecursively(panel);
+            assertEquals(divider, split.getDividerLocation());
+            assertTrue(title.getPreferredSize().height
+                    > title.getFontMetrics(title.getFont()).getHeight());
+
+            Rectangle revealBounds = SwingUtilities.convertRectangle(
+                    reveal.getParent(),
+                    reveal.getBounds(),
+                    detailsScroll.getViewport().getView());
+            assertTrue(detailsScroll.getViewport().getViewRect().contains(revealBounds));
+
+            int leftMinimum = split.getLeftComponent().getMinimumSize().width;
+            int rightMinimum = split.getRightComponent().getMinimumSize().width;
+            split.setDividerLocation(0);
+            layoutRecursively(panel);
+            assertTrue(split.getLeftComponent().getWidth() >= leftMinimum);
+            split.setDividerLocation(split.getWidth());
+            layoutRecursively(panel);
+            assertTrue(split.getRightComponent().getWidth() >= rightMinimum);
             panel.close();
         });
 
@@ -529,6 +737,15 @@ public final class ModCatalogPanelTest {
         return findComponent(root, name, AbstractButton.class);
     }
 
+    /// Finds one named text area.
+    ///
+    /// @param root component root
+    /// @param name deterministic component name
+    /// @return matching text area
+    private static JTextArea findTextArea(Component root, String name) {
+        return findComponent(root, name, JTextArea.class);
+    }
+
     /// Finds one named text field.
     ///
     /// @param root component root
@@ -647,6 +864,9 @@ public final class ModCatalogPanelTest {
 
         /// Conflict surfaced only when an import without its decision reaches the fake backend.
         private @Nullable Path lateImportConflict;
+
+        /// One-shot asynchronous import failure.
+        private @Nullable Throwable importFailure;
 
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
@@ -785,6 +1005,11 @@ public final class ModCatalogPanelTest {
             @Nullable Path conflict = lateImportConflict;
             if (conflict != null && !conflictActions.containsKey(conflict)) {
                 return CompletableFuture.failedFuture(new ModImportConflictException(conflict));
+            }
+            @Nullable Throwable failure = importFailure;
+            importFailure = null;
+            if (failure != null) {
+                return CompletableFuture.failedFuture(failure);
             }
             return CompletableFuture.completedFuture(snapshot);
         }
@@ -928,6 +1153,13 @@ public final class ModCatalogPanelTest {
             lateImportConflict = conflict.toAbsolutePath().normalize();
         }
 
+        /// Configures one one-shot asynchronous import failure.
+        ///
+        /// @param failure failure retained for the next import call
+        private void replaceImportFailure(Throwable failure) {
+            importFailure = Objects.requireNonNull(failure, "failure");
+        }
+
         /// Returns deleted keys.
         ///
         /// @return immutable keys
@@ -971,6 +1203,9 @@ public final class ModCatalogPanelTest {
         /// Deterministic import conflict response.
         private ModImportConflictAction importConflictAction = ModImportConflictAction.REPLACE;
 
+        /// Latest captured retry request.
+        private @Nullable Runnable retryAction;
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
@@ -997,6 +1232,26 @@ public final class ModCatalogPanelTest {
             return batchDeleteConfirmed;
         }
 
+        /// Maps the single deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param target selected Mod
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+        }
+
+        /// Maps the batch deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner dialog owner
+        /// @param selectedCount selected Mod count
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+        }
+
         /// Records one exact reveal path.
         @Override
         public CompletionStage<@Nullable Void> reveal(Path target) {
@@ -1015,6 +1270,16 @@ public final class ModCatalogPanelTest {
         @Override
         public void showFailure(Component owner, String title, String detail) {
             throw new AssertionError(title + ": " + detail);
+        }
+
+        /// Captures one explicit retry request without showing a dialog.
+        @Override
+        public void showRetryableFailure(
+                Component owner,
+                String title,
+                String detail,
+                Runnable retryAction) {
+            this.retryAction = Objects.requireNonNull(retryAction, "retryAction");
         }
 
         /// Returns latest revealed path.
@@ -1043,6 +1308,13 @@ public final class ModCatalogPanelTest {
         /// @return immutable conflict sources
         private @Unmodifiable List<Path> importConflictSources() {
             return List.copyOf(importConflictSources);
+        }
+
+        /// Returns the latest captured retry request.
+        ///
+        /// @return retry request, or null when none was presented
+        private @Nullable Runnable retryAction() {
+            return retryAction;
         }
 
         /// Replaces the deterministic conflict response.

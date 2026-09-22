@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -119,12 +120,12 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.languageProperty().set(Objects.requireNonNull(language, "language")));
     }
 
-    /// Queues a preview-update preference write.
+    /// Queues an update-source channel write.
     ///
-    /// @param accepted whether preview updates are eligible
+    /// @param channel selected update source channel
     @Override
-    public void setAcceptPreviewUpdates(boolean accepted) {
-        write(() -> settings.acceptPreviewUpdateProperty().set(accepted));
+    public void setUpdateChannel(UpdateChannel channel) {
+        write(() -> settings.updateChannelProperty().set(Objects.requireNonNull(channel, "channel")));
     }
 
     /// Queues the automatic-update-dialog preference write.
@@ -258,6 +259,58 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.proxyPasswordProperty().set(Objects.requireNonNull(password, "password")));
     }
 
+    /// Queues the local MCP server enablement write.
+    ///
+    /// @param enabled whether the MCP entry point may serve requests
+    @Override
+    public void setMcpEnabled(boolean enabled) {
+        write(() -> settings.mcpEnabledProperty().set(enabled));
+    }
+
+    /// Queues a bearer-token write for the local MCP HTTP listener.
+    ///
+    /// @param token bearer token, which may be empty
+    @Override
+    public void setMcpBearerToken(String token) {
+        String checkedToken = Objects.requireNonNull(token, "token");
+        write(() -> settings.mcpBearerTokenProperty().set(checkedToken));
+    }
+
+    /// Queues the local MCP server port write.
+    ///
+    /// @param port loopback TCP port in the range 1..65535
+    @Override
+    public void setMcpPort(int port) {
+        if (port < 1 || port > 0xFFFF) {
+            throw new IllegalArgumentException("MCP port must be in range 1..65535");
+        }
+        write(() -> settings.mcpPortProperty().set(port));
+    }
+
+    /// Queues the MCP instance-deletion confirmation preference write.
+    ///
+    /// @param required whether instance-deletion confirmation is required
+    @Override
+    public void setMcpConfirmInstanceDeletion(boolean required) {
+        write(() -> settings.mcpConfirmInstanceDeletionProperty().set(required));
+    }
+
+    /// Queues the MCP mod-deletion confirmation preference write.
+    ///
+    /// @param required whether mod-deletion confirmation is required
+    @Override
+    public void setMcpConfirmModDeletion(boolean required) {
+        write(() -> settings.mcpConfirmModDeletionProperty().set(required));
+    }
+
+    /// Queues the MCP enablement-warning preference write.
+    ///
+    /// @param show whether the warning should be shown before enabling MCP
+    @Override
+    public void setShowMcpEnablementWarning(boolean show) {
+        write(() -> settings.showMcpEnablementWarningProperty().set(show));
+    }
+
     /// Releases subscriptions and blocks later writes.
     @Override
     public void close() {
@@ -273,7 +326,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
     private void subscribeToSettingsProperties() {
         requireEventThread();
         propertySubscriptions.add(settings.languageProperty().subscribe(change -> scheduleRefreshSnapshot()));
-        propertySubscriptions.add(settings.acceptPreviewUpdateProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.updateChannelProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.disableAutoShowUpdateDialogProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.disableAprilFoolsProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.commonDirectoryTypeProperty().subscribe(change -> scheduleRefreshSnapshot()));
@@ -289,6 +342,14 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         propertySubscriptions.add(settings.hasProxyAuthProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.proxyUserProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.proxyPasswordProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpEnabledProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpBearerTokenProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpPortProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(
+                settings.mcpConfirmInstanceDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmModDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(
+                settings.showMcpEnablementWarningProperty().subscribe(change -> scheduleRefreshSnapshot()));
     }
 
     /// Queues a launcher-state snapshot refresh after one property change.
@@ -326,7 +387,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         @Nullable String resolvedDirectory = settings.getResolvedCommonDirectory();
         return new SettingsCenterSnapshot(
                 Objects.requireNonNullElse(configuredLanguage, SupportedLocale.DEFAULT),
-                settings.acceptPreviewUpdateProperty().get(),
+                settings.getEffectiveUpdateChannel(),
                 settings.disableAutoShowUpdateDialogProperty().get(),
                 settings.disableAprilFoolsProperty().get(),
                 Objects.requireNonNullElse(configuredDirectoryType, EnumCommonDirectory.DEFAULT),
@@ -343,6 +404,12 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
                 settings.hasProxyAuthProperty().get(),
                 Objects.requireNonNullElse(configuredProxyUsername, ""),
                 Objects.requireNonNullElse(configuredProxyPassword, ""),
+                settings.mcpEnabledProperty().get(),
+                Objects.requireNonNullElse(settings.mcpBearerTokenProperty().get(), ""),
+                settings.mcpPortProperty().get(),
+                settings.mcpConfirmInstanceDeletionProperty().get(),
+                settings.mcpConfirmModDeletionProperty().get(),
+                settings.showMcpEnablementWarningProperty().get(),
                 writableSupplier.getAsBoolean());
     }
 

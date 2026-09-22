@@ -18,16 +18,18 @@
 package space.minecraftstl.xyml.game;
 
 import com.google.gson.annotations.SerializedName;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.Constants;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.ToStringBuilder;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 /// A class that describes a Minecraft dependency.
 ///
@@ -183,6 +185,9 @@ public record Library(
         return CompatibilityRule.appliesToCurrentEnvironment(rules);
     }
 
+    /// Returns whether this library resolves to a platform-native artifact in the current environment.
+    ///
+    /// @return whether the library is applicable and has native metadata or a native classifier
     public boolean isNative() {
         if (!appliesToCurrentEnvironment()) {
             return false;
@@ -191,9 +196,12 @@ public record Library(
             return true;
         }
 
-        return downloads != null
-                && downloads.classifiers() != null
-                && downloads.classifiers().keySet().stream().anyMatch(s -> s.startsWith("native"));
+        if (downloads != null && downloads.classifiers() != null
+                && downloads.classifiers().keySet().stream().anyMatch(s -> s.startsWith("native"))) {
+            return true;
+        }
+
+        return this.artifact().getClassifier() != null && this.artifact().getClassifier().startsWith("natives-");
     }
 
     public @Nullable LibraryDownloadInfo getRawDownloadInfo() {
@@ -233,7 +241,7 @@ public record Library(
             }
         }
 
-        String repo = Lang.requireNonNullElse(url, Constants.DEFAULT_LIBRARY_URL);
+        String repo = Objects.requireNonNullElse(url, Constants.DEFAULT_LIBRARY_URL);
         if (!repo.endsWith("/")) {
             repo += '/';
         }

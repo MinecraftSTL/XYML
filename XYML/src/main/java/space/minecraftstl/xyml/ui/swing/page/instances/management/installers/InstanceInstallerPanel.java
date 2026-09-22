@@ -41,8 +41,10 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionLi
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -94,6 +96,9 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Host owning visual presentation of the single active Core task.
     private final TaskProgressHostPanel progressHost;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
+
     /// Stable top-level navigation between installed-state and online-loader workflows.
     private final JTabbedPane tabs = new AnimatedTabbedPane();
 
@@ -101,13 +106,13 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     private final DefaultListModel<InstanceInstallerEntry> installedLoaderModel = new DefaultListModel<>();
 
     /// List rendering recognized installed loaders without inferring removal eligibility.
-    private final JList<InstanceInstallerEntry> installedLoaderList = new JList<>(installedLoaderModel);
+    private final JList<InstanceInstallerEntry> installedLoaderList = new RowBoundsCheckedList<>(installedLoaderModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Mutable model for third-party libraries that Core allows the page to describe.
     private final DefaultListModel<InstanceOtherLibraryEntry> otherLibraryModel = new DefaultListModel<>();
 
     /// Single-choice list of third-party libraries, where only clear entries are removable.
-    private final JList<InstanceOtherLibraryEntry> otherLibraryList = new JList<>(otherLibraryModel);
+    private final JList<InstanceOtherLibraryEntry> otherLibraryList = new RowBoundsCheckedList<>(otherLibraryModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Displays the detected base Minecraft version or a localized unavailable state.
     private final JLabel gameVersionValue = new JLabel();
@@ -229,11 +234,19 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
                 this::installDroppedOffline);
     }
 
-    /// Returns the localized outer tab title used by the containing instance-management view.
+    /// Returns the localized page title including the target instance identifier.
     ///
     /// @return non-blank installer-management title
     public String title() {
-        return i18n("settings.tabs.installers");
+        return i18n("install.change_version.title", instanceId.id());
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Returns the latest successfully rendered installer snapshot, or null before loading succeeds.
@@ -308,7 +321,6 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         root.add(tabs, "grow, push");
 
         progressHost.setName("instanceInstallerTaskProgress");
-        root.add(progressHost, "growx");
         statusLabel.setName("instanceInstallerStatus");
         root.add(statusLabel, "growx, h 24!");
         add(root, BorderLayout.CENTER);
@@ -708,8 +720,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         statusLabel.setText(i18n("message.doing"));
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);

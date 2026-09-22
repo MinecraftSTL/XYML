@@ -21,6 +21,14 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
+import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -62,6 +70,19 @@ final class InstanceGameSettingsFooterControls {
     /// Save command.
     private final JButton saveButton = new JButton(i18n("button.save"));
 
+    /// Current asynchronous recovery executor, or null when no recovery is running.
+    private @Nullable TaskExecutor forceOverwriteExecutor;
+
+    /// Listener registration for the current asynchronous recovery executor.
+    private @Nullable Subscription forceOverwriteSubscription;
+
+    /// Last availability values supplied by the owning editor.
+    private boolean writable;
+    private boolean interactive;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
+
     /// Creates production footer controls with a native destructive-action confirmation.
     ///
     /// @param store backing instance settings store
@@ -101,6 +122,14 @@ final class InstanceGameSettingsFooterControls {
         return component;
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Replaces the concise footer status.
     ///
     /// @param text localized status text
@@ -113,11 +142,14 @@ final class InstanceGameSettingsFooterControls {
     /// @param writable whether ordinary persistence is available
     /// @param interactive whether the owning editor accepts interaction
     void updateAvailability(boolean writable, boolean interactive) {
-        saveButton.setEnabled(writable && interactive);
-        reloadButton.setEnabled(interactive);
+        this.writable = writable;
+        this.interactive = interactive;
+        boolean busy = forceOverwriteExecutor != null;
+        saveButton.setEnabled(writable && interactive && !busy);
+        reloadButton.setEnabled(interactive && !busy);
         boolean recoverable = !writable && store.canForceOverwrite();
         forceOverwriteButton.setVisible(recoverable);
-        forceOverwriteButton.setEnabled(recoverable && interactive);
+        forceOverwriteButton.setEnabled(recoverable && interactive && !busy);
     }
 
     /// Configures stable identities, icons, layout, and command listeners.
@@ -139,19 +171,85 @@ final class InstanceGameSettingsFooterControls {
 
     /// Performs confirmed backup-and-overwrite recovery and reloads the resulting writable snapshot.
     private void forceOverwrite() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (forceOverwriteExecutor != null) {
+            return;
+        }
         if (!overwriteConfirmation.getAsBoolean()) {
             return;
         }
         try {
-            store.forceOverwrite();
-            reloadAction.run();
-            setStatus(i18n("message.success"));
-        } catch (IllegalArgumentException | IllegalStateException exception) {
+            Task<@Nullable Void> task = store.forceOverwriteTask(Schedulers.io());
+            TaskExecutor executor = task.executor();
+            forceOverwriteExecutor = executor;
+            forceOverwriteSubscription = executor.subscribeTaskListener(new TaskListener() {
+                /// Delivers recovery completion to the Swing event-dispatch thread.
+                @Override
+                public void onStop(boolean successful, TaskExecutor completedExecutor) {
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                            () -> completeForceOverwrite(completedExecutor, successful));
+                }
+            });
+            updateAvailability(writable, interactive);
+            taskLaunchController.launch(executor, i18n("settings.file.force_write"), () -> { });
+        } catch (RuntimeException exception) {
+            if (forceOverwriteSubscription != null) {
+                forceOverwriteSubscription.unsubscribe();
+                forceOverwriteSubscription = null;
+            }
+            if (forceOverwriteExecutor != null) {
+                forceOverwriteExecutor.cancel();
+                forceOverwriteExecutor = null;
+            }
+            updateAvailability(writable, interactive);
             setStatus(i18n(
                     "swing.instance_settings.reload_failed",
                     Objects.requireNonNullElse(
                             exception.getMessage(),
                             i18n("swing.instance_settings.unavailable"))));
+        }
+    }
+
+    /// Completes one asynchronous recovery task on the event-dispatch thread.
+    ///
+    /// @param executor executor that reached its terminal state
+    /// @param successful whether the complete recovery task succeeded
+    private void completeForceOverwrite(TaskExecutor executor, boolean successful) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (forceOverwriteExecutor != executor) {
+            return;
+        }
+        if (forceOverwriteSubscription != null) {
+            forceOverwriteSubscription.unsubscribe();
+            forceOverwriteSubscription = null;
+        }
+        forceOverwriteExecutor = null;
+        if (successful) {
+            reloadAction.run();
+            setStatus(i18n("message.success"));
+        } else if (executor.isCancelled()) {
+            setStatus(i18n("message.cancelled"));
+        } else {
+            Throwable failure = executor.getFailure();
+            setStatus(i18n(
+                    "swing.instance_settings.reload_failed",
+                    Objects.requireNonNullElse(
+                            failure == null ? null : failure.getMessage(),
+                            i18n("swing.instance_settings.unavailable"))));
+        }
+        updateAvailability(writable, interactive);
+    }
+
+    /// Cancels recovery and removes its listener during panel disposal.
+    void close() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (forceOverwriteSubscription != null) {
+            forceOverwriteSubscription.unsubscribe();
+            forceOverwriteSubscription = null;
+        }
+        if (forceOverwriteExecutor != null) {
+            forceOverwriteExecutor.cancel();
+            forceOverwriteExecutor = null;
         }
     }
 

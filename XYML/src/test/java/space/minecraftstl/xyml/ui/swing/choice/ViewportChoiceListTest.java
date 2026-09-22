@@ -34,15 +34,20 @@ import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -167,6 +172,106 @@ public final class ViewportChoiceListTest {
             assertTrue(choiceList.getVerticalScrollBar().getValue() > initialValue);
             choiceList.close();
         });
+    }
+
+    /// Retaining policy keeps the current row when blank space below the list is pressed.
+    @Test
+    public void retainsSelectionForMandatoryViewportList() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            ViewportChoiceList<String> choiceList = new ViewportChoiceList<>(
+                    new ImmediateDataSource(),
+                    value -> value,
+                    RowBoundsCheckedList.BlankClickPolicy.RETAIN);
+            prepareForBlankClick(choiceList);
+            JList<ChoiceListEntry<String>> list = choiceList.getList();
+            list.setSelectedIndex(0);
+            AtomicInteger selectionEvents = new AtomicInteger();
+            list.addListSelectionListener(event -> {
+                if (!event.getValueIsAdjusting()) {
+                    selectionEvents.incrementAndGet();
+                }
+            });
+
+            click(list, blankBelowLastRow(list));
+
+            assertAll(
+                    () -> assertEquals(0, list.getSelectedIndex()),
+                    () -> assertEquals(0, selectionEvents.get()));
+            choiceList.close();
+        });
+    }
+
+    /// The default clearing policy removes the current row when blank space is pressed.
+    @Test
+    public void clearsSelectionForOptionalViewportList() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            ViewportChoiceList<String> choiceList = new ViewportChoiceList<>(
+                    new ImmediateDataSource(),
+                    value -> value);
+            prepareForBlankClick(choiceList);
+            JList<ChoiceListEntry<String>> list = choiceList.getList();
+            list.setSelectedIndex(1);
+            AtomicInteger selectionEvents = new AtomicInteger();
+            list.addListSelectionListener(event -> {
+                if (!event.getValueIsAdjusting()) {
+                    selectionEvents.incrementAndGet();
+                }
+            });
+
+            click(list, blankBelowLastRow(list));
+
+            assertAll(
+                    () -> assertEquals(-1, list.getSelectedIndex()),
+                    () -> assertEquals(1, selectionEvents.get()));
+            choiceList.close();
+        });
+    }
+
+    /// Sizes and loads the exact two-row viewport used by blank-click tests.
+    ///
+    /// @param choiceList target viewport list
+    private static void prepareForBlankClick(ViewportChoiceList<String> choiceList) {
+        choiceList.setSize(new Dimension(320, 160));
+        choiceList.doLayout();
+        choiceList.getViewport().doLayout();
+        choiceList.refreshLoadPlan();
+    }
+
+    /// Returns a point below the last exact row.
+    ///
+    /// @param list target list
+    /// @return blank point
+    private static Point blankBelowLastRow(JList<ChoiceListEntry<String>> list) {
+        Rectangle lastRow = Objects.requireNonNull(list.getCellBounds(1, 1));
+        return new Point(lastRow.x + 4, lastRow.y + lastRow.height + 5);
+    }
+
+    /// Dispatches one primary-button press and release.
+    ///
+    /// @param list target list
+    /// @param point list-coordinate click point
+    private static void click(JList<ChoiceListEntry<String>> list, Point point) {
+        long when = System.currentTimeMillis();
+        list.dispatchEvent(new MouseEvent(
+                list,
+                MouseEvent.MOUSE_PRESSED,
+                when,
+                0,
+                point.x,
+                point.y,
+                1,
+                false,
+                MouseEvent.BUTTON1));
+        list.dispatchEvent(new MouseEvent(
+                list,
+                MouseEvent.MOUSE_RELEASED,
+                when + 1L,
+                0,
+                point.x,
+                point.y,
+                1,
+                false,
+                MouseEvent.BUTTON1));
     }
 
     /// Paints one fixed-size Swing component into a transparent image.

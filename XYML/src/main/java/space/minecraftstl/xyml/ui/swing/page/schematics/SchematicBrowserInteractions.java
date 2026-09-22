@@ -20,6 +20,9 @@ package space.minecraftstl.xyml.ui.swing.page.schematics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -31,7 +34,7 @@ import java.util.concurrent.CompletionStage;
 /// Dialog methods must be called on the Swing event-dispatch thread. [#reveal] may be called
 /// from any thread and reports desktop work asynchronously without blocking the caller.
 @NotNullByDefault
-public interface SchematicBrowserInteractions {
+public interface SchematicBrowserInteractions extends RetryableFailureInteraction {
     /// Opens a multi-selection Litematic chooser on the event-dispatch thread.
     ///
     /// @param owner dialog owner
@@ -51,6 +54,27 @@ public interface SchematicBrowserInteractions {
     /// @param target exact row proposed for deletion
     /// @return whether deletion was explicitly confirmed
     boolean confirmDelete(Component owner, SchematicBrowserItem target);
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact row proposed for deletion
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteMode(Component owner, SchematicBrowserItem target) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a schematic could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact row proposed for deletion
+    /// @return whether permanent deletion was approved
+    default boolean confirmPermanentFallback(Component owner, SchematicBrowserItem target) {
+        return confirmDelete(owner, target);
+    }
 
     /// Schedules revealing one row through the platform desktop integration.
     ///

@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -37,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.RemoteAddonChangelogDialog;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -132,6 +134,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// Owns the one current update-task presentation.
     private final TaskProgressHostPanel progressHost;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
+
     /// Owned table selection listener detached during closure.
     private final ListSelectionListener selectionListener;
 
@@ -140,6 +145,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
 
     /// Guards one in-flight CSV write and prevents duplicate export commands.
     private final AtomicBoolean exporting = new AtomicBoolean();
+
+    /// Whether a terminal partial failure requested an exact retry before rescanning.
+    private boolean retryRequested;
 
     /// Guards one in-flight changelog request and prevents duplicate dialog loads.
     private final AtomicBoolean changelogLoading = new AtomicBoolean();
@@ -281,6 +289,14 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         return strings.title();
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Starts one explicit background scan when no check is already running.
     ///
     /// This is the only page entry point that can contact a network add-on source.
@@ -402,7 +418,6 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         updateButton.addActionListener(event -> applySelectedUpdates());
         status.add(updateButton, "h 36!");
 
-        status.add(progressHost, "newline, span 3, growx");
         return status;
     }
 
@@ -637,6 +652,22 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
             updateControls();
             return;
         }
+        beginUpdateApplication(selectedUpdates);
+    }
+
+    /// Starts one exact update batch and leaves terminal handling to the application listener.
+    ///
+    /// @param updates immutable exact update batch
+    private void beginUpdateApplication(@Unmodifiable List<AddonUpdateItem> updates) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || scanning.get() || activeExecutor != null) {
+            return;
+        }
+        @Unmodifiable List<AddonUpdateItem> selectedUpdates = List.copyOf(updates);
+        if (selectedUpdates.isEmpty()) {
+            updateControls();
+            return;
+        }
         releaseCompletedPresentation();
 
         final Task<AddonUpdateApplicationResult> task;
@@ -663,8 +694,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         statusLabel.setText(strings.updatingText());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            taskExecutor.start();
+            taskLaunchController.launch(taskExecutor, strings.title(), () -> { });
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentTaskFailure(startFailure);
@@ -696,6 +726,11 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
                             "Add-on update task completed without an application result"));
                 } else {
                     handleApplicationResult(result);
+                    if (retryRequested) {
+                        retryRequested = false;
+                        updateControls();
+                        return;
+                    }
                     checkForUpdates();
                     return;
                 }
@@ -719,14 +754,45 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         if (outcome.hasFailures()) {
             pendingCompletionStatus = strings.failedDownloadText()
                     + " (" + outcome.successfulUpdates().size() + "/" + outcome.attemptedCount() + ")";
-            interactions.showFailure(
-                    this,
-                    strings.failureDialogTitle(),
-                    formatApplicationFailures(outcome.failures()));
+            @Unmodifiable List<AddonUpdateItem> retryable = retryableUpdates(outcome.failures());
+            String detail = formatApplicationFailures(outcome.failures());
+            if (retryable.isEmpty()) {
+                interactions.showFailure(this, strings.failureDialogTitle(), detail);
+            } else {
+                retryRequested = false;
+                interactions.showRetryableFailure(
+                        this,
+                        strings.failureDialogTitle(),
+                        detail,
+                        () -> {
+                            retryRequested = true;
+                            beginUpdateApplication(retryable);
+                        });
+            }
         } else {
             pendingCompletionStatus = strings.updateSucceededText()
                     + " (" + outcome.successfulUpdates().size() + ")";
         }
+    }
+
+    /// Returns failed updates whose rolled-back local file still exists in its original state.
+    ///
+    /// @param failures immutable failed update outcomes
+    /// @return immutable retryable update batch in original order
+    private static @Unmodifiable List<AddonUpdateItem> retryableUpdates(
+            @Unmodifiable List<AddonUpdateApplicationFailure> failures) {
+        List<AddonUpdateItem> retryable = new ArrayList<>();
+        for (AddonUpdateApplicationFailure failure
+                : Objects.requireNonNull(failures, "failures")) {
+            AddonUpdateItem item = Objects.requireNonNull(failure, "failure").updateItem();
+            String fileName = Objects.requireNonNull(
+                    item.update().localAddonFile().getFile().getFileName(),
+                    "local add-on file name").toString();
+            if (!fileName.endsWith(LocalAddonManager.OLD_EXTENSION)) {
+                retryable.add(item);
+            }
+        }
+        return List.copyOf(retryable);
     }
 
     /// Removes exact update objects that became stale as soon as their application task completed.

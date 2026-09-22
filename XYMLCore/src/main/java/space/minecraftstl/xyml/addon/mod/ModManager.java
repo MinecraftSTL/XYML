@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.game.NoSuchGameInstanceException;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.tree.ZipFileTree;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -74,17 +75,43 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
     }
 
     private final HashMap<Pair<String, ModLoaderType>, LocalMod> localMods = new HashMap<>();
+
+    /// Captured mods directory, or `null` when the manager follows repository settings dynamically.
+    private final @Nullable Path directorySnapshot;
+
     private @Nullable LibraryAnalyzer analyzer;
 
     private boolean loaded = false;
 
+    /// Creates a manager whose directory follows the repository's effective instance settings.
+    ///
+    /// @param repository repository owning the instance
+    /// @param id managed instance identifier
     public ModManager(GameRepository repository, GameInstanceID id) {
         super(repository, id);
+        this.directorySnapshot = null;
     }
 
+    /// Creates a manager bound to one captured mods directory.
+    ///
+    /// This form is intended for a task that has already resolved and acquired the corresponding filesystem resource.
+    /// Later repository-setting changes do not redirect the manager outside that protected directory.
+    ///
+    /// @param repository repository owning the instance manifest
+    /// @param id managed instance identifier
+    /// @param directorySnapshot captured mods directory used for every filesystem access
+    public ModManager(GameRepository repository, GameInstanceID id, Path directorySnapshot) {
+        super(repository, id);
+        this.directorySnapshot = Objects.requireNonNull(directorySnapshot, "directorySnapshot")
+                .toAbsolutePath().normalize();
+    }
+
+    /// Returns the captured mods directory, or the repository's current directory for a dynamic manager.
+    ///
+    /// @return directory used for every managed mod access
     @Override
     public Path getDirectory() {
-        return repository.getModsDirectory(instanceId);
+        return directorySnapshot != null ? directorySnapshot : repository.getModsDirectory(instanceId);
     }
 
     public @Nullable LibraryAnalyzer getLibraryAnalyzer() {
@@ -237,6 +264,21 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         }
     }
 
+    /// Invalidates loaded mod metadata after an external filesystem mutation.
+    ///
+    /// The next call to [getLocalFiles] performs an authoritative rescan.
+    public void invalidateCache() {
+        lock.lock();
+        try {
+            loaded = false;
+            localFiles.clear();
+            localMods.clear();
+            analyzer = null;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public void addMod(Path file) throws IOException {
         if (!isFileNameMod(file))
             throw new IllegalArgumentException("File " + file + " is not a valid mod file.");
@@ -262,6 +304,19 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         for (LocalModFile localModFile : localModFiles) {
             localModFile.delete();
         }
+    }
+
+    /// Removes every supplied current or archived mod through one selected deletion mode.
+    ///
+    /// @param mode recycle-bin-first or permanent deletion behavior
+    /// @param localModFiles exact Mod files to remove
+    /// @throws IOException when a selected deletion fails
+    public void removeMods(DeletionMode mode, LocalModFile... localModFiles) throws IOException {
+        DeletionMode requestedMode = java.util.Objects.requireNonNull(mode, "mode");
+        @Unmodifiable List<Path> paths = java.util.Arrays.stream(localModFiles)
+                .map(file -> java.util.Objects.requireNonNull(file, "localModFiles contains null").getFile())
+                .toList();
+        FileUtils.deleteAllWithMode(paths, requestedMode);
     }
 
     public void rollback(LocalModFile from, LocalModFile to) throws IOException {

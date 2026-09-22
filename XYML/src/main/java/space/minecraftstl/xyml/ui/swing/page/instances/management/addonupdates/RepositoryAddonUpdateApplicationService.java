@@ -27,10 +27,11 @@ import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -44,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -137,7 +139,10 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             operations.add(createOperation(state));
         }
 
-        ApplicationTask task = new ApplicationTask(batchPlan.selectedItems(), operations);
+        ApplicationTask task = new ApplicationTask(
+                batchPlan.selectedItems(),
+                operations,
+                batchPlan.protectedPaths());
         task.onDone().register(event -> {
             if (event.isFailed()) {
                 recoverCancelledOperations(states);
@@ -151,9 +156,25 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
     /// @param state mutable lifecycle holder guarded by [#STATE_LOCK]
     /// @return stopped operation task
     private Task<UpdateOutcome> createOperation(OperationState state) {
+        PlannedUpdate plan = state.plan();
+        List<Path> operationPaths = new ArrayList<>(4);
+        operationPaths.add(plan.sourcePath());
+        operationPaths.add(plan.archivePath());
+        @Nullable Path plannedStagingPath = plan.stagingPath();
+        if (plannedStagingPath != null) {
+            operationPaths.add(plannedStagingPath);
+        }
+        @Nullable Path destination = plan.destinationOrNull();
+        if (destination != null) {
+            operationPaths.add(destination);
+        }
+
+        // Preparation creates a unique sibling staging file.  The source/archive/destination set is the stable
+        // transaction identity; the staging name is private to this state and is never selected by another plan.
         Task<PreparedUpdate> preparation = Task.supplyAsync(
                 ioExecutor,
                 () -> prepareUpdate(state));
+        setAddonFileResources(preparation, operationPaths);
         Task<@Nullable Void> download = preparation.thenComposeAsync(
                 ioExecutor,
                 (@Nullable PreparedUpdate prepared) -> {
@@ -165,11 +186,14 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                             exactPreparation.stagingPath(),
                             exactPreparation.plan().destinationOrThrow(),
                             exactPreparation.integrityCheck(),
-                            exactPreparation.downloadName());
+                            exactPreparation.downloadName())
+                            .setResources(TaskResource.downloadTarget(exactPreparation.stagingPath()));
                 });
+        setAddonFileResources(download, operationPaths);
         Task<@Nullable Void> completedDownload = download.thenRunAsync(
                 ioExecutor,
                 () -> markDownloadCompleted(state));
+        setAddonFileResources(completedDownload, operationPaths);
         return new UpdateOperationTask(state, preparation, completedDownload, ioExecutor)
                 .withCounter(UPDATE_STAGE);
     }
@@ -211,7 +235,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                     remoteVersion.file(),
                     "update.targetVersion.file");
             String remoteUrl = Objects.requireNonNull(remoteFile.url(), "remote file URL");
-            @Unmodifiable List<URI> candidates = List.copyOf(
+            @Unmodifiable List<WebURL> candidates = List.copyOf(
                     downloadProvider.injectURLWithCandidates(remoteUrl));
             if (candidates.isEmpty()) {
                 throw new IOException("Download provider returned no candidates for " + remoteUrl);
@@ -221,7 +245,9 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                     ? Objects.requireNonNull(remoteFile.filename(), "remote file name")
                     : remoteName;
 
-            Path stagingPath = createStagingPath(destination, state.protectedPaths());
+            Path stagingPath = claimStagingPath(
+                    Objects.requireNonNull(plan.stagingPath(), "valid plan staging path"),
+                    destination);
             PreparedUpdate prepared = new PreparedUpdate(
                     plan,
                     localAddonFile,
@@ -237,28 +263,32 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         }
     }
 
-    /// Creates an empty unique staging file beside the final destination without touching protected paths.
+    /// Claims the precomputed staging path beside the final destination with an atomic create-new operation.
     ///
+    /// @param stagingPath immutable plan-time staging path
     /// @param destination validated final destination
-    /// @param protectedPaths every selected source, generated archive, and final destination path
     /// @return unique owned staging path
-    /// @throws IOException when staging cannot be created safely
-    private static Path createStagingPath(
-            Path destination,
-            @Unmodifiable Set<Path> protectedPaths) throws IOException {
+    /// @throws IOException when staging cannot be created safely or is already occupied
+    private static Path claimStagingPath(
+            Path stagingPath,
+            Path destination) throws IOException {
         @Nullable Path directory = destination.getParent();
-        if (directory == null) {
-            throw new IOException("Update destination has no parent directory: " + destination);
+        @Nullable Path stagingFileName = stagingPath.getFileName();
+        if (directory == null || stagingFileName == null
+                || !directory.equals(stagingPath.getParent())
+                || !stagingFileName.toString().startsWith(STAGING_PREFIX)
+                || !stagingFileName.toString().endsWith(".part")) {
+            throw new IOException("Invalid generated staging path: " + stagingPath);
         }
-        Path stagingPath = Files.createTempFile(
-                directory,
-                STAGING_PREFIX,
-                ".part").toAbsolutePath().normalize();
-        if (protectedPaths.contains(stagingPath) || stagingPath.equals(destination)) {
-            Files.deleteIfExists(stagingPath);
+        if (stagingPath.equals(destination)) {
             throw new IOException("Generated staging path conflicts with protected update paths: " + stagingPath);
         }
-        return stagingPath;
+        try {
+            Files.createFile(stagingPath);
+            return stagingPath;
+        } catch (java.nio.file.FileAlreadyExistsException collision) {
+            throw new IOException("Generated staging path is already occupied: " + stagingPath, collision);
+        }
     }
 
     /// Marks that the staged artifact download completed before final publication.
@@ -532,11 +562,15 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         @Nullable Path fileName = stagingPath.getFileName();
         return fileName != null
                 && fileName.toString().startsWith(STAGING_PREFIX)
-                && Objects.equals(stagingPath.getParent(), plan.sourcePath().getParent())
+                && fileName.toString().endsWith(".part")
+                && Objects.equals(stagingPath, plan.stagingPath())
+                && Objects.equals(stagingPath.getParent(), plan.destinationOrNull() == null
+                        ? null
+                        : plan.destinationOrNull().getParent())
                 && !stagingPath.equals(plan.sourcePath())
                 && !stagingPath.equals(plan.archivePath())
                 && !stagingPath.equals(plan.destinationOrNull())
-                && !state.protectedPaths().contains(stagingPath);
+                && state.protectedPaths().contains(stagingPath);
     }
 
     /// Restores an archived source without overwriting a path created by another process.
@@ -614,7 +648,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
     /// @param downloadName stable progress display name
     /// @return stopped Core download task
     private static Task<@Nullable Void> createDownloadTask(
-            @Unmodifiable List<URI> candidates,
+            @Unmodifiable List<WebURL> candidates,
             Path stagingPath,
             Path validationPath,
             @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
@@ -702,6 +736,17 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
 
             Set<Path> protectedPaths = new LinkedHashSet<>(sourcePaths);
             protectedPaths.addAll(archivePaths);
+            Set<Path> stagingPaths = new LinkedHashSet<>();
+            plans.stream()
+                    .map(PlannedUpdate::stagingPath)
+                    .filter(Objects::nonNull)
+                    .forEach(stagingPath -> {
+                        if (!stagingPaths.add(stagingPath)) {
+                            throw new IllegalArgumentException(
+                                    "updates contains conflicting staging path: " + stagingPath);
+                        }
+                        protectedPaths.add(stagingPath);
+                    });
             protectedPaths.addAll(destinations.keySet());
             return new BatchPlan(plans, protectedPaths);
         } finally {
@@ -719,11 +764,13 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             Path sourcePath) {
         Path archivePath = resolveArchivePath(sourcePath);
         try {
+            Path destination = resolveDestination(updateItem, sourcePath);
             return PlannedUpdate.valid(
                     updateItem,
                     sourcePath,
                     archivePath,
-                    resolveDestination(updateItem, sourcePath));
+                    destination,
+                    resolvePlannedStagingPath(destination));
         } catch (IOException | RuntimeException planningFailure) {
             return PlannedUpdate.invalid(
                     updateItem,
@@ -799,6 +846,22 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         return destination;
     }
 
+    /// Creates a lexical, collision-resistant staging name without touching the filesystem during task construction.
+    ///
+    /// The path is claimed later with an atomic create-new operation so an occupied or replaced entry fails closed
+    /// at execution time while the exact download-target resource is known from the stopped task graph.
+    ///
+    /// @param destination validated final destination
+    /// @return normalized unique sibling staging path
+    private static Path resolvePlannedStagingPath(Path destination) {
+        Path directory = Objects.requireNonNull(destination, "destination").getParent();
+        if (directory == null) {
+            throw new IllegalArgumentException("Update destination has no parent directory: " + destination);
+        }
+        return directory.resolve(STAGING_PREFIX + UUID.randomUUID() + ".part")
+                .toAbsolutePath().normalize();
+    }
+
     /// Returns whether one normalized local path carries the disabled suffix.
     ///
     /// @param path normalized local source path
@@ -815,6 +878,26 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
     /// @return whether a filesystem entry occupies the path
     private static boolean pathExists(Path path) {
         return Files.exists(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /// Declares exact managed add-on files for one aggregate or per-item task.
+    ///
+    /// An empty batch does not stage or mutate local files, so it is explicitly an orchestration-only task.
+    /// Non-empty declarations are normalized and deduplicated by [Task#setResources(TaskResource, TaskResource...)].
+    ///
+    /// @param task task owning the declared file lifecycle
+    /// @param paths exact source, archive, and destination paths
+    private static void setAddonFileResources(Task<?> task, Collection<Path> paths) {
+        @Unmodifiable List<TaskResource> resources = Objects.requireNonNull(paths, "paths").stream()
+                .map(TaskResource::addonFile)
+                .toList();
+        if (!resources.isEmpty()) {
+            task.setResources(
+                    resources.get(0),
+                    resources.subList(1, resources.size()).toArray(TaskResource[]::new));
+        } else {
+            task.asOrchestration();
+        }
     }
 
     /// Converts one task failure to concise non-blank UI text.
@@ -843,10 +926,10 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                 + Objects.requireNonNull(addition, "addition");
     }
 
-    /// Immutable whole-batch path plan whose protected set includes every source, archive, and valid destination.
+    /// Immutable whole-batch path plan whose protected set includes every source, archive, staging, and valid destination.
     ///
     /// @param updates exact ordered planned updates
-    /// @param protectedPaths every selected source, generated archive, and valid final destination path
+    /// @param protectedPaths every selected source, generated archive, staging, and valid final destination path
     @NotNullByDefault
     private record BatchPlan(
             @Unmodifiable List<PlannedUpdate> updates,
@@ -871,6 +954,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
     /// @param sourcePath normalized scan-time source path
     /// @param archivePath normalized generated old-file path
     /// @param destination final destination, or `null` when planning failed
+    /// @param stagingPath immutable sibling staging path, or `null` when planning failed
     /// @param planningFailure non-blank planning failure, or `null` for a valid destination
     @NotNullByDefault
     private record PlannedUpdate(
@@ -878,15 +962,17 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             Path sourcePath,
             Path archivePath,
             @Nullable Path destination,
+            @Nullable Path stagingPath,
             @Nullable String planningFailure) {
         /// Validates one exact valid or invalid planned update.
         private PlannedUpdate {
             updateItem = Objects.requireNonNull(updateItem, "updateItem");
             sourcePath = Objects.requireNonNull(sourcePath, "sourcePath");
             archivePath = Objects.requireNonNull(archivePath, "archivePath");
-            if ((destination == null) == (planningFailure == null)) {
+            if ((destination == null) != (stagingPath == null)
+                    || (destination == null) == (planningFailure == null)) {
                 throw new IllegalArgumentException(
-                        "Exactly one of destination and planningFailure must be present");
+                        "Valid plans require destination and stagingPath; invalid plans require planningFailure");
             }
             if (planningFailure != null && planningFailure.isBlank()) {
                 throw new IllegalArgumentException("planningFailure must not be blank");
@@ -899,13 +985,15 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         /// @param sourcePath normalized source path
         /// @param archivePath normalized archive path
         /// @param destination normalized final destination
+        /// @param stagingPath normalized unique sibling staging path
         /// @return valid planned update
         private static PlannedUpdate valid(
                 AddonUpdateItem updateItem,
                 Path sourcePath,
                 Path archivePath,
-                Path destination) {
-            return new PlannedUpdate(updateItem, sourcePath, archivePath, destination, null);
+                Path destination,
+                Path stagingPath) {
+            return new PlannedUpdate(updateItem, sourcePath, archivePath, destination, stagingPath, null);
         }
 
         /// Creates one invalid planned update retained as a value-based task failure.
@@ -920,7 +1008,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                 Path sourcePath,
                 Path archivePath,
                 String planningFailure) {
-            return new PlannedUpdate(updateItem, sourcePath, archivePath, null, planningFailure);
+            return new PlannedUpdate(updateItem, sourcePath, archivePath, null, null, planningFailure);
         }
 
         /// Returns the valid destination or fails for an invalid planned update.
@@ -956,7 +1044,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             PlannedUpdate plan,
             LocalAddonFile localAddonFile,
             Path stagingPath,
-            @Unmodifiable List<URI> candidates,
+            @Unmodifiable List<WebURL> candidates,
             @Nullable FileDownloadTask.IntegrityCheck integrityCheck,
             String downloadName,
             boolean disabled) {
@@ -1166,9 +1254,11 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         ///
         /// @param selectedUpdates exact caller selection
         /// @param operations ordered per-item operation tasks
+        /// @param protectedPaths every source, archive, staging, and valid destination path in the batch
         private ApplicationTask(
                 @Unmodifiable List<AddonUpdateItem> selectedUpdates,
-                List<Task<UpdateOutcome>> operations) {
+                List<Task<UpdateOutcome>> operations,
+                @Unmodifiable Set<Path> protectedPaths) {
             this.selectedUpdates = List.copyOf(Objects.requireNonNull(
                     selectedUpdates,
                     "selectedUpdates"));
@@ -1179,6 +1269,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             setStage(UPDATE_STAGE);
             setName(UPDATE_STAGE);
             getProperties().put("total", this.selectedUpdates.size());
+            setAddonFileResources(this, protectedPaths);
         }
 
         /// Returns all per-item operations as aggregate prerequisites.
@@ -1238,6 +1329,18 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             this.download = Objects.requireNonNull(download, "download");
             setExecutor(Objects.requireNonNull(ioExecutor, "ioExecutor"));
             setName(state.plan().updateItem().fileName());
+            List<Path> operationPaths = new ArrayList<>(4);
+            operationPaths.add(state.plan().sourcePath());
+            operationPaths.add(state.plan().archivePath());
+            @Nullable Path stagingPath = state.plan().stagingPath();
+            if (stagingPath != null) {
+                operationPaths.add(stagingPath);
+            }
+            @Nullable Path destination = state.plan().destinationOrNull();
+            if (destination != null) {
+                operationPaths.add(destination);
+            }
+            setAddonFileResources(this, operationPaths);
         }
 
         /// Returns the preparation and staged-download chain as this operation's sole prerequisite.
@@ -1282,7 +1385,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         /// @param downloadName stable progress display name
         /// @return stopped staged download task
         Task<@Nullable Void> create(
-                @Unmodifiable List<URI> candidates,
+                @Unmodifiable List<WebURL> candidates,
                 Path stagingPath,
                 Path validationPath,
                 @Nullable FileDownloadTask.IntegrityCheck integrityCheck,

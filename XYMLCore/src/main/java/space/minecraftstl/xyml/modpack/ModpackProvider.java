@@ -20,13 +20,16 @@ package space.minecraftstl.xyml.modpack;
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.task.Task;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.Set;
 
 /// Provides format-specific modpack parsing, installation completion, and update tasks.
 public interface ModpackProvider {
@@ -35,7 +38,27 @@ public interface ModpackProvider {
 
     Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId);
 
-    Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException;
+    Task<?> createUpdateTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            Path zipFile,
+            Modpack modpack,
+            @Nullable Set<String> excludedFiles) throws MismatchedModpackTypeException;
+
+    /// Creates an update task with all optional files enabled.
+    ///
+    /// @param dependencyManager dependency manager for the target repository
+    /// @param instanceId target instance identifier
+    /// @param zipFile modpack archive
+    /// @param modpack parsed modpack
+    /// @return the update task
+    default Task<?> createUpdateTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            Path zipFile,
+            Modpack modpack) throws MismatchedModpackTypeException {
+        return createUpdateTask(dependencyManager, instanceId, zipFile, modpack, null);
+    }
 
     /**
      * @param zipFile the opened modpack zip file.
@@ -48,5 +71,14 @@ public interface ModpackProvider {
     Modpack readManifest(ZipArchiveReader zipFile, Path file, Charset encoding) throws IOException, JsonParseException;
 
     default void injectLaunchOptions(String modpackConfigurationJson, LaunchOptions.Builder builder) {
+    }
+
+    /// Enriches optional file entries with remote metadata when supported.
+    ///
+    /// @param downloadProvider provider used for remote metadata queries
+    /// @param manifest parsed manifest
+    /// @return the enriched manifest, or the original manifest when no enrichment is available
+    default ModpackManifest loadFiles(DownloadProvider downloadProvider, ModpackManifest manifest) {
+        return manifest;
     }
 }

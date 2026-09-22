@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.download.VersionMismatchException;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.CommandBuilder;
@@ -34,6 +35,7 @@ import org.jenkinsci.constant_pool_scanner.ConstantPool;
 import org.jenkinsci.constant_pool_scanner.ConstantPoolScanner;
 import org.jenkinsci.constant_pool_scanner.ConstantType;
 import org.jenkinsci.constant_pool_scanner.Utf8Constant;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -54,7 +56,7 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
     private final DefaultDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
     private final OptiFineRemoteVersion remote;
-    private final Path installer;
+    private final @Nullable Path installer;
     private final List<Task<?>> dependents = new ArrayList<>(0);
     private final List<Task<?>> dependencies = new ArrayList<>(1);
     private Path dest;
@@ -66,12 +68,28 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
         this(dependencyManager, manifest, remoteVersion, null);
     }
 
-    public OptiFineInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, OptiFineRemoteVersion remoteVersion, Path installer) {
+    public OptiFineInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            OptiFineRemoteVersion remoteVersion,
+            @Nullable Path installer) {
         this.dependencyManager = dependencyManager;
         this.gameRepository = dependencyManager.getGameRepository();
         this.manifest = manifest;
         this.remote = remoteVersion;
         this.installer = installer;
+
+        if (installer == null) {
+            setResources(
+                    TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                    TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)));
+        } else {
+            setResources(
+                    TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                    TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)),
+                    TaskResource.archive(installer));
+        }
+        releaseResourcesBeforeDependencies();
 
         String mavenVersion = remote.getGameVersion() + "_" + remote.getSelfVersion();
 
@@ -92,7 +110,11 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void preExecute() throws Exception {
-        dest = Files.createTempFile("optifine-installer", ".jar");
+        Path stagingDirectory = gameRepository.getInstanceRoot(manifest.id()).resolve(".xyml-installers");
+        Files.createDirectories(stagingDirectory);
+        dest = Files.createTempFile(stagingDirectory, "optifine-installer-", ".jar")
+                .toAbsolutePath()
+                .normalize();
 
         if (installer == null) {
             var task = new FileDownloadTask(

@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutionProgressHandle;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
@@ -46,8 +47,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Runs one launch task and releases its owner's single-flight slot at the first terminal preparation state.
 ///
 /// The session creates and owns a [TaskExecutorPresentationModel] before executor startup, then republishes that
-/// model through its stable [LaunchSession] identity. This session intentionally has no operation that stops a
-/// [ManagedProcess]. Once a process exists, ownership passes to the launcher process-monitoring layer.
+/// model through its stable [LaunchSession] identity. Once cancellation is accepted, a process produced concurrently
+/// by the task is force-stopped before cancellation is published. After successful preparation without cancellation,
+/// ownership passes to the launcher process-monitoring layer.
 @NotNullByDefault
 public final class DefaultLaunchSession implements LaunchSession {
     /// Serializes startup, cancellation, and terminal-state selection.
@@ -93,11 +95,17 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// Executor after task construction, or null while the factory is running or after terminal cleanup.
     private @Nullable TaskExecutor executor;
 
+    /// Exact top-level execution progress handle owned by this launch session.
+    private @Nullable TaskExecutionProgressHandle executionProgressHandle;
+
     /// Owned completion-listener subscription, or null outside active executor preparation.
     private @Nullable Subscription executorSubscription;
 
     /// Owned bridge from the executor presentation adapter, or null outside active executor preparation.
     private @Nullable Subscription presentationSubscription;
+
+    /// Owned bridge from the top-level task registry's cumulative progress, or null outside active preparation.
+    private @Nullable Subscription executionProgressSubscription;
 
     /// Executor presentation adapter created before start, or null before creation and after terminal cleanup.
     private @Nullable TaskExecutorPresentationModel executorPresentation;
@@ -187,6 +195,8 @@ public final class DefaultLaunchSession implements LaunchSession {
                 executor = preparedExecution.executor();
                 executorSubscription = preparedExecution.completionSubscription();
                 presentationSubscription = preparedExecution.presentationSubscription();
+                executionProgressSubscription = preparedExecution.executionProgressSubscription();
+                executionProgressHandle = preparedExecution.executionProgressHandle();
                 executorPresentation = preparedExecution.presentation();
                 executorStartPending = true;
             }
@@ -258,22 +268,29 @@ public final class DefaultLaunchSession implements LaunchSession {
         @Nullable Subscription taskCompletionSubscription = null;
         @Nullable TaskExecutorPresentationModel taskPresentation = null;
         @Nullable Subscription taskPresentationSubscription = null;
+        @Nullable Subscription executionProgressSubscription = null;
         try {
+            TaskExecutionProgressHandle progressHandle = taskExecutor.taskExecutionProgressHandle();
             taskCompletionSubscription = taskExecutor.subscribeTaskListener(new CompletionListener(task));
             TaskExecutorPresentationModel createdPresentation =
                     new TaskExecutorPresentationModel(taskExecutor, presentationTitle, waitingPhase);
             taskPresentation = createdPresentation;
             taskPresentationSubscription = createdPresentation.subscribe(
                     ignored -> presentationChanged(createdPresentation));
+            executionProgressSubscription = progressHandle.subscribe(
+                    () -> executionProgressChanged(progressHandle));
             return new PreparedExecution(
                     taskExecutor,
+                    progressHandle,
                     createdPresentation,
                     taskPresentationSubscription,
+                    executionProgressSubscription,
                     taskCompletionSubscription);
         } catch (RuntimeException | Error creationFailure) {
             @Nullable Throwable cleanupFailure = releaseDetachedExecution(
                     taskCompletionSubscription,
                     taskPresentationSubscription,
+                    executionProgressSubscription,
                     taskPresentation);
             if (cleanupFailure != null && cleanupFailure != creationFailure) {
                 creationFailure.addSuppressed(cleanupFailure);
@@ -290,6 +307,7 @@ public final class DefaultLaunchSession implements LaunchSession {
         return releaseDetachedExecution(
                 preparedExecution.completionSubscription(),
                 preparedExecution.presentationSubscription(),
+                preparedExecution.executionProgressSubscription(),
                 preparedExecution.presentation());
     }
 
@@ -302,10 +320,12 @@ public final class DefaultLaunchSession implements LaunchSession {
     private static @Nullable Throwable releaseDetachedExecution(
             @Nullable Subscription completionSubscription,
             @Nullable Subscription taskPresentationSubscription,
+            @Nullable Subscription executionProgressSubscription,
             @Nullable TaskExecutorPresentationModel taskPresentation) {
         @Nullable Throwable cleanupFailure = null;
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(completionSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(taskPresentationSubscription));
+        cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(executionProgressSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> closePresentation(taskPresentation));
         return cleanupFailure;
     }
@@ -429,11 +449,59 @@ public final class DefaultLaunchSession implements LaunchSession {
             if (status != LaunchStatus.PREPARING || executorPresentation != sourcePresentation) {
                 return;
             }
-            TaskSnapshot replacement = sourcePresentation.snapshot();
+            TaskSnapshot replacement = withTaskExecutionProgress(sourcePresentation.snapshot());
             if (cancellationRequested) {
                 replacement = withCancellationDisabled(replacement);
             }
             transition = replacePresentationSnapshotLocked(replacement);
+        }
+        reportCleanupFailure(notifyPresentationTransition(transition));
+    }
+
+    /// Applies the top-level registry aggregate to a task presentation snapshot when available.
+    ///
+    /// @param snapshot current phase and lifecycle presentation
+    /// @return snapshot with cumulative execution progress, or the original snapshot when unavailable
+    private TaskSnapshot withTaskExecutionProgress(TaskSnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        @Nullable TaskExecutionProgressHandle activeProgressHandle = executionProgressHandle;
+        if (activeProgressHandle == null) {
+            return snapshot;
+        }
+        OptionalDouble progress = activeProgressHandle.progress();
+        if (progress.isEmpty() || progress.equals(snapshot.progress())) {
+            return snapshot;
+        }
+        return new TaskSnapshot(
+                snapshot.title(),
+                snapshot.phase(),
+                progress,
+                snapshot.status(),
+                snapshot.cancelable(),
+                snapshot.details());
+    }
+
+    /// Publishes a cumulative registry progress transition for the owning executor.
+    ///
+    /// @param sourceExecutor executor whose registry progress changed
+    private void executionProgressChanged(TaskExecutionProgressHandle sourceProgressHandle) {
+        OptionalDouble progress = sourceProgressHandle.progress();
+        if (progress.isEmpty()) {
+            return;
+        }
+        @Nullable PresentationTransition transition;
+        synchronized (stateLock) {
+            if (status != LaunchStatus.PREPARING || executionProgressHandle != sourceProgressHandle) {
+                return;
+            }
+            TaskSnapshot current = presentationSnapshot;
+            transition = replacePresentationSnapshotLocked(new TaskSnapshot(
+                    current.title(),
+                    current.phase(),
+                    progress,
+                    current.status(),
+                    current.cancelable(),
+                    current.details()));
         }
         reportCleanupFailure(notifyPresentationTransition(transition));
     }
@@ -481,8 +549,9 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Maps the executor's terminal event to a launch-session outcome.
     ///
-    /// A non-null task result wins over a concurrent cancellation because the process has already crossed the
-    /// ownership boundary and must remain observable rather than being silently abandoned.
+    /// A non-null task result can race cancellation because task bodies publish their result before the executor
+    /// commits the terminal invocation outcome. The terminal transition resolves that race in favor of an already
+    /// accepted cancellation and force-stops the process instead of publishing it as a successful launch.
     ///
     /// @param task completed root launch task
     /// @param taskExecutor executor that emitted the terminal event
@@ -512,61 +581,91 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Performs the one allowed terminal transition and releases all preparation ownership.
     ///
-    /// The owning service slot is released before any listener publication or subscription cleanup, so failures in
-    /// those external boundaries cannot strand the single-flight guard. Cleanup failures are combined using
-    /// suppressed exceptions and rethrown only after all release steps have run.
+    /// An accepted cancellation wins over a process result produced by the same in-flight task. The process is
+    /// force-stopped before any terminal listener is published and never becomes observable through
+    /// [#createdProcess()]. The owning service slot is released before any listener publication or subscription
+    /// cleanup, so failures in those external boundaries cannot strand the single-flight guard. Cleanup failures are
+    /// combined using suppressed exceptions and rethrown only after all release steps have run.
     ///
-    /// @param terminalStatus terminal status to publish
-    /// @param process created process only for [LaunchStatus#PROCESS_CREATED]
-    /// @param terminalFailure failure only for [LaunchStatus#FAILED]
+    /// @param requestedStatus terminal status requested by the task or cancellation arbitration
+    /// @param requestedProcess created process only for [LaunchStatus#PROCESS_CREATED]
+    /// @param requestedFailure failure only for [LaunchStatus#FAILED]
     private void finish(
-            LaunchStatus terminalStatus,
-            @Nullable ManagedProcess process,
-            @Nullable Throwable terminalFailure) {
-        validateTerminalOutcome(terminalStatus, process, terminalFailure);
+            LaunchStatus requestedStatus,
+            @Nullable ManagedProcess requestedProcess,
+            @Nullable Throwable requestedFailure) {
+        validateTerminalOutcome(requestedStatus, requestedProcess, requestedFailure);
 
         @Nullable Subscription completionSubscription;
         @Nullable Subscription taskPresentationSubscription;
+        @Nullable Subscription executionProgressSubscription;
         @Nullable TaskExecutorPresentationModel taskPresentation;
         @Nullable PresentationTransition terminalPresentationTransition;
+        @Nullable ManagedProcess processToForceStop;
+        LaunchStatus terminalStatus = requestedStatus;
+        @Nullable ManagedProcess terminalProcess = requestedProcess;
+        @Nullable Throwable terminalFailure = requestedFailure;
         synchronized (stateLock) {
             if (status != LaunchStatus.PREPARING) {
                 return;
             }
+            if (terminalStatus == LaunchStatus.PROCESS_CREATED
+                    && terminalProcess != null
+                    && cancellationRequested) {
+                processToForceStop = terminalProcess;
+                terminalStatus = LaunchStatus.CANCELLED;
+                terminalProcess = null;
+                terminalFailure = null;
+            } else {
+                processToForceStop = null;
+            }
+            validateTerminalOutcome(terminalStatus, terminalProcess, terminalFailure);
             TaskSnapshot terminalPresentation = createTerminalPresentation(
                     terminalStatus,
                     terminalFailure,
                     presentationSnapshot);
             status = terminalStatus;
-            createdProcess = process;
+            createdProcess = terminalProcess;
             failure = terminalFailure;
             terminalPresentationTransition = replacePresentationSnapshotLocked(terminalPresentation);
             executor = null;
+            executionProgressHandle = null;
             executorStartPending = false;
             completionSubscription = executorSubscription;
             executorSubscription = null;
             taskPresentationSubscription = presentationSubscription;
             presentationSubscription = null;
+            executionProgressSubscription = this.executionProgressSubscription;
+            this.executionProgressSubscription = null;
             taskPresentation = executorPresentation;
             executorPresentation = null;
         }
 
+        LaunchStatus finalizedStatus = terminalStatus;
+        @Nullable ManagedProcess finalizedProcess = terminalProcess;
+        @Nullable Throwable finalizedFailure = terminalFailure;
+        @Nullable ManagedProcess finalizedProcessToForceStop = processToForceStop;
+
         @Nullable Throwable cleanupFailure = null;
+        if (finalizedProcessToForceStop != null) {
+            cleanupFailure = attempt(cleanupFailure, finalizedProcessToForceStop::forceStop);
+        }
         // Release single-flight ownership before invoking any observer or unsubscribe callback.
         cleanupFailure = attempt(cleanupFailure, () -> preparationFinished.accept(this));
-        cleanupFailure = attempt(cleanupFailure, () -> statusProperty.setValue(terminalStatus));
+        cleanupFailure = attempt(cleanupFailure, () -> statusProperty.setValue(finalizedStatus));
         cleanupFailure = combineFailures(
                 cleanupFailure,
                 notifyPresentationTransition(terminalPresentationTransition));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(completionSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(taskPresentationSubscription));
+        cleanupFailure = attempt(cleanupFailure, () -> unsubscribe(executionProgressSubscription));
         cleanupFailure = attempt(cleanupFailure, () -> closePresentation(taskPresentation));
 
         // CompletableFuture invokes synchronous dependents here; every public state surface is already terminal.
-        if (process != null) {
-            completion.complete(process);
-        } else if (terminalFailure != null) {
-            completion.completeExceptionally(terminalFailure);
+        if (finalizedProcess != null) {
+            completion.complete(finalizedProcess);
+        } else if (finalizedFailure != null) {
+            completion.completeExceptionally(finalizedFailure);
         } else {
             completion.cancel(false);
         }
@@ -575,8 +674,8 @@ public final class DefaultLaunchSession implements LaunchSession {
 
     /// Creates task presentation matching the authoritative launch outcome.
     ///
-    /// This matters when cancellation races process creation: the task executor may report cancellation while the
-    /// launch contract must report the already-created process as success.
+    /// This matters when cancellation races process creation: an accepted cancellation remains authoritative even when
+    /// the task executor reports that the task body produced a process.
     ///
     /// @param terminalStatus authoritative launch terminal status
     /// @param terminalFailure non-cancellation failure, or null for other outcomes
@@ -723,20 +822,26 @@ public final class DefaultLaunchSession implements LaunchSession {
     /// Owns the complete local resource set prepared before executor startup.
     ///
     /// @param executor stopped task executor
+    /// @param executionProgressHandle exact top-level execution progress handle
     /// @param presentation executor presentation adapter
     /// @param presentationSubscription bridge into the stable session presentation
+    /// @param executionProgressSubscription bridge into cumulative registry progress
     /// @param completionSubscription session completion listener registration
     @NotNullByDefault
     private record PreparedExecution(
             TaskExecutor executor,
+            TaskExecutionProgressHandle executionProgressHandle,
             TaskExecutorPresentationModel presentation,
             Subscription presentationSubscription,
+            Subscription executionProgressSubscription,
             Subscription completionSubscription) {
         /// Validates one complete prepared execution bundle.
         private PreparedExecution {
             Objects.requireNonNull(executor, "executor");
+            Objects.requireNonNull(executionProgressHandle, "executionProgressHandle");
             Objects.requireNonNull(presentation, "presentation");
             Objects.requireNonNull(presentationSubscription, "presentationSubscription");
+            Objects.requireNonNull(executionProgressSubscription, "executionProgressSubscription");
             Objects.requireNonNull(completionSubscription, "completionSubscription");
         }
     }

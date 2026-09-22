@@ -27,6 +27,9 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
@@ -320,6 +323,68 @@ public final class LocalThemePackRepositoryTest {
         assertFalse(Files.exists(installed.directory()));
     }
 
+    /// Recycle-bin deletion moves the validated installation directory into the configured trash.
+    @Test
+    public void deletesInstalledPackageThroughRecycleBin() throws Exception {
+        Path archive = temporaryDirectory.resolve("recycle.xyml-theme");
+        writeZip(archive, Map.of(
+                "manifest.json", manifest("example.recycle", "assets/pixel.png"),
+                "assets/pixel.png", png(1, 1)));
+        Path repositoryDirectory = temporaryDirectory.resolve("recycle-repository");
+        Path trash = temporaryDirectory.resolve("trash");
+        LocalThemePackRepository repository = new LocalThemePackRepository(
+                repositoryDirectory,
+                ThemePackArchiveLimits.launcherDefaults(),
+                new RecordingTrashOperations(trash, false));
+        QueuedExecutor executor = new QueuedExecutor();
+        var importStage = repository.importArchive(archive, executor);
+        executor.runNext();
+        InstalledThemePack installed = importStage.toCompletableFuture().join();
+
+        var deleteStage = repository.deleteInstalled(
+                installed.manifest().id(),
+                installed.directory(),
+                DeletionMode.RECYCLE_BIN_FIRST,
+                executor);
+        executor.runNext();
+        deleteStage.toCompletableFuture().join();
+
+        assertFalse(Files.exists(installed.directory()));
+        assertTrue(Files.exists(trash.resolve(installed.manifest().id())));
+    }
+
+    /// A refused recycle-bin move preserves the validated installation and reports its path.
+    @Test
+    public void preservesInstalledPackageWhenRecycleBinMoveFails() throws Exception {
+        Path archive = temporaryDirectory.resolve("recycle-failure.xyml-theme");
+        writeZip(archive, Map.of(
+                "manifest.json", manifest("example.recycle.failure", "assets/pixel.png"),
+                "assets/pixel.png", png(1, 1)));
+        Path repositoryDirectory = temporaryDirectory.resolve("recycle-failure-repository");
+        LocalThemePackRepository repository = new LocalThemePackRepository(
+                repositoryDirectory,
+                ThemePackArchiveLimits.launcherDefaults(),
+                new RecordingTrashOperations(temporaryDirectory.resolve("trash"), true));
+        QueuedExecutor executor = new QueuedExecutor();
+        var importStage = repository.importArchive(archive, executor);
+        executor.runNext();
+        InstalledThemePack installed = importStage.toCompletableFuture().join();
+
+        var deleteStage = repository.deleteInstalled(
+                installed.manifest().id(),
+                installed.directory(),
+                DeletionMode.RECYCLE_BIN_FIRST,
+                executor);
+        executor.runNext();
+        CompletionException failure = assertThrows(
+                CompletionException.class,
+                () -> deleteStage.toCompletableFuture().join());
+        TrashMoveException trashFailure = assertInstanceOf(TrashMoveException.class, failure.getCause());
+
+        assertEquals(installed.directory(), trashFailure.failedPaths().get(0));
+        assertTrue(Files.isDirectory(installed.directory()));
+    }
+
     /// Local archives cannot reuse an embedded package ID whose persisted reference resolves to trusted content.
     @Test
     public void importRejectsReservedBuiltinPackageId() throws Exception {
@@ -355,6 +420,46 @@ public final class LocalThemePackRepositoryTest {
 
         ThemePackResource.File resource = new ThemePackResource.File(link);
         assertThrows(IOException.class, resource::openStream);
+    }
+
+    /// Moves accepted directories into a temporary trash location or refuses every move.
+    @NotNullByDefault
+    private static final class RecordingTrashOperations implements TrashOperations {
+        /// Temporary trash destination.
+        private final Path trashDirectory;
+
+        /// Whether every move should be refused.
+        private final boolean refuseMoves;
+
+        /// Creates one deterministic recycle-bin substitute.
+        ///
+        /// @param trashDirectory temporary trash destination
+        /// @param refuseMoves whether all moves should fail
+        private RecordingTrashOperations(Path trashDirectory, boolean refuseMoves) {
+            this.trashDirectory = trashDirectory;
+            this.refuseMoves = refuseMoves;
+        }
+
+        /// Reports a supported recycle-bin boundary.
+        @Override
+        public boolean isSupported() {
+            return true;
+        }
+
+        /// Moves one directory unless configured to refuse every move.
+        @Override
+        public boolean moveToTrash(Path path) {
+            if (refuseMoves) {
+                return false;
+            }
+            try {
+                Files.createDirectories(trashDirectory);
+                Files.move(path, trashDirectory.resolve(path.getFileName()));
+                return true;
+            } catch (IOException exception) {
+                return false;
+            }
+        }
     }
 
     /// Builds one canonical simple manifest as UTF-8 bytes.

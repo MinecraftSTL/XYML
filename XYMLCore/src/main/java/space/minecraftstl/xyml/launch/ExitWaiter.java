@@ -62,8 +62,11 @@ final class ExitWaiter implements Runnable {
             List<String> errorLines = process.getLines(Log4jLevel::guessLogLineError);
             ProcessListener.ExitType exitType;
 
-            // LaunchWrapper will catch the exception logged and will exit normally.
-            if (exitCode != 0 && StringUtils.containsOne(errorLines,
+            // A forced launcher stop is not an application failure even when the operating system reports a non-zero
+            // exit code before this waiter is interrupted.
+            if (process.isForceStopRequested()) {
+                exitType = ProcessListener.ExitType.INTERRUPTED;
+            } else if (exitCode != 0 && StringUtils.containsOne(errorLines,
                     "Could not create the Java Virtual Machine.",
                     "Error occurred during initialization of VM",
                     "A fatal exception has occurred. Program will exit.")) {

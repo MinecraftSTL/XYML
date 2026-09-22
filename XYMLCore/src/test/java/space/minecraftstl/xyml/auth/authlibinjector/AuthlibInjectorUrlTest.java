@@ -36,6 +36,20 @@ public final class AuthlibInjectorUrlTest {
                         .orElseThrow());
     }
 
+    /// Formats secure authentication endpoints without redundant scheme, default port, or conventional path.
+    @Test
+    public void formatsAuthenticationServerDisplayAddress() {
+        assertEquals(
+                "example.com",
+                new AuthlibInjectorServer("https://example.com/api/yggdrasil/").getDisplayHostUrl());
+        assertEquals(
+                "example.com:8443/custom/path/",
+                new AuthlibInjectorServer("https://example.com:8443/custom/path/").getDisplayHostUrl());
+        assertEquals(
+                "http://example.com/api/yggdrasil/",
+                new AuthlibInjectorServer("http://example.com/api/yggdrasil/").getDisplayHostUrl());
+    }
+
     /// Rejects absent text, direct endpoints, and unsupported integration paths.
     @Test
     public void rejectsUnsupportedPayloads() {

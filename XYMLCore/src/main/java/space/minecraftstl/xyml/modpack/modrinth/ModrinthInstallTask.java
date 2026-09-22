@@ -18,6 +18,9 @@
 package space.minecraftstl.xyml.modpack.modrinth;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -25,19 +28,21 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.*;
 import space.minecraftstl.xyml.task.CacheFileTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Installs a downloaded Modrinth-format archive into one game repository.
+@NotNullByDefault
 public class ModrinthInstallTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -46,23 +51,72 @@ public class ModrinthInstallTask extends Task<Void> {
     private final Modpack modpack;
     private final ModrinthManifest manifest;
     private final GameInstanceID instanceId;
-    private final String iconUrl;
+    /// Optional remote icon URL.
+    private final @Nullable String iconUrl;
     private final Path run;
-    private final ModpackConfiguration<ModrinthManifest> config;
-    private String iconExt;
-    private Task<Path> downloadIconTask;
+    /// Existing modpack configuration, or null for a fresh installation.
+    private final @Nullable ModpackConfiguration<ModrinthManifest> config;
+
+    /// Keys of optional files excluded from installation, or null to install all files.
+    private final @Nullable Set<String> excludedFiles;
+
+    /// Validated icon extension, or null when no icon should be installed.
+    private @Nullable String iconExt;
+
+    /// Optional icon download task created for a supported remote icon.
+    private @Nullable Task<Path> downloadIconTask;
     private final List<Task<?>> dependents = new ArrayList<>(4);
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public ModrinthInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, Modpack modpack, ModrinthManifest manifest, GameInstanceID instanceId, String iconUrl) {
+    /// Creates a repository-scoped installation that also owns its input archive.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest Modrinth manifest
+    /// @param instanceId destination instance
+    /// @param iconUrl optional remote icon URL
+    public ModrinthInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            ModrinthManifest manifest,
+            GameInstanceID instanceId,
+            @Nullable String iconUrl) {
+        this(dependencyManager, zipFile, modpack, manifest, instanceId, iconUrl, null);
+    }
+
+    /// Creates a Modrinth installation with optional files excluded by key.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest Modrinth manifest
+    /// @param instanceId destination instance
+    /// @param iconUrl optional remote icon URL
+    /// @param excludedFiles optional file keys to skip
+    public ModrinthInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            ModrinthManifest manifest,
+            GameInstanceID instanceId,
+            @Nullable String iconUrl,
+            @Nullable Set<String> excludedFiles) {
         this.dependencyManager = dependencyManager;
         this.zipFile = zipFile;
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.iconUrl = iconUrl;
+        this.excludedFiles = excludedFiles == null ? null : Set.copyOf(excludedFiles);
         this.repository = dependencyManager.getGameRepository();
-        this.run = repository.getRunDirectory(instanceId);
+        this.run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(this.run),
+                TaskResource.archive(zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))
@@ -94,7 +148,7 @@ public class ModrinthInstallTask extends Task<Void> {
         dependents.add(builder.buildAsync());
 
         onDone().register(event -> {
-            Exception ex = event.getTask().getException();
+            @Nullable Exception ex = event.getTask().getException();
             if (event.isFailed()) {
                 if (!(ex instanceof ModpackCompletionException)) {
                     repository.removeInstanceFromDisk(instanceId);
@@ -102,7 +156,7 @@ public class ModrinthInstallTask extends Task<Void> {
             }
         });
 
-        ModpackConfiguration<ModrinthManifest> config = null;
+        @Nullable ModpackConfiguration<ModrinthManifest> config = null;
         try {
             if (Files.exists(json)) {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(ModrinthManifest.class));
@@ -118,7 +172,7 @@ public class ModrinthInstallTask extends Task<Void> {
         dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), subDirectories, any -> true, config).withStage("xyml.modpack"));
         dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), subDirectories, manifest, ModrinthModpackProvider.INSTANCE, manifest.getName(), manifest.getVersionId(), repository.getModpackConfiguration(instanceId)).withStage("xyml.modpack"));
 
-        URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
+        @Nullable WebURL iconUri = NetworkUtils.toWebURLOrNull(iconUrl);
         if (iconUri != null) {
             String ext = FileUtils.getExtension(StringUtils.substringAfter(iconUri.getPath(), '/')).toLowerCase(Locale.ROOT);
             if (Modpack.SUPPORTED_ICON_EXTS.contains(ext)) {
@@ -127,7 +181,7 @@ public class ModrinthInstallTask extends Task<Void> {
                 dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().injectURLWithCandidates(iconUrl)));
             }
         }
-        dependencies.add(new ModrinthCompletionTask(dependencyManager, instanceId, manifest));
+        dependencies.add(new ModrinthCompletionTask(dependencyManager, instanceId, manifest, excludedFiles));
     }
 
     @Override

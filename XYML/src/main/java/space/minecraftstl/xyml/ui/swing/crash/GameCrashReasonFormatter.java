@@ -19,12 +19,15 @@ package space.minecraftstl.xyml.ui.swing.crash;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -41,9 +44,11 @@ final class GameCrashReasonFormatter {
     /// @return localized reason text that may contain trusted i18n HTML links
     String format(GameCrashAnalysis analysis) {
         Objects.requireNonNull(analysis, "analysis");
-        if (analysis.results().isEmpty()) {
+        if (analysis.resultCount() == 0) {
             if (!analysis.keywords().isEmpty()) {
-                String keywords = String.join(", ", analysis.keywords());
+                String keywords = analysis.keywords().stream()
+                        .map(GameCrashReasonFormatter::escapeHtmlArgument)
+                        .collect(Collectors.joining(", "));
                 LOG.info("Crash reason unknown, but some log keywords have been found: " + keywords);
                 return i18n("game.crash.reason.stacktrace", keywords);
             }
@@ -51,10 +56,19 @@ final class GameCrashReasonFormatter {
             return i18n("game.crash.reason.unknown");
         }
 
-        LOG.info("Number of reasons: " + analysis.results().size());
+        LOG.info("Number of reasons: " + analysis.resultCount());
         StringBuilder reasons = new StringBuilder();
-        if (analysis.results().size() > 1) {
+        if (analysis.resultCount() > 1) {
             reasons.append(i18n("game.crash.reason.multiple"));
+        }
+        for (AnalyzeResult<LogAnalyzable> result : analysis.logResults()) {
+            String message = i18n(
+                    result.solver().messageKey(),
+                    result.solver().messageArguments().stream()
+                            .map(GameCrashReasonFormatter::escapeHtmlArgument)
+                            .toArray());
+            LOG.info("Launch log cause: " + result.resultId() + ": " + message);
+            reasons.append(message).append("\n\n");
         }
         for (CrashReportAnalyzer.Result result : analysis.results()) {
             String message = formatResult(result);
@@ -76,13 +90,13 @@ final class GameCrashReasonFormatter {
                             Integer.parseInt(result.matcher().group("expected"))));
             case MOD_RESOLUTION_CONFLICT, MOD_RESOLUTION_MISSING, MOD_RESOLUTION_COLLECTION -> i18n(
                     "game.crash.reason." + result.rule().name().toLowerCase(Locale.ROOT),
-                    translateFabricModId(result.matcher().group("sourcemod")),
-                    parseFabricModId(result.matcher().group("destmod")),
-                    parseFabricModId(result.matcher().group("destmod")));
+                    escapeHtmlArgument(translateFabricModId(result.matcher().group("sourcemod"))),
+                    escapeHtmlArgument(parseFabricModId(result.matcher().group("destmod"))),
+                    escapeHtmlArgument(parseFabricModId(result.matcher().group("destmod"))));
             case MOD_RESOLUTION_MISSING_MINECRAFT -> i18n(
                     "game.crash.reason." + result.rule().name().toLowerCase(Locale.ROOT),
-                    translateFabricModId(result.matcher().group("mod")),
-                    result.matcher().group("version"));
+                    escapeHtmlArgument(translateFabricModId(result.matcher().group("mod"))),
+                    escapeHtmlArgument(result.matcher().group("version")));
             case MOD_FOREST_OPTIFINE,
                  TWILIGHT_FOREST_OPTIFINE,
                  PERFORMANT_FOREST_OPTIFINE,
@@ -92,8 +106,22 @@ final class GameCrashReasonFormatter {
                     "game.crash.reason." + result.rule().name().toLowerCase(Locale.ROOT),
                     Arrays.stream(result.rule().getGroupNames())
                             .map(groupName -> result.matcher().group(groupName))
+                            .map(GameCrashReasonFormatter::escapeHtmlArgument)
                             .toArray());
         };
+    }
+
+    /// Escapes matcher- and solver-supplied values before they enter trusted localized HTML templates.
+    ///
+    /// @param value untrusted dynamic value
+    /// @return HTML-safe value
+    static String escapeHtmlArgument(Object value) {
+        return String.valueOf(value)
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     /// Converts built-in Fabric identifiers to their user-facing names.

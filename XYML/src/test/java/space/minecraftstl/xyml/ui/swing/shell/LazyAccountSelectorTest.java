@@ -172,6 +172,19 @@ public final class LazyAccountSelectorTest {
             Objects.requireNonNull(accountId, "accountId");
         }
 
+        /// Reports that this selection-only fixture has no reorderable rows.
+        @Override
+        public boolean canMoveAccount(String accountId, int targetIndex) {
+            Objects.requireNonNull(accountId, "accountId");
+            return false;
+        }
+
+        /// Performs no reorder in this selection-only fixture.
+        @Override
+        public void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
+            Objects.requireNonNull(accountId, "accountId");
+        }
+
         /// Completes refresh immediately without external authentication.
         ///
         /// @param accountId stable account identifier

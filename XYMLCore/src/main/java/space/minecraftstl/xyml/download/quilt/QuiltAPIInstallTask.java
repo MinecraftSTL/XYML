@@ -17,22 +17,23 @@
  */
 package space.minecraftstl.xyml.download.quilt;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * <b>Note</b>: Quilt should be installed first.
- *
- * @author huangyuhui
- */
+/// Downloads Quilt API into one game instance.
+///
+/// Quilt itself must be installed first. The API file and dynamic download stay below the instance root.
+@NotNullByDefault
 public final class QuiltAPIInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -40,10 +41,19 @@ public final class QuiltAPIInstallTask extends Task<GameInstancePatch> {
     private final QuiltAPIRemoteVersion remote;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public QuiltAPIInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, QuiltAPIRemoteVersion remoteVersion) {
+    /// Creates an instance-scoped Quilt API installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination game instance manifest
+    /// @param remoteVersion selected Quilt API version
+    public QuiltAPIInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            QuiltAPIRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
+        setResources(TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())));
     }
 
     @Override

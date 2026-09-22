@@ -18,8 +18,13 @@
     "language": {
       "type": "string"
     },
-    "acceptPreviewUpdate": {
-      "type": "boolean"
+    "updateChannel": {
+      "enum": [
+        "STABLE",
+        "BETA",
+        "ALPHA",
+        "DEV"
+      ]
     },
     "disableAutoShowUpdateDialog": {
       "type": "boolean"
@@ -176,6 +181,29 @@
     },
     "proxyPassword": {
       "type": "string"
+    },
+    "mcpEnabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "mcpBearerToken": {
+      "type": "string",
+      "default": ""
+    },
+    "mcpPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "mcpConfirmInstanceDeletion": {
+      "type": "boolean"
+    },
+    "mcpConfirmModDeletion": {
+      "type": "boolean"
+    },
+    "showMcpEnablementWarning": {
+      "type": "boolean",
+      "default": true
     },
     "selectedGameDirectory": {
       "$ref": "#/$defs/gameDirectoryID"

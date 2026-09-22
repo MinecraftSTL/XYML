@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -51,6 +52,7 @@ import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.Dimension;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -90,6 +92,15 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
     /// Progress surface that owns one task-presentation panel at a time.
     private final TaskProgressHostPanel progressHost;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
+    /// Command dismissing the hosting confirmation surface after successful submission.
+    private Runnable submittedDismissAction = () -> { };
+
+    /// Whether the current task has been handed to global task management.
+    private boolean handedOff;
+
     /// Listener that reevaluates whether the selected archive and name form a valid request.
     private final DocumentListener inputListener = new ImportInputListener();
 
@@ -117,12 +128,32 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a local modpack importer with explicit task navigation ownership.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public LocalModpackImportPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout(
-                "insets 0, fill, wrap 3",
-                "[][grow,fill][180!]",
-                "[40!]8[40!]8[]8[grow,fill]"));
+                "insets 0, fill, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]8[40!]8[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         progressHost = new TaskProgressHostPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
@@ -134,11 +165,13 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         add(archiveLabel);
         archiveField.setName("localModpackArchive");
         archiveField.setEditable(false);
-        add(archiveField, "growx, h 40!");
+        archiveField.setMinimumSize(new Dimension(0, 0));
+        add(archiveField, "growx, wmin 0, h 40!");
         chooseArchiveButton.setName("localModpackChooseArchive");
         chooseArchiveButton.setText(i18n("modpack.choose.local"));
         chooseArchiveButton.addActionListener(event -> chooseArchive());
-        add(chooseArchiveButton, "grow, h 40!");
+        chooseArchiveButton.setMinimumSize(new Dimension(0, 0));
+        add(chooseArchiveButton, "span 2, growx, wmin 0, h 40!");
 
         JLabel instanceNameLabel = new JLabel(i18n("modpack.enter_name"));
         instanceNameLabel.setLabelFor(instanceNameField);
@@ -146,17 +179,27 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         instanceNameField.setName("localModpackInstanceName");
         SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(inputListener);
-        add(instanceNameField, "growx, h 40!");
+        instanceNameField.setMinimumSize(new Dimension(0, 0));
+        add(instanceNameField, "growx, wmin 0, h 40!");
         importButton.setName("localModpackImport");
         importButton.setText(i18n("install.modpack"));
         importButton.addActionListener(event -> beginImport());
-        add(importButton, "grow, h 40!");
+        importButton.setMinimumSize(new Dimension(0, 0));
+        add(importButton, "span 2, growx, wmin 0, h 40!");
 
         statusLabel.setName("localModpackImportStatus");
-        add(statusLabel, "skip 1, span 2, growx, h 24!");
+        add(statusLabel, "span 2, growx, h 24!");
         progressHost.setName("localModpackImportProgress");
-        add(progressHost, "span 3, grow");
+        add(progressHost, "span 2, grow");
         updateImportButton();
+    }
+
+    /// Installs the command dismissing a hosting dialog after task submission.
+    ///
+    /// @param dismissAction confirmation-surface dismissal command
+    public void setSubmittedDismissAction(Runnable dismissAction) {
+        EdtDispatcher.requireEventDispatchThread();
+        submittedDismissAction = Objects.requireNonNull(dismissAction, "dismissAction");
     }
 
     /// Releases task presentation resources and cancels a still-running import without blocking the EDT.
@@ -349,10 +392,11 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         activeExecutor = executor;
         activePresentation = presentation;
         activeCompletionSubscription = completionSubscription;
+        handedOff = true;
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, i18n("modpack.installing"), submittedDismissAction);
         } catch (RuntimeException | Error startFailure) {
+            handedOff = false;
             LOG.warning("Failed to start local modpack installation", startFailure);
             cleanupFailedTaskStart(presentation, completionSubscription);
             if (terminalCleanup != null) {
@@ -477,7 +521,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         EdtDispatcher.requireEventDispatchThread();
         @Nullable TaskExecutor executor = activeExecutor;
         activeExecutor = null;
-        if (executor != null) {
+        if (executor != null && !handedOff) {
             try {
                 executor.cancel();
             } catch (RuntimeException cancellationFailure) {

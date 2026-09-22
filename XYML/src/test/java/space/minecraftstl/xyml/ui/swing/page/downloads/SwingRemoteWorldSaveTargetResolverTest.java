@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JPanel;
@@ -81,7 +82,12 @@ final class SwingRemoteWorldSaveTargetResolverTest {
 
         assertTrue(resolver.isSelectionAvailable(RemoteAddonCatalogKind.WORLD));
         assertFalse(resolver.isSelectionAvailable(RemoteAddonCatalogKind.MOD));
+        assertTrue(resolver.isSelectionAvailable(RemoteAddonCatalogKind.WORLD, null));
+        assertFalse(resolver.isSelectionAvailable(
+                RemoteAddonCatalogKind.WORLD,
+                new GameInstanceID("installed-world-target")));
         assertTrue(resolver.resolve(RemoteAddonCatalogKind.WORLD).isEmpty());
+        assertTrue(resolver.resolve(RemoteAddonCatalogKind.WORLD, null).isEmpty());
         assertEquals(0, chooserCalls.get());
 
         JPanel owner = new JPanel();
@@ -89,6 +95,16 @@ final class SwingRemoteWorldSaveTargetResolverTest {
         RemoteAddon.Version version = fixtureVersion("provider-world.zip");
         EdtDispatcher.executeAndWait(() -> result.set(resolver.resolveSelection(
                 RemoteAddonCatalogKind.WORLD,
+                new GameInstanceID("installed-world-target"),
+                fixtureItem(),
+                version,
+                owner)));
+        assertTrue(result.get().isEmpty());
+        assertEquals(0, chooserCalls.get());
+
+        EdtDispatcher.executeAndWait(() -> result.set(resolver.resolveSelection(
+                RemoteAddonCatalogKind.WORLD,
+                null,
                 fixtureItem(),
                 version,
                 owner)));

@@ -26,7 +26,7 @@ import space.minecraftstl.xyml.util.io.ChecksumMismatchException;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
 
 import java.io.IOException;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -59,18 +59,18 @@ final class ManagedJavaArchiveDownloadTask extends FetchTask<Path> {
 
     /// Creates a stopped bounded download task over ordered provider candidates.
     ///
-    /// @param uris immutable ordered download candidates
+    /// @param urls immutable ordered download candidates
     /// @param archiveSuffix parser-significant `.zip` or `.tar.gz` suffix
     /// @param checksumAlgorithm normalized JCA checksum algorithm
     /// @param expectedChecksum expected lowercase hexadecimal checksum
     /// @param maximumBytes positive decoded-byte ceiling
     ManagedJavaArchiveDownloadTask(
-            @Unmodifiable List<URI> uris,
+            @Unmodifiable List<WebURL> urls,
             String archiveSuffix,
             String checksumAlgorithm,
             String expectedChecksum,
             long maximumBytes) {
-        super(List.copyOf(Objects.requireNonNull(uris, "uris")));
+        super(List.copyOf(Objects.requireNonNull(urls, "urls")));
         if (!(archiveSuffix.equals(".zip") || archiveSuffix.equals(".tar.gz"))) {
             throw new IllegalArgumentException("Unsupported Java archive suffix: " + archiveSuffix);
         }

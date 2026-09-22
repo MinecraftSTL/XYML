@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
@@ -217,7 +218,7 @@ public final class JavaRuntimeAcquisitionPanel extends JPanel implements AutoClo
         snapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
         this.listener = Objects.requireNonNull(listener, "listener");
         mojangDataSource = new MojangOptionDataSource(snapshot.mojangRuntimes());
-        mojangChoiceList = new ViewportChoiceList<>(mojangDataSource, JavaRuntimeAcquisitionPanel::mojangText);
+        mojangChoiceList = new ViewportChoiceList<>(mojangDataSource, JavaRuntimeAcquisitionPanel::mojangText, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         discoPanel = new DiscoJavaAcquisitionPanel(
                 Objects.requireNonNull(supportedDistributions, "supportedDistributions"),
                 Objects.requireNonNull(platformLinks, "platformLinks"),

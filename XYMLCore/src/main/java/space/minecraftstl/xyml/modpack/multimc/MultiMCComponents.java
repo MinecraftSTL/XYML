@@ -18,9 +18,9 @@
 package space.minecraftstl.xyml.modpack.multimc;
 
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.util.io.NetworkUtils;
+import org.glavo.url.WebURL;
+import org.jetbrains.annotations.Nullable;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -100,7 +100,8 @@ public final class MultiMCComponents {
         return PAIRS;
     }
 
-    public static URI getMetaURL(String componentID, String version, String mcVersion) {
+    /// Returns the component metadata URL, selecting the known LWJGL or Minecraft version fallback when absent.
+    public static WebURL getMetaURL(String componentID, @Nullable String version, String mcVersion) {
         if (version == null) {
             switch (componentID) {
                 case "org.lwjgl": {
@@ -119,6 +120,6 @@ public final class MultiMCComponents {
             }
         }
 
-        return NetworkUtils.toURI(String.format("https://meta.multimc.org/v1/%s/%s.json", componentID, version));
+        return WebURL.parse(String.format("https://meta.multimc.org/v1/%s/%s.json", componentID, version));
     }
 }

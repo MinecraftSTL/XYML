@@ -48,12 +48,11 @@ import java.nio.file.Paths;
 import java.util.*;
 
 import static java.util.stream.Collectors.toList;
-import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAccountMetadataRecords;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAuthlibInjectorServers;
 import static space.minecraftstl.xyml.setting.SettingsManager.getUserAccountMetadataRecords;
+import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.userSettings;
-import static space.minecraftstl.xyml.util.Lang.immutableListOf;
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -76,7 +75,6 @@ public final class Accounts {
 
     /// Creates offline accounts.
     public static final OfflineAccountFactory FACTORY_OFFLINE = new OfflineAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER);
-
     /// Creates authlib-injector accounts against configured authentication servers.
     public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, Accounts::getOrCreateAuthlibInjectorServer);
 
@@ -85,7 +83,7 @@ public final class Accounts {
 
     /// Immutable account factories in launcher display order.
     public static final @Unmodifiable List<AccountFactory<?>> FACTORIES =
-            immutableListOf(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
+            List.of(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
 
     /// Login-type identifiers indexed to their storage factories.
     private static final Map<String, AccountFactory<?>> type2factory = new HashMap<>();
@@ -480,6 +478,54 @@ public final class Accounts {
     /// @return live mutable account list
     public static ObservableList<Account> getAccounts() {
         return accountValues;
+    }
+
+    /// Appends an account to the end of its portable or global storage group.
+    ///
+    /// The account's portability flag must already be set to its target group.
+    ///
+    /// @param account account to append
+    public static void addAccount(Account account) {
+        Objects.requireNonNull(account, "account");
+        int insertionIndex = accountValues.size();
+        if (account.isPortable()) {
+            insertionIndex = 0;
+            for (int index = 0; index < accountValues.size(); index++) {
+                if (accountValues.get(index).isPortable()) {
+                    insertionIndex = index + 1;
+                }
+            }
+        }
+        accountValues.add(insertionIndex, account);
+    }
+
+    /// Moves an account to a final index while preserving the portable/global group boundary.
+    ///
+    /// @param account account to move
+    /// @param targetIndex final zero-based list index after the move
+    /// @throws IllegalArgumentException when the account is absent, the index is invalid,
+    ///     or the target belongs to the other storage group
+    public static void moveAccount(Account account, int targetIndex) {
+        Objects.requireNonNull(account, "account");
+        int sourceIndex = accountValues.indexOf(account);
+        if (sourceIndex < 0) {
+            throw new IllegalArgumentException("Unknown account: " + account);
+        }
+        if (targetIndex < 0 || targetIndex >= accountValues.size()) {
+            throw new IllegalArgumentException("Account target index out of range: " + targetIndex);
+        }
+        if (sourceIndex == targetIndex) {
+            return;
+        }
+        Account target = accountValues.get(targetIndex);
+        if (account.isPortable() != target.isPortable()) {
+            throw new IllegalArgumentException("Account cannot cross storage groups");
+        }
+
+        List<Account> reordered = new ArrayList<>(accountValues);
+        reordered.remove(sourceIndex);
+        reordered.add(targetIndex, account);
+        accountValues.setAll(reordered);
     }
 
     /// Returns the selected account from the toolkit-neutral state model.

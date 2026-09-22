@@ -73,6 +73,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -597,6 +598,7 @@ class SwingApplicationCompositionTest {
                 instanceManagement,
                 gameVersions,
                 gameInstaller,
+                new TaskLaunchController(() -> { }),
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
                 ownedResources);
@@ -699,7 +701,8 @@ class SwingApplicationCompositionTest {
                 "XYML test",
                 ShellPagePresentations.englishFallback(),
                 new HomeStrings(
-                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching", "Back"),
+                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching",
+                        "Cancel launch", "Back"),
                 new HomeStatusStrings("Ready", "Select account", "Select instance", "Exporting"),
                 new InstancesStrings(
                         "Instances", "Search", "Refresh", "Refreshing", "Add", "Manage", "Empty", "No matches"),

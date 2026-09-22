@@ -18,7 +18,11 @@
 package space.minecraftstl.xyml.modpack;
 
 import kala.compress.archivers.zip.ZipArchiveEntry;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
@@ -34,18 +38,53 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/// Builds and writes one modpack configuration by hashing selected entries from its input archive.
+@NotNullByDefault
 public final class MinecraftInstanceTask<T> extends Task<ModpackConfiguration<T>> {
 
+    /// Input modpack archive.
     private final Path zipFile;
-    private final Charset encoding;
-    private final List<String> subDirectories;
-    private final Path jsonFile;
-    private final T manifest;
-    private final String type;
-    private final String name;
-    private final String version;
 
-    public MinecraftInstanceTask(Path zipFile, Charset encoding, List<String> subDirectories, T manifest, ModpackProvider modpackProvider, String name, String version, Path jsonFile) {
+    /// Archive entry-name charset.
+    private final Charset encoding;
+
+    /// Immutable normalized archive subdirectory snapshot.
+    private final @Unmodifiable List<String> subDirectories;
+
+    /// Destination configuration file.
+    private final Path jsonFile;
+
+    /// Format-specific manifest stored in the generated configuration.
+    private final T manifest;
+
+    /// Stable modpack provider identifier.
+    private final String type;
+
+    /// Display name stored in the generated configuration.
+    private final String name;
+
+    /// Optional modpack version stored in the generated configuration.
+    private final @Nullable String version;
+
+    /// Creates a configuration task with exact input archive and output-file resources.
+    ///
+    /// @param zipFile input modpack archive
+    /// @param encoding archive entry-name charset
+    /// @param subDirectories archive subdirectories whose files become override metadata
+    /// @param manifest format-specific manifest
+    /// @param modpackProvider provider defining the stored type identifier
+    /// @param name modpack display name
+    /// @param version modpack version, or null when the format does not provide one
+    /// @param jsonFile destination configuration file
+    public MinecraftInstanceTask(
+            Path zipFile,
+            Charset encoding,
+            List<String> subDirectories,
+            T manifest,
+            ModpackProvider modpackProvider,
+            String name,
+            @Nullable String version,
+            Path jsonFile) {
         this.zipFile = zipFile;
         this.encoding = encoding;
         this.subDirectories = subDirectories.stream().map(FileUtils::normalizePath).toList();
@@ -54,6 +93,7 @@ public final class MinecraftInstanceTask<T> extends Task<ModpackConfiguration<T>
         this.type = modpackProvider.getName();
         this.name = name;
         this.version = version;
+        setResources(TaskResource.archive(zipFile), TaskResource.configuration(jsonFile));
     }
 
     private static void getOverrides(List<ModpackConfiguration.FileInformation> overrides,

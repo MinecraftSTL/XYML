@@ -30,8 +30,10 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -39,6 +41,7 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import java.awt.Desktop;
+import java.awt.Dimension;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -84,6 +87,9 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// Whether this panel no longer accepts user actions or worker-to-EDT feedback.
     private volatile boolean closed;
 
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
     /// Creates every content category without starting network work or opening platform applications.
     ///
     /// @param taskProgressStrings localized task lifecycle controls for local modpack imports
@@ -93,37 +99,84 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(taskProgressStrings, animator, progressAnimationDuration, null);
+    }
+
+    /// Creates every content category with an optional explicit installed-instance source.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls for local modpack imports
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null for
+    /// legacy category-only construction
+    public DownloadCategoryPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable InstancesModel instancesModel) {
+        this(
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                instancesModel,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates every content category with explicit task navigation ownership.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls for local modpack imports
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public DownloadCategoryPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[grow,fill]8[]"));
         EdtDispatcher.requireEventDispatchThread();
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         categoryTabs = new AnimatedTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
         SwingTransparency.revealBackgroundThroughTabs(categoryTabs);
         categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        categoryTabs.setMinimumSize(new Dimension(0, 0));
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                taskLaunchController);
         modsCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.MOD,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                instancesModel,
+                taskLaunchController);
         resourcePackCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.RESOURCE_PACK,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                instancesModel,
+                taskLaunchController);
         shaderPackCatalog = createRemoteCatalog(
                 RemoteAddonCatalogKind.SHADER_PACK,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                instancesModel,
+                taskLaunchController);
         worldDownloadPanel = new WorldDownloadPanel(
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                taskLaunchController);
         for (DownloadCategory category : DownloadCategory.values()) {
             categoryTabs.addTab(
                     i18n(category.titleKey()),
@@ -146,6 +199,31 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// @return user-selectable content categories
     public JTabbedPane categoryTabs() {
         return categoryTabs;
+    }
+
+    /// Selects the Mods category, prefills its query, and starts the native remote search.
+    ///
+    /// @param searchText non-blank project or dependency identifier
+    public void openModSearch(String searchText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openSearch(searchText);
+    }
+
+    /// Selects the Mods category and starts one version-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openMissingDependencySearch(searchText, gameVersion);
     }
 
     /// Selects the local-modpack category and displays a dropped archive.
@@ -197,18 +275,24 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// @param taskProgressStrings localized task lifecycle controls
     /// @param animator optional shared determinate-progress animator
     /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @return configured native remote catalog
     private static RemoteAddonCatalogPanel createRemoteCatalog(
             RemoteAddonCatalogKind kind,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
-            Duration progressAnimationDuration) {
-        return new RemoteAddonCatalogPanel(
+            Duration progressAnimationDuration,
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
+        RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
                 Objects.requireNonNull(kind, "kind"),
                 RemoteAddonCatalogStrings.launcherLocalized(kind),
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                instancesModel);
+        panel.setTaskLaunchController(Objects.requireNonNull(taskLaunchController, "taskLaunchController"));
+        return panel;
     }
 
     /// Builds the modpack tab with its real local import surface and external catalog route.
@@ -221,6 +305,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
                 "[grow,fill]",
                 "[]12[grow,fill]"));
         panel.setOpaque(false);
+        panel.setMinimumSize(new Dimension(0, 0));
         panel.setName("downloadsCategory" + category.name());
         panel.add(createCategoryActions(category), "growx");
         localModpackImporter.setName("downloadsLocalModpackImporter");
@@ -235,18 +320,21 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     private JPanel createCategoryActions(DownloadCategory category) {
         JPanel actions = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][grow,fill]", "[40!]"));
         actions.setOpaque(false);
+        actions.setMinimumSize(new Dimension(0, 0));
 
         JButton browseButton = new JButton("Modrinth");
         browseButton.setName("downloadsBrowse" + category.name());
         browseButton.setToolTipText(i18n("download.external_link"));
         browseButton.addActionListener(event -> browseCategory(category));
-        actions.add(browseButton, "grow, h 40!");
+        browseButton.setMinimumSize(new Dimension(0, 0));
+        actions.add(browseButton, "grow, wmin 0, h 40!");
 
         JButton revealButton = new JButton(i18n("button.reveal_dir"));
         revealButton.setName("downloadsReveal" + category.name());
         revealButton.setToolTipText(i18n(category.directoryKey()));
         revealButton.addActionListener(event -> revealCategoryDirectory(category));
-        actions.add(revealButton, "grow, h 40!");
+        revealButton.setMinimumSize(new Dimension(0, 0));
+        actions.add(revealButton, "grow, wmin 0, h 40!");
         return actions;
     }
 
@@ -389,7 +477,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         MODPACK("modpack", "folder.game", false, "https://modrinth.com/modpacks"),
 
         /// Instance mod archives and their managed mods directory.
-        MODS("mods.manage", "folder.mod", true, "https://modrinth.com/mods"),
+        MODS("mods", "folder.mod", true, "https://modrinth.com/mods"),
 
         /// Instance resource packs and their managed resource-pack directory.
         RESOURCE_PACKS("resourcepack", "folder.resourcepacks", true, "https://modrinth.com/resourcepacks"),

@@ -20,6 +20,9 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -28,7 +31,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Owns Mod interactions that cross Swing dialog and platform desktop boundaries.
 @NotNullByDefault
-public interface ModCatalogInteractions {
+public interface ModCatalogInteractions extends RetryableFailureInteraction {
     /// Opens a multi-selection Mod archive chooser on the EDT.
     ///
     /// @param owner dialog owner
@@ -56,6 +59,48 @@ public interface ModCatalogInteractions {
     /// @param selectedCount positive selected target count
     /// @return whether batch deletion was explicitly confirmed
     boolean confirmDeleteSelected(Component owner, int selectedCount);
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact loaded target
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Chooses recycle-bin-first batch deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected target count
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original deletion warning after one target could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact loaded target
+    /// @return whether permanent deletion was approved
+    default boolean confirmPermanentFallback(Component owner, ModCatalogItem target) {
+        return confirmDelete(owner, target);
+    }
+
+    /// Shows the original batch warning after one selection could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected target count
+    /// @return whether permanent batch deletion was approved
+    default boolean confirmPermanentFallbackSelected(Component owner, int selectedCount) {
+        return confirmDeleteSelected(owner, selectedCount);
+    }
 
     /// Schedules revealing one exact current Mod file.
     ///

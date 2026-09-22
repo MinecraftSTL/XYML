@@ -17,11 +17,13 @@
  */
 package space.minecraftstl.xyml.download.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.util.ArrayList;
@@ -31,6 +33,8 @@ import java.util.List;
 
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
 
+/// Installs a base game and its shared assets and libraries into one game repository.
+@NotNullByDefault
 public class GameInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultGameRepository gameRepository;
@@ -40,12 +44,25 @@ public class GameInstallTask extends Task<GameInstancePatch> {
     private final GameInstanceJsonDownloadTask downloadTask;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public GameInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, GameRemoteVersion remoteVersion) {
+    /// Creates a repository-scoped base-game installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination instance manifest
+    /// @param remoteVersion selected remote base-game version
+    public GameInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            GameRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.gameRepository = dependencyManager.getGameRepository();
         this.manifest = manifest;
         this.remote = remoteVersion;
+        TaskResource instanceResource = TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id()));
         this.downloadTask = new GameInstanceJsonDownloadTask(remoteVersion.getGameVersion(), dependencyManager);
+        this.downloadTask.setResources(instanceResource);
+        setResources(
+                TaskResource.repositoryOperation(gameRepository.getBaseDirectory()),
+                instanceResource);
     }
 
     @Override
@@ -73,15 +90,17 @@ public class GameInstallTask extends Task<GameInstancePatch> {
         setResult(patch);
 
         GameInstanceManifest version = new GameInstanceManifest(this.manifest.id()).addPatch(patch);
-        dependencies.add(Task.allOf(
+        Task<?> assetsAndLibraries = Task.allOf(
+                new GameAssetDownloadTask(dependencyManager, version, GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY, true),
+                new GameLibrariesTask(dependencyManager, version, true)
+        ).withComposeAsync(Task.runAsync(() -> {
+            // Asset and library repair is intentionally optional during base-game installation.
+        }).asOrchestration()).asOrchestration();
+        Task<?> installation = Task.allOf(
                 new GameDownloadTask(dependencyManager, remote.getGameVersion(), version),
-                Task.allOf(
-                        new GameAssetDownloadTask(dependencyManager, version, GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY, true),
-                        new GameLibrariesTask(dependencyManager, version, true)
-                ).withRunAsync(() -> {
-                    // ignore failure
-                })
-        ).thenComposeAsync(gameRepository.saveAsync(version)));
+                assetsAndLibraries
+        ).asOrchestration();
+        dependencies.add(installation.thenComposeAsync(gameRepository.saveAsync(version)));
     }
 
 }

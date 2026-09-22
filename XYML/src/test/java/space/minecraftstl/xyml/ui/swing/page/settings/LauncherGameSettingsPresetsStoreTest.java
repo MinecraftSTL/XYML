@@ -295,7 +295,7 @@ public final class LauncherGameSettingsPresetsStoreTest {
                         actual.notPatchNativesProperty().getValue()),
                 () -> assertEquals(
                         expected.nativeLibraries().nativeGlfw(),
-                        actual.useNativeGLFWProperty().getValue()),
+                        actual.useNativeGLFWorSDLProperty().getValue()),
                 () -> assertEquals(
                         expected.nativeLibraries().nativeOpenAl(),
                         actual.useNativeOpenALProperty().getValue()),

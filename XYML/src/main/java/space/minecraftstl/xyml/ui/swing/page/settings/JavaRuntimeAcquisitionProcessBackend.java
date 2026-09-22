@@ -50,7 +50,7 @@ import space.minecraftstl.xyml.util.tree.ArchiveFileTree;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -242,18 +242,18 @@ final class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisiti
 
     /// Creates a stopped checksummed download into a bounded random temporary archive.
     ///
-    /// @param uris immutable ordered download candidates
+    /// @param urls immutable ordered download candidates
     /// @param archiveSuffix parser-significant `.zip` or `.tar.gz` suffix
     /// @param checksumAlgorithm normalized JCA checksum algorithm
     /// @param checksum expected lowercase hexadecimal checksum
     /// @return stopped managed archive download task
     Task<Path> downloadManagedTemporaryArchive(
-            @Unmodifiable List<URI> uris,
+            @Unmodifiable List<WebURL> urls,
             String archiveSuffix,
             String checksumAlgorithm,
             String checksum) {
         return new ManagedJavaArchiveDownloadTask(
-                uris,
+                urls,
                 archiveSuffix,
                 checksumAlgorithm,
                 checksum,

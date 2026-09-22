@@ -19,6 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.settings.theme;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -40,6 +42,27 @@ public interface ThemePackManagementInteractions {
     /// @param item selected installed item
     /// @return whether deletion was confirmed
     boolean confirmDelete(Component owner, ThemePackItem item);
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner dialog owner
+    /// @param item selected installed item
+    /// @return selected deletion mode, or null when deletion was cancelled
+    default @Nullable DeletionMode chooseDeleteMode(Component owner, ThemePackItem item) {
+        if (FileUtils.isMoveToTrashSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, item) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a theme package could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param item selected installed item
+    /// @return whether permanent deletion was approved
+    default boolean confirmPermanentFallback(Component owner, ThemePackItem item) {
+        return confirmDelete(owner, item);
+    }
 
     /// Opens a previously revalidated installed package directory without blocking the EDT.
     ///

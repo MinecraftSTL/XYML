@@ -24,10 +24,14 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
@@ -39,6 +43,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
@@ -74,6 +79,18 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// are created on the supplied executor only after the user selects a visible loaded world row.
 @NotNullByDefault
 public final class DataPackManagementPanel extends JPanel implements AutoCloseable {
+    /// Fallback icon for a world row in the two-pane data-pack manager.
+    private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
+    /// Bundled icon for one data-pack row.
+    private static final Icon DATA_PACK_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/folder-fill.svg",
+            32,
+            32);
+
     /// Background model that lazily indexes direct child world directories and owns its own work.
     private final WorldCatalogModel worlds;
 
@@ -210,6 +227,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Whether an import or deletion currently owns the selected data-pack manager.
     private boolean dataPackOperationPending;
 
+    /// Exact captured mutation retained until its terminal result is presented.
+    private @Nullable Runnable pendingDataPackRetry;
+
     /// Whether this page has started its lazy world-directory index.
     private boolean activated;
 
@@ -253,8 +273,22 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.executor = Objects.requireNonNull(executor, "executor");
         displayedWorldSnapshot = this.worlds.snapshot();
-        worldChoiceList = new ViewportChoiceList<>(this.worlds, WorldCatalogItem::displayText);
-        dataPackChoiceList = new ViewportChoiceList<>(dataPackSource, this::dataPackText);
+        worldChoiceList = new ViewportChoiceList<>(
+                this.worlds,
+                new RichChoiceListCellRenderer<>(
+                        WorldCatalogItem::displayText,
+                        this::worldRowDetail,
+                        this::worldRowBadge,
+                        item -> WORLD_ROW_ICON,
+                        item -> item.path().toString()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
+        dataPackChoiceList = new ViewportChoiceList<>(
+                dataPackSource,
+                new RichChoiceListCellRenderer<>(
+                        DataPack.Pack::getId,
+                        this::dataPackDetail,
+                        this::dataPackBadge,
+                        item -> DATA_PACK_ROW_ICON,
+                        this::dataPackTooltip), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         configureComponents();
         worldChoiceList.getList().addListSelectionListener(worldSelectionListener);
@@ -481,13 +515,72 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         return label;
     }
 
-    /// Formats one loaded data-pack row without resolving more metadata on the EDT.
+    /// Formats compact world metadata for the world selector without opening its directory.
     ///
-    /// @param dataPack loaded Core data-pack value
-    /// @return concise stable identifier and requested active state
-    private String dataPackText(DataPack.Pack dataPack) {
-        DataPack.Pack pack = Objects.requireNonNull(dataPack, "dataPack");
-        return pack.getId() + " - " + (pack.isActive() ? strings.activeText() : strings.inactiveText());
+    /// @param world loaded world row
+    /// @return game-version or retained failure detail
+    private String worldRowDetail(WorldCatalogItem world) {
+        if (world.failureDetail() != null) {
+            return firstNonBlankLine(world.failureDetail());
+        }
+        return world.gameVersion() == null
+                ? world.path().toString()
+                : world.gameVersion() + " | " + world.path();
+    }
+
+    /// Formats a localized readability/lock badge for a world selector row.
+    ///
+    /// @param world loaded world row
+    /// @return localized world state
+    private String worldRowBadge(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return i18n("swing.world_catalog.unreadable");
+        }
+        return world.locked()
+                ? i18n("swing.world_catalog.locked_yes")
+                : i18n("swing.world_catalog.locked_no");
+    }
+
+    /// Formats one data pack's parsed description and storage shape.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return one-line description and directory/archive marker
+    private String dataPackDetail(DataPack.Pack dataPack) {
+        String description = dataPack.getDescription().toStringSingleLine();
+        return description.isBlank() ? dataPack.getPath().toString() : description;
+    }
+
+    /// Formats the explicit enabled-state badge for one data pack.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return localized active/inactive state
+    private String dataPackBadge(DataPack.Pack dataPack) {
+        return dataPack.isActive() ? strings.activeText() : strings.inactiveText();
+    }
+
+    /// Supplies a tooltip containing the durable data-pack path and full description.
+    ///
+    /// @param dataPack loaded data-pack row
+    /// @return path and complete description
+    private String dataPackTooltip(DataPack.Pack dataPack) {
+        String description = dataPack.getDescription().toString();
+        return description.isBlank()
+                ? dataPack.getPath().toString()
+                : dataPack.getPath() + "\n" + description;
+    }
+
+    /// Returns the first meaningful line from a nullable world failure message.
+    ///
+    /// @param text nullable failure detail
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Restarts the non-repeating search timer after an editable document transition.
@@ -741,9 +834,48 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             SelectedWorld context,
             @Unmodifiable List<Path> archives) {
         @Unmodifiable List<Path> selectedArchives = List.copyOf(archives);
+        pendingDataPackRetry = () -> scheduleDataPackInstallation(context, selectedArchives);
         beginDataPackOperation();
         try {
             executor.execute(() -> installDataPacksOnExecutor(context, selectedArchives));
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Schedules one captured active-state request and retains it for retry.
+    ///
+    /// @param context stable selected-world context
+    /// @param selected immutable selected packs
+    /// @param active requested active state
+    private void scheduleDataPacksActive(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected,
+            boolean active) {
+        @Unmodifiable List<DataPack.Pack> captured = List.copyOf(selected);
+        pendingDataPackRetry = () -> scheduleDataPacksActive(context, captured, active);
+        beginDataPackOperation();
+        try {
+            executor.execute(() -> setDataPacksActiveOnExecutor(context, captured, active));
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Schedules one captured mode-aware deletion request and retains it for retry.
+    ///
+    /// @param context stable selected-world context
+    /// @param selected immutable selected packs
+    /// @param mode selected deletion behavior
+    private void scheduleDataPacksDeletion(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected,
+            DeletionMode mode) {
+        @Unmodifiable List<DataPack.Pack> captured = List.copyOf(selected);
+        pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, captured, mode);
+        beginDataPackOperation();
+        try {
+            executor.execute(() -> deleteDataPacksOnExecutor(context, captured, mode, true));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
@@ -816,12 +948,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (context == null || selected.isEmpty()) {
             return;
         }
-        beginDataPackOperation();
-        try {
-            executor.execute(() -> setDataPacksActiveOnExecutor(context, selected, active));
-        } catch (RuntimeException failure) {
-            finishDataPackOperation(context, failure);
-        }
+        scheduleDataPacksActive(context, selected, active);
     }
 
     /// Changes selected data-pack states outside the EDT before publishing the refreshed snapshot.
@@ -844,7 +971,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Confirms and schedules permanent deletion of all selected loaded data-pack rows.
+    /// Chooses a mode and schedules deletion of all selected loaded data-pack rows.
     private void deleteSelectedDataPacks() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable SelectedWorld context = usableSelectedWorld();
@@ -852,38 +979,49 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (context == null || selected.isEmpty()) {
             return;
         }
-        boolean confirmed;
+        @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showFailure(failure);
             return;
         }
-        if (!confirmed) {
+        if (mode == null) {
             return;
         }
-        beginDataPackOperation();
-        try {
-            executor.execute(() -> deleteDataPacksOnExecutor(context, selected));
-        } catch (RuntimeException failure) {
-            finishDataPackOperation(context, failure);
-        }
+        scheduleDataPacksDeletion(context, selected, mode);
     }
 
     /// Deletes selected packs through their owning Core data-pack manager outside the EDT.
     ///
     /// @param context stable selected-world data-pack context
     /// @param selected immutable durable selected pack rows
+    /// @param mode selected deletion behavior
+    /// @param allowFallback whether recycle-bin failure may prompt again
     private void deleteDataPacksOnExecutor(
             SelectedWorld context,
-            @Unmodifiable List<DataPack.Pack> selected) {
+            @Unmodifiable List<DataPack.Pack> selected,
+            DeletionMode mode,
+            boolean allowFallback) {
         try {
             requireBackgroundThread();
-            for (DataPack.Pack pack : selected) {
-                context.dataPack().deletePack(pack);
-            }
+            context.dataPack().deletePacks(selected, mode);
             finishDataPackOperation(context, null);
         } catch (IOException | RuntimeException failure) {
+            if (allowFallback && failure instanceof TrashMoveException) {
+                boolean[] approved = {false};
+                EdtDispatcher.executeAndWait(() -> approved[0] = interactions.confirmPermanentFallback(this, selected));
+                if (approved[0]) {
+                    pendingDataPackRetry = () -> scheduleDataPacksDeletion(
+                            context,
+                            selected,
+                            DeletionMode.PERMANENT);
+                    deleteDataPacksOnExecutor(context, selected, DeletionMode.PERMANENT, false);
+                } else {
+                    finishDataPackOperation(context, null);
+                }
+                return;
+            }
             finishDataPackOperation(context, failure);
         }
     }
@@ -905,6 +1043,8 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             if (closed.get() || selectedWorld != context) {
                 return;
             }
+            @Nullable Runnable retryAction = pendingDataPackRetry;
+            pendingDataPackRetry = null;
             dataPackOperationPending = false;
             if (failure == null) {
                 List<DataPack.Pack> packs = context.dataPack().getPacks();
@@ -914,7 +1054,15 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 dataPackStatusLabel.setText(strings.packsReadyText(packs.size()));
             } else {
                 dataPackStatusLabel.setText(strings.packsReadyText(dataPackSource.exactItemCount().orElse(0)));
-                showFailure(failure);
+                if (retryAction == null) {
+                    showFailure(failure);
+                } else {
+                    interactions.showRetryableFailure(
+                            this,
+                            strings.failureTitle(),
+                            failureDetail(failure),
+                            retryAction);
+                }
             }
             updateActionState();
         });
@@ -1037,6 +1185,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         selectedWorld = null;
         selectedWorldPath = null;
         dataPackOperationPending = false;
+        pendingDataPackRetry = null;
         removeAll();
     }
 

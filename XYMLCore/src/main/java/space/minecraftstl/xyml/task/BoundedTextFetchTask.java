@@ -25,7 +25,7 @@ import space.minecraftstl.xyml.util.io.UrlResponseInfo;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -33,7 +33,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
-/// Fetches text from ordered URIs while bounding both advertised and actually decoded response bytes.
+/// Fetches text from ordered URLs while bounding both advertised and actually decoded response bytes.
 ///
 /// HTTP content length is rejected before allocation when it exceeds the configured ceiling. Every decoded write is
 /// counted independently so chunked, compressed, missing-length, incorrect-length, and non-HTTP responses cannot
@@ -48,17 +48,18 @@ public final class BoundedTextFetchTask extends FetchTask<String> {
 
     /// Creates a stopped bounded UTF-compatible text fetch task.
     ///
-    /// @param uris immutable ordered candidate URIs
+    /// @param urls immutable ordered candidate URLs
     /// @param maximumBytes positive decoded response byte ceiling
     public BoundedTextFetchTask(
-            @Unmodifiable List<URI> uris,
+            @Unmodifiable List<WebURL> urls,
             long maximumBytes) {
-        super(List.copyOf(Objects.requireNonNull(uris, "uris")));
+        super(List.copyOf(Objects.requireNonNull(urls, "urls")));
         if (maximumBytes <= 0L) {
             throw new IllegalArgumentException("maximumBytes must be positive");
         }
         this.maximumBytes = maximumBytes;
-        setName(this.uris.get(0).toString());
+        setName(this.urls.get(0).toString());
+        useCacheOperationResource();
     }
 
     /// Enables existing HTTP validator caching while keeping cache reads bounded.

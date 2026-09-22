@@ -1,8 +1,10 @@
 # 貢獻指南
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](Contributing_zh.md), **繁體**) | [English](Contributing.md)
+**中文** ([简体](Contributing.md), **繁體**) | [English](Contributing_en.md)
 <!-- #END LANGUAGE_SWITCHER -->
+
+合併 HMCL 上游變更前，請先閱讀[上游合併指南](UpstreamMerge_zh_Hant.md)。
 
 ## 構建 XYML
 
@@ -71,10 +73,11 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 想要構建 XYML，請切換到 XYML 專案的根目錄下，並執行以下指令:
 
 ```shell
-./gradlew clean makeExecutables
+./gradlew clean :build
 ```
 
 構建出的 XYML 程式檔位於根目錄下的 `XYML/build/libs` 子目錄中。
+根 `:build` 任務只負責依目前工作樹組裝和封裝，不會呼叫 `check` 或測試任務；需要測試時請單獨執行 `:test`。
 
 ### IDEA Gradle 建置流程
 
@@ -82,33 +85,34 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 | 任務 | 行為 |
 | --- | --- |
-| `buildMain` | 擷取並建置最新的 `origin/main` 提交。 |
-| `buildBeta` | 擷取並建置最新的 `origin/beta` 提交。 |
-| `buildAlpha` | 擷取並建置最新的 `origin/alpha` 提交。 |
-| `buildDev` | 擷取並建置最新的 `origin/dev` 提交。 |
-| `build` | 發佈分支呼叫上方對應任務；功能分支或游離提交直接建置目前工作樹。 |
+| `buildMain` | 在隔離工作樹中建置本機 `main` 分支尖端。 |
+| `buildBeta` | 在隔離工作樹中建置本機 `beta` 分支尖端。 |
+| `buildAlpha` | 在隔離工作樹中建置本機 `alpha` 分支尖端。 |
+| `buildDev` | 在隔離工作樹中建置本機 `dev` 分支尖端。 |
+| `build` | 依目前工作樹組裝並封裝，包括未提交變更，但不執行測試。 |
+| `test` | 使用與 `build` 相同的分支和版本解析規則測試目前工作樹。 |
 | `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
-| `run` | 有可用結果時複用最近一次根 `:build` 的製品；否則在同一次 Gradle 呼叫中對目前工作樹增量建置臨時製品。 |
+| `run` | 始終重新建置 `XYML`、`XYMLCore` 和 `XYMLBoot`，然後執行目前工作樹製品。 |
 
-即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始終將目前倉庫根目錄作為 XYML 的執行目錄。
+即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`build`、`test` 和 `run` 也始終使用目前倉庫根目錄；這些任務都不會切換分支或委託渠道任務。
+沒有 CI 版本輸入時，製品版本由目前分支與 `HEAD` 拓撲決定；未提交變更會進入製品，但不會使版本號遞增。
+從命令列呼叫時建議保留任務名前的 `:`（`:build` 或 `:test`）以精確指向根任務。IntelliJ 的 Gradle Tooling API 可能會傳送裸 `build`；根建置腳本也會將這種聚合呼叫規範化為只組裝子專案。
 
-只有根 `:build` 任務會記錄可複用製品，包括發佈分支建置複製到 `build/channel-builds/<branch>` 的 JAR。
-`run` 觸發的回退只強制重新產生最終 `shadowJar`，可以複用相依任務的最新輸出，但不會寫入根結果清單，也不會啓動第二個 Wrapper。
-`clean` 會刪除可複用結果清單。原生源碼未變更時，回退還可以複用現有的 XYMLL 可執行檔作為中間輸入，但不會因此讓最終製品變為可複用結果。
-沒有 CI 版本輸入時，發佈分支的本機建置版本按目前 Git 拓撲推斷；建置製品的版本不同不會阻止複用，XYML 左上角顯示的是所選 JAR 內嵌的版本。
+每次呼叫 `run` 都會禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任務複用最新輸出或建置快取，包括 Java 編譯、語言資料產生、
+資源處理和最終 `shadowJar`。XoyzNBT 和 XoyzMCP 使用單獨的規則：成功的根 `build` 會登記一份經過完整性校驗的庫快照，
+`run` 會優先使用該快照，直到下一次根 `build` 成功。若不存在完整快照，或執行 `clean run`，兩個庫會在停用 Gradle 複用的
+臨時目錄中建置，並在啓動器 JAR 組裝完成後刪除；這種臨時回退不會更新快照。同一次呼叫中包含 `:build run`、`:test run` 或 `:check run`
+時則使用目前專案輸出。其他專案相依保留原有複用規則，因此原生源碼未變更時仍可複用現有的 XYMLL 可執行檔。
+
+`run` 始終重新建置並選擇目前 `XYML/build/libs` 中的應用製品，不會複用之前根 `:build` 記錄的應用 JAR、寫入根結果清單或
+啓動第二個 Wrapper。
 子專案任務改名為 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 執行根工作流程時同時選中第二個啓動器程序。
 
-四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，
-不會切換 IDEA 目前工作樹。在 Windows 上，GitHub 擷取會使用已啟用的 Windows 系統代理。成功的渠道建置產物會連同
-`build-info.properties` 複製到 `build/channel-builds/<branch>`；功能分支產物仍位於 `XYML/build/libs`。
+四個渠道任務只讀取本機 `main`、`beta`、`alpha` 和 `dev` 引用，不會執行擷取或其他線上 Git 操作。任務會在臨時的游離 worktree
+中建置所選本機分支尖端，不會切換 IDEA 目前工作樹。成功的渠道建置產物會連同 `build-info.properties` 複製到
+`build/libs/<branch>`；目前工作樹的 `build` 產物仍位於 `XYML/build/libs`。
 
-如需在不存取 GitHub 的情況下測試現有遠端追蹤引用，可明確關閉重新整理：
-
-```powershell
-.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
-```
-
-Windows 系統代理無法使用時，也可以透過 `-Pxyml.branchBuild.gitProxy=<proxy-url>` 明確指定代理。
+在 Windows 上，Gradle Wrapper 和巢狀渠道建置允許 Gradle 發行包及相依下載使用已啟用的 Windows 系統代理。
 
 ## 除錯選項
 

@@ -140,6 +140,40 @@ public final class SettingsRestartPanelTest {
         });
     }
 
+    /// MCP enablement and listener-port changes activate the same retryable restart action.
+    @Test
+    public void tracksMcpSettingsBaseline() {
+        RecordingRestartCommand command = new RecordingRestartCommand();
+        SettingsRestartPanel panel = onEventDispatchThread(
+                () -> new SettingsRestartPanel(STRINGS, command, active -> { }));
+
+        onEventDispatchThread(() -> {
+            JButton restart = findComponent(panel, "settingsRestartAction", JButton.class);
+            panel.updateMcpSettings(false, 23968);
+            assertFalse(panel.isRestartRequired());
+            assertFalse(restart.isEnabled());
+
+            panel.updateMcpSettings(false, 23968, "configured-token");
+            assertTrue(panel.isRestartRequired());
+            assertTrue(restart.isEnabled());
+
+            panel.updateMcpSettings(false, 23968, "");
+            assertFalse(panel.isRestartRequired());
+            assertFalse(restart.isEnabled());
+
+            panel.updateMcpSettings(true, 23968);
+            assertTrue(panel.isRestartRequired());
+            assertTrue(restart.isEnabled());
+
+            panel.updateMcpSettings(false, 23968);
+            assertFalse(restart.isEnabled());
+
+            panel.updateMcpSettings(false, 24000);
+            assertTrue(restart.isEnabled());
+            panel.close();
+        });
+    }
+
     /// A failed injected command restores the restart action and never invokes a real process launcher.
     @Test
     public void exposesProgressAndAllowsRetryAfterFailure() {

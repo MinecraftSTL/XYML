@@ -1,13 +1,13 @@
-<!-- #BEGIN BLOCK -->
+<!-- #BEGIN COPY -->
 <!-- #PROPERTY NAME=TITLE -->
 <div align="center">
     <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="XYML Logo" width="64"/>
 </div>
 
 <h1 align="center">xOyz Minecraft Launcher</h1>
-<!-- #END BLOCK -->
+<!-- #END COPY -->
 
-<!-- #BEGIN BLOCK -->
+<!-- #BEGIN COPY -->
 <!-- #PROPERTY NAME=BADGES -->
 <div align="center">
 
@@ -18,82 +18,60 @@
 
 
 </div>
-<!-- #END BLOCK -->
+<!-- #END COPY -->
 
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** (**简体**, [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
-## Introduction
+## 简介
 
-XYML (xOyz Minecraft Launcher) is an open-source, cross-platform Minecraft launcher independently maintained by the
-MinecraftSTL community. Its current desktop interface is built with Swing and provides complete workflows for
-installing and launching the game, maintaining instances, and managing modpacks.
+XYML（xOyz Minecraft Launcher）是由 MinecraftSTL 社区独立维护的开源、跨平台 Minecraft 启动器。当前桌面界面基于 Swing，围绕游戏安装与启动、实例维护和整合包管理提供完整工作流。
 
-Its main features include:
+XYML 的主要功能包括：
 
-- Installing and managing Minecraft together with loaders such as Forge, NeoForge, Cleanroom, Fabric, Legacy Fabric,
-  Quilt, LiteLoader, and OptiFine;
-- Managing accounts, game instances, Java runtimes, and game settings;
-- Managing mods, resource packs, worlds, and modpacks, including modpack installation, updates, creation, and export;
-- Customizing launcher themes, backgrounds, and appearance.
+- 安装与管理 Minecraft，以及 Forge、NeoForge、Cleanroom、Fabric、Legacy Fabric、Quilt、LiteLoader 和 OptiFine 等加载器；
+- 管理账户、游戏实例、Java 与游戏设置；
+- 管理模组、资源包、存档和整合包，并支持整合包的安装、更新、创建与导出；
+- 自定义启动器主题、背景和界面外观。
 
-XYML supports multiple operating systems and CPU architectures. See the [platform support table](PLATFORM.md) for exact
-support levels and limitations. The launcher requires Java 17 or later, and Java 21 is recommended.
+XYML 支持多种操作系统与 CPU 架构，具体支持程度及限制请参阅[平台支持状态](PLATFORM.md)。启动器主体需要 Java 17 或更高版本，推荐使用 Java 21。
 
-## Relationship with HMCL
+## 与 HMCL 的关系
 
-XYML originates from the code and Git history of
-[HMCL (Hello Minecraft! Launcher)](https://github.com/HMCL-dev/HMCL), which is this project's upstream repository.
-HMCL's maintainers and community contributors established the foundations that XYML inherits, including game
-launching and downloads, instance and account management, modpacks, localization, and cross-platform support. This
-repository preserves those historical commits, authorship, and copyright notices with gratitude.
+XYML 源自 [HMCL（Hello Minecraft! Launcher）](https://github.com/HMCL-dev/HMCL)的代码与 Git 历史，HMCL 是本项目的上游仓库。HMCL 的维护者和社区贡献者奠定了 XYML 所继承的启动、下载、实例与账户管理、整合包、国际化和跨平台支持等基础；本仓库继续保留这些历史提交、作者信息和版权声明，并对此表示感谢。
 
-XYML is a downstream project independently maintained by MinecraftSTL and is not an official HMCL release. XYML
-manages its own versions, release channels, artifacts, and issue tracking; the release status of HMCL and XYML does not
-represent the other project. This repository retains `HMCL-dev/HMCL` as its upstream source so that suitable upstream
-changes can be tracked and evaluated for XYML.
+XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发行版。XYML 的版本号、发布渠道、构建产物和问题反馈均由本仓库独立管理；上游 HMCL 的发布状态与 XYML 不互相代表。仓库保留 `HMCL-dev/HMCL` 作为上游来源，以便追踪和评估适合 XYML 的上游变更。
 
-The source tree also maintains four XYML-branded forks in [`libraries/`](../libraries/README.md). They are built with
-XYML while remaining independent Java archives or native executables. Upstream project names are retained only where
-license notices, provenance records, or compatible remote runtime coordinates require them.
+本仓库还在 [`libraries/`](../libraries/README.md) 中维护四个采用 XYML 品牌的源码分叉。它们会与 XYML 一起构建，同时继续以独立 Java 归档或原生可执行文件的形式使用。只有许可证声明、溯源记录和必须兼容的远程运行时坐标会保留上游项目名称。
 
-## Downloads and Releases
+## 下载与发布
 
-Download XYML Stable builds from [Github Release](https://github.com/MinecraftSTL/XYML/releases). The official website
-publishes Stable and Beta builds. XYML uses four release channels: stable, beta, alpha, and dev. Their version formats,
-test audiences, feedback policies, and promotion order are documented in the [release model](ReleaseSchedule.md).
+请从 [Github Release](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 稳定版；官网发布稳定版和公测版。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](ReleaseSchedule.md)。
 
-## Contributing
+## 参与贡献
 
-You can participate in XYML through the following channels:
+欢迎通过以下方式参与 XYML：
 
-- Report problems or propose features through [GitHub Issues](https://github.com/MinecraftSTL/XYML/issues/new/choose);
-- Fork this repository and [submit a pull request](https://github.com/MinecraftSTL/XYML/compare);
-- Follow the [contributing guide](Contributing.md) to build, run, and debug XYML from source.
+- 在 [GitHub Issues](https://github.com/MinecraftSTL/XYML/issues/new/choose) 报告问题或提出功能建议；
+- Fork 本仓库并[提交 Pull Request](https://github.com/MinecraftSTL/XYML/compare)；
+- 按照[贡献指南](Contributing.md)从源码构建、运行和调试 XYML。
 
-## Contributors and Acknowledgments
+## 贡献者与致谢
 
-Thank you to everyone who contributes code, translations, testing, issue reports, and documentation to XYML.
+感谢所有通过代码、翻译、测试、问题反馈和文档参与 XYML 的贡献者。
 
 [![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
-We also thank
-[HMCL's authors and contributors throughout its history](https://github.com/HMCL-dev/HMCL/graphs/contributors). The
-long-running development inherited by XYML belongs to that upstream history and should not be represented as work
-produced solely by the XYML project.
+同时感谢 [HMCL 的作者与历代贡献者](https://github.com/HMCL-dev/HMCL/graphs/contributors)。XYML 所继承的长期开发成果属于这段上游历史，不应被误写为仅由 XYML 项目产生。
 
-## License
+## 开源协议
 
-XYML is distributed under the [GNU General Public License, version 3 or later](../LICENSE), with the GPLv3 Section 7
-additional requirements inherited from HMCL:
+XYML 按照 [GNU 通用公共许可证第 3 版或更高版本](../LICENSE)发布，并保留源自 HMCL 的 GPLv3 第 7 条附加要求：
 
-1. When distributing a modified version of this program, you must reasonably change its name or version number so that
-   it can be distinguished from the original version (under
-   [GPLv3 Section 7(c)](../LICENSE#L372-L374)). The program name and version are defined in
-   [`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java).
-2. You must not remove copyright notices displayed by the program (under [GPLv3 Section 7(b)](../LICENSE#L368-L370)).
+1. 分发本程序的修改版本时，必须以合理方式修改程序名称或版本号，使其能够与原始版本区分（依据 [GPLv3 第 7(c) 项](../LICENSE#L372-L374)）。程序名称和版本号定义在 [`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java) 中。
+2. 不得移除程序显示的版权声明（依据 [GPLv3 第 7(b) 项](../LICENSE#L368-L370)）。
 
-The complete licensing terms are provided in [LICENSE](../LICENSE) and in the copyright and license notices of individual source files.
+完整授权条件以 [LICENSE](../LICENSE) 及各源文件中的版权和许可证声明为准。

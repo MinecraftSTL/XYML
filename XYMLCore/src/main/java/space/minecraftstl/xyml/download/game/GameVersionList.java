@@ -89,7 +89,7 @@ public final class GameVersionList extends VersionList<GameRemoteVersion> {
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
     @Override

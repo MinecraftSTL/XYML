@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.util.Log4jLevel;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
@@ -115,7 +116,7 @@ final class SwingGameLogPanel extends JPanel {
     private final DefaultListModel<Log> visibleModel = new DefaultListModel<>();
 
     /// Selectable log view supporting multi-row clipboard copy.
-    private final JList<Log> logList = new JList<>(visibleModel);
+    private final JList<Log> logList = new RowBoundsCheckedList<>(visibleModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Automatic tail-following toggle.
     private final JCheckBox autoScroll = new JCheckBox(i18n("logwindow.autoscroll"), true);

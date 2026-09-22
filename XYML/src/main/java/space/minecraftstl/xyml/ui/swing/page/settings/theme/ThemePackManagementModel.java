@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.settings.theme;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -258,6 +259,18 @@ public final class ThemePackManagementModel
     /// @param item selected installed item
     /// @return eventual current snapshot with the package removed or a visible failure state
     public CompletionStage<ThemePackManagementSnapshot> delete(ThemePackItem item) {
+        return delete(item, DeletionMode.PERMANENT);
+    }
+
+    /// Deletes the exact installed package using the selected deletion mode.
+    ///
+    /// @param item selected installed item
+    /// @param mode selected deletion behavior
+    /// @return eventual current snapshot with the package removed or a visible failure state
+    public CompletionStage<ThemePackManagementSnapshot> delete(
+            ThemePackItem item,
+            DeletionMode mode) {
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         ThemePackItem current;
         synchronized (stateLock) {
             current = Objects.requireNonNull(findCurrentItem(item), "Theme item is no longer available");
@@ -270,7 +283,7 @@ public final class ThemePackManagementModel
         CompletionStage<@Nullable Void> stage;
         try {
             stage = Objects.requireNonNull(
-                    backend.deleteInstalled(current, executor),
+                    backend.deleteInstalled(current, requestedMode, executor),
                     "backend returned null delete stage");
         } catch (RuntimeException failure) {
             completeDelete(generation, current.reference().packId(), failure, completion);

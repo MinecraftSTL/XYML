@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
+import org.glavo.url.WebURL;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -147,7 +148,7 @@ final class AccountAvatarIconCache {
     /// @throws IOException when the response is unavailable, oversized, or undecodable
     private static BufferedImage loadRemoteTexture(AccountAvatarSource.RemoteSource source) throws IOException {
         HttpURLConnection connection = NetworkUtils.resolveConnection(
-                NetworkUtils.createHttpConnection(source.uri()));
+                NetworkUtils.createHttpConnection(WebURL.of(source.uri())));
         try {
             long contentLength = connection.getContentLengthLong();
             if (contentLength > MAX_REMOTE_TEXTURE_BYTES) {

@@ -16,6 +16,7 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.EOFException;
@@ -23,6 +24,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
 
+/// Reader constrained to one encoded payload boundary.
+@NotNullByDefault
 public abstract non-sealed class BoundedDataReader extends DataReader {
     private final RawDataReader rawReader;
     private final InputBuffer buffer;
@@ -31,7 +34,15 @@ public abstract non-sealed class BoundedDataReader extends DataReader {
     public BoundedDataReader(RawDataReader rawReader, InputBuffer buffer, long limit) {
         this.rawReader = rawReader;
         this.buffer = buffer;
-        this.endPosition = limit >= 0 ? rawReader.position() + limit : -1L;
+        if (limit < 0) {
+            this.endPosition = -1L;
+        } else {
+            try {
+                this.endPosition = Math.addExact(rawReader.position(), limit);
+            } catch (ArithmeticException exception) {
+                throw new IllegalArgumentException("Bounded reader position overflows", exception);
+            }
+        }
     }
 
     @Override
@@ -56,7 +67,22 @@ public abstract non-sealed class BoundedDataReader extends DataReader {
                 throw new IOException("Limit exceeded");
             }
 
-            getRawReader().skip(endPosition - currentPosition);
+            try {
+                getRawReader().skip(Math.subtractExact(endPosition, currentPosition));
+            } catch (ArithmeticException overflow) {
+                throw new IOException("Bounded reader position overflows", overflow);
+            }
+        }
+    }
+
+    /// Requires the bounded payload to have been consumed exactly.
+    public final void requireFullyConsumed() throws IOException {
+        if (endPosition >= 0) {
+            long currentPosition = rawReader.position();
+            if (currentPosition != endPosition) {
+                throw new IOException("Trailing or truncated bounded payload: expected position "
+                        + endPosition + ", got " + currentPosition);
+            }
         }
     }
 
@@ -84,7 +110,7 @@ public abstract non-sealed class BoundedDataReader extends DataReader {
                     return 0;
                 }
 
-                long rawRemaining = endPosition >= 0 ? endPosition - rawReader.position() : Long.MAX_VALUE;
+                long rawRemaining = remainingRawBytes();
                 if (rawRemaining <= 0) {
                     return -1;
                 }
@@ -103,5 +129,33 @@ public abstract non-sealed class BoundedDataReader extends DataReader {
             }
 
         };
+    }
+
+    /// Returns the number of decoded bytes consumed by this bounded reader when available.
+    ///
+    /// Concrete decompression readers count bytes emitted by their decoder; the raw reader uses
+    /// the number of bytes consumed from its bounded source. A negative value means that the
+    /// reader does not expose a decoded-byte counter.
+    long decodedBytes() {
+        return -1L;
+    }
+
+    /// Returns the number of raw bytes remaining in the bounded source.
+    ///
+    /// @return remaining bytes, or {@link Long#MAX_VALUE} for an unbounded source
+    /// @throws IOException if the source position has passed the bound or arithmetic overflows
+    protected final long remainingRawBytes() throws IOException {
+        if (endPosition < 0) {
+            return Long.MAX_VALUE;
+        }
+        long currentPosition = rawReader.position();
+        if (currentPosition > endPosition) {
+            throw new IOException("Bounded reader position exceeds its limit");
+        }
+        try {
+            return Math.subtractExact(endPosition, currentPosition);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("Bounded reader position overflows", overflow);
+        }
     }
 }

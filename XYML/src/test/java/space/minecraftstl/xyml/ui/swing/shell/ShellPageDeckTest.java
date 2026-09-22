@@ -24,7 +24,10 @@ import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 
 import javax.swing.JPanel;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,6 +39,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies stable page ownership and cached-frame transitions in both top-level navigation directions.
 @NotNullByDefault
 public final class ShellPageDeckTest {
+    /// A page mounted before shell allocation receives one complete nested layout on the first real size.
+    @Test
+    public void laysOutLateAllocatedPageBeforeFirstPaint() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.OFF, 10_000);
+
+        EdtDispatcher.executeAndWait(() -> {
+            ShellPageDeck deck = new ShellPageDeck(animator, Duration.ZERO);
+            AtomicInteger pageLayouts = new AtomicInteger();
+            AtomicInteger childLayouts = new AtomicInteger();
+            LayoutTrackingPanel page = new LayoutTrackingPanel(pageLayouts);
+            LayoutTrackingPanel child = new LayoutTrackingPanel(childLayouts);
+            page.add(child, BorderLayout.CENTER);
+
+            deck.showPage(page, false);
+            assertEquals(new Dimension(0, 0), page.getSize());
+
+            deck.setSize(640, 480);
+            deck.doLayout();
+
+            assertAll(
+                    () -> assertEquals(new Dimension(640, 480), page.getSize()),
+                    () -> assertEquals(page.getSize(), child.getSize()),
+                    () -> assertTrue(pageLayouts.get() > 0),
+                    () -> assertTrue(childLayouts.get() > 0));
+        });
+    }
+
     /// A transition retains one live page and can animate back after releasing its cached outgoing frame.
     @Test
     public void compositesOutgoingFrameWithoutRetainingItsComponent() {
@@ -83,5 +113,27 @@ public final class ShellPageDeckTest {
                     () -> assertFalse(second.isVisible()),
                     () -> assertFalse(deck.isTransitionRunning()));
         });
+    }
+
+    /// Panel recording every direct layout while preserving ordinary BorderLayout behavior.
+    @NotNullByDefault
+    private static final class LayoutTrackingPanel extends JPanel {
+        /// Layout invocation counter owned by the test.
+        private final AtomicInteger layoutCalls;
+
+        /// Creates one transparent tracking panel.
+        ///
+        /// @param layoutCalls layout invocation counter
+        private LayoutTrackingPanel(AtomicInteger layoutCalls) {
+            super(new BorderLayout());
+            this.layoutCalls = layoutCalls;
+        }
+
+        /// Records one layout and delegates child allocation to BorderLayout.
+        @Override
+        public void doLayout() {
+            layoutCalls.incrementAndGet();
+            super.doLayout();
+        }
     }
 }

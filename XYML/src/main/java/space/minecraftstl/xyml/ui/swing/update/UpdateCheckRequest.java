@@ -27,9 +27,8 @@ import java.util.Objects;
 /// Equal requests share one in-flight operation in [SwingUpdateCheckService].
 ///
 /// @param channel release channel to query
-/// @param preview whether preview releases are accepted
 @NotNullByDefault
-public record UpdateCheckRequest(UpdateChannel channel, boolean preview) {
+public record UpdateCheckRequest(UpdateChannel channel) {
     /// Validates one immutable update request.
     public UpdateCheckRequest {
         Objects.requireNonNull(channel, "channel");

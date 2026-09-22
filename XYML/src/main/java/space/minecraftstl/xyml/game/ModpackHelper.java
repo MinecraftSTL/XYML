@@ -36,8 +36,10 @@ import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.GameDirectory;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.function.ExceptionalConsumer;
@@ -60,13 +62,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Utilities for reading, installing, and applying modpack-specific game settings.
 @NotNullByDefault
 public final class ModpackHelper {
+    /// File storing instance-specific launcher settings under the XYML instance configuration directory.
+    private static final String INSTANCE_GAME_SETTINGS_FILENAME = "instance-game-settings.json";
+
     /// Prevents instantiation of this utility class.
     private ModpackHelper() {
     }
@@ -221,8 +228,8 @@ public final class ModpackHelper {
             }
         };
 
-        return new ServerModpackRemoteInstallTask(repository.getDependency(), manifest, instanceId)
-                .whenComplete(Schedulers.defaultScheduler(), success, failure)
+        Task<?> installation = new ServerModpackRemoteInstallTask(repository.getDependency(), manifest, instanceId);
+        return finalizeInstallation(repository, instanceId, installation, success, failure)
                 .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
     }
 
@@ -247,14 +254,30 @@ public final class ModpackHelper {
         }
 
         return new ManuallyCreatedModpackInstallTask(zipFile, charset, name)
-                .thenAcceptAsync(Schedulers.ui(), location -> {
-                    GameDirectory newGameDirectory = new GameDirectory(
-                            GameDirectoryManager.newGameDirectoryId(),
-                            LocalizedText.plain(name),
-                            PortablePath.fromPath(location));
-                    GameDirectoryManager.addLocalGameDirectory(newGameDirectory);
-                    GameDirectoryManager.setSelectedGameDirectory(newGameDirectory);
-                });
+                .thenComposeAsync(Schedulers.ui(), location -> createManualPostInstallTask(
+                        Objects.requireNonNull(location, "manual installation location"),
+                        name))
+                .asOrchestration();
+    }
+
+    /// Creates the short settings-publication phase after a manual archive has finished extracting.
+    ///
+    /// @param location extracted external game directory
+    /// @param name display name registered for the directory
+    /// @return UI task owning the destination and both affected launcher configuration files
+    private static Task<?> createManualPostInstallTask(Path location, String name) {
+        Path destination = location.toAbsolutePath().normalize();
+        return Task.runAsync(Schedulers.ui(), () -> {
+            GameDirectory newGameDirectory = new GameDirectory(
+                    GameDirectoryManager.newGameDirectoryId(),
+                    LocalizedText.plain(name),
+                    PortablePath.fromPath(location));
+            GameDirectoryManager.addLocalGameDirectory(newGameDirectory);
+            GameDirectoryManager.setSelectedGameDirectory(newGameDirectory);
+        }).setResources(
+                TaskResource.gameDirectory(destination),
+                TaskResource.configuration(SettingsManager.gameDirectoriesLocation()),
+                TaskResource.configuration(SettingsManager.settingsLocation()));
     }
 
     /// Creates a task that installs an archive modpack and applies provider-specific settings.
@@ -271,6 +294,25 @@ public final class ModpackHelper {
             GameInstanceID instanceId,
             Modpack modpack,
             String iconUrl) {
+        return getInstallTask(repository, zipFile, instanceId, modpack, iconUrl, null);
+    }
+
+    /// Creates an archive installation task with selected optional files excluded.
+    ///
+    /// @param repository destination game repository
+    /// @param zipFile archive path
+    /// @param instanceId destination instance identifier
+    /// @param modpack parsed modpack
+    /// @param iconUrl instance icon URL
+    /// @param excludedFiles optional file keys to skip
+    /// @return configured installation task
+    public static Task<?> getInstallTask(
+            XYMLGameRepository repository,
+            Path zipFile,
+            GameInstanceID instanceId,
+            Modpack modpack,
+            String iconUrl,
+            @Nullable Set<String> excludedFiles) {
         repository.markInstanceAsModpack(instanceId);
 
         ExceptionalRunnable<?> success = () -> {
@@ -289,20 +331,60 @@ public final class ModpackHelper {
             }
         };
 
+        Task<?> installation = finalizeInstallation(
+                repository,
+                instanceId,
+                modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl, excludedFiles),
+                success,
+                failure);
         if (modpack.getManifest() instanceof MultiMCInstanceConfiguration)
-            return modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl)
-                    .whenComplete(Schedulers.defaultScheduler(), success, failure)
+            return installation
                     .thenComposeAsync(createMultiMCPostInstallTask(repository, (MultiMCInstanceConfiguration) modpack.getManifest(), instanceId))
                     .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
         else if (modpack.getManifest() instanceof McbbsModpackManifest)
-            return modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl)
-                    .whenComplete(Schedulers.defaultScheduler(), success, failure)
+            return installation
                     .thenComposeAsync(createMcbbsPostInstallTask(repository, (McbbsModpackManifest) modpack.getManifest(), instanceId))
                     .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
         else
-            return modpack.getInstallTask(repository.getDependency(), zipFile, instanceId, iconUrl)
-                    .whenComplete(Schedulers.defaultScheduler(), success, failure)
+            return installation
                     .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
+    }
+
+    /// Adds a repository-wide terminal refresh after one precise instance installation hands off its resources.
+    ///
+    /// The installation body retains its own operation, instance, run-directory, and archive resources. The returned
+    /// orchestration node releases before starting that body, then runs the terminal callback under a short repository
+    /// boundary. This allows different instances to install concurrently without refreshing a partially written
+    /// catalog.
+    ///
+    /// @param repository destination game repository
+    /// @param instanceId destination instance identifier
+    /// @param installation precise installation task
+    /// @param success callback invoked after successful installation
+    /// @param failure callback invoked after failed installation or a failed success callback
+    /// @return orchestration task coordinating the installation and resource-aware terminal callback
+    private static Task<@Nullable Void> finalizeInstallation(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            Task<?> installation,
+            ExceptionalRunnable<?> success,
+            ExceptionalConsumer<Exception, ?> failure) {
+        return installation.whenCompleteWithResources(Schedulers.defaultScheduler(), exception -> {
+            if (exception == null) {
+                try {
+                    success.run();
+                } catch (Exception successFailure) {
+                    LOG.warning("Failed to execute " + success, successFailure);
+                    failure.accept(successFailure);
+                }
+            } else {
+                failure.accept(exception);
+            }
+        },
+                TaskResource.gameDirectory(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(instanceGameSettingsFile(repository, instanceId)))
+                .asOrchestration();
     }
 
     /// Creates a task that updates an installed remote server modpack.
@@ -357,11 +439,14 @@ public final class ModpackHelper {
             throw new UnsupportedModpackException();
         }
         if (modpack.getManifest() instanceof MultiMCInstanceConfiguration)
-            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack)
-                    .thenComposeAsync(() -> createMultiMCPostUpdateTask(repository, (MultiMCInstanceConfiguration) modpack.getManifest(), instanceId))
+            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack, null)
+                    .thenComposeAsync(createMultiMCPostUpdateTask(
+                            repository,
+                            (MultiMCInstanceConfiguration) modpack.getManifest(),
+                            instanceId))
                     .thenComposeAsync(repository.refreshAsync());
         else
-            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack)
+            return provider.createUpdateTask(repository.getDependency(), instanceId, zipFile, modpack, null)
                     .thenComposeAsync(repository.refreshAsync());
     }
 
@@ -456,9 +541,12 @@ public final class ModpackHelper {
             MultiMCInstanceConfiguration manifest,
             GameInstanceID instanceId) {
         return Task.runAsync(Schedulers.ui(), () -> {
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instanceId));
+            GameSettings.Instance setting = Objects.requireNonNull(
+                    repository.getInstanceGameSettingsOrCreate(instanceId));
             ModpackHelper.applyCommandAndJvmSettings(manifest, setting);
-        });
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(instanceGameSettingsFile(repository, instanceId)));
     }
 
     /// Creates the post-install task that imports all supported MultiMC settings.
@@ -472,9 +560,12 @@ public final class ModpackHelper {
             MultiMCInstanceConfiguration manifest,
             GameInstanceID instanceId) {
         return Task.runAsync(Schedulers.ui(), () -> {
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instanceId));
+            GameSettings.Instance setting = Objects.requireNonNull(
+                    repository.getInstanceGameSettingsOrCreate(instanceId));
             ModpackHelper.toGameSettings(manifest, setting);
-        });
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(instanceGameSettingsFile(repository, instanceId)));
     }
 
     /// Creates the post-install task that enforces an MCBBS manifest's minimum memory.
@@ -490,7 +581,8 @@ public final class ModpackHelper {
         return Task.runAsync(Schedulers.ui(), () -> {
             GameSettings.Effective effective = repository.getEffectiveGameSettings(instanceId);
             if (manifest.getLaunchInfo().getMinMemory() > effective.getMaxMemory()) {
-                GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instanceId));
+                GameSettings.Instance setting = Objects.requireNonNull(
+                        repository.getInstanceGameSettingsOrCreate(instanceId));
                 setting.getOverrideProperties().addAll(List.of(
                         GameSettings.PROPERTY_AUTO_MEMORY,
                         GameSettings.PROPERTY_MIN_MEMORY,
@@ -502,6 +594,17 @@ public final class ModpackHelper {
                 setting.maxMemoryProperty().setValue(manifest.getLaunchInfo().getMinMemory());
                 setting.permSizeProperty().setValue(effective.getInheritable(GameSettings::permSizeProperty));
             }
-        });
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(instanceGameSettingsFile(repository, instanceId)));
+    }
+
+    /// Returns the exact instance settings file updated by post-install and post-update callbacks.
+    ///
+    /// @param repository repository owning the instance settings
+    /// @param instanceId instance whose settings are updated
+    /// @return instance-specific launcher settings path
+    private static Path instanceGameSettingsFile(XYMLGameRepository repository, GameInstanceID instanceId) {
+        return repository.getInstanceConfigDirectory(instanceId).resolve(INSTANCE_GAME_SETTINGS_FILENAME);
     }
 }

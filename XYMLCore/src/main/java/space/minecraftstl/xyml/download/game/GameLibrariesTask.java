@@ -17,6 +17,9 @@
  */
 package space.minecraftstl.xyml.download.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
@@ -26,16 +29,15 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
-import org.jetbrains.annotations.Nullable;
-
+import org.jetbrains.annotations.Unmodifiable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,12 +48,10 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * This task is to download game libraries.
- * This task should be executed last(especially after game downloading, Forge, LiteLoader and OptiFine install task).
- *
- * @author huangyuhui
- */
+/// Downloads and repairs libraries in the shared game repository.
+///
+/// This task should execute after base-game and loader installation because those stages can add library metadata.
+@NotNullByDefault
 public final class GameLibrariesTask extends Task<Void> {
 
     private final AbstractDependencyManager dependencyManager;
@@ -60,23 +60,29 @@ public final class GameLibrariesTask extends Task<Void> {
     private final List<Library> libraries;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager that can provides {@link GameRepository}
-     * @param manifest           the game version
-     */
-    public GameLibrariesTask(AbstractDependencyManager dependencyManager, GameInstanceManifest manifest, boolean integrityCheck) {
+    /// Creates a library task from all libraries resolved from the supplied manifest.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest game instance manifest
+    /// @param integrityCheck whether existing libraries must be checksummed
+    public GameLibrariesTask(
+            AbstractDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            boolean integrityCheck) {
         this(dependencyManager, manifest, integrityCheck, manifest.resolve(dependencyManager.getGameRepository()).getLibraries());
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager that can provides {@link GameRepository}
-     * @param manifest           the game version
-     */
-    public GameLibrariesTask(AbstractDependencyManager dependencyManager, GameInstanceManifest manifest, boolean integrityCheck, List<Library> libraries) {
+    /// Creates a game-directory-scoped library task from an explicit library snapshot.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest game instance manifest
+    /// @param integrityCheck whether existing libraries must be checksummed
+    /// @param libraries libraries to inspect and install
+    public GameLibrariesTask(
+            AbstractDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            boolean integrityCheck,
+            List<Library> libraries) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.integrityCheck = integrityCheck;
@@ -84,6 +90,19 @@ public final class GameLibrariesTask extends Task<Void> {
 
         setStage("xyml.install.libraries");
         setSignificance(TaskSignificance.MODERATE);
+        GameRepository gameRepository = dependencyManager.getGameRepository();
+        TaskResource librariesResource = TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest));
+        if (gameRepository instanceof DefaultGameRepository defaultGameRepository) {
+            // Forge 1.5.2 publishes a second set of dependencies below <base>/lib rather than <base>/libraries.
+            setResources(
+                    librariesResource,
+                    TaskResource.gameDirectory(defaultGameRepository.getBaseDirectory().resolve("lib")));
+        } else {
+            setResources(librariesResource);
+        }
+        // The broad shared-directory lease protects parsing and the direct OptiFine/bootstrap/FML writes only. Each
+        // generated download task owns its exact target after this handoff.
+        releaseResourcesBeforeDependencies();
     }
 
     @Override
@@ -156,9 +175,9 @@ public final class GameLibrariesTask extends Task<Void> {
                     for (FMLLib fmlLib : fmlLibs) {
                         Path file = libDir.resolve(fmlLib.name);
                         if (shouldDownloadFMLLib(fmlLib, file)) {
-                            List<URI> uris = dependencyManager.getDownloadProvider()
+                            @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider()
                                     .injectURLWithCandidates(fmlLib.downloadUrl());
-                            dependencies.add(new FileDownloadTask(uris, file)
+                            dependencies.add(new FileDownloadTask(urls, file)
                                     .withCounter("xyml.install.libraries"));
                         }
                     }

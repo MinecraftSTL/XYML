@@ -32,7 +32,7 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
-import java.net.URI;
+import org.glavo.url.WebURL;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -852,18 +852,18 @@ final class DownloadProviderGameVersionCatalogSourceTest {
 
         /// Returns no network manifest locations because tests never execute the core task.
         ///
-        /// @return empty URI list
+        /// @return empty URL list
         @Override
-        public @Unmodifiable List<URI> getVersionListURLs() {
+        public @Unmodifiable List<WebURL> getVersionListURLs() {
             return List.of();
         }
 
         /// Returns no asset candidates because catalog tests do not download assets.
         ///
         /// @param assetObjectLocation ignored asset location
-        /// @return empty URI list
+        /// @return empty URL list
         @Override
-        public @Unmodifiable List<URI> getAssetObjectCandidates(String assetObjectLocation) {
+        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
             return List.of();
         }
 

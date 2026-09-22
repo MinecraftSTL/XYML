@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.launch.LaunchInteraction;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
@@ -50,6 +51,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -101,7 +103,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 request,
                 this::registerVisibility,
                 launchInteraction,
-                accountReauthentication);
+                accountReauthentication,
+                this.visibilityActions.openMissingDependencySearch());
         this.launchScriptTaskBuilder = (request, scriptFile) -> createProductionLaunchScriptTask(
                 request,
                 scriptFile,
@@ -229,28 +232,41 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// @param visibilityRegistrar factory-owned policy registrar
     /// @param launchInteraction native production launch-decision boundary
     /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @param openMissingModSearch application action opening the Mods search page
     /// @return unstarted real game-launch task
     private static Task<ManagedProcess> createProductionTask(
             LaunchRequest request,
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
-            AccountReauthentication accountReauthentication) {
+            AccountReauthentication accountReauthentication,
+            MissingDependencySearchAction openMissingModSearch) {
         LauncherStateDispatcher.requireEventThread();
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(visibilityRegistrar, "visibilityRegistrar");
         Objects.requireNonNull(launchInteraction, "launchInteraction");
         Objects.requireNonNull(accountReauthentication, "accountReauthentication");
+        Objects.requireNonNull(openMissingModSearch, "openMissingModSearch");
 
         GameDirectoryID gameDirectoryId = GameDirectoryID.parse(request.gameDirectoryId());
         XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+        Path repositoryDirectory = normalized(repository.getBaseDirectory());
+        Path instanceDirectory = normalized(repository.getInstanceRoot(request.instanceId()));
+        Path librariesDirectory = repositoryDirectory.resolve("libraries");
         return afterRepositoryReady(
                 repository.isLoaded(),
                 repository::refreshAsync,
-                () -> createLoadedProductionTask(
-                        request,
-                        visibilityRegistrar,
-                        launchInteraction,
-                        accountReauthentication),
+                () -> deferLoadedTask(
+                        repositoryDirectory,
+                        instanceDirectory,
+                        librariesDirectory,
+                        () -> createLoadedProductionTask(
+                                repository,
+                                repositoryDirectory,
+                                request,
+                                visibilityRegistrar,
+                                launchInteraction,
+                                accountReauthentication,
+                                openMissingModSearch)),
                 Schedulers.io());
     }
 
@@ -277,14 +293,23 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
 
         GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
         XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+        Path repositoryDirectory = normalized(repository.getBaseDirectory());
+        Path instanceDirectory = normalized(repository.getInstanceRoot(capturedRequest.instanceId()));
+        Path librariesDirectory = repositoryDirectory.resolve("libraries");
         return afterRepositoryReady(
                 repository.isLoaded(),
                 repository::refreshAsync,
-                () -> createLoadedProductionLaunchScriptTask(
-                        capturedRequest,
-                        destination,
-                        launchInteraction,
-                        accountReauthentication),
+                () -> deferLoadedTask(
+                        repositoryDirectory,
+                        instanceDirectory,
+                        librariesDirectory,
+                        () -> createLoadedProductionLaunchScriptTask(
+                                repository,
+                                repositoryDirectory,
+                                capturedRequest,
+                                destination,
+                                launchInteraction,
+                                accountReauthentication)),
                 Schedulers.io());
     }
 
@@ -294,16 +319,22 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// thread-confined during this migration stage. The directory and instance are resolved again only
     /// from the immutable request; no current UI selection is consulted.
     ///
+    /// @param expectedRepository exact repository used to declare the construction resources
+    /// @param expectedRepositoryDirectory normalized repository root captured with those resources
     /// @param request exact captured launch request
     /// @param visibilityRegistrar factory-owned policy registrar
     /// @param launchInteraction native production launch-decision boundary
     /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @param openMissingModSearch application action opening the Mods search page
     /// @return unstarted real game-launch task
     private static Task<ManagedProcess> createLoadedProductionTask(
+            XYMLGameRepository expectedRepository,
+            Path expectedRepositoryDirectory,
             LaunchRequest request,
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
-            AccountReauthentication accountReauthentication) {
+            AccountReauthentication accountReauthentication,
+            MissingDependencySearchAction openMissingModSearch) {
         AtomicReference<@Nullable Task<ManagedProcess>> result = new AtomicReference<>();
         LauncherStateDispatcher.executeAndWait(() -> {
             AccountID accountId = AccountID.parse(request.accountId());
@@ -313,6 +344,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(request.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+            requireRepositorySnapshot(expectedRepository, expectedRepositoryDirectory, repository);
             GameInstanceID instanceId = request.instanceId();
             if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
@@ -325,7 +357,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     account,
                     instanceId,
                     launchInteraction,
-                    accountReauthentication);
+                    accountReauthentication,
+                    openMissingModSearch);
             configureLaunchModes(request, helper::setQuickPlayOption, helper::setTestMode);
             LauncherVisibility originalVisibility = helper.getLauncherVisibility();
             Task<ManagedProcess> processTask = helper.createLaunchTask();
@@ -334,9 +367,10 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 visibilityRegistrar.accept(
                         process,
                         originalVisibility,
-                        helper.processLifecycleCompletion());
+                        helper.processLifecycleCompletion(),
+                        helper::missingModSearchOpened);
                 return process;
-            }));
+            }).asOrchestration());
         });
         return Objects.requireNonNull(result.get(), "launcher dispatcher did not build launch task");
     }
@@ -346,12 +380,16 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// Re-resolution deliberately uses only the immutable request. It never reads an active Swing selection, so a
     /// later account or instance change cannot alter the script that the user explicitly requested.
     ///
+    /// @param expectedRepository exact repository used to declare the construction resources
+    /// @param expectedRepositoryDirectory normalized repository root captured with those resources
     /// @param request exact captured launch request
     /// @param scriptFile normalized local script target
     /// @param launchInteraction native production launch-decision boundary
     /// @param accountReauthentication stable-ID credential recovery boundary
     /// @return unstarted launcher task writing the selected script
     private static Task<Path> createLoadedProductionLaunchScriptTask(
+            XYMLGameRepository expectedRepository,
+            Path expectedRepositoryDirectory,
             LaunchRequest request,
             Path scriptFile,
             LaunchInteraction launchInteraction,
@@ -367,6 +405,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+            requireRepositorySnapshot(expectedRepository, expectedRepositoryDirectory, repository);
             GameInstanceID instanceId = capturedRequest.instanceId();
             if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
@@ -433,7 +472,11 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     void registerVisibility(
             ManagedProcess process,
             LauncherVisibility visibility) {
-        registerVisibility(process, visibility, CompletableFuture.completedFuture(null));
+        registerVisibility(
+                process,
+                visibility,
+                CompletableFuture.completedFuture(null),
+                () -> false);
     }
 
     /// Registers one original policy and its full process-listener completion signal.
@@ -441,19 +484,23 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// @param process created managed process
     /// @param visibility original effective launcher visibility
     /// @param processLifecycleCompletion completion after log and crash bookkeeping
+    /// @param missingModSearchOpened reports whether automatic missing-mod search opened the launcher
     private void registerVisibility(
             ManagedProcess process,
             LauncherVisibility visibility,
-            CompletionStage<@Nullable Void> processLifecycleCompletion) {
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         Objects.requireNonNull(process, "process");
         Objects.requireNonNull(visibility, "visibility");
         Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+        Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         if (closed.get()) {
             return;
         }
         RegisteredVisibility registration = new RegisteredVisibility(
                 visibility,
-                processLifecycleCompletion);
+                processLifecycleCompletion,
+                missingModSearchOpened);
         pendingVisibilities.put(process, registration);
         if (closed.get()) {
             pendingVisibilities.remove(process, registration);
@@ -472,7 +519,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                         process,
                         registration.visibility(),
                         visibilityActions,
-                        registration.processLifecycleCompletion());
+                        registration.processLifecycleCompletion(),
+                        registration.missingModSearchOpened());
             } catch (RuntimeException | Error failure) {
                 reportVisibilityFailure(
                         "apply " + registration.visibility() + " policy",
@@ -496,10 +544,32 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             LauncherVisibility visibility,
             LaunchVisibilityActions visibilityActions,
             CompletionStage<@Nullable Void> processLifecycleCompletion) {
+        applyVisibilityPolicy(
+                process,
+                visibility,
+                visibilityActions,
+                processLifecycleCompletion,
+                () -> false);
+    }
+
+    /// Applies one captured policy while preserving the launcher after a successful missing-mod search.
+    ///
+    /// @param process exact managed process committed by the launch session
+    /// @param visibility original effective launcher visibility
+    /// @param visibilityActions runtime-owned close, hide, and show commands
+    /// @param processLifecycleCompletion completion after log and crash bookkeeping
+    /// @param missingModSearchOpened reports whether the search action opened the launcher successfully
+    static void applyVisibilityPolicy(
+            ManagedProcess process,
+            LauncherVisibility visibility,
+            LaunchVisibilityActions visibilityActions,
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         Objects.requireNonNull(process, "process");
         Objects.requireNonNull(visibility, "visibility");
         Objects.requireNonNull(visibilityActions, "visibilityActions");
         Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+        Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         switch (visibility) {
             case CLOSE -> runVisibilityAction("close launcher", visibilityActions.close());
             case KEEP -> {
@@ -509,8 +579,14 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 runVisibilityAction("hide launcher", visibilityActions.hide());
                 runAfterProcessLifecycle(
                         processLifecycleCompletion,
-                        "close hidden launcher after process exit",
-                        visibilityActions.close());
+                        "finish hidden launcher after process exit",
+                        () -> {
+                            if (missingModSearchOpened.getAsBoolean()) {
+                                visibilityActions.show().run();
+                            } else {
+                                visibilityActions.close().run();
+                            }
+                        });
             }
             case HIDE_AND_REOPEN -> {
                 runVisibilityAction("hide launcher", visibilityActions.hide());
@@ -534,12 +610,26 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         processLifecycleCompletion.whenComplete((
                 @Nullable Void ignored,
                 @Nullable Throwable failure) -> {
-            if (failure != null) {
-                reportVisibilityFailure(
-                        "observe process lifecycle before " + actionName,
-                        failure);
+            Runnable completion = () -> {
+                if (failure != null) {
+                    reportVisibilityFailure(
+                            "observe process lifecycle before " + actionName,
+                            failure);
+                }
+                runVisibilityAction(actionName, action);
+            };
+            if (!SwingUtilities.isEventDispatchThread()) {
+                completion.run();
+                return;
             }
-            runVisibilityAction(actionName, action);
+            try {
+                Schedulers.io().execute(completion);
+            } catch (RuntimeException schedulingFailure) {
+                reportVisibilityFailure(
+                        "schedule " + actionName + " after process lifecycle",
+                        schedulingFailure);
+                completion.run();
+            }
         });
     }
 
@@ -597,7 +687,64 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 continuationExecutor,
                 () -> Objects.requireNonNull(
                         loadedTaskSupplier.get(),
-                        "loadedTaskSupplier returned null"));
+                        "loadedTaskSupplier returned null"))
+                .asOrchestration();
+    }
+
+    /// Protects synchronous loaded-task construction, then hands ownership to the constructed task.
+    ///
+    /// Launcher task construction performs manifest maintenance and may publish compatibility libraries. The short
+    /// construction boundary therefore owns repository metadata, the selected instance, and the shared libraries
+    /// tree. The returned task begins as an independent owner after this boundary releases, so unrelated instance
+    /// preparation is not serialized for the remainder of the launch lifecycle.
+    ///
+    /// @param repositoryDirectory normalized repository root captured before scheduling
+    /// @param instanceDirectory normalized selected-instance root
+    /// @param librariesDirectory normalized shared libraries root
+    /// @param loadedTaskSupplier synchronous builder invoked while the construction resources are held
+    /// @param <T> result type produced by the constructed task
+    /// @return unstarted construction boundary with an explicit post-execution handoff
+    static <T> Task<T> deferLoadedTask(
+            Path repositoryDirectory,
+            Path instanceDirectory,
+            Path librariesDirectory,
+            Supplier<Task<T>> loadedTaskSupplier) {
+        Path capturedRepositoryDirectory = normalized(repositoryDirectory);
+        Path capturedInstanceDirectory = normalized(instanceDirectory);
+        Path capturedLibrariesDirectory = normalized(librariesDirectory);
+        Supplier<Task<T>> checkedSupplier = Objects.requireNonNull(loadedTaskSupplier, "loadedTaskSupplier");
+        return Task.<T>composeAsync(() -> Objects.requireNonNull(
+                        checkedSupplier.get(),
+                        "loadedTaskSupplier returned null"))
+                .setResources(
+                        TaskResource.repositoryMetadata(capturedRepositoryDirectory),
+                        TaskResource.gameInstance(capturedInstanceDirectory),
+                        TaskResource.gameDirectory(capturedLibrariesDirectory))
+                .releaseResourcesBeforeDependencies();
+    }
+
+    /// Rejects repository replacement or relocation after the construction lock paths were captured.
+    ///
+    /// @param expectedRepository exact repository used to derive the resource declaration
+    /// @param expectedRepositoryDirectory normalized repository root used by the declaration
+    /// @param currentRepository repository currently registered for the stable directory ID
+    private static void requireRepositorySnapshot(
+            XYMLGameRepository expectedRepository,
+            Path expectedRepositoryDirectory,
+            XYMLGameRepository currentRepository) {
+        if (currentRepository != Objects.requireNonNull(expectedRepository, "expectedRepository")
+                || !normalized(currentRepository.getBaseDirectory()).equals(
+                        normalized(expectedRepositoryDirectory))) {
+            throw new IllegalStateException("Game repository changed after launch resources were declared");
+        }
+    }
+
+    /// Returns one absolute lexical snapshot suitable for resource declaration and later equality checks.
+    ///
+    /// @param path path to normalize
+    /// @return absolute normalized path
+    private static Path normalized(Path path) {
+        return Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
     }
 
     /// Registers a process policy together with the helper's full listener-completion signal.
@@ -609,24 +756,29 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         /// @param process created managed process
         /// @param visibility captured launcher visibility
         /// @param processLifecycleCompletion completion after listener bookkeeping
+        /// @param missingModSearchOpened reports whether the automatic search opened the launcher
         void accept(
                 ManagedProcess process,
                 LauncherVisibility visibility,
-                CompletionStage<@Nullable Void> processLifecycleCompletion);
+                CompletionStage<@Nullable Void> processLifecycleCompletion,
+                BooleanSupplier missingModSearchOpened);
     }
 
     /// Pending policy and listener-completion boundary for one exact managed process.
     ///
     /// @param visibility captured launcher visibility
     /// @param processLifecycleCompletion completion after listener bookkeeping
+    /// @param missingModSearchOpened reports whether the automatic search opened the launcher
     @NotNullByDefault
     private record RegisteredVisibility(
             LauncherVisibility visibility,
-            CompletionStage<@Nullable Void> processLifecycleCompletion) {
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         /// Rejects incomplete registrations before they enter the concurrent map.
         private RegisteredVisibility {
             Objects.requireNonNull(visibility, "visibility");
             Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+            Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         }
     }
 }

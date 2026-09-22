@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 
@@ -61,12 +62,17 @@ public final class XYMLModpackInstallTask extends Task<Void> {
             XYMLGameRepository repository, Path zipFile, Modpack modpack, GameInstanceID instanceId) {
         this.repository = repository;
         this.dependency = repository.getDependency();
-        this.zipFile = zipFile;
+        this.zipFile = zipFile.toAbsolutePath().normalize();
         this.instanceId = instanceId;
         this.modpack = modpack;
 
-        Path run = repository.getRunDirectory(this.instanceId);
+        Path run = repository.getRunDirectory(this.instanceId).toAbsolutePath().normalize();
         Path json = repository.getModpackConfiguration(this.instanceId);
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(this.instanceId)),
+                TaskResource.gameDirectory(run),
+                TaskResource.archive(this.zipFile));
         if (repository.hasInstance(this.instanceId) && Files.notExists(json))
             throw new IllegalArgumentException("Instance " + instanceId + " already exists");
 
@@ -119,15 +125,20 @@ public final class XYMLModpackInstallTask extends Task<Void> {
                 JsonUtils.GSON.fromJson(json, GameInstanceManifest.class), "Missing minecraft/pack.json manifest");
         GameInstanceManifest originalManifest = parsedManifest.withId(instanceId).withJar(null);
         LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(originalManifest, null);
-        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest);
+        // The seed and each continuation only assemble immutable manifest data.  Keep these graph nodes out of the
+        // conservative fallback so the explicitly declared installer children can retain the instance boundary.
+        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest).asOrchestration();
         // reinstall libraries
         // libraries of Forge and OptiFine should be obtained by installation.
         for (LibraryAnalyzer.LibraryMark mark : analyzer) {
             if (LibraryAnalyzer.LibraryType.MINECRAFT.getPatchId().equals(mark.getLibraryId()))
                 continue;
-            libraryTask = libraryTask.thenComposeAsync(version -> dependency.installLibraryAsync(modpack.getGameVersion(), version, mark.getLibraryId(), mark.getLibraryVersion()));
+            libraryTask = libraryTask.thenComposeAsync(
+                    version -> dependency.installLibraryAsync(
+                            modpack.getGameVersion(), version, mark.getLibraryId(), mark.getLibraryVersion()))
+                    .asOrchestration();
         }
 
-        dependencies.add(libraryTask.thenComposeAsync(repository::saveAsync));
+        dependencies.add(libraryTask.thenComposeAsync(repository::saveAsync).asOrchestration());
     }
 }

@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -74,7 +75,7 @@ final class SwingAuthlibServerManagementDialog extends JDialog implements AutoCl
     private final DefaultListModel<AuthlibServerOption> serverModel = new DefaultListModel<>();
 
     /// Single-choice configured-server list.
-    private final JList<AuthlibServerOption> serverList = new JList<>(serverModel);
+    private final JList<AuthlibServerOption> serverList = new RowBoundsCheckedList<>(serverModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Endpoint input for metadata discovery.
     private final JTextField endpoint = new JTextField();
@@ -223,7 +224,9 @@ final class SwingAuthlibServerManagementDialog extends JDialog implements AutoCl
         serverList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         serverList.setVisibleRowCount(8);
         serverList.setCellRenderer((list, value, index, selected, focused) -> {
-            JLabel label = new JLabel(value == null ? "" : value.displayName() + " - " + value.url());
+            JLabel label = new JLabel(value == null
+                    ? ""
+                    : value.displayName() + " - " + value.displayAddress());
             label.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
             label.setOpaque(true);
             label.setBackground(selected ? list.getSelectionBackground() : list.getBackground());

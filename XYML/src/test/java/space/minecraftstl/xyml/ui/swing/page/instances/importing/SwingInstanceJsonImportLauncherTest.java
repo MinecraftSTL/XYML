@@ -157,6 +157,7 @@ final class SwingInstanceJsonImportLauncherTest {
                         "Export",
                         "Launch",
                         "Launching",
+                        "Cancel launch",
                         "Back"),
                 TaskProgressStrings.english(),
                 new SwingAnimator(MotionPolicy.OFF, 16),

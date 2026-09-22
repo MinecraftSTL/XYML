@@ -25,6 +25,8 @@ import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Graphics;
 import java.time.Duration;
 import java.util.Objects;
@@ -102,11 +104,18 @@ final class ShellPageDeck extends JPanel {
         return currentPage;
     }
 
-    /// Sizes every retained transition page to the same stable content bounds.
+    /// Sizes and lays out every visible retained page from the same stable content bounds.
+    ///
+    /// The shell uses a null layout so it can retain transition pages without letting their
+    /// preferred sizes resize the window. A page can be mounted while the shell is still zero-sized
+    /// during startup, so the first real allocation must also reach its newly visible descendants.
     @Override
     public void doLayout() {
-        for (java.awt.Component child : getComponents()) {
+        for (Component child : getComponents()) {
             child.setBounds(0, 0, getWidth(), getHeight());
+            if (child.isVisible() && child instanceof Container container) {
+                layoutVisibleTree(container);
+            }
         }
     }
 
@@ -167,5 +176,17 @@ final class ShellPageDeck extends JPanel {
         }
         revalidate();
         repaint();
+    }
+
+    /// Applies one allocated page size through its visible descendant tree before first paint.
+    ///
+    /// @param container visible page root or nested visible container
+    private static void layoutVisibleTree(Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child.isVisible() && child instanceof Container nestedContainer) {
+                layoutVisibleTree(nestedContainer);
+            }
+        }
     }
 }

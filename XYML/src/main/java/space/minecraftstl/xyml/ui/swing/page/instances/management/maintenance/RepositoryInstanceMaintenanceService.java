@@ -29,7 +29,10 @@ import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.FileUtils;
+
+import org.glavo.url.WebURL;
 
 import java.io.IOException;
 import java.net.URI;
@@ -116,7 +119,9 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
                     instanceId,
                     configuration);
             return updateTask.thenComposeAsync(ioExecutor, this::snapshotTask);
-        });
+        }).setResources(
+                TaskResource.gameDirectory(repository.getBaseDirectory()),
+                TaskResource.archive(updateArchive));
     }
 
     /// Downloads a direct archive or reads a server manifest before applying the established provider update.
@@ -134,30 +139,52 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
             ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(
                     repository.getModpackConfiguration(instanceId));
             if (isServerManifestSource(updateSource)) {
-                return new GetTask(updateSource)
+                GetTask fetch = new GetTask(WebURL.of(updateSource));
+                TaskResource cacheResource = fetch.getResources().iterator().next();
+                Task<ServerModpackManifest> parsedManifest = fetch
                         .thenGetJsonAsync(ServerModpackManifest.class)
-                        .thenComposeAsync(ioExecutor, manifest -> ModpackHelper.getUpdateTask(
+                        .setResources(cacheResource);
+                return parsedManifest.thenComposeAsync(ioExecutor, manifest -> Task.composeAsync(
+                        ioExecutor,
+                        () -> ModpackHelper.getUpdateTask(
                                 repository,
                                 Objects.requireNonNull(manifest, "remote server manifest"),
                                 StandardCharsets.UTF_8,
                                 instanceId,
-                                configuration))
-                        .thenComposeAsync(ioExecutor, this::snapshotTask);
+                                configuration).thenComposeAsync(ioExecutor, this::snapshotTask))
+                        .setResources(TaskResource.gameDirectory(repository.getBaseDirectory())))
+                        .setResources(cacheResource)
+                        .releaseResourcesBeforeDependencies();
             }
 
-            Path temporaryArchive = Files.createTempFile("xyml-modpack-update-", ".zip");
-            FileDownloadTask downloadTask = new FileDownloadTask(updateSource, temporaryArchive);
+            Path temporaryDirectory = repository.getInstanceStateDirectory(instanceId).resolve("maintenance");
+            Files.createDirectories(temporaryDirectory);
+            Path temporaryArchive = Files.createTempFile(temporaryDirectory, "modpack-update-", ".zip");
+            FileDownloadTask downloadTask = new FileDownloadTask(WebURL.of(updateSource), temporaryArchive);
             downloadTask.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
-            return downloadTask
-                    .thenComposeAsync(ioExecutor, ignored -> ModpackHelper.getUpdateTask(
+            Task<@Nullable Void> acquisition = downloadTask.thenApplyAsync(ioExecutor, ignored -> (Void) null)
+                    .setResources(instanceResource(), TaskResource.downloadTarget(temporaryArchive));
+            Task<?> update = acquisition.thenComposeAsync(ioExecutor, () -> Task.composeAsync(
+                    ioExecutor,
+                    () -> ModpackHelper.getUpdateTask(
                             repository,
                             temporaryArchive,
                             StandardCharsets.UTF_8,
                             instanceId,
                             configuration))
-                    .whenComplete(ioExecutor, failure -> Files.deleteIfExists(temporaryArchive))
-                    .thenComposeAsync(ioExecutor, this::snapshotTask);
-        });
+                    .setResources(TaskResource.gameDirectory(repository.getBaseDirectory())))
+                    .asOrchestration();
+            Task<@Nullable Void> cleaned = update.whenCompleteWithResources(
+                    ioExecutor,
+                    failure -> Files.deleteIfExists(temporaryArchive),
+                    TaskResource.downloadTarget(temporaryArchive))
+                    .asOrchestration();
+            return cleaned.thenComposeAsync(
+                    ioExecutor,
+                    () -> snapshotTask().setResources(TaskResource.gameDirectory(repository.getBaseDirectory())))
+                    .asOrchestration();
+        }).setResources(metadataResource(), instanceResource())
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Uses Core's forced-index asset task and rereads local state on completion.
@@ -172,8 +199,17 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
                     repository.getResolvedInstanceManifest(instanceId).launchManifest(),
                     GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY,
                     true);
-            return download.thenComposeAsync(ioExecutor, this::snapshotTask);
-        });
+            return download.thenComposeAsync(
+                    ioExecutor,
+                    () -> snapshotTask().setResources(metadataResource(), instanceResource()))
+                    .setResources(
+                            metadataResource(),
+                            instanceResource(),
+                            TaskResource.gameDirectory(repository.getBaseDirectory().resolve("assets")));
+        }).setResources(
+                metadataResource(),
+                instanceResource(),
+                TaskResource.gameDirectory(repository.getBaseDirectory().resolve("assets")));
     }
 
     /// Validates and normalizes one supported remote update source without contacting it.
@@ -208,11 +244,21 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     /// @return stopped cleanup and snapshot task
     @Override
     public Task<InstanceMaintenanceSnapshot> removeAssets() {
-        return fileMutationTask(() -> {
-            requireExistingInstance();
-            FileUtils.deleteDirectory(repository.getBaseDirectory().resolve("assets"));
-            FileUtils.deleteDirectory(repository.getRunDirectory(instanceId).resolve("resources"));
-        });
+        return Task.composeAsync(ioExecutor, () -> {
+            Path sharedAssets = repository.getBaseDirectory().resolve("assets").toAbsolutePath().normalize();
+            Path legacyResources = repository.getRunDirectory(instanceId)
+                    .resolve("resources")
+                    .toAbsolutePath()
+                    .normalize();
+            return fileMutationTask(() -> {
+                requireExistingInstance();
+                FileUtils.deleteDirectory(sharedAssets);
+                FileUtils.deleteDirectory(legacyResources);
+            }, metadataResource(), instanceResource(),
+                    TaskResource.gameDirectory(sharedAssets),
+                    TaskResource.gameDirectory(legacyResources));
+        }).setResources(metadataResource(), instanceResource())
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Deletes the repository-wide libraries directory.
@@ -220,10 +266,11 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     /// @return stopped cleanup and snapshot task
     @Override
     public Task<InstanceMaintenanceSnapshot> removeLibraries() {
+        Path libraries = repository.getBaseDirectory().resolve("libraries").toAbsolutePath().normalize();
         return fileMutationTask(() -> {
             requireExistingInstance();
-            FileUtils.deleteDirectory(repository.getBaseDirectory().resolve("libraries"));
-        });
+            FileUtils.deleteDirectory(libraries);
+        }, metadataResource(), instanceResource(), TaskResource.gameDirectory(libraries));
     }
 
     /// Delegates generated log and crash-report cleanup to the repository implementation.
@@ -231,27 +278,74 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     /// @return stopped cleanup and snapshot task
     @Override
     public Task<InstanceMaintenanceSnapshot> cleanGeneratedFiles() {
-        return fileMutationTask(() -> {
-            requireExistingInstance();
-            repository.clean(instanceId);
-        });
+        return Task.composeAsync(ioExecutor, () -> {
+            Path baseDirectory = repository.getBaseDirectory().toAbsolutePath().normalize();
+            Path runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+            return fileMutationTask(() -> {
+                requireExistingInstance();
+                cleanGeneratedFiles(baseDirectory);
+                if (!baseDirectory.equals(runDirectory)) {
+                    cleanGeneratedFiles(runDirectory);
+                }
+            }, TaskResource.gameDirectory(baseDirectory), TaskResource.gameDirectory(runDirectory));
+        }).setResources(metadataResource(), instanceResource())
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Creates one worker-bound file mutation followed by an authoritative snapshot read.
     ///
     /// @param mutation checked filesystem mutation
+    /// @param firstResource first complete mutation resource
+    /// @param additionalResources additional mutation resources
     /// @return stopped mutation and snapshot task
-    private Task<InstanceMaintenanceSnapshot> fileMutationTask(FileMutation mutation) {
+    private Task<InstanceMaintenanceSnapshot> fileMutationTask(
+            FileMutation mutation,
+            TaskResource firstResource,
+            TaskResource... additionalResources) {
         FileMutation operation = Objects.requireNonNull(mutation, "mutation");
-        return Task.runAsync(ioExecutor, operation::run)
-                .thenComposeAsync(ioExecutor, this::snapshotTask);
+        Task<@Nullable Void> mutationTask = Task.runAsync(ioExecutor, operation::run)
+                .setResources(firstResource, additionalResources);
+        return mutationTask
+                .thenComposeAsync(
+                        ioExecutor,
+                        () -> snapshotTask().setResources(metadataResource(), instanceResource()))
+                .setResources(firstResource, additionalResources);
+    }
+
+    /// Deletes generated diagnostics from one captured game directory without following directory symlinks.
+    ///
+    /// @param directory captured repository or instance running directory
+    /// @throws IOException when generated files cannot be deleted
+    private static void cleanGeneratedFiles(Path directory) throws IOException {
+        FileUtils.deleteDirectory(directory.resolve("crash-reports"));
+        FileUtils.deleteDirectory(directory.resolve("logs"));
+        for (Path logFile : FileUtils.listFilesByExtension(directory, "log")) {
+            Files.deleteIfExists(logFile);
+        }
+    }
+
+    /// Returns the mutable repository catalog scope used by validation and snapshot reads.
+    ///
+    /// @return repository metadata resource
+    private TaskResource metadataResource() {
+        return TaskResource.repositoryMetadata(repository.getBaseDirectory());
+    }
+
+    /// Returns the fixed instance's complete filesystem scope.
+    ///
+    /// @return instance resource
+    private TaskResource instanceResource() {
+        return TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
     }
 
     /// Creates one stopped worker task that reads the latest local state.
     ///
     /// @return stopped snapshot task
     private Task<InstanceMaintenanceSnapshot> snapshotTask() {
-        return Task.supplyAsync(ioExecutor, this::readSnapshot);
+        // Snapshot reads consult both the repository catalog and the fixed instance.  Declaring them here keeps
+        // callers that construct this helper dynamically from falling back to the process-wide conservative lock.
+        return Task.supplyAsync(ioExecutor, this::readSnapshot)
+                .setResources(metadataResource(), instanceResource());
     }
 
     /// Reads one immutable snapshot after checking that the fixed instance still exists.

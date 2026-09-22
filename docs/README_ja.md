@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | **日本語** | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | **日本語** | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## 紹介
@@ -32,7 +32,7 @@ XYMLはオープンソースでクロスプラットフォーム対応のMinecra
 
 XYMLは優れたクロスプラットフォーム性能を持っています。Windows、Linux、macOS、FreeBSDなどの異なるオペレーティングシステムだけでなく、x86、ARM、RISC-V、MIPS、LoongArchなどのさまざまなCPUアーキテクチャにも対応しています。XYMLを使えば、さまざまなプラットフォームでMinecraftを簡単に楽しむことができます。
 
-XYMLが対応しているシステムやCPUアーキテクチャについては、[この表](PLATFORM.md)をご参照ください。
+XYMLが対応しているシステムやCPUアーキテクチャについては、[この表](PLATFORM_en.md)をご参照ください。
 
 ## ダウンロード
 
@@ -51,10 +51,10 @@ XYML の開発には、次の方法で参加できます。
 - GitHub で [Issue を作成](https://github.com/MinecraftSTL/XYML/issues/new/choose)して、バグ報告や機能要望を行う。
 - GitHub でリポジトリを fork し、[Pull Request を送信](https://github.com/MinecraftSTL/XYML/compare)してコードを貢献する。
 
-貢献する前に、以下の内容を含む[貢献ガイド](./Contributing.md)をお読みください。
+貢献する前に、以下の内容を含む[貢献ガイド](./Contributing_en.md)をお読みください。
 
-- [ソースコードから XYML をビルドして実行する方法](./Contributing.md#build-xyml)
-- [デバッグオプションで XYML の動作を調整する方法](./Contributing.md#debug-options)
+- [ソースコードから XYML をビルドして実行する方法](./Contributing_en.md#build-xyml)
+- [デバッグオプションで XYML の動作を調整する方法](./Contributing_en.md#debug-options)
 
 ## 貢献者
 
@@ -64,4 +64,4 @@ XYML の開発には、次の方法で参加できます。
 
 ## ライセンス
 
-ライセンスについては [README.md](README.md#license) をご参照ください。
+ライセンスについては [README.md](README_ja.md#license) をご参照ください。

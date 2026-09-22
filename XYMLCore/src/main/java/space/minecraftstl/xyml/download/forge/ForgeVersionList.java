@@ -19,12 +19,12 @@ package space.minecraftstl.xyml.download.forge;
 
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.VersionList;
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 
-import java.net.URI;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
@@ -93,8 +93,9 @@ public final class ForgeVersionList extends VersionList<ForgeRemoteVersion> {
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
-    public static final URI FORGE_LIST = URI.create("https://hmcl.glavo.site/metadata/forge/");
+    /// Base URL for Forge version metadata maintained for the launcher.
+    public static final WebURL FORGE_LIST = WebURL.parse("https://hmcl.glavo.site/metadata/forge/");
 }

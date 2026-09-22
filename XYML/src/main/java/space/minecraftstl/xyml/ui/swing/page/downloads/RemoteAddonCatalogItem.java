@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /// One Core remote add-on result paired with the catalog kind and source needed for version loading.
@@ -48,5 +50,30 @@ public record RemoteAddonCatalogItem(
     public String displayText() {
         String title = addon.title().isBlank() ? addon.slug() : addon.title();
         return title + " - " + source.displayName();
+    }
+
+    /// Formats the description, author, and provider tags already present in this result.
+    ///
+    /// @return compact metadata line suitable for a narrow result row
+    public String rowDetail() {
+        List<String> values = new ArrayList<>();
+        String description = addon.description().lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
+        if (!description.isBlank()) {
+            values.add(description);
+        }
+        if (!addon.author().isBlank()) {
+            values.add(addon.author());
+        }
+        if (!addon.categories().isEmpty()) {
+            values.add(String.join(", ", addon.categories()));
+        }
+        if (values.isEmpty()) {
+            values.add(addon.slug());
+        }
+        return String.join(" | ", values);
     }
 }

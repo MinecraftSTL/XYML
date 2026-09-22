@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.AbstractButton;
 import javax.swing.JTextArea;
@@ -1308,6 +1309,26 @@ public final class ResourcePackCatalogPanelActionsTest {
         public boolean confirmDeleteSelected(Component owner, int selectedCount) {
             recordDialogThread();
             return deleteConfirmed;
+        }
+
+        /// Maps single deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner owning panel
+        /// @param target target pack
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, ResourcePackCatalogItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+        }
+
+        /// Maps batch deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner owning panel
+        /// @param selectedCount selected path count
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
         }
 
         /// Records a reveal and returns its controlled completion.

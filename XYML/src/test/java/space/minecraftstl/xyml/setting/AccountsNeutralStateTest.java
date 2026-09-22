@@ -37,6 +37,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /// Verifies the toolkit-neutral account state boundary.
 @NotNullByDefault
@@ -76,6 +77,41 @@ public final class AccountsNeutralStateTest {
                 Accounts.selectedAccountProperty().set(null);
                 assertNull(Accounts.getSelectedAccount());
             } finally {
+                Accounts.setSelectedAccount(null);
+            }
+        });
+    }
+
+    /// New accounts append to their storage group and moves cannot cross the group boundary.
+    @Test
+    public void keepsStorageGroupsContiguousWhenAddingAndMoving() {
+        withAccounts(() -> {
+            ObservableList<Account> accounts = Accounts.getAccounts();
+            TestAccount portableFirst = new TestAccount("portable-first");
+            TestAccount portableSecond = new TestAccount("portable-second");
+            TestAccount globalFirst = new TestAccount("global-first");
+            TestAccount globalSecond = new TestAccount("global-second");
+            portableFirst.setPortable(true);
+            portableSecond.setPortable(true);
+            try {
+                Accounts.addAccount(portableFirst);
+                Accounts.addAccount(globalFirst);
+                Accounts.addAccount(portableSecond);
+                Accounts.addAccount(globalSecond);
+                assertEquals(
+                        List.of(portableFirst, portableSecond, globalFirst, globalSecond),
+                        List.copyOf(accounts));
+
+                Accounts.moveAccount(portableSecond, 0);
+                Accounts.moveAccount(globalFirst, 3);
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> Accounts.moveAccount(globalFirst, 0));
+                assertEquals(
+                        List.of(portableSecond, portableFirst, globalSecond, globalFirst),
+                        List.copyOf(accounts));
+            } finally {
+                accounts.clear();
                 Accounts.setSelectedAccount(null);
             }
         });

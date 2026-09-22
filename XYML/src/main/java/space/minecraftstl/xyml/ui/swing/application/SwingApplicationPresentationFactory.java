@@ -122,6 +122,7 @@ public final class SwingApplicationPresentationFactory {
         EnumMap<ShellPageId, ShellPagePresentation> pages = new EnumMap<>(ShellPageId.class);
         pages.put(ShellPageId.INSTANCES, new ShellPagePresentation(i18n("instance.manage"), KeyEvent.VK_I));
         pages.put(ShellPageId.DOWNLOADS, new ShellPagePresentation(i18n("download"), KeyEvent.VK_D));
+        pages.put(ShellPageId.TASKS, new ShellPagePresentation(i18n("swing.task.manager"), KeyEvent.VK_T));
         pages.put(ShellPageId.ACCOUNTS, new ShellPagePresentation(i18n("account"), KeyEvent.VK_A));
         pages.put(ShellPageId.SETTINGS, new ShellPagePresentation(i18n("settings"), KeyEvent.VK_S));
         return new ShellPagePresentations(pages);
@@ -141,6 +142,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("instance.launch_script"),
                 i18n("instance.launch"),
                 i18n("swing.home.launching"),
+                i18n("swing.home.cancel_launch"),
                 i18n("swing.home.back_to_selections"));
     }
 

@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.modpack.modrinth;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
@@ -24,6 +26,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -34,54 +37,82 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Completes missing files for an installed Modrinth modpack instance.
+@NotNullByDefault
 public class ModrinthCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
     private final GameInstanceID instanceId;
-    private ModrinthManifest manifest;
+    /// Manifest supplied by the caller or loaded from the instance, if available.
+    private @Nullable ModrinthManifest manifest;
+    /// Keys of optional files excluded from completion, or null to include all files.
+    private @Nullable Set<String> excludedFiles;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     */
+    /// Creates a completion task that loads its manifest from the destination instance.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
     public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
-        this(dependencyManager, instanceId, null);
+        this(dependencyManager, instanceId, null, null);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     * @param manifest          the CurseForgeModpack manifest.
-     */
-    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModrinthManifest manifest) {
+    /// Creates a repository-scoped completion task with an optional in-memory manifest.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest manifest, or null to load it from the instance
+    public ModrinthCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable ModrinthManifest manifest) {
+        this(dependencyManager, instanceId, manifest, null);
+    }
+
+    /// Creates a completion task with optional file exclusions.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest manifest, or null to load it from the instance
+    /// @param excludedFiles optional file keys to skip
+    public ModrinthCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable ModrinthManifest manifest,
+            @Nullable Set<String> excludedFiles) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.manifest = manifest;
+        this.excludedFiles = excludedFiles == null ? null : Set.copyOf(excludedFiles);
 
         if (manifest == null)
             try {
                 Path manifestFile = repository.getInstanceRoot(instanceId).resolve("modrinth.index.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, ModrinthManifest.class);
+                Path excludedFile = repository.getInstanceRoot(instanceId).resolve("excluded.json");
+                if (Files.exists(excludedFile)) {
+                    this.excludedFiles = Set.copyOf(Objects.requireNonNull(
+                            JsonUtils.fromJsonFile(excludedFile, JsonUtils.listTypeOf(String.class))));
+                }
             } catch (Exception e) {
                 LOG.warning("Unable to read Modrinth modpack manifest.json", e);
             }
@@ -107,10 +138,18 @@ public class ModrinthCompletionTask extends Task<Void> {
         Path runDirectory = FileUtils.toAbsolute(repository.getRunDirectory(instanceId));
         Path modsDirectory = runDirectory.resolve("mods");
 
+        if (excludedFiles != null) {
+            JsonUtils.writeToJsonFile(
+                    repository.getInstanceRoot(instanceId).resolve("excluded.json"),
+                    List.copyOf(excludedFiles));
+        }
+
         for (ModrinthManifest.File file : manifest.getFiles()) {
             if (file.getEnv() != null && file.getEnv().getOrDefault("client", "required").equals("unsupported"))
                 continue;
             if (file.getDownloads().isEmpty())
+                continue;
+            if (excludedFiles != null && excludedFiles.contains(file.key()))
                 continue;
 
             Path filePath = runDirectory.resolve(file.getPath()).toAbsolutePath().normalize();

@@ -202,7 +202,7 @@ class SwingUpdatePromptPresenterTest {
                 false,
                 false);
         return new UpdateCheckResult(
-                new UpdateCheckRequest(UpdateChannel.STABLE, false),
+                new UpdateCheckRequest(UpdateChannel.STABLE),
                 remoteVersion,
                 available,
                 Instant.parse("2026-07-24T08:00:00Z"));

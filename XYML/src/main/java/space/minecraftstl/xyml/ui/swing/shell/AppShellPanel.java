@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorUrl;
+import space.minecraftstl.xyml.game.ExportedCrashBundleReader;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
@@ -29,11 +30,13 @@ import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -55,7 +58,7 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Renders a title-bar workflow above persistent instance management and lazy overlay pages.
+/// Renders a title-bar workflow above persistent instance management and lazy application pages.
 @NotNullByDefault
 public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Minimum shell width that preserves page and navigation readability.
@@ -81,6 +84,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             ShellPageId.ACCOUNTS,
             ShellPageId.INSTANCES,
             ShellPageId.DOWNLOADS,
+            ShellPageId.TASKS,
             ShellPageId.SETTINGS);
 
     /// Toolkit-neutral selected-destination state.
@@ -92,7 +96,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Stable instance-management page retained across every top-level transition.
     private final JComponent instancesPage;
 
-    /// Unified page deck for instance management, accounts, downloads, and settings.
+    /// Unified page deck for instance management, accounts, downloads, tasks, and settings.
     private final ShellPageDeck pageDeck;
 
     /// Full-window-content title-bar workflow controls.
@@ -101,17 +105,11 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Icon-only navigation for transient pages beside persistent instance management.
     private final ShellNavigationRail navigationRail;
 
-    /// Launch progress temporarily covering both base and top-level overlays.
-    private final LaunchTaskOverlayPanel launchTaskOverlay;
-
-    /// Layered workspace retaining the page deck and launch-task overlay.
-    private final ShellWorkspace workspace;
-
     /// Root-level click-origin feedback shared by every current and lazily added button.
     private final SwingButtonRippleSupport buttonRippleSupport;
 
     /// Injected boundary opening the native local-modpack installation window.
-    private final DroppedModpackInstallLauncher droppedModpackInstallLauncher;
+    private DroppedModpackInstallLauncher droppedModpackInstallLauncher;
 
     /// Shell route accepting modpack archives only on instance-management and download pages.
     private final ShellFileDropHandler.RouteRegistration modpackDropRegistration;
@@ -165,10 +163,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 animator,
                 pageTransitionDuration,
                 progressAnimationDuration,
+                new TaskLaunchController(() -> { }),
                 (owner, archive) -> SwingLocalModpackInstallDialog.show(
                         owner,
                         archive,
                         taskProgressStrings,
+                        new TaskLaunchController(() -> { }),
                         animator,
                         progressAnimationDuration));
     }
@@ -184,6 +184,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param animator the shared Swing animator
     /// @param pageTransitionDuration the non-negative caller-selected transition duration
     /// @param progressAnimationDuration non-negative launch progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param droppedModpackInstallLauncher injected native-window launcher
     AppShellPanel(
             String windowTitle,
@@ -195,6 +196,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             SwingAnimator animator,
             Duration pageTransitionDuration,
             Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController,
             DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(pagePresentations, "pagePresentations");
@@ -207,6 +209,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         this.droppedModpackInstallLauncher = Objects.requireNonNull(
                 droppedModpackInstallLauncher,
                 "droppedModpackInstallLauncher");
+        Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         navigationState = new ShellNavigationState();
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
         pageDeck = new ShellPageDeck(animator, pageTransitionDuration);
@@ -226,14 +229,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 this::navigateTo,
                 this::openGameDirectoryManagement,
                 this::showDefaultPage);
-        launchTaskOverlay = new LaunchTaskOverlayPanel(
-                toolbarModels.home(),
-                homeStrings,
-                taskProgressStrings,
-                animator,
-                progressAnimationDuration);
-        workspace = new ShellWorkspace(pageDeck, launchTaskOverlay);
-
         setLayout(new MigLayout(
                 "insets 0, fill",
                 "[52!][grow,fill]",
@@ -247,7 +242,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
         add(toolbar, "cell 0 0 2 1, grow");
         add(navigationRail, "cell 0 1, grow");
-        add(workspace, "cell 1 1, grow, gap 18 20 18 18");
+        add(pageDeck, "cell 1 1, grow, gap 18 20 18 18");
         showInstanceManagement();
         pageDeck.showPage(instancesPage, false);
         updateSelection(null);
@@ -261,6 +256,32 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 text -> AuthlibInjectorUrl.parse(text).isPresent(),
                 this::openDroppedAuthlibServer);
         defaultDropTargetSuppressor = ShellDefaultDropTargetSuppressor.install(this);
+    }
+
+    /// Creates the shell with an injected dropped-modpack boundary and default task navigation.
+    AppShellPanel(
+            String windowTitle,
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
+            ShellPagePresentations pagePresentations,
+            ShellToolbarModels toolbarModels,
+            HomeStrings homeStrings,
+            TaskProgressStrings taskProgressStrings,
+            SwingAnimator animator,
+            Duration pageTransitionDuration,
+            Duration progressAnimationDuration,
+            DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
+        this(
+                windowTitle,
+                pageFactories,
+                pagePresentations,
+                toolbarModels,
+                homeStrings,
+                taskProgressStrings,
+                animator,
+                pageTransitionDuration,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }),
+                droppedModpackInstallLauncher);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -281,6 +302,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         windowBackground = windowBackground.withWindowTransparency(transparent);
         setOpaque(!transparent);
         repaint();
+    }
+
+    /// Replaces the dropped-modpack workflow with explicit task navigation ownership.
+    ///
+    /// @param launcher native-window installation boundary
+    public void setDroppedModpackInstallLauncher(DroppedModpackInstallLauncher launcher) {
+        EdtDispatcher.requireEventDispatchThread();
+        droppedModpackInstallLauncher = Objects.requireNonNull(launcher, "launcher");
     }
 
     /// Paints a cover-cropped image or bounds-aware paint beneath all shell controls.
@@ -423,8 +452,43 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
         JComponent destinationPage = pageCache.getOrCreate(page);
         pageDeck.showPage(destinationPage, true, direction);
-        showInstanceManagement();
+        EdtDispatcher.executeLater(this::showInstanceManagement);
         updateSelection(page);
+    }
+
+    /// Navigates to the download center and opens the Mods search for one dependency identifier.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    public void openModSearch(String dependencyId) {
+        EdtDispatcher.requireEventDispatchThread();
+        String query = Objects.requireNonNull(dependencyId, "dependencyId").trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("dependencyId must not be blank");
+        }
+        navigateTo(ShellPageId.DOWNLOADS);
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
+            throw new IllegalStateException("Downloads page does not expose the game-version catalog");
+        }
+        catalogPanel.openModSearch(query);
+    }
+
+    /// Navigates to one read-only missing-dependency search with its analyzed game-version filter.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        String query = Objects.requireNonNull(dependencyId, "dependencyId").trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("dependencyId must not be blank");
+        }
+        navigateTo(ShellPageId.DOWNLOADS);
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
+            throw new IllegalStateException("Downloads page does not expose the game-version catalog");
+        }
+        catalogPanel.openMissingDependencySearch(query, gameVersion);
     }
 
     /// Opens or toggles one side destination from the left navigation rail.
@@ -472,7 +536,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Restores management for the selected instance when the persistent page supports it.
     private void showInstanceManagement() {
         if (instancesPage instanceof InstancesPanel panel) {
-            panel.showSelectedInstanceManagement(false).toCompletableFuture().join();
+            panel.showSelectedInstanceManagement(false).whenComplete(
+                    (@Nullable Void ignored, @Nullable Throwable failure) -> {
+                        if (failure != null) {
+                            LOG.warning("Failed to prepare instance management behind the active page", failure);
+                        }
+                    });
         }
     }
 
@@ -514,7 +583,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @return whether the path is a modpack and the shell is on the default workspace or downloads
     private boolean supportsDroppedModpack(java.nio.file.Path path) {
         ShellPageId page = selectedPage();
-        return ModpackHelper.isFileModpackByExtension(path)
+        return !ExportedCrashBundleReader.hasSupportedFileName(path)
+                && ModpackHelper.isFileModpackByExtension(path)
                 && (page == null || page == ShellPageId.DOWNLOADS);
     }
 
@@ -566,7 +636,6 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 @Nullable Throwable failure = null;
                 failure = attemptClose(failure, toolbar);
                 navigationRail.disableNavigation();
-                failure = attemptClose(failure, launchTaskOverlay);
                 failure = attemptClose(failure, buttonRippleSupport);
                 failure = attemptClose(failure, pageCache);
                 if (failure instanceof RuntimeException runtimeException) {
@@ -611,14 +680,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return toolbar;
     }
 
-    /// Returns the launch task overlay for focused lifecycle verification.
-    ///
-    /// @return stable launch task overlay
-    LaunchTaskOverlayPanel launchTaskOverlay() {
-        return launchTaskOverlay;
-    }
-
-    /// Synchronizes title-bar navigation state after a base or overlay change.
+    /// Synchronizes title-bar navigation state after a base or application-page change.
     ///
     /// @param page the newly selected side destination, or `null` for persistent instance management
     private void updateSelection(@Nullable ShellPageId page) {
@@ -662,43 +724,10 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Fixed-bounds layered workspace keeping page transitions below the launch-task overlay.
-    @NotNullByDefault
-    private static final class ShellWorkspace extends JPanel {
-        /// Creates the page and launch-overlay layers in input-facing z-order.
-        ///
-        /// @param pageDeck all persistent and lazy top-level pages
-        /// @param launchOverlay current launch-task surface
-        private ShellWorkspace(
-                ShellPageDeck pageDeck,
-                LaunchTaskOverlayPanel launchOverlay) {
-            super(null);
-            setOpaque(false);
-            add(Objects.requireNonNull(pageDeck, "pageDeck"));
-            add(Objects.requireNonNull(launchOverlay, "launchOverlay"), 0);
-        }
-
-        /// Keeps all layers on identical stable content bounds.
-        @Override
-        public void doLayout() {
-            for (Component child : getComponents()) {
-                child.setBounds(0, 0, getWidth(), getHeight());
-            }
-        }
-
-        /// Reports overlap because hidden or visible overlays share base bounds.
-        ///
-        /// @return always false for layered child painting
-        @Override
-        public boolean isOptimizedDrawingEnabled() {
-            return false;
-        }
-    }
-
     /// Opens the native installation window for one dropped modpack archive.
     @NotNullByDefault
     @FunctionalInterface
-    interface DroppedModpackInstallLauncher {
+    public interface DroppedModpackInstallLauncher {
         /// Opens one installer owned by the shell.
         ///
         /// @param owner visible shell owner

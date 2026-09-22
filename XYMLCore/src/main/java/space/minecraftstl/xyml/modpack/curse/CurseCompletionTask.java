@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
@@ -28,6 +30,7 @@ import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
@@ -37,6 +40,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -45,48 +50,77 @@ import java.util.stream.Stream;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Completes missing metadata and files for an installed CurseForge modpack instance.
+@NotNullByDefault
 public final class CurseCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
     private final GameInstanceID instanceId;
-    private CurseManifest manifest;
-    private List<Task<?>> dependencies;
+    /// Manifest supplied by the caller or loaded from the instance, if available.
+    private @Nullable CurseManifest manifest;
+
+    /// Keys of optional files excluded from completion, or null to include all files.
+    private @Nullable Set<String> excludedFiles;
+
+    /// Download tasks assembled during execution.
+    private List<Task<?>> dependencies = List.of();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     */
+    /// Creates a completion task that loads its manifest from the destination instance.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
     public CurseCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
-        this(dependencyManager, instanceId, null);
+        this(dependencyManager, instanceId, null, null);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     * @param manifest          the CurseForgeModpack manifest.
-     */
-    public CurseCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, CurseManifest manifest) {
+    /// Creates a repository-scoped completion task with an optional in-memory manifest.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest manifest, or null to load it from the instance
+    public CurseCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable CurseManifest manifest) {
+        this(dependencyManager, instanceId, manifest, null);
+    }
+
+    /// Creates a completion task with optional file exclusions.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest manifest, or null to load it from the instance
+    /// @param excludedFiles optional file keys to skip
+    public CurseCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable CurseManifest manifest,
+            @Nullable Set<String> excludedFiles) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.manifest = manifest;
+        this.excludedFiles = excludedFiles == null ? null : Set.copyOf(excludedFiles);
 
         if (manifest == null)
             try {
                 Path manifestFile = repository.getInstanceRoot(instanceId).resolve("manifest.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, CurseManifest.class);
+                Path excludedFile = repository.getInstanceRoot(instanceId).resolve("excluded.json");
+                if (Files.exists(excludedFile)) {
+                    this.excludedFiles = Set.copyOf(Objects.requireNonNull(
+                            JsonUtils.fromJsonFile(excludedFile, JsonUtils.listTypeOf(String.class))));
+                }
             } catch (Exception e) {
                 LOG.warning("Unable to read CurseForge modpack manifest.json", e);
             }
@@ -120,7 +154,10 @@ public final class CurseCompletionTask extends Task<Void> {
                             if (StringUtils.isBlank(file.fileName()) || file.url() == null) {
                                 try {
                                     RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.MODS.getAddonFile(Integer.toString(file.projectID()), Integer.toString(file.fileID()));
-                                    return file.withFileName(remoteFile.filename()).withURL(remoteFile.url());
+                                    return file
+                                            .withFileName(remoteFile.filename())
+                                            .withURL(remoteFile.url())
+                                            .withHashes(remoteFile.hashes());
                                 } catch (FileNotFoundException fof) {
                                     LOG.warning("Could not query api.curseforge.com for deleted mods: " + file.projectID() + ", " + file.fileID(), fof);
                                     notFound.set(true);
@@ -136,6 +173,9 @@ public final class CurseCompletionTask extends Task<Void> {
                         })
                         .collect(Collectors.toList()));
         JsonUtils.writeToJsonFile(root.resolve("manifest.json"), newManifest);
+        if (excludedFiles != null) {
+            JsonUtils.writeToJsonFile(root.resolve("excluded.json"), List.copyOf(excludedFiles));
+        }
 
         Path versionRoot = repository.getInstanceRoot(modManager.getInstanceId());
         Path resourcePacksRoot = versionRoot.resolve("resourcepacks");
@@ -144,6 +184,7 @@ public final class CurseCompletionTask extends Task<Void> {
         dependencies = newManifest.files()
                 .stream().parallel()
                 .filter(f -> f.fileName() != null)
+                .filter(f -> excludedFiles == null || !excludedFiles.contains(f.key()))
                 .flatMap(f -> {
                     try {
                         Path path = guessFilePath(f, dependency.getDownloadProvider(), resourcePacksRoot, shaderPacksRoot);
@@ -151,7 +192,7 @@ public final class CurseCompletionTask extends Task<Void> {
                             return Stream.empty();
                         }
 
-                        var task = new FileDownloadTask(f.url(), path);
+                        var task = new FileDownloadTask(f.url(), path, f.getIntegrityCheck());
                         task.setCacheRepository(dependency.getCacheRepository());
                         task.setCaching(true);
                         return Stream.of(task.withCounter("xyml.modpack.download"));

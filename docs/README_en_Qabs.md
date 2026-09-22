@@ -24,7 +24,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** ([Standard](README.md), **uʍoᗡ ǝpᴉsd∩**) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** ([Standard](README_en.md), **uʍoᗡ ǝpᴉsd∩**) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## uoᴉʇɔnpoɹʇuI
@@ -41,7 +41,7 @@
 - ⸵ʇɹodxǝ puɐ 'uoᴉʇɐǝɹɔ 'sǝʇɐpdn 'uoᴉʇɐꞁꞁɐʇsuᴉ ʞɔɐdpoɯ ᵷuᴉpnꞁɔuᴉ 'sʞɔɐdpoɯ puɐ 'spꞁɹoʍ 'sʞɔɐd ǝɔɹnosǝɹ 'spoɯ ᵷuᴉᵷɐuɐW
 - ˙ǝɔuɐɹɐǝddɐ puɐ 'spunoɹᵷʞɔɐq 'sǝɯǝɥʇ ɹǝɥɔunɐꞁ ᵷuᴉzᴉɯoʇsnƆ
 
-ʇɔɐxǝ ɹoɟ [ǝꞁqɐʇ ʇɹoddns ɯɹoɟʇɐꞁd](PLATFORM.md) ǝɥʇ ǝǝS ˙sǝɹnʇɔǝʇᴉɥɔɹɐ ∩ԀƆ puɐ sɯǝʇsʎs ᵷuᴉʇɐɹǝdo ǝꞁdᴉʇꞁnɯ sʇɹoddns ꞀWʎX
+ʇɔɐxǝ ɹoɟ [ǝꞁqɐʇ ʇɹoddns ɯɹoɟʇɐꞁd](PLATFORM_en.md) ǝɥʇ ǝǝS ˙sǝɹnʇɔǝʇᴉɥɔɹɐ ∩ԀƆ puɐ sɯǝʇsʎs ᵷuᴉʇɐɹǝdo ǝꞁdᴉʇꞁnɯ sʇɹoddns ꞀWʎX
 ˙pǝpuǝɯɯoɔǝɹ sᴉ Ɩᘔ ɐʌɐſ puɐ 'ɹǝʇɐꞁ ɹo ㄥƖ ɐʌɐſ sǝɹᴉnbǝɹ ɹǝɥɔunɐꞁ ǝɥ⟘ ˙suoᴉʇɐʇᴉɯᴉꞁ puɐ sꞁǝʌǝꞁ ʇɹoddns
 
 ## ꞀƆWH ɥʇᴉʍ dᴉɥsuoᴉʇɐꞁǝᴚ
@@ -61,7 +61,7 @@ sᴉɥ⟘ ˙ʇɹoddns ɯɹoɟʇɐꞁd-ssoɹɔ puɐ 'uoᴉʇɐzᴉꞁɐɔoꞁ 's�
 
 ɹnoɟ sǝsn ꞀWʎX ˙[sǝsɐǝꞁǝᴚ qnHʇᴉ⅁](https://github.com/MinecraftSTL/XYML/releases) ɯoɹɟ spꞁᴉnq ꞀWʎX ꞁɐᴉɔᴉɟɟo pɐoꞁuʍoᗡ
 uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 'sʇɐɯɹoɟ uoᴉsɹǝʌ ɹᴉǝɥ⟘ ˙ʌǝp puɐ 'ɐɥdꞁɐ 'ɐʇǝq 'ǝꞁqɐʇs :sꞁǝuuɐɥɔ ǝsɐǝꞁǝɹ
-˙[ꞁǝpoɯ ǝsɐǝꞁǝɹ](ReleaseSchedule.md) ǝɥʇ uᴉ pǝʇuǝɯnɔop ǝɹɐ ɹǝpɹo
+˙[ꞁǝpoɯ ǝsɐǝꞁǝɹ](ReleaseSchedule_en.md) ǝɥʇ uᴉ pǝʇuǝɯnɔop ǝɹɐ ɹǝpɹo
 
 ## ᵷuᴉʇnqᴉɹʇuoƆ
 
@@ -69,7 +69,7 @@ uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 's
 
 - ⸵[sǝnssI qnHʇᴉ⅁](https://github.com/MinecraftSTL/XYML/issues/new/choose) ɥᵷnoɹɥʇ sǝɹnʇɐǝɟ ǝsodoɹd ɹo sɯǝꞁqoɹd ʇɹodǝᴚ
 - ⸵[ʇsǝnbǝɹ ꞁꞁnd ɐ ʇᴉɯqns](https://github.com/MinecraftSTL/XYML/compare) puɐ ʎɹoʇᴉsodǝɹ sᴉɥʇ ʞɹoℲ
-- ˙ǝɔɹnos ɯoɹɟ ꞀWʎX ᵷnqǝp puɐ 'unɹ 'pꞁᴉnq oʇ [ǝpᴉnᵷ ᵷuᴉʇnqᴉɹʇuoƆ](Contributing.md) ǝɥʇ ʍoꞁꞁoℲ
+- ˙ǝɔɹnos ɯoɹɟ ꞀWʎX ᵷnqǝp puɐ 'unɹ 'pꞁᴉnq oʇ [ǝpᴉnᵷ ᵷuᴉʇnqᴉɹʇuoƆ](Contributing_en.md) ǝɥʇ ʍoꞁꞁoℲ
 
 ## sʇuǝɯᵷpǝꞁʍouʞɔⱯ puɐ sɹoʇnqᴉɹʇuoƆ
 

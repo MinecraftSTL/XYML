@@ -18,30 +18,30 @@
 package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.glavo.url.WebURL;
 
 import java.io.IOException;
-import java.net.URI;
 
 import static java.util.Objects.requireNonNull;
 
-/// Reports that a resource could not be downloaded from a specific URI.
+/// Reports that a resource could not be downloaded from a specific URL.
 @NotNullByDefault
 public class DownloadException extends IOException {
 
-    /// URI whose download failed.
-    private final URI uri;
+    /// URL whose download failed.
+    private final WebURL url;
 
-    /// Creates a download failure with its source URI and underlying cause.
+    /// Creates a download failure with its source URL and underlying cause.
     ///
-    /// @param uri source URI
+    /// @param url source URL
     /// @param cause underlying failure
-    public DownloadException(URI uri, Throwable cause) {
-        super("Unable to download " + uri + ", " + cause.getMessage(), requireNonNull(cause));
-        this.uri = uri;
+    public DownloadException(WebURL url, Throwable cause) {
+        super("Unable to download " + url + ", " + cause.getMessage(), requireNonNull(cause));
+        this.url = url;
     }
 
-    /// Returns the URI whose download failed.
-    public URI getUri() {
-        return uri;
+    /// Returns the URL whose download failed.
+    public WebURL getUrl() {
+        return url;
     }
 }

@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import org.glavo.url.WebURL;
 import kala.compress.archivers.zip.UnixStat;
 import kala.compress.archivers.zip.ZipArchiveEntry;
 import kala.compress.archivers.zip.ZipArchiveOutputStream;
@@ -34,6 +35,7 @@ import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.BoundedTextFetchTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -48,6 +50,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -115,6 +118,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, task.getState()),
+                () -> assertEquals(
+                        List.of(TaskResource.Kind.ORCHESTRATION),
+                        task.getResources().stream().map(TaskResource::getKind).toList()),
                 () -> assertEquals(0, backend.fetchVersionRequests.get()));
         assertTrue(task.test(), () -> "Version fetch failed: " + task.getException());
         @Unmodifiable List<DiscoJavaRemoteVersion> result = Objects.requireNonNull(task.getResult());
@@ -250,6 +256,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, task.getState()),
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(backend.managedRoot)),
+                        task.getResources()),
                 () -> assertEquals(0, backend.fetchTextRequests.size()),
                 () -> assertEquals(0, backend.downloadRequests.get()));
         assertTrue(task.test(), () -> "Disco install failed: " + task.getException());
@@ -368,7 +377,7 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         Files.write(source, "bounded-download".getBytes(StandardCharsets.UTF_8));
         String checksum = DigestUtils.digestToString("SHA-256", source);
         ManagedJavaArchiveDownloadTask task = new ManagedJavaArchiveDownloadTask(
-                List.of(source.toUri()),
+                List.of(WebURL.of(source.toUri())),
                 ".zip",
                 "SHA-256",
                 checksum,
@@ -386,9 +395,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         String contents = "bounded-text-response";
         Files.writeString(source, contents, StandardCharsets.UTF_8);
         long exactBytes = Files.size(source);
-        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(List.of(source.toUri()), exactBytes);
+        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(List.of(WebURL.of(source.toUri())), exactBytes);
         BoundedTextFetchTask oversizedTask = new BoundedTextFetchTask(
-                List.of(source.toUri()),
+                List.of(WebURL.of(source.toUri())),
                 exactBytes - 1L);
 
         assertTrue(exactTask.test(), () -> "Exact bounded text fetch failed: " + exactTask.getException());
@@ -637,6 +646,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         /// Fixed supported platform.
         private final Platform platform = Platform.WINDOWS_X86_64;
 
+        /// Fixed managed Java platform root.
+        private final Path managedRoot = Path.of("fake-managed").toAbsolutePath().normalize();
+
         /// Mutable per-package fake Core version maps.
         private final EnumMap<JavaPackageType, TreeMap<Integer, DiscoJavaRemoteVersion>> versions =
                 new EnumMap<>(JavaPackageType.class);
@@ -723,6 +735,15 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         @Override
         public Platform currentPlatform() {
             return platform;
+        }
+
+        /// Returns the fixed managed Java platform root.
+        ///
+        /// @param ignoredPlatform ignored target platform
+        /// @return fixed managed root
+        @Override
+        public Path managedPlatformRoot(Platform ignoredPlatform) {
+            return managedRoot;
         }
 
         /// Records lazy version task construction and returns a defensive map copy.

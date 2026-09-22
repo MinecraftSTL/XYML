@@ -43,12 +43,19 @@ public interface RemoteAddonRepository {
     /// @return absolute provider web base URL
     String getBaseUrl();
 
+    /// Provider-neutral result orderings exposed by the remote catalog filter.
     enum SortType {
+        /// Provider popularity or follower ranking.
         POPULARITY,
+        /// Project name ordering.
         NAME,
+        /// Project creation time.
         DATE_CREATED,
+        /// Latest project update time.
         LAST_UPDATED,
+        /// Project author ordering.
         AUTHOR,
+        /// Total project download count.
         TOTAL_DOWNLOADS
     }
 
@@ -96,9 +103,13 @@ public interface RemoteAddonRepository {
 
     RemoteAddon getAddonById(DownloadProvider downloadProvider, String id) throws IOException;
 
-    default RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException {
-        return getAddonById(downloadProvider, id);
-    }
+    /// Resolves dependency metadata while distinguishing a missing project from provider failure.
+    ///
+    /// @param downloadProvider provider used to transform or mirror API requests
+    /// @param id provider project identifier
+    /// @return the resolved dependency, or {@link RemoteAddon#BROKEN} when it no longer exists
+    /// @throws IOException if provider access fails for any reason other than a missing dependency
+    RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException;
 
     RemoteAddon.File getAddonFile(String projectId, String fileId) throws IOException;
 

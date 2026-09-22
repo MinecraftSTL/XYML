@@ -40,12 +40,14 @@ import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
-import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.AbstractAction;
@@ -74,6 +76,7 @@ import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Font;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
@@ -116,9 +119,6 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Card containing the optional compatible loader-selection workflow.
     private static final String LOADER_VIEW = "loaders";
 
-    /// Card containing the current installation task and terminal return command.
-    private static final String TASK_VIEW = "task";
-
     /// Action-map key that opens the selected version's visible installation configuration.
     private static final String ACTIVATE_INSTALL_CONFIGURATION = "activateInstallConfiguration";
 
@@ -149,11 +149,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Stable card host switching between the catalog and retained task details.
     private final JPanel workflowCards = new JPanel(new CardLayout());
 
-    /// Owns the current installation task presentation panel.
-    private final TaskProgressHostPanel taskProgressHost;
-
     /// Secondary download-center categories retained beside the vanilla game-version workflow.
     private final DownloadCategoryPanel downloadCategoryPanel;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
 
     /// Explicitly searched remote CurseForge and Modrinth modpack catalog retained beside local imports.
     private final RemoteModpackCatalogPanel remoteModpackCatalogPanel;
@@ -198,17 +198,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Command that opens the optional compatible loader-selection card.
     private final JButton selectLoadersButton = new JButton();
 
-    /// Command that dismisses a terminal task and restores the catalog card.
-    private final JButton backToCatalogButton = new JButton();
-
     /// Command that returns from the loader-selection card to the game-version catalog.
     private final JButton backFromLoadersButton = new JButton();
 
     /// Localized installation validation or terminal-failure feedback.
     private final JLabel installStatusLabel = new JLabel();
-
-    /// Localized terminal installation feedback shown beside the return command.
-    private final JLabel taskStatusLabel = new JLabel();
 
     /// Concise current loader selection retained beside the installation command.
     private final JLabel loaderSummaryLabel = new JLabel();
@@ -221,6 +215,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Status text displayed inside the exact empty card.
     private final JLabel emptyLabel = stateLabel("gameVersionsEmpty");
+
+    /// Handles primary clicks on retryable and returnable catalog state text.
+    private final MouseAdapter stateMouseListener = new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            activateStateAction(event);
+        }
+    };
 
     /// Listener that propagates user query edits to the model.
     private final DocumentListener searchListener = new DocumentListener() {
@@ -302,6 +304,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Owned status listener for the currently displayed installation session.
     private @Nullable Subscription installStatusSubscription;
 
+    /// Owned submitted-state listener for the currently displayed installation session.
+    private @Nullable Subscription installSubmittedSubscription;
+
+    /// Whether the current session has already triggered task-manager navigation.
+    private boolean installSubmissionHandled;
+
     /// Snapshot currently represented by controls, or null before initialization.
     private @Nullable GameVersionCatalogSnapshot displayedSnapshot;
 
@@ -372,7 +380,75 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
-                LoaderSelectionWizardPanel.createForLauncher());
+                LoaderSelectionWizardPanel.createForLauncher(),
+                null,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a production catalog whose direct-install download tabs use explicit instance selection.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs
+    public GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            InstancesModel instancesModel) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                LoaderSelectionWizardPanel.createForLauncher(),
+                instancesModel,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a production catalog with explicit direct-install instance selection and task navigation.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                LoaderSelectionWizardPanel.createForLauncher(),
+                instancesModel,
+                taskLaunchController);
     }
 
     /// Creates a catalog panel with an explicit zero-I/O loader-selection control for focused integration tests.
@@ -394,6 +470,78 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             LoaderSelectionWizardPanel loaderSelectionPanel) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                loaderSelectionPanel,
+                null,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a catalog with an explicit loader workflow and installed-instance source.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param loaderSelectionPanel embedded loader-selection workflow
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null for
+    /// legacy category-only construction
+    GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            LoaderSelectionWizardPanel loaderSelectionPanel,
+            @Nullable InstancesModel instancesModel) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                loaderSelectionPanel,
+                instancesModel,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a catalog with an explicit loader workflow, instance source, and task navigation controller.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param loaderSelectionPanel embedded loader-selection workflow
+    /// @param instancesModel application-owned installed-instance source for direct-install catalogs, or null for
+    /// legacy category-only construction
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            LoaderSelectionWizardPanel loaderSelectionPanel,
+            @Nullable InstancesModel instancesModel,
+            TaskLaunchController taskLaunchController) {
         super(new MigLayout(
                 "insets 0, fill",
                 "[grow,fill]",
@@ -403,27 +551,27 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         this.installService = Objects.requireNonNull(installService, "installService");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.installStrings = Objects.requireNonNull(installStrings, "installStrings");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
                 taskProgressStrings, "taskProgressStrings");
         Duration resolvedProgressAnimationDuration = Objects.requireNonNull(
                 progressAnimationDuration, "progressAnimationDuration");
-        taskProgressHost = new TaskProgressHostPanel(
-                resolvedTaskProgressStrings,
-                animator,
-                resolvedProgressAnimationDuration);
         downloadCategoryPanel = new DownloadCategoryPanel(
                 resolvedTaskProgressStrings,
                 animator,
-                resolvedProgressAnimationDuration);
+                resolvedProgressAnimationDuration,
+                instancesModel,
+                taskLaunchController);
         remoteModpackCatalogPanel = new RemoteModpackCatalogPanel(
                 RemoteModpackCatalogStrings.launcherLocalized(),
                 resolvedTaskProgressStrings,
                 animator,
-                resolvedProgressAnimationDuration);
+                resolvedProgressAnimationDuration,
+                taskLaunchController);
         this.loaderSelectionPanel = Objects.requireNonNull(
                 loaderSelectionPanel,
                 "loaderSelectionPanel");
-        choiceList = new ViewportChoiceList<>(model, new GameVersionEntryRenderer());
+        choiceList = new ViewportChoiceList<>(model, new GameVersionEntryRenderer(), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         configureComponents();
         this.loaderSelectionPanel.addSelectionListener(loaderSelectionListener);
@@ -444,6 +592,31 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// @return viewport-driven game-version list
     public ViewportChoiceList<GameVersionCatalogItem> choiceList() {
         return choiceList;
+    }
+
+    /// Selects the download-content tab and opens the Mods search for one dependency identifier.
+    ///
+    /// @param searchText non-blank project or dependency identifier
+    public void openModSearch(String searchText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
+        downloadCategoryPanel.openModSearch(searchText);
+    }
+
+    /// Selects the download-content tab and opens one version-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
+        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion);
     }
 
     /// Starts the lazy source load after this page first becomes displayable.
@@ -487,10 +660,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]",
                 "[]12[grow,fill]"));
         gameVersionsPanel.setOpaque(false);
+        gameVersionsPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         gameVersionsPanel.setName("gameVersionsDownloadCenter");
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[]"));
         headingBand.setOpaque(false);
+        headingBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("gameVersionsPageTitle");
@@ -511,6 +686,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]",
                 "[]8[]12[grow,fill]"));
         catalogWorkspace.setOpaque(false);
+        catalogWorkspace.setMinimumSize(new java.awt.Dimension(0, 0));
         catalogWorkspace.setName("gameVersionsCatalogWorkspace");
 
         JPanel searchBand = new JPanel(new MigLayout(
@@ -518,6 +694,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[40!]"));
         searchBand.setOpaque(false);
+        searchBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
@@ -525,7 +702,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         searchField.setName("gameVersionsSearch");
         SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(searchListener);
-        searchBand.add(searchField, "growx, h 40!");
+        searchField.setMinimumSize(new java.awt.Dimension(0, 0));
+        searchBand.add(searchField, "growx, wmin 0, h 40!");
         catalogWorkspace.add(searchBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
@@ -533,6 +711,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[36!]"));
         filterBand.setOpaque(false);
+        filterBand.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JLabel filterLabel = new JLabel(strings.filterLabel());
         filterBand.add(filterLabel);
@@ -541,6 +720,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill][grow,fill][grow,fill][grow,fill][grow,fill]",
                 "[36!]"));
         filterOptionsPanel.setOpaque(false);
+        filterOptionsPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         filterOptionsPanel.setName("gameVersionsFilterOptions");
         for (GameVersionFilter filter : GameVersionFilter.values()) {
             JToggleButton button = new JToggleButton(strings.filterText(filter));
@@ -549,7 +729,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             button.addActionListener(event -> filterChanged(filter));
             filterButtonGroup.add(button);
             filterButtons.put(filter, button);
-            filterOptionsPanel.add(button, "grow");
+            button.setMinimumSize(new java.awt.Dimension(0, 0));
+            filterOptionsPanel.add(button, "grow, wmin 0");
         }
         filterLabel.setLabelFor(filterButton(GameVersionFilter.RELEASE));
         filterBand.add(filterOptionsPanel, "growx");
@@ -557,10 +738,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel selectionWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill",
-                "[grow,fill]12[300:340:420,fill]",
+                "[grow,fill]12[grow,fill]",
                 "[grow,fill]"));
         selectionWorkspace.setOpaque(false);
         selectionWorkspace.setName("gameVersionsSelectionWorkspace");
+        selectionWorkspace.setMinimumSize(new java.awt.Dimension(0, 0));
 
         JPanel versionListPanel = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -596,6 +778,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(failedLabel, FAILED_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
+        failedLabel.addMouseListener(stateMouseListener);
+        emptyLabel.addMouseListener(stateMouseListener);
+        statusLabel.addMouseListener(stateMouseListener);
         contentCards.add(choiceList, LIST_CARD);
         contentCards.setName("gameVersionsContentCards");
         contentCards.setOpaque(false);
@@ -611,6 +796,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[][grow,fill]",
                 "[40!]8[40!]6[]4[]"));
         installConfigurationPanel.setOpaque(false);
+        installConfigurationPanel.setMinimumSize(new java.awt.Dimension(0, 0));
         installConfigurationPanel.setName("gameVersionsInstallConfiguration");
         installConfigurationPanel.setBorder(BorderFactory.createTitledBorder(installStrings.taskTitle()));
 
@@ -625,13 +811,16 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]6[40!]",
                 "[40!]"));
         instanceNameRow.setOpaque(false);
-        instanceNameRow.add(instanceNameField, "grow, h 40!");
+        instanceNameRow.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameField.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameRow.add(instanceNameField, "grow, wmin 0, h 40!");
         resetInstanceNameButton.setName("gameVersionsResetInstanceName");
         resetInstanceNameButton.setIcon(new FlatSVGIcon("assets/swing/icons/restore.svg", 18, 18));
         resetInstanceNameButton.setToolTipText(i18n("button.reset"));
         resetInstanceNameButton.getAccessibleContext().setAccessibleName(i18n("button.reset"));
         resetInstanceNameButton.addActionListener(event -> resetInstanceName());
-        instanceNameRow.add(resetInstanceNameButton, "grow");
+        resetInstanceNameButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        instanceNameRow.add(resetInstanceNameButton, "grow, wmin 0");
         installConfigurationPanel.add(instanceNameRow, "growx, h 40!");
 
         JPanel installActions = new JPanel(new MigLayout(
@@ -639,14 +828,17 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]8[grow,fill]",
                 "[40!]"));
         installActions.setOpaque(false);
+        installActions.setMinimumSize(new java.awt.Dimension(0, 0));
         selectLoadersButton.setName("gameVersionsLoaders");
         selectLoadersButton.setText(i18n("settings.tabs.installers"));
         selectLoadersButton.addActionListener(event -> showLoaderSelection());
-        installActions.add(selectLoadersButton, "grow, h 40!");
+        selectLoadersButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        installActions.add(selectLoadersButton, "grow, wmin 0, h 40!");
         installButton.setName("gameVersionsInstall");
         installButton.setText(installStrings.installAction());
         installButton.addActionListener(event -> startInstallation());
-        installActions.add(installButton, "grow, h 40!");
+        installButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        installActions.add(installButton, "grow, wmin 0, h 40!");
         installConfigurationPanel.add(installActions, "span 2, growx");
 
         installStatusLabel.setName("gameVersionsInstallStatus");
@@ -668,7 +860,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel loaderActions = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][220!]",
+                "[grow,fill][grow,fill]",
                 "[40!]"));
         loaderActions.setOpaque(false);
         loaderSummaryLabel.setToolTipText(loaderSelectionPanel.selectionSummary());
@@ -676,7 +868,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         backFromLoadersButton.setName("gameVersionsBackFromLoaders");
         backFromLoadersButton.setText(installStrings.backToCatalogAction());
         backFromLoadersButton.addActionListener(event -> showCatalogAfterLoaderSelection());
-        loaderActions.add(backFromLoadersButton, "grow, h 40!");
+        backFromLoadersButton.setMinimumSize(new java.awt.Dimension(0, 0));
+        loaderActions.add(backFromLoadersButton, "grow, wmin 0, h 40!");
         loaderWorkspace.add(loaderActions, "growx");
 
         JScrollPane loaderScroll = new JScrollPane(loaderWorkspace);
@@ -688,34 +881,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         loaderScroll.setMinimumSize(new java.awt.Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(loaderScroll);
 
-        JPanel taskWorkspace = new JPanel(new MigLayout(
-                "insets 0, fill, wrap 1",
-                "[grow,fill]",
-                "[grow,fill]12[]"));
-        taskWorkspace.setOpaque(false);
-        taskWorkspace.setName("gameVersionsTaskWorkspace");
-        taskProgressHost.setName("gameVersionsInstallProgress");
-        taskWorkspace.add(taskProgressHost, "grow");
-
-        JPanel taskActions = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[grow,fill][220!]",
-                "[40!]"));
-        taskActions.setOpaque(false);
-        taskStatusLabel.setName("gameVersionsInstallTaskStatus");
-        taskActions.add(taskStatusLabel, "growx");
-        backToCatalogButton.setName("gameVersionsBackToCatalog");
-        backToCatalogButton.setText(installStrings.backToCatalogAction());
-        backToCatalogButton.addActionListener(event -> showCatalogAfterTerminalTask());
-        taskActions.add(backToCatalogButton, "grow, h 40!");
-        taskWorkspace.add(taskActions, "growx");
-
         workflowCards.setOpaque(false);
         workflowCards.setName("gameVersionsWorkflowCards");
         workflowCards.setMinimumSize(new java.awt.Dimension(0, 0));
         workflowCards.add(catalogWorkspace, CATALOG_VIEW);
         workflowCards.add(loaderScroll, LOADER_VIEW);
-        workflowCards.add(taskWorkspace, TASK_VIEW);
         gameVersionsPanel.add(workflowCards, "grow");
 
         downloadCenterTabs.setName("downloadCenterTabs");
@@ -795,6 +965,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         failedLabel.setText(snapshot.statusText());
         emptyLabel.setText(snapshot.statusText());
         ((CardLayout) contentCards.getLayout()).show(contentCards, contentCard);
+        boolean failedState = snapshot.status() == GameVersionCatalogStatus.FAILED;
+        boolean emptyState = EMPTY_CARD.equals(contentCard);
+        Cursor stateCursor = failedState || emptyState
+                ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                : Cursor.getDefaultCursor();
+        failedLabel.setCursor(failedState ? stateCursor : Cursor.getDefaultCursor());
+        emptyLabel.setCursor(emptyState ? stateCursor : Cursor.getDefaultCursor());
+        statusLabel.setCursor(stateCursor);
 
         choiceList.setEnabled(snapshot.listEnabled());
         choiceList.getList().setEnabled(snapshot.listEnabled());
@@ -806,6 +984,43 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         statusLabel.setToolTipText(snapshot.statusText());
         synchronizeLoadedSelection();
         updateInstallAction();
+    }
+
+    /// Retries the current catalog load when the failure state text is activated.
+    ///
+    /// @param event mouse event delivered by a catalog state label
+    private void activateStateAction(MouseEvent event) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (event.getClickCount() != 1 || event.getButton() != MouseEvent.BUTTON1
+                || !isOpen() || workflowView != WorkflowView.CATALOG) {
+            return;
+        }
+        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
+        if (snapshot == null) {
+            return;
+        }
+        String contentCard = selectContentCard(snapshot);
+        if (snapshot.status() == GameVersionCatalogStatus.FAILED && snapshot.refreshEnabled()) {
+            model.refresh();
+        } else if (EMPTY_CARD.equals(contentCard)) {
+            returnFromEmptyCatalog();
+        }
+    }
+
+    /// Returns from an empty query result by clearing the query or restoring the default filter.
+    private void returnFromEmptyCatalog() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
+        if (snapshot == null || !isOpen()) {
+            return;
+        }
+        if (!snapshot.query().isBlank()) {
+            model.setQuery("");
+        } else if (snapshot.filter() != GameVersionFilter.RELEASE) {
+            model.setFilter(GameVersionFilter.RELEASE);
+        } else {
+            model.refresh();
+        }
     }
 
     /// Restores the model-selected row without delegating it back as a user command.
@@ -1181,45 +1396,61 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         Objects.requireNonNull(session, "session");
 
         @Nullable Subscription replacementSubscription = null;
+        @Nullable Subscription replacementSubmittedSubscription = null;
         try {
             replacementSubscription = session.statusProperty().subscribe(
                     change -> installStatusChanged(session, change));
-            taskProgressHost.bind(session);
+            replacementSubmittedSubscription = session.submittedProperty().subscribe(
+                    change -> installSubmittedChanged(session, change));
         } catch (RuntimeException | Error bindingFailure) {
-            rollbackUnpresentedSession(session, replacementSubscription, bindingFailure);
+            rollbackUnpresentedSession(
+                    session,
+                    replacementSubscription,
+                    replacementSubmittedSubscription,
+                    bindingFailure);
             throw new AssertionError("installation presentation failure was lost", bindingFailure);
         }
 
         Subscription installedSubscription = Objects.requireNonNull(
                 replacementSubscription,
                 "installation status subscription was not acquired");
+        Subscription installedSubmittedSubscription = Objects.requireNonNull(
+                replacementSubmittedSubscription,
+                "installation submitted subscription was not acquired");
 
         @Nullable Subscription previousSubscription;
+        @Nullable Subscription previousSubmittedSubscription;
         boolean rejectedByClose;
         synchronized (stateLock) {
             rejectedByClose = closed;
             if (rejectedByClose) {
                 previousSubscription = null;
+                previousSubmittedSubscription = null;
             } else {
                 previousSubscription = installStatusSubscription;
+                previousSubmittedSubscription = installSubmittedSubscription;
                 installStatusSubscription = installedSubscription;
+                installSubmittedSubscription = installedSubmittedSubscription;
                 displayedInstallSession = session;
+                installSubmissionHandled = false;
                 installRevision++;
             }
         }
         if (rejectedByClose) {
             @Nullable Throwable cleanupFailure = null;
             cleanupFailure = attemptCleanup(cleanupFailure, installedSubscription::unsubscribe);
-            cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::clear);
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    installedSubmittedSubscription::unsubscribe);
             cleanupFailure = attemptCleanup(cleanupFailure, session::cancel);
             throwUncheckedFailure(cleanupFailure);
             return;
         }
         unsubscribe(previousSubscription);
+        unsubscribe(previousSubmittedSubscription);
 
-        workflowView = WorkflowView.TASK;
-        ((CardLayout) workflowCards.getLayout()).show(workflowCards, TASK_VIEW);
-        refreshButton.setEnabled(false);
+        workflowView = WorkflowView.CATALOG;
+        ((CardLayout) workflowCards.getLayout()).show(workflowCards, CATALOG_VIEW);
         applyInstallStatus(session);
     }
 
@@ -1234,12 +1465,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private void rollbackUnpresentedSession(
             GameInstallSession session,
             @Nullable Subscription statusSubscription,
+            @Nullable Subscription submittedSubscription,
             Throwable bindingFailure) {
         @Nullable Throwable combinedFailure = Objects.requireNonNull(bindingFailure, "bindingFailure");
         combinedFailure = attemptCleanup(
                 combinedFailure,
                 () -> unsubscribe(statusSubscription));
-        combinedFailure = attemptCleanup(combinedFailure, taskProgressHost::clear);
+        combinedFailure = attemptCleanup(
+                combinedFailure,
+                () -> unsubscribe(submittedSubscription));
         combinedFailure = attemptCleanup(combinedFailure, session::cancel);
         installStatusLabel.setText(installStrings.installationFailedStatus());
         installStatusLabel.setToolTipText(installStatusLabel.getText());
@@ -1264,6 +1498,38 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         }
         SwingUiDispatcher.INSTANCE.dispatchOrRun(
                 () -> applyLatestInstallStatus(session, requestedRevision));
+    }
+
+    /// Coalesces one submitted-state transition and routes it to task-manager navigation.
+    ///
+    /// @param session session whose executor was submitted
+    /// @param change submitted-state transition
+    private void installSubmittedChanged(
+            GameInstallSession session,
+            ValueChange<Boolean> change) {
+        Objects.requireNonNull(change, "change");
+        long requestedRevision;
+        synchronized (stateLock) {
+            if (closed || displayedInstallSession != session) {
+                return;
+            }
+            requestedRevision = installRevision;
+        }
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                () -> applyLatestSubmittedState(session, requestedRevision));
+    }
+
+    /// Applies a submitted transition only while its session identity remains current.
+    private void applyLatestSubmittedState(GameInstallSession session, long requestedRevision) {
+        EdtDispatcher.requireEventDispatchThread();
+        synchronized (stateLock) {
+            if (closed
+                    || displayedInstallSession != session
+                    || installRevision != requestedRevision) {
+                return;
+            }
+        }
+        handleSubmittedSession(session);
     }
 
     /// Applies a queued installation transition only while its identity and revision remain current.
@@ -1292,13 +1558,56 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private void applyInstallStatus(GameInstallSession session) {
         EdtDispatcher.requireEventDispatchThread();
         GameInstallStatus status = session.status();
-        taskStatusLabel.setText(status == GameInstallStatus.FAILED
+        if (status == GameInstallStatus.FAILED && !installSubmissionHandled) {
+            installStatusLabel.setText(localizedInstallFailure(session));
+            installStatusLabel.setToolTipText(installStatusLabel.getText());
+        }
+        updateInstallAction();
+        if (Boolean.TRUE.equals(session.submittedProperty().getValue())) {
+            handleSubmittedSession(session);
+        }
+        if (status.isTerminal() && installSubmissionHandled) {
+            finishSubmittedSession(session, status);
+        }
+    }
+
+    /// Opens the task manager once after the current session enters the application task registry.
+    private void handleSubmittedSession(GameInstallSession session) {
+        EdtDispatcher.requireEventDispatchThread();
+        synchronized (stateLock) {
+            if (closed || displayedInstallSession != session || installSubmissionHandled) {
+                return;
+            }
+            installSubmissionHandled = true;
+        }
+        taskLaunchController.openTaskManager(() -> { });
+    }
+
+    /// Releases the completed submitted session while leaving the catalog ready for another install.
+    private void finishSubmittedSession(GameInstallSession session, GameInstallStatus status) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable Subscription statusSubscription;
+        @Nullable Subscription submittedSubscription;
+        synchronized (stateLock) {
+            if (displayedInstallSession != session) {
+                return;
+            }
+            statusSubscription = installStatusSubscription;
+            submittedSubscription = installSubmittedSubscription;
+            installStatusSubscription = null;
+            installSubmittedSubscription = null;
+            displayedInstallSession = null;
+            installSubmissionHandled = false;
+            installRevision++;
+        }
+        @Nullable Throwable cleanupFailure = null;
+        cleanupFailure = attemptCleanup(cleanupFailure, () -> unsubscribe(statusSubscription));
+        cleanupFailure = attemptCleanup(cleanupFailure, () -> unsubscribe(submittedSubscription));
+        String feedback = status == GameInstallStatus.FAILED
                 ? localizedInstallFailure(session)
-                : "");
-        taskStatusLabel.setToolTipText(taskStatusLabel.getText().isBlank()
-                ? null
-                : taskStatusLabel.getText());
-        backToCatalogButton.setEnabled(status.isTerminal());
+                : cleanupFailure == null ? "" : installStrings.installationFailedStatus();
+        installStatusLabel.setText(feedback);
+        installStatusLabel.setToolTipText(feedback.isBlank() ? null : feedback);
         updateInstallAction();
     }
 
@@ -1315,42 +1624,6 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             };
         }
         return installStrings.installationFailedStatus();
-    }
-
-    /// Dismisses a terminal task, releases its status subscription, and restores measured viewport demand.
-    private void showCatalogAfterTerminalTask() {
-        EdtDispatcher.requireEventDispatchThread();
-        @Nullable GameInstallSession session = displayedInstallSession;
-        if (session == null || !session.status().isTerminal() || !isOpen()) {
-            return;
-        }
-
-        @Nullable Subscription previousSubscription;
-        synchronized (stateLock) {
-            if (closed || displayedInstallSession != session) {
-                return;
-            }
-            previousSubscription = installStatusSubscription;
-            installStatusSubscription = null;
-            displayedInstallSession = null;
-            installRevision++;
-        }
-
-        @Nullable Throwable cleanupFailure = null;
-        cleanupFailure = attemptCleanup(
-                cleanupFailure,
-                () -> unsubscribe(previousSubscription));
-        cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::clear);
-
-        taskStatusLabel.setText("");
-        taskStatusLabel.setToolTipText(null);
-        workflowView = WorkflowView.CATALOG;
-        ((CardLayout) workflowCards.getLayout()).show(workflowCards, CATALOG_VIEW);
-        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
-        refreshButton.setEnabled(snapshot != null && snapshot.refreshEnabled());
-        synchronizeLoadedSelection();
-        choiceList.refreshLoadPlan();
-        throwUncheckedFailure(cleanupFailure);
     }
 
     /// Enables installation only for an open catalog view with an exact loaded choice and nonblank name.
@@ -1413,6 +1686,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                     () -> choiceList.getList().removeMouseListener(versionActivationMouseListener));
             cleanupFailure = attemptCleanup(
                     cleanupFailure,
+                    () -> failedLabel.removeMouseListener(stateMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> emptyLabel.removeMouseListener(stateMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> statusLabel.removeMouseListener(stateMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
                     () -> choiceList.getList().getInputMap(JComponent.WHEN_FOCUSED).remove(
                             KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)));
             cleanupFailure = attemptCleanup(
@@ -1428,14 +1710,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(cleanupFailure, () -> resetInstanceNameButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> selectLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> installButton.setEnabled(false));
-            cleanupFailure = attemptCleanup(cleanupFailure, () -> backToCatalogButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> backFromLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.getList().setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, loaderSelectionPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, remoteModpackCatalogPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, downloadCategoryPanel::close);
-            cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::close);
             cleanupFailure = attemptCleanup(cleanupFailure, choiceList::close);
             installConfigurationActivationIndex = -1;
             throwUncheckedFailure(cleanupFailure);
@@ -1526,17 +1806,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         return label;
     }
 
-    /// Distinguishes the three retained child workflows sharing the stable page host.
+    /// Distinguishes the two retained child workflows sharing the stable page host.
     @NotNullByDefault
     private enum WorkflowView {
         /// Base game-version catalog and installation controls.
         CATALOG,
 
         /// Optional loader-selection subflow for the selected base game version.
-        LOADERS,
-
-        /// Active or terminal installation-task presentation.
-        TASK
+        LOADERS
     }
 
     /// Activates only a concrete double-clicked version row.

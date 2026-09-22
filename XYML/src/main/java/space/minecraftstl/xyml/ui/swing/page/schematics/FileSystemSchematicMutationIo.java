@@ -21,6 +21,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserModel.FileIdentity;
 
 import java.io.IOException;
@@ -89,6 +93,9 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
     /// Cross-platform identity capture, injectable only to exercise keyless providers.
     private final IdentityCapture identityCapture;
 
+    /// Recycle-bin movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates operations rooted at one normalized schematic directory.
     /// @param rootDirectory normalized root boundary
     FileSystemSchematicMutationIo(Path rootDirectory) {
@@ -97,7 +104,8 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
                 (source, destination) -> Files.move(source, destination),
                 NO_TEMPORARY_CHECKPOINT,
                 NO_DELETE_CHECKPOINT,
-                FileIdentity::capture);
+                FileIdentity::capture,
+                SystemTrashOperations.INSTANCE);
     }
 
     /// Creates operations with an explicit final-move boundary for rollback tests.
@@ -147,6 +155,30 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
             TemporaryFileCheckpoint temporaryFileCheckpoint,
             DeleteIsolationCheckpoint deleteIsolationCheckpoint,
             IdentityCapture identityCapture) {
+        this(
+                rootDirectory,
+                moveOperation,
+                temporaryFileCheckpoint,
+                deleteIsolationCheckpoint,
+                identityCapture,
+                SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates operations with explicit transaction checkpoints, identity capture, and recycle-bin boundary.
+    ///
+    /// @param rootDirectory normalized root boundary
+    /// @param moveOperation no-replace final import move operation
+    /// @param temporaryFileCheckpoint post-output-open, pre-copy checkpoint
+    /// @param deleteIsolationCheckpoint post-delete-isolation checkpoint
+    /// @param identityCapture no-follow cross-platform identity capture
+    /// @param trashOperations recycle-bin implementation
+    FileSystemSchematicMutationIo(
+            Path rootDirectory,
+            MoveOperation moveOperation,
+            TemporaryFileCheckpoint temporaryFileCheckpoint,
+            DeleteIsolationCheckpoint deleteIsolationCheckpoint,
+            IdentityCapture identityCapture,
+            TrashOperations trashOperations) {
         this.rootDirectory = Objects.requireNonNull(rootDirectory, "rootDirectory")
                 .toAbsolutePath().normalize();
         this.moveOperation = Objects.requireNonNull(moveOperation, "moveOperation");
@@ -155,6 +187,7 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
         this.deleteIsolationCheckpoint = Objects.requireNonNull(
                 deleteIsolationCheckpoint, "deleteIsolationCheckpoint");
         this.identityCapture = Objects.requireNonNull(identityCapture, "identityCapture");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Imports every source after complete preflight and rolls back owned partial writes.
@@ -285,6 +318,17 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
             Path currentDirectory,
             DefaultSchematicBrowserModel.DiscoveredEntry entry,
             LoadCancellation cancellation) throws IOException {
+        delete(currentDirectory, entry, DeletionMode.PERMANENT, cancellation);
+    }
+
+    /// Deletes one validated direct child using the selected recycle-bin or permanent mode.
+    @Override
+    public void delete(
+            Path currentDirectory,
+            DefaultSchematicBrowserModel.DiscoveredEntry entry,
+            DeletionMode mode,
+            LoadCancellation cancellation) throws IOException {
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         prepareCurrentDirectory(currentDirectory, false, cancellation);
         Path target = entry.path().toAbsolutePath().normalize();
         if (!Objects.equals(target.getParent(), currentDirectory)
@@ -305,6 +349,10 @@ final class FileSystemSchematicMutationIo implements DefaultSchematicBrowserMode
         validateDirectoryChain(
                 rootDirectory, currentDirectory, cancellation::throwIfCancelled);
         cancellation.throwIfCancelled();
+        if (requestedMode == DeletionMode.RECYCLE_BIN_FIRST) {
+            FileUtils.deleteWithMode(target, requestedMode, trashOperations);
+            return;
+        }
         Path isolated = newDeleteIsolationPath(currentDirectory);
         Files.move(target, isolated, StandardCopyOption.ATOMIC_MOVE);
         try {

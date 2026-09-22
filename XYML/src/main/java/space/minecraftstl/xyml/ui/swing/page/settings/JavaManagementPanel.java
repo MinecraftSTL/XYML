@@ -37,8 +37,8 @@ import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
-import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
-import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -60,7 +60,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -118,7 +117,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private final DefaultListModel<JavaRuntime> runtimeListModel = new DefaultListModel<>();
 
     /// Single-selection list of active Java runtimes.
-    private final JList<JavaRuntime> runtimeList = new JList<>(runtimeListModel);
+    private final JList<JavaRuntime> runtimeList = new RowBoundsCheckedList<>(runtimeListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Mutable disabled-runtime list model rendered from immutable snapshots.
     private final DefaultListModel<DisabledJavaRuntimeEntry> disabledListModel = new DefaultListModel<>();
@@ -130,7 +129,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private final Set<String> failedDisabledRestores = new HashSet<>();
 
     /// Single-selection list of disabled Java records.
-    private final JList<DisabledJavaRuntimeEntry> disabledList = new JList<>(disabledListModel);
+    private final JList<DisabledJavaRuntimeEntry> disabledList = new RowBoundsCheckedList<>(disabledListModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Layout switching between active and disabled runtime management.
     private final CardLayout cardLayout = new CardLayout();
@@ -192,8 +191,8 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Displays scanning, empty-state, success, cancellation, or failure feedback.
     private final JLabel statusLabel = new JLabel();
 
-    /// Hosts the single active operation's progress presentation.
-    private final TaskProgressHostPanel progressHost;
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController = new TaskLaunchController(() -> { });
 
     /// Runtime snapshot subscription owned by this panel.
     private final Subscription runtimeSubscription;
@@ -296,7 +295,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                 "discoAcquisitionService");
         discoVersionLoadController = new DiscoJavaVersionLoadController(this.discoAcquisitionService);
         this.interactions = Objects.requireNonNull(interactions, "interactions");
-        progressHost = new TaskProgressHostPanel(createTaskProgressStrings(), null, Duration.ZERO);
         configureComponents();
         runtimeSubscription = service.subscribe(this::runtimeSnapshotChanged);
         applySnapshot(service.snapshot());
@@ -332,6 +330,14 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(this::closeOnEventDispatchThread);
     }
 
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
+    }
+
     /// Builds both cards, shared status feedback, and the task progress host.
     private void configureComponents() {
         setOpaque(false);
@@ -357,8 +363,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         root.add(cards, "grow, push");
         statusLabel.setName("javaManagementStatus");
         root.add(statusLabel, "growx, h 24!");
-        progressHost.setName("javaManagementProgress");
-        root.add(progressHost, "growx");
         add(root, BorderLayout.CENTER);
 
         configureRuntimeList();
@@ -1395,8 +1399,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         setStatus(i18n("message.doing"));
         updateActionAvailability();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(executor, Objects.requireNonNull(title, "title"), () -> { });
         } catch (RuntimeException | Error startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             setStatus(failureStatus);
@@ -1461,7 +1464,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         }
         @Nullable TaskExecutorPresentationModel presentation = activePresentation;
         activePresentation = null;
-        progressHost.clear();
         if (presentation != null) {
             presentation.close();
         }
@@ -1480,7 +1482,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         if (activePresentation == presentation) {
             activePresentation = null;
         }
-        progressHost.clear();
         presentation.close();
     }
 
@@ -1745,7 +1746,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         discardAcquisitionPanel();
         discoVersionLoadController.close();
         nameValidationExecutor.shutdownNow();
-        progressHost.close();
         updateActionAvailability();
     }
 
@@ -1766,22 +1766,6 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         if (subscription != null) {
             subscription.unsubscribe();
         }
-    }
-
-    /// Creates localized generic task-progress controls and states for Java operations.
-    ///
-    /// @return localized task progress strings
-    private static TaskProgressStrings createTaskProgressStrings() {
-        return new TaskProgressStrings(
-                i18n("swing.task.status.waiting"),
-                i18n("swing.task.status.running"),
-                i18n("message.success"),
-                i18n("message.failed"),
-                i18n("message.cancelled"),
-                i18n("swing.task.progress_name"),
-                i18n("button.cancel"),
-                i18n("swing.task.show_details"),
-                i18n("swing.task.hide_details"));
     }
 
     /// Maps a nullable or blank runtime metadata value to localized visible text.

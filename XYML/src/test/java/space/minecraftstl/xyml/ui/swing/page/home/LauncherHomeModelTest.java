@@ -270,7 +270,7 @@ public final class LauncherHomeModelTest {
                     () -> assertEquals(0, instanceSelections.get()),
                     () -> assertEquals(0, instanceAdditions.get()));
 
-            assertTrue(firstSession.cancel());
+            model.cancelLaunch();
             assertAll(
                     () -> assertEquals(LaunchStatus.CANCELLED, firstSession.status()),
                     () -> assertFalse(model.snapshot().launching()),
@@ -287,6 +287,53 @@ public final class LauncherHomeModelTest {
                             capturedRequest.get()),
                     () -> assertEquals(2, launchCalls.get()));
         } finally {
+            model.close();
+            launchService.close();
+        }
+    }
+
+    /// A cancellation requested before launchCommand returns is applied to the returned session exactly once.
+    @Test
+    @Timeout(10)
+    public void cancellationBeforeLaunchCommandReturnsIsAppliedAfterInstallation() throws Exception {
+        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
+        DefaultGameLaunchService launchService = pendingLaunchService();
+        CountDownLatch commandEntered = new CountDownLatch(1);
+        CountDownLatch commandRelease = new CountDownLatch(1);
+        AtomicReference<@Nullable LaunchSession> returnedSession = new AtomicReference<>();
+        LauncherHomeModel model = new LauncherHomeModel(
+                store,
+                STATUS_STRINGS,
+                () -> { },
+                () -> { },
+                () -> { },
+                request -> {
+                    commandEntered.countDown();
+                    awaitUninterruptibly(commandRelease);
+                    LaunchSession session = launchService.launch(request);
+                    returnedSession.set(session);
+                    return session;
+                },
+                HomeLaunchScriptExportCommand.unavailable());
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> launch = caller.submit(model::launch);
+            assertTrue(commandEntered.await(5, TimeUnit.SECONDS));
+            model.cancelLaunch();
+            assertTrue(model.snapshot().launchCancellationRequested());
+            commandRelease.countDown();
+            launch.get(5, TimeUnit.SECONDS);
+            LaunchSession session = returnedSession.get();
+            assertTrue(session != null);
+            assertEquals(LaunchStatus.CANCELLED, session.status());
+            assertFalse(model.snapshot().launchCancellationRequested());
+            model.cancelLaunch();
+            assertEquals(LaunchStatus.CANCELLED, session.status());
+        } finally {
+            commandRelease.countDown();
+            caller.shutdownNow();
             model.close();
             launchService.close();
         }

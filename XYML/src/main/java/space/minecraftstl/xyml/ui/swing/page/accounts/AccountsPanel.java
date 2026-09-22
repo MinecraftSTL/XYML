@@ -26,21 +26,36 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.task.Schedulers;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.DropMode;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
@@ -104,6 +119,9 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     /// Owned model listener registration.
     private final Subscription modelSubscription;
 
+    /// Mouse controller that starts account drags only from the right-side handle.
+    private final AccountDragHandleController dragHandleController = new AccountDragHandleController();
+
     /// Listener that commits a user-selected placeholder after its row finishes loading.
     private final ListDataListener listDataListener = new ListDataListener() {
         /// Rechecks a changed loaded row.
@@ -165,7 +183,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interaction = Objects.requireNonNull(interaction, "interaction");
-        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer());
+        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer(), RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
         configureComponents(strings);
         modelSubscription = model.subscribe(this::modelChanged);
@@ -195,6 +213,10 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                 closed = true;
                 modelSubscription.unsubscribe();
                 choiceList.getChoiceModel().removeListDataListener(listDataListener);
+                JList<ChoiceListEntry<AccountListItem>> list = choiceList.getList();
+                list.removeMouseListener(dragHandleController);
+                list.removeMouseMotionListener(dragHandleController);
+                list.setTransferHandler(null);
                 choiceList.close();
                 updateActionAvailability();
             }
@@ -298,6 +320,11 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         list.setName("accountsListView");
         list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setDragEnabled(false);
+        list.setDropMode(DropMode.INSERT);
+        list.setTransferHandler(new AccountReorderTransferHandler());
+        list.addMouseListener(dragHandleController);
+        list.addMouseMotionListener(dragHandleController);
         list.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !applyingSnapshot) {
                 pendingUserSelectionIndex = list.getSelectedIndex();
@@ -578,6 +605,40 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         updateActionAvailability();
     }
 
+    /// Applies one already-validated same-group account move with read-only recovery consent.
+    ///
+    /// @param selected selected loaded account row
+    /// @param targetIndex final zero-based list index
+    /// @return true when the model accepted the move
+    boolean moveAccountToIndex(AccountListItem selected, int targetIndex) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!model.canMoveAccount(selected.accountId(), targetIndex)) {
+            return false;
+        }
+        try {
+            model.moveAccount(selected.accountId(), targetIndex, false);
+            return true;
+        } catch (AccountStorageOverwriteRequiredException failure) {
+            if (!selected.accountId().equals(failure.accountId())) {
+                showActionFailure(failure);
+                return false;
+            }
+            if (!interaction.confirmReadOnlyOverwrite(this)) {
+                return false;
+            }
+            try {
+                model.moveAccount(selected.accountId(), targetIndex, true);
+                return true;
+            } catch (RuntimeException retryFailure) {
+                showActionFailure(retryFailure);
+                return false;
+            }
+        } catch (RuntimeException failure) {
+            showActionFailure(failure);
+            return false;
+        }
+    }
+
     /// Opens local validation and preview for an upload-capable online account.
     private void openOnlineSkinUpload() {
         EdtDispatcher.requireEventDispatchThread();
@@ -618,6 +679,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         boolean hasSelection = !closed && !refreshInProgress && selectedItem() != null;
         refreshButton.setEnabled(hasSelection);
         copyUuidButton.setEnabled(hasSelection);
+        @Nullable AccountListItem selected = selectedItem();
         removeButton.setEnabled(hasSelection);
         addButton.setEnabled(!closed && !refreshInProgress);
         authlibServersButton.setEnabled(
@@ -636,7 +698,6 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                             : "account.move_to_portable"));
         }
         onlineSkinButton.setVisible(model.accountSkinUploadStore().isPresent());
-        @Nullable AccountListItem selected = selectedItem();
         onlineSkinButton.setEnabled(hasSelection
                 && selected != null
                 && model.accountSkinUploadStore()
@@ -694,6 +755,227 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
             current = current.getCause();
         }
         return current;
+    }
+
+    /// Starts account reordering only when the pointer drags the right-side row handle.
+    @NotNullByDefault
+    private final class AccountDragHandleController extends MouseAdapter {
+        /// Minimum pointer movement before a drag gesture starts.
+        private static final int DRAG_THRESHOLD = 4;
+
+        /// Row whose handle armed the current gesture, or -1 when inactive.
+        private int armedIndex = -1;
+
+        /// Pointer x-coordinate captured when the handle gesture starts.
+        private int armedX;
+
+        /// Pointer y-coordinate captured when the handle gesture starts.
+        private int armedY;
+
+        /// Whether the current armed gesture has started Swing drag-and-drop.
+        private boolean dragging;
+
+        /// Arms a drag only when the primary button is pressed over one loaded row's handle.
+        @Override
+        public void mousePressed(MouseEvent event) {
+            if (!(event.getSource() instanceof JList<?> list)
+                    || event.getButton() != MouseEvent.BUTTON1
+                    || closed
+                    || refreshInProgress
+                    || !list.isEnabled()) {
+                reset();
+                return;
+            }
+            int index = list.locationToIndex(event.getPoint());
+            if (!isHandleHit(list, index, event.getPoint())) {
+                reset();
+                return;
+            }
+            list.setSelectedIndex(index);
+            armedIndex = index;
+            armedX = event.getX();
+            armedY = event.getY();
+            dragging = false;
+        }
+
+        /// Starts Swing drag-and-drop after the pointer leaves the handle activation threshold.
+        @Override
+        public void mouseDragged(MouseEvent event) {
+            if (armedIndex < 0 || dragging || !(event.getSource() instanceof JList<?> list)) {
+                return;
+            }
+            if (Math.abs(event.getX() - armedX) + Math.abs(event.getY() - armedY) < DRAG_THRESHOLD) {
+                return;
+            }
+            dragging = true;
+            @Nullable TransferHandler handler = list.getTransferHandler();
+            if (handler != null) {
+                handler.exportAsDrag(list, event, TransferHandler.MOVE);
+            }
+        }
+
+        /// Clears one completed handle gesture.
+        @Override
+        public void mouseReleased(MouseEvent event) {
+            reset();
+        }
+
+        /// Shows the hand cursor only while hovering one loaded row's drag handle.
+        @Override
+        public void mouseMoved(MouseEvent event) {
+            if (event.getSource() instanceof JList<?> list) {
+                int index = list.locationToIndex(event.getPoint());
+                list.setCursor(isHandleHit(list, index, event.getPoint())
+                        ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        : Cursor.getDefaultCursor());
+            }
+        }
+
+        /// Restores the list cursor and clears any inactive armed gesture.
+        @Override
+        public void mouseExited(MouseEvent event) {
+            if (event.getSource() instanceof JList<?> list) {
+                list.setCursor(Cursor.getDefaultCursor());
+            }
+            if (!dragging) {
+                reset();
+            }
+        }
+
+        /// Tests whether one point belongs to a loaded row's right-side handle hit area.
+        ///
+        /// @param list owning account list
+        /// @param index row index, or -1 for no row
+        /// @param point list-coordinate pointer location
+        /// @return true when the row handle may start a drag
+        private boolean isHandleHit(JList<?> list, int index, Point point) {
+            if (index < 0 || index >= list.getModel().getSize()) {
+                return false;
+            }
+            Object value = list.getModel().getElementAt(index);
+            if (!(value instanceof ChoiceListEntry<?> entry)
+                    || entry.status() != ChoiceLoadStatus.LOADED
+                    || entry.value() == null) {
+                return false;
+            }
+            @Nullable Rectangle bounds = list.getCellBounds(index, index);
+            return bounds != null && AccountListCellRenderer.dragHandleBounds(bounds).contains(point);
+        }
+
+        /// Clears the current gesture and drag state.
+        private void reset() {
+            armedIndex = -1;
+            armedX = 0;
+            armedY = 0;
+            dragging = false;
+        }
+    }
+
+    /// Reorders one loaded account through Swing list drag-and-drop within its storage group.
+    @NotNullByDefault
+    private final class AccountReorderTransferHandler extends TransferHandler {
+        /// Source list of the active account drag, or null when no drag is active.
+        private @Nullable Component dragSource;
+
+        /// Stable identifier captured when the active drag starts, or null outside a drag.
+        private @Nullable String draggedAccountId;
+
+        /// Immutable row captured when the active drag starts, or null outside a drag.
+        private @Nullable AccountListItem draggedAccount;
+
+        /// Creates the transferable account identifier for one list drag.
+        @Override
+        protected Transferable createTransferable(JComponent component) {
+            if (closed || refreshInProgress || component != choiceList.getList()) {
+                return null;
+            }
+            @Nullable AccountListItem selected = selectedItem();
+            if (selected == null) {
+                return null;
+            }
+            dragSource = component;
+            draggedAccountId = selected.accountId();
+            draggedAccount = selected;
+            return new StringSelection(selected.accountId());
+        }
+
+        /// Enables move semantics for the source account list.
+        @Override
+        public int getSourceActions(JComponent component) {
+            return MOVE;
+        }
+
+        /// Accepts drops only within the same account group and originating list.
+        @Override
+        public boolean canImport(TransferSupport support) {
+            if (closed || refreshInProgress || !choiceList.getList().isEnabled()
+                    || !support.isDrop()
+                    || !support.isDataFlavorSupported(DataFlavor.stringFlavor)
+                    || support.getComponent() != dragSource
+                    || dragSource != choiceList.getList()) {
+                return false;
+            }
+            @Nullable String accountId = transferredAccountId(support);
+            if (accountId == null || !accountId.equals(draggedAccountId)) {
+                return false;
+            }
+            int sourceIndex = model.stableItemIds().indexOf(accountId);
+            JList.DropLocation dropLocation = (JList.DropLocation) support.getDropLocation();
+            int targetIndex = dropTargetIndex(sourceIndex, dropLocation.getIndex());
+            return targetIndex >= 0 && model.canMoveAccount(accountId, targetIndex);
+        }
+
+        /// Applies one accepted same-group reorder with the existing read-only recovery flow.
+        @Override
+        public boolean importData(TransferSupport support) {
+            if (!canImport(support)) {
+                return false;
+            }
+            @Nullable AccountListItem account = draggedAccount;
+            if (account == null) {
+                return false;
+            }
+            int sourceIndex = model.stableItemIds().indexOf(account.accountId());
+            JList.DropLocation dropLocation = (JList.DropLocation) support.getDropLocation();
+            int targetIndex = dropTargetIndex(sourceIndex, dropLocation.getIndex());
+            return moveAccountToIndex(account, targetIndex);
+        }
+
+        /// Clears one completed or cancelled drag.
+        @Override
+        protected void exportDone(JComponent source, Transferable data, int action) {
+            dragSource = null;
+            draggedAccountId = null;
+            draggedAccount = null;
+            super.exportDone(source, data, action);
+        }
+
+        /// Reads the dragged account identifier from the current transfer data.
+        ///
+        /// @param support current transfer support
+        /// @return account identifier, or null when unavailable
+        private @Nullable String transferredAccountId(TransferSupport support) {
+            try {
+                Object value = support.getTransferable().getTransferData(DataFlavor.stringFlavor);
+                return value instanceof String accountId && !accountId.isBlank() ? accountId : null;
+            } catch (UnsupportedFlavorException | IOException failure) {
+                return null;
+            }
+        }
+
+        /// Converts one insertion gap into the final zero-based source index.
+        ///
+        /// @param sourceIndex current source index, or -1 when absent
+        /// @param dropIndex insertion gap reported by the list
+        /// @return final target index, or -1 when no target exists
+        private int dropTargetIndex(int sourceIndex, int dropIndex) {
+            int itemCount = model.snapshot().itemCount();
+            if (sourceIndex < 0 || itemCount == 0) {
+                return -1;
+            }
+            int targetIndex = dropIndex > sourceIndex ? dropIndex - 1 : dropIndex;
+            return Math.max(0, Math.min(itemCount - 1, targetIndex));
+        }
     }
 
     /// Configures one fixed icon-only account command with tooltip and accessibility text.

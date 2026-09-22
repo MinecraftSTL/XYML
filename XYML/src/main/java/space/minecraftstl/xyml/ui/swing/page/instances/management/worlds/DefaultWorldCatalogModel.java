@@ -22,12 +22,19 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.game.WorldArchiveImporter;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.SwingUtilities;
 import java.io.IOException;
@@ -82,11 +89,17 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// Monotonically increasing ownership generation for refreshes and mutations.
     private long generation;
 
-    /// Current shallow-index cancellation signal, or `null` without an active index.
-    private @Nullable LoadCancellation activeRefreshCancellation;
+    /// Current shallow-index operation, or `null` without an active index.
+    private @Nullable RefreshOperation activeRefresh;
 
     /// Current serialized import/delete operation, or `null` when idle.
     private @Nullable MutationOperation activeMutation;
+
+    /// Whether a mutation terminal transition is publishing while its task still owns filesystem resources.
+    ///
+    /// Reentrant listeners and completion callbacks fail fast during this short interval instead of starting a new
+    /// task that would wait on the lease currently executing the callback.
+    private boolean mutationPublicationInProgress;
 
     /// Whether all subsequent model operations must fail immediately.
     private boolean closed;
@@ -314,15 +327,28 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     public CompletionStage<WorldCatalogSnapshot> installWorld(WorldCatalogImport world, String targetName) {
         WorldCatalogImport importWorld;
         String normalizedTargetName;
+        Path savesDirectory;
+        Path targetDirectory;
         try {
             importWorld = Objects.requireNonNull(world, "world");
             normalizedTargetName = requireNonBlank(targetName, "targetName");
+            savesDirectory = normalizedSavesDirectory();
+            targetDirectory = resolveDirectWorldPath(savesDirectory, normalizedTargetName);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 strings.importingText(),
-                (source, cancellation) -> source.install(importWorld, normalizedTargetName, cancellation));
+                (source, cancellation) -> source.install(
+                        importWorld,
+                        savesDirectory,
+                        normalizedTargetName,
+                        cancellation),
+                List.of(
+                        TaskResource.worldCatalog(savesDirectory),
+                        TaskResource.gameWorld(targetDirectory),
+                        TaskResource.archive(importWorld.source())),
+                savesDirectory);
     }
 
     /// Starts one serialized Core deletion followed by a shallow index refresh.
@@ -331,15 +357,32 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// @return terminal catalog snapshot
     @Override
     public CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world) {
+        return deleteWorld(world, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one serialized Core deletion using the selected mode and one shallow index refresh.
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> deleteWorld(
+            WorldCatalogItem world,
+            DeletionMode mode) {
         WorldCatalogItem selectedWorld;
+        DeletionMode requestedMode;
+        Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
+            requestedMode = Objects.requireNonNull(mode, "mode");
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 strings.deletingText(),
-                (source, cancellation) -> source.delete(selectedWorld, cancellation),
+                (source, cancellation) -> source.delete(selectedWorld, requestedMode, cancellation),
+                List.of(
+                        TaskResource.worldCatalog(savesDirectory),
+                        TaskResource.gameWorld(selectedWorld.path())),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -354,15 +397,20 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             WorldDetailsUpdate update) {
         WorldCatalogItem selectedWorld;
         WorldDetailsUpdate requested;
+        Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
             requested = Objects.requireNonNull(update, "update");
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 i18n("button.save"),
                 (source, cancellation) -> source.updateDetails(selectedWorld, requested, cancellation),
+                List.of(TaskResource.gameWorld(selectedWorld.path())),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -377,15 +425,22 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             Path source) {
         WorldCatalogItem selectedWorld;
         Path selectedSource;
+        Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
             selectedSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 i18n("world.icon.change"),
                 (access, cancellation) -> access.replaceIcon(selectedWorld, selectedSource, cancellation),
+                List.of(
+                        TaskResource.gameWorld(selectedWorld.path()),
+                        TaskResource.inputFile(selectedSource)),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -396,14 +451,19 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     @Override
     public CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem world) {
         WorldCatalogItem selectedWorld;
+        Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 i18n("button.reset"),
                 (source, cancellation) -> source.resetIcon(selectedWorld, cancellation),
+                List.of(TaskResource.gameWorld(selectedWorld.path())),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -416,15 +476,25 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     public CompletionStage<WorldCatalogSnapshot> copyWorld(WorldCatalogItem world, String targetName) {
         WorldCatalogItem selectedWorld;
         String normalizedTargetName;
+        Path savesDirectory;
+        Path targetDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
             normalizedTargetName = requireNonBlank(targetName, "targetName");
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
+            targetDirectory = resolveDirectWorldPath(savesDirectory, normalizedTargetName);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 strings.copyingText(),
                 (source, cancellation) -> source.copy(selectedWorld, normalizedTargetName, cancellation),
+                List.of(
+                        TaskResource.worldCatalog(savesDirectory),
+                        TaskResource.gameWorld(selectedWorld.path()),
+                        TaskResource.gameWorld(targetDirectory)),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -440,15 +510,22 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     public CompletionStage<WorldCatalogSnapshot> exportWorld(WorldCatalogItem world, Path archive) {
         WorldCatalogItem selectedWorld;
         Path normalizedArchive;
+        Path savesDirectory;
         try {
             selectedWorld = Objects.requireNonNull(world, "world");
             normalizedArchive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
+            savesDirectory = normalizedSavesDirectory();
+            requireDirectWorldPath(savesDirectory, selectedWorld.path());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
         return startMutation(
                 strings.exportingText(),
                 (source, cancellation) -> source.export(selectedWorld, normalizedArchive, cancellation),
+                List.of(
+                        TaskResource.gameWorld(selectedWorld.path()),
+                        TaskResource.exportTarget(normalizedArchive)),
+                savesDirectory,
                 selectedWorld);
     }
 
@@ -517,46 +594,86 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// Cancels owned refreshes and mutations, then rejects all later work.
     @Override
     public void close() {
+        @Nullable RefreshOperation refresh;
+        @Nullable TaskExecutor refreshExecutor = null;
         @Nullable MutationOperation mutation;
+        @Nullable TaskExecutor mutationExecutor = null;
         synchronized (stateLock) {
             if (closed) {
                 return;
             }
             closed = true;
             generation++;
-            if (activeRefreshCancellation != null) {
-                activeRefreshCancellation.cancel();
-                activeRefreshCancellation = null;
+            refresh = activeRefresh;
+            activeRefresh = null;
+            if (refresh != null) {
+                refreshExecutor = refresh.requestCancellation();
             }
             mutation = activeMutation;
             activeMutation = null;
             if (mutation != null) {
-                mutation.cancellation().cancel();
+                mutationExecutor = mutation.requestCancellation();
+            }
+        }
+        @Nullable Throwable cancellationFailure = null;
+        if (refreshExecutor != null) {
+            try {
+                refreshExecutor.cancel();
+            } catch (Throwable failure) {
+                cancellationFailure = failure;
+            }
+        }
+        if (mutationExecutor != null) {
+            try {
+                mutationExecutor.cancel();
+            } catch (Throwable failure) {
+                if (cancellationFailure == null) {
+                    cancellationFailure = failure;
+                } else if (cancellationFailure != failure) {
+                    cancellationFailure.addSuppressed(failure);
+                }
             }
         }
         if (mutation != null) {
-            mutation.result().completeExceptionally(new CancellationException("World catalog model was closed"));
+            Throwable terminalFailure = cancellationFailure == null
+                    ? new CancellationException("World catalog model was closed")
+                    : cancellationFailure;
+            mutation.result().completeExceptionally(terminalFailure);
+        }
+        if (cancellationFailure instanceof Error error) {
+            throw error;
+        }
+        if (cancellationFailure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
         }
     }
 
-    /// Prepares and submits one shallow index refresh.
+    /// Prepares and submits one shallow index refresh under the captured catalog resource.
     ///
     /// @param onlyIfIdle whether non-idle models suppress this request
     private void startRefresh(boolean onlyIfIdle) {
         RefreshOperation operation;
         SnapshotTransition transition;
+        @Nullable TaskExecutor refreshExecutorToCancel = null;
+        Path savesDirectory;
+        try {
+            savesDirectory = normalizedSavesDirectory();
+        } catch (RuntimeException failure) {
+            failRefreshPathResolution(onlyIfIdle, failure);
+            return;
+        }
         synchronized (stateLock) {
             requireOpen();
             WorldCatalogSnapshot previous = state.snapshot();
             if (activeMutation != null || onlyIfIdle && previous.status() != WorldCatalogStatus.IDLE) {
                 return;
             }
-            if (activeRefreshCancellation != null) {
-                activeRefreshCancellation.cancel();
+            if (activeRefresh != null) {
+                refreshExecutorToCancel = activeRefresh.requestCancellation();
             }
             LoadCancellation cancellation = new LoadCancellation();
-            activeRefreshCancellation = cancellation;
-            operation = new RefreshOperation(++generation, cancellation);
+            operation = new RefreshOperation(++generation, cancellation, savesDirectory);
+            activeRefresh = operation;
             WorldCatalogSnapshot loading = new WorldCatalogSnapshot(
                     OptionalInt.empty(),
                     nextRevision(previous.contentRevision()),
@@ -568,11 +685,82 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     false);
             transition = replaceStateLocked(List.of(), loading);
         }
-        publish(transition);
+        if (refreshExecutorToCancel != null) {
+            try {
+                refreshExecutorToCancel.cancel();
+            } catch (RuntimeException | Error failure) {
+                // The replacement refresh owns the current generation; the old operation observes its cancellation
+                // flag even if its executor rejects the explicit cancel call.
+            }
+        }
         try {
-            executor.execute(() -> executeRefresh(operation));
+            publish(transition);
         } catch (RuntimeException failure) {
-            commitRefreshFailure(operation, failure);
+            failRefreshAfterStartFailure(operation, failure);
+            throw failure;
+        } catch (Error failure) {
+            failRefreshAfterStartFailure(operation, failure);
+            throw failure;
+        }
+        try {
+            Task<@Nullable Void> task = Task.runAsync("Index world catalog", executor, () -> executeRefresh(operation))
+                    .setSignificance(Task.TaskSignificance.MINOR)
+                    .setResources(TaskResource.worldCatalog(operation.savesDirectory()));
+            TaskExecutor taskExecutor = task.executor(new TaskListener() {
+                @Override
+                public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                    if (!success) {
+                        failRefreshAfterStartFailure(operation, terminalFailure(stoppedExecutor));
+                    }
+                }
+            });
+            operation.installExecutor(taskExecutor);
+            taskExecutor.start();
+        } catch (RuntimeException failure) {
+            failRefreshAfterStartFailure(operation, failure);
+        } catch (Error failure) {
+            failRefreshAfterStartFailure(operation, failure);
+            throw failure;
+        } finally {
+            @Nullable TaskExecutor executorToCancel = operation.markStartCompleted();
+            if (executorToCancel != null) {
+                executorToCancel.cancel();
+            }
+        }
+    }
+
+    /// Publishes a retryable failed state when the saves path cannot be resolved before a refresh task is created.
+    ///
+    /// The current refresh is retained when a replacement request cannot resolve its own path; this lets the already
+    /// valid operation finish instead of discarding useful state for a transient path-resolution failure.
+    ///
+    /// @param onlyIfIdle whether non-idle models suppress this request
+    /// @param failure path-resolution failure
+    private void failRefreshPathResolution(boolean onlyIfIdle, RuntimeException failure) {
+        SnapshotTransition transition;
+        synchronized (stateLock) {
+            requireOpen();
+            WorldCatalogSnapshot previous = state.snapshot();
+            if (activeMutation != null || onlyIfIdle && previous.status() != WorldCatalogStatus.IDLE) {
+                return;
+            }
+            WorldCatalogSnapshot failed = new WorldCatalogSnapshot(
+                    OptionalInt.empty(),
+                    nextRevision(previous.contentRevision()),
+                    WorldCatalogStatus.FAILED,
+                    strings.loadFailureText(failureDetail(failure)),
+                    "",
+                    false,
+                    true,
+                    false);
+            transition = replaceStateLocked(List.of(), failed);
+        }
+        try {
+            publish(transition);
+        } catch (RuntimeException | Error publicationFailure) {
+            if (publicationFailure != failure) {
+                failure.addSuppressed(publicationFailure);
+            }
         }
     }
 
@@ -586,15 +774,24 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     ? access.instanceGameVersion()
                     : Optional.empty();
             operation.cancellation().throwIfCancelled();
-            @Unmodifiable List<Path> directories = access.indexWorldDirectories(operation.cancellation());
+            @Unmodifiable List<Path> directories = access.indexWorldDirectories(
+                    operation.savesDirectory(),
+                    operation.cancellation());
             operation.cancellation().throwIfCancelled();
             commitRefresh(operation, directories, resolvedGameVersion);
         } catch (IOException | RuntimeException failure) {
-            commitRefreshFailure(operation, failure);
+            failRefreshAfterStartFailure(operation, failure);
+        } catch (Error failure) {
+            failRefreshAfterStartFailure(operation, failure);
+            throw failure;
         }
     }
 
-    /// Commits one current complete shallow index.
+    /// Commits one current complete shallow index and retains ownership through READY publication.
+    ///
+    /// The refresh remains active until all synchronous listeners have accepted the READY transition. If a listener
+    /// fails, the still-owned operation can publish a retryable FAILED state; clearing [#activeRefresh] before
+    /// publication would make the failure callback a no-op and leave a misleading READY snapshot behind.
     ///
     /// @param operation current refresh owner
     /// @param directories immutable direct-child paths
@@ -608,7 +805,6 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (!ownsRefresh(operation)) {
                 return;
             }
-            activeRefreshCancellation = null;
             currentGameVersion = Objects.requireNonNull(resolvedGameVersion, "resolvedGameVersion");
             WorldCatalogSnapshot previous = state.snapshot();
             WorldCatalogSnapshot ready = readySnapshot(
@@ -617,7 +813,23 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     "");
             transition = replaceStateLocked(directories, ready);
         }
-        publish(transition);
+        try {
+            publish(transition);
+        } catch (RuntimeException | Error publicationFailure) {
+            try {
+                failRefreshAfterStartFailure(operation, publicationFailure);
+            } catch (RuntimeException | Error failurePublicationFailure) {
+                if (failurePublicationFailure != publicationFailure) {
+                    publicationFailure.addSuppressed(failurePublicationFailure);
+                }
+            }
+            throw publicationFailure;
+        }
+        synchronized (stateLock) {
+            if (activeRefresh == operation) {
+                activeRefresh = null;
+            }
+        }
     }
 
     /// Commits a retryable shallow-index failure only when its owner remains current.
@@ -630,7 +842,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (!ownsRefresh(operation)) {
                 return;
             }
-            activeRefreshCancellation = null;
+            activeRefresh = null;
             WorldCatalogSnapshot previous = state.snapshot();
             WorldCatalogSnapshot failed = new WorldCatalogSnapshot(
                     OptionalInt.empty(),
@@ -644,6 +856,21 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             transition = replaceStateLocked(List.of(), failed);
         }
         publish(transition);
+    }
+
+    /// Commits a refresh failure while preserving the original unchecked throwable when a failure listener also throws.
+    /// The loading state has already been replaced before this method returns when the operation still owns it.
+    ///
+    /// @param operation refresh whose execution or startup failed
+    /// @param failure original refresh failure
+    private void failRefreshAfterStartFailure(RefreshOperation operation, Throwable failure) {
+        try {
+            commitRefreshFailure(operation, failure);
+        } catch (RuntimeException | Error publicationFailure) {
+            if (publicationFailure != failure) {
+                failure.addSuppressed(publicationFailure);
+            }
+        }
     }
 
     /// Runs archive preflight outside the EDT and preserves its original failure.
@@ -673,28 +900,42 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     ///
     /// @param operationText localized active status
     /// @param action blocking Core mutation
+    /// @param resources complete immutable mutation resource set
     /// @return terminal catalog snapshot
     private CompletionStage<WorldCatalogSnapshot> startMutation(
             String operationText,
-            MutationAction action) {
-        return startMutation(operationText, action, null);
+            MutationAction action,
+            @Unmodifiable List<TaskResource> resources,
+            Path savesDirectory) {
+        return startMutation(operationText, action, resources, savesDirectory, null);
     }
 
     /// Starts a serialized mutation and optionally checks its selected row against the current index.
     ///
     /// @param operationText localized active status
     /// @param action blocking Core mutation
+    /// @param resources complete immutable mutation resource set
+    /// @param savesDirectory stable normalized directory used for the terminal shallow index
     /// @param requiredCurrentWorld selected world required to remain in the current index, or null
     /// @return terminal catalog snapshot
     private CompletionStage<WorldCatalogSnapshot> startMutation(
             String operationText,
             MutationAction action,
+            @Unmodifiable List<TaskResource> resources,
+            Path savesDirectory,
             @Nullable WorldCatalogItem requiredCurrentWorld) {
         MutationOperation operation;
         SnapshotTransition transition;
         try {
             operationText = requireNonBlank(operationText, "operationText");
             action = Objects.requireNonNull(action, "action");
+            resources = List.copyOf(Objects.requireNonNull(resources, "resources"));
+            savesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                    .toAbsolutePath()
+                    .normalize();
+            if (resources.isEmpty()) {
+                throw new IllegalArgumentException("World mutation resources cannot be empty");
+            }
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
@@ -706,14 +947,19 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (previous.status() != WorldCatalogStatus.READY) {
                 return CompletableFuture.failedFuture(new IllegalStateException("World directory index is not ready"));
             }
-            if (activeMutation != null) {
+            if (activeMutation != null || mutationPublicationInProgress) {
                 return CompletableFuture.failedFuture(new IllegalStateException("Another world operation is already running"));
             }
             if (requiredCurrentWorld != null && !state.directories().contains(requiredCurrentWorld.path())) {
                 return CompletableFuture.failedFuture(new IllegalArgumentException("Selected world is no longer current"));
             }
             CompletableFuture<WorldCatalogSnapshot> result = new CompletableFuture<>();
-            operation = new MutationOperation(++generation, new LoadCancellation(), result, action);
+            operation = new MutationOperation(
+                    ++generation,
+                    new LoadCancellation(),
+                    result,
+                    action,
+                    savesDirectory);
             activeMutation = operation;
             WorldCatalogSnapshot busy = new WorldCatalogSnapshot(
                     previous.itemCount(),
@@ -726,29 +972,74 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     true);
             transition = replaceStateLocked(state.directories(), busy);
         }
-        publish(transition);
         try {
-            executor.execute(() -> executeMutation(operation));
+            publish(transition);
         } catch (RuntimeException failure) {
             commitMutationFailure(operation, failure);
+            return operation.result();
+        } catch (Error failure) {
+            commitMutationFailure(operation, failure);
+            throw failure;
+        }
+        Task<@Nullable Void> mutationTask = Task.runAsync("Mutate world catalog", executor, () ->
+                executeMutation(operation))
+                .setSignificance(Task.TaskSignificance.MINOR);
+        TaskResource firstResource = resources.get(0);
+        TaskResource[] additionalResources = resources.subList(1, resources.size())
+                .toArray(TaskResource[]::new);
+        mutationTask.setResources(firstResource, additionalResources);
+        Task<@Nullable Void> indexTask = Task.runAsync("Index world catalog", executor, () ->
+                        executeMutationIndex(operation))
+                .setSignificance(Task.TaskSignificance.MINOR)
+                .setResources(TaskResource.worldCatalog(operation.savesDirectory()));
+        Task<@Nullable Void> task = mutationTask.thenComposeAsync(indexTask)
+                .setName("World catalog mutation")
+                .setSignificance(Task.TaskSignificance.MINOR);
+        TaskExecutor taskExecutor = task.executor(new TaskListener() {
+            @Override
+            public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                if (!success) {
+                    commitMutationFailure(operation, terminalFailure(stoppedExecutor));
+                }
+            }
+        });
+        operation.installExecutor(taskExecutor);
+        try {
+            taskExecutor.start();
+        } catch (RuntimeException failure) {
+            commitMutationFailure(operation, failure);
+        } catch (Error failure) {
+            commitMutationFailure(operation, failure);
+            throw failure;
+        } finally {
+            @Nullable TaskExecutor executorToCancel = operation.markStartCompleted();
+            if (executorToCancel != null) {
+                executorToCancel.cancel();
+            }
         }
         return operation.result();
     }
 
-    /// Runs one Core mutation and mandatory fresh shallow index outside the EDT.
+    /// Runs one Core mutation under its precise content and publication resources.
     ///
     /// @param operation active serialized mutation
-    private void executeMutation(MutationOperation operation) {
-        try {
-            requireBackgroundThread();
-            operation.action().run(access, operation.cancellation());
-            operation.cancellation().throwIfCancelled();
-            @Unmodifiable List<Path> directories = access.indexWorldDirectories(operation.cancellation());
-            operation.cancellation().throwIfCancelled();
-            commitMutation(operation, directories);
-        } catch (IOException | RuntimeException failure) {
-            commitMutationFailure(operation, failure);
-        }
+    private void executeMutation(MutationOperation operation) throws IOException {
+        requireBackgroundThread();
+        operation.action().run(access, operation.cancellation());
+        operation.cancellation().throwIfCancelled();
+    }
+
+    /// Reindexes the captured `saves` directory under the short world-catalog coordination key.
+    ///
+    /// @param operation active serialized mutation
+    private void executeMutationIndex(MutationOperation operation) throws IOException {
+        requireBackgroundThread();
+        operation.cancellation().throwIfCancelled();
+        @Unmodifiable List<Path> directories = access.indexWorldDirectories(
+                operation.savesDirectory(),
+                operation.cancellation());
+        operation.cancellation().throwIfCancelled();
+        commitMutation(operation, directories);
     }
 
     /// Commits one successfully mutated and freshly indexed directory source.
@@ -762,13 +1053,25 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (!ownsMutation(operation)) {
                 return;
             }
-            activeMutation = null;
+            mutationPublicationInProgress = true;
             WorldCatalogSnapshot previous = state.snapshot();
             terminal = readySnapshot(directories.size(), nextRevision(previous.contentRevision()), "");
             transition = replaceStateLocked(directories, terminal);
         }
-        publish(transition);
-        operation.result().complete(terminal);
+        try {
+            publish(transition);
+            operation.result().complete(terminal);
+        } catch (RuntimeException | Error failure) {
+            operation.result().completeExceptionally(failure);
+            throw failure;
+        } finally {
+            synchronized (stateLock) {
+                if (activeMutation == operation) {
+                    activeMutation = null;
+                }
+                mutationPublicationInProgress = false;
+            }
+        }
     }
 
     /// Invalidates the current index after a failed or partially completed mutation.
@@ -784,7 +1087,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (!ownsMutation(operation)) {
                 return;
             }
-            activeMutation = null;
+            mutationPublicationInProgress = true;
             WorldCatalogSnapshot previous = state.snapshot();
             String detail = failureDetail(failure);
             WorldCatalogSnapshot failed = new WorldCatalogSnapshot(
@@ -798,8 +1101,24 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     false);
             transition = replaceStateLocked(List.of(), failed);
         }
-        publish(transition);
-        operation.result().completeExceptionally(failure);
+        try {
+            publish(transition);
+        } catch (RuntimeException | Error publicationFailure) {
+            if (publicationFailure != failure) {
+                failure.addSuppressed(publicationFailure);
+            }
+        } finally {
+            try {
+                operation.result().completeExceptionally(failure);
+            } finally {
+                synchronized (stateLock) {
+                    if (activeMutation == operation) {
+                        activeMutation = null;
+                    }
+                    mutationPublicationInProgress = false;
+                }
+            }
+        }
     }
 
     /// Materializes exactly the requested shallow-index range and checks supersession before completion.
@@ -953,7 +1272,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     private boolean ownsRefresh(RefreshOperation operation) {
         return !closed
                 && generation == operation.generation()
-                && activeRefreshCancellation == operation.cancellation()
+                && activeRefresh == operation
                 && !operation.cancellation().isCancelled();
     }
 
@@ -1010,6 +1329,63 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         return message == null || message.isBlank()
                 ? checkedFailure.getClass().getSimpleName()
                 : message;
+    }
+
+    /// Returns one executor's complete terminal failure without losing cooperative cancellation classification.
+    ///
+    /// @param executor stopped task executor
+    /// @return recorded failure or a cancellation failure when no separate cause exists
+    private static Throwable terminalFailure(TaskExecutor executor) {
+        @Nullable Throwable failure = Objects.requireNonNull(executor, "executor").getFailure();
+        return failure == null ? new CancellationException("World catalog mutation was cancelled") : failure;
+    }
+
+    /// Captures one normalized `saves` directory before a task declares resources or starts filesystem work.
+    ///
+    /// @return stable normalized catalog path
+    private Path normalizedSavesDirectory() {
+        return Objects.requireNonNull(access.savesDirectory(), "savesDirectory")
+                .toAbsolutePath()
+                .normalize();
+    }
+
+    /// Resolves and validates one direct saved-world destination before resource acquisition.
+    ///
+    /// @param savesDirectory normalized catalog directory
+    /// @param targetName requested direct-child directory name
+    /// @return normalized direct-child destination
+    /// @throws IllegalArgumentException if the name is invalid or escapes the catalog
+    private static Path resolveDirectWorldPath(Path savesDirectory, String targetName) {
+        Path selectedSavesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                .toAbsolutePath()
+                .normalize();
+        String selectedTargetName = requireNonBlank(targetName, "targetName");
+        if (!FileUtils.isNameValid(selectedTargetName)
+                || WorldArchiveImporter.isReservedWorldName(selectedTargetName)) {
+            throw new IllegalArgumentException("Invalid world directory name: " + selectedTargetName);
+        }
+        Path target = selectedSavesDirectory.resolve(selectedTargetName).toAbsolutePath().normalize();
+        if (!selectedSavesDirectory.equals(target.getParent())) {
+            throw new IllegalArgumentException("World target must remain inside the saves directory");
+        }
+        return target;
+    }
+
+    /// Verifies that a selected current row still belongs directly to the captured catalog directory.
+    ///
+    /// @param savesDirectory normalized catalog directory
+    /// @param worldDirectory selected world directory
+    /// @throws IllegalArgumentException if the selected row belongs to another catalog
+    private static void requireDirectWorldPath(Path savesDirectory, Path worldDirectory) {
+        Path selectedSavesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                .toAbsolutePath()
+                .normalize();
+        Path selectedWorldDirectory = Objects.requireNonNull(worldDirectory, "worldDirectory")
+                .toAbsolutePath()
+                .normalize();
+        if (!selectedSavesDirectory.equals(selectedWorldDirectory.getParent())) {
+            throw new IllegalArgumentException("Selected world no longer belongs to the current saves directory");
+        }
     }
 
     /// Advances a revision while preserving an explicit overflow failure.
@@ -1076,26 +1452,183 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             WorldCatalogSnapshot replacement) {
     }
 
-    /// Active shallow-index ownership metadata.
-    ///
-    /// @param generation operation generation
-    /// @param cancellation cooperative cancellation signal
+    /// Active shallow-index ownership and task-start handoff state.
     @NotNullByDefault
-    private record RefreshOperation(long generation, LoadCancellation cancellation) {
+    private static final class RefreshOperation {
+        /// Operation generation used to reject superseded completion.
+        private final long generation;
+
+        /// Cooperative cancellation signal observed inside the blocking index operation.
+        private final LoadCancellation cancellation;
+
+        /// Stable catalog directory captured before resource acquisition.
+        private final Path savesDirectory;
+
+        /// Installed task executor, or null before task construction finishes.
+        private @Nullable TaskExecutor executor;
+
+        /// Whether [TaskExecutor#start()] has returned or thrown.
+        private boolean startCompleted;
+
+        /// Whether model closure or a superseding refresh requested cancellation.
+        private boolean cancellationRequested;
+
+        /// Creates an active refresh before its task executor is installed.
+        ///
+        /// @param generation operation generation
+        /// @param cancellation cooperative cancellation signal
+        /// @param savesDirectory stable normalized catalog directory
+        private RefreshOperation(long generation, LoadCancellation cancellation, Path savesDirectory) {
+            this.generation = generation;
+            this.cancellation = Objects.requireNonNull(cancellation, "cancellation");
+            this.savesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                    .toAbsolutePath()
+                    .normalize();
+        }
+
+        /// Returns this operation's generation.
+        private long generation() {
+            return generation;
+        }
+
+        /// Returns the cooperative cancellation signal.
+        private LoadCancellation cancellation() {
+            return cancellation;
+        }
+
+        /// Returns the stable catalog directory captured for this refresh.
+        private Path savesDirectory() {
+            return savesDirectory;
+        }
+
+        /// Installs the executor before startup so a concurrent close can remember to cancel it.
+        ///
+        /// @param installedExecutor executor prepared for this refresh
+        private synchronized void installExecutor(TaskExecutor installedExecutor) {
+            if (executor != null) {
+                throw new IllegalStateException("World refresh executor is already installed");
+            }
+            executor = Objects.requireNonNull(installedExecutor, "installedExecutor");
+        }
+
+        /// Publishes completion of the synchronous start call and returns a deferred cancellation target.
+        ///
+        /// @return executor to cancel, or null when no cancellation raced startup
+        private synchronized @Nullable TaskExecutor markStartCompleted() {
+            startCompleted = true;
+            return cancellationRequested ? executor : null;
+        }
+
+        /// Cancels index work and returns an executor only when its start call has completed.
+        ///
+        /// @return executor safe to cancel immediately, or null when startup will perform the handoff
+        private synchronized @Nullable TaskExecutor requestCancellation() {
+            cancellationRequested = true;
+            cancellation.cancel();
+            return startCompleted ? executor : null;
+        }
     }
 
-    /// Active import/delete ownership metadata.
-    ///
-    /// @param generation operation generation
-    /// @param cancellation cooperative cancellation signal
-    /// @param result externally visible terminal completion
-    /// @param action blocking Core operation
+    /// Active world-mutation ownership and task-start handoff state.
     @NotNullByDefault
-    private record MutationOperation(
-            long generation,
-            LoadCancellation cancellation,
-            CompletableFuture<WorldCatalogSnapshot> result,
-            MutationAction action) {
+    private static final class MutationOperation {
+        /// Operation generation used to reject superseded completion.
+        private final long generation;
+
+        /// Cooperative cancellation signal observed inside blocking Core calls.
+        private final LoadCancellation cancellation;
+
+        /// Externally visible terminal completion.
+        private final CompletableFuture<WorldCatalogSnapshot> result;
+
+        /// Blocking Core mutation performed while the task owns its declared resources.
+        private final MutationAction action;
+
+        /// Stable catalog directory used by the separately locked shallow-index stage.
+        private final Path savesDirectory;
+
+        /// Installed task executor, or null before task construction finishes.
+        private @Nullable TaskExecutor executor;
+
+        /// Whether [TaskExecutor#start()] has returned or thrown.
+        private boolean startCompleted;
+
+        /// Whether model closure requested cancellation before or after executor startup.
+        private boolean cancellationRequested;
+
+        /// Creates an active mutation before its task executor is installed.
+        ///
+        /// @param generation operation generation
+        /// @param cancellation cooperative cancellation signal
+        /// @param result externally visible terminal completion
+        /// @param action blocking Core operation
+        /// @param savesDirectory stable normalized catalog directory
+        private MutationOperation(
+                long generation,
+                LoadCancellation cancellation,
+                CompletableFuture<WorldCatalogSnapshot> result,
+                MutationAction action,
+                Path savesDirectory) {
+            this.generation = generation;
+            this.cancellation = Objects.requireNonNull(cancellation, "cancellation");
+            this.result = Objects.requireNonNull(result, "result");
+            this.action = Objects.requireNonNull(action, "action");
+            this.savesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                    .toAbsolutePath()
+                    .normalize();
+        }
+
+        /// Returns this operation's generation.
+        private long generation() {
+            return generation;
+        }
+
+        /// Returns the cooperative cancellation signal.
+        private LoadCancellation cancellation() {
+            return cancellation;
+        }
+
+        /// Returns the externally visible terminal future.
+        private CompletableFuture<WorldCatalogSnapshot> result() {
+            return result;
+        }
+
+        /// Returns the blocking Core action.
+        private MutationAction action() {
+            return action;
+        }
+
+        /// Returns the stable catalog directory for terminal shallow indexing.
+        private Path savesDirectory() {
+            return savesDirectory;
+        }
+
+        /// Installs the executor before startup so a concurrent close can remember to cancel it.
+        ///
+        /// @param installedExecutor executor prepared for this mutation
+        private synchronized void installExecutor(TaskExecutor installedExecutor) {
+            if (executor != null) {
+                throw new IllegalStateException("World mutation executor is already installed");
+            }
+            executor = Objects.requireNonNull(installedExecutor, "installedExecutor");
+        }
+
+        /// Publishes completion of the synchronous start call and returns a deferred cancellation target.
+        ///
+        /// @return executor to cancel, or null when no cancellation raced startup
+        private synchronized @Nullable TaskExecutor markStartCompleted() {
+            startCompleted = true;
+            return cancellationRequested ? executor : null;
+        }
+
+        /// Cancels Core work and returns an executor only when its start call has completed.
+        ///
+        /// @return executor safe to cancel immediately, or null when startup will perform the handoff
+        private synchronized @Nullable TaskExecutor requestCancellation() {
+            cancellationRequested = true;
+            cancellation.cancel();
+            return startCompleted ? executor : null;
+        }
     }
 
     /// Blocking operation performed before mandatory reindexing.

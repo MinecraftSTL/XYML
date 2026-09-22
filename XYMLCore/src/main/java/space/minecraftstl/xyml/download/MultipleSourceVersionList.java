@@ -59,6 +59,7 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
                 setName("MultipleSourceVersionList.refreshAsync(task=%s, index=%d, all=%d)".formatted(
                         refreshTask.getName(), sourceIndex, backends.length)
                 );
+                asOrchestration();
             }
 
             @Override
@@ -107,7 +108,13 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
 
     @Override
     public Task<?> refreshAsync(String gameVersion) {
-        versions.clear(gameVersion);
-        return refreshAsync(gameVersion, 0);
+        return Task.runAsync(() -> {
+            lock.writeLock().lock();
+            try {
+                versions.clear(gameVersion);
+            } finally {
+                lock.writeLock().unlock();
+            }
+        }).asOrchestration().thenComposeAsync(() -> refreshAsync(gameVersion, 0)).asOrchestration();
     }
 }

@@ -21,6 +21,7 @@ import org.glavo.uuid.UUIDs;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
@@ -66,6 +67,33 @@ public class DefaultLauncher extends Launcher {
         super(repository, manifest, authInfo, options, listener, daemon);
 
         this.analyzer = LibraryAnalyzer.analyze(manifest, repository.getGameVersion(manifest).orElse(null));
+    }
+
+    /// Removes the legacy monolithic ASM artifact when Legacy Fabric already supplies modular ASM libraries.
+    ///
+    /// @param manifest resolved launch manifest
+    /// @param legacyFabricInstalled whether the resolved instance contains Legacy Fabric
+    /// @return the original manifest when no conflict exists, otherwise a copy without `asm-all`
+    static GameInstanceManifest repairLegacyFabricAsmConflict(
+            GameInstanceManifest manifest,
+            boolean legacyFabricInstalled) {
+        GameInstanceManifest launchManifest = Objects.requireNonNull(manifest, "manifest");
+        if (!legacyFabricInstalled) {
+            return launchManifest;
+        }
+
+        @Unmodifiable List<Library> libraries = launchManifest.getLibraries();
+        boolean hasModularAsm = libraries.stream().anyMatch(library -> library.is("org.ow2.asm", "asm"));
+        if (!hasModularAsm) {
+            return launchManifest;
+        }
+
+        @Unmodifiable List<Library> repairedLibraries = libraries.stream()
+                .filter(library -> !library.is("org.ow2.asm", "asm-all"))
+                .toList();
+        return repairedLibraries.size() == libraries.size()
+                ? launchManifest
+                : launchManifest.withLibraries(repairedLibraries);
     }
 
     /// Builds the complete operating-system command and its native-library metadata.
@@ -288,10 +316,15 @@ public class DefaultLauncher extends Launcher {
             }
         }
 
-        Set<String> classpath = repository.getClasspath(manifest);
+        GameInstanceManifest classpathManifest = repairLegacyFabricAsmConflict(
+                manifest,
+                analyzer.has(LibraryAnalyzer.LibraryType.LEGACY_FABRIC));
+        Set<String> classpath = repository.getClasspath(classpathManifest);
 
         if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
             classpath.removeIf(c -> c.contains("2.9.4-nightly-20150209"));
+            classpath.removeIf(c -> c.contains("platform-3.4.0"));
+            classpath.removeIf(c -> c.contains("icu4j-core-mojang"));
         }
 
         Path jar = repository.getInstanceJar(manifest);
@@ -497,9 +530,14 @@ public class DefaultLauncher extends Launcher {
                                 if (ext.equals("sha1") || ext.equals("git"))
                                     return false;
 
-                                if (options.isUseNativeGLFW() && FileUtils.getName(destFile).toLowerCase(Locale.ROOT).contains("glfw")) {
+                                if (options.isUseNativeGLFWorSDL() && FileUtils.getName(destFile).toLowerCase(Locale.ROOT).contains("glfw")) {
                                     return false;
                                 }
+
+                                if (options.isUseNativeGLFWorSDL() && FileUtils.getName(destFile).toLowerCase(Locale.ROOT).contains("sdl")) {
+                                    return false;
+                                }
+
                                 if (options.isUseNativeOpenAL() && FileUtils.getName(destFile).toLowerCase(Locale.ROOT).contains("openal")) {
                                     return false;
                                 }
@@ -727,29 +765,15 @@ public class DefaultLauncher extends Launcher {
             }
         }
 
-        if (analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
-            env.put("INST_FORGE", "1");
+        for (ModLoaderType modLoader : analyzer.getModLoaders()) {
+            @Nullable String envVarName = modLoader.getEnvVarName();
+            if (envVarName != null) {
+                env.put(envVarName, "1");
+            }
         }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
-            env.put("INST_CLEANROOM", "1");
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.NEO_FORGE)) {
-            env.put("INST_NEOFORGE", "1");
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.LITELOADER)) {
-            env.put("INST_LITELOADER", "1");
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.FABRIC)) {
-            env.put("INST_FABRIC", "1");
-        }
+
         if (analyzer.has(LibraryAnalyzer.LibraryType.OPTIFINE)) {
             env.put("INST_OPTIFINE", "1");
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.QUILT)) {
-            env.put("INST_QUILT", "1");
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.LEGACY_FABRIC)) {
-            env.put("INST_LEGACYFABRIC", "1");
         }
 
         env.putAll(options.getEnvironmentVariables());

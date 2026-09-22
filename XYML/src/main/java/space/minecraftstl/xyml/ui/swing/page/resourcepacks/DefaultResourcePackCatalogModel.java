@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.Lang;
 
 import java.io.IOException;
@@ -459,7 +460,13 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     /// @return asynchronous terminal completion
     @Override
     public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path) {
-        return startMutation(new ResourcePackDeleteMutation(normalizeMutationPath(path)));
+        return deleteResourcePack(path, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one deletion using the selected recycle-bin or permanent mode.
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path, DeletionMode mode) {
+        return startMutation(new ResourcePackDeleteMutation(normalizeMutationPath(path), mode));
     }
 
     /// Cancels index, range, and pre-commit write work, then terminates every subscription.
