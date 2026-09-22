@@ -25,10 +25,10 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Starts confirmed user-visible tasks and directs their progress to the task manager.
+/// Starts confirmed user-visible tasks with an explicit task-manager navigation policy.
 ///
-/// The executor is started before the confirmation surface is dismissed. A start failure therefore leaves the
-/// original page or dialog open for its existing error handling, while navigation failures after a successful start
+/// Each launch method starts the executor before dismissing the confirmation surface. A start failure therefore
+/// leaves the original page or dialog open for its existing error handling, while navigation failures after a successful start
 /// are logged without turning the committed task into a reported failure.
 @NotNullByDefault
 public final class TaskLaunchController {
@@ -50,6 +50,25 @@ public final class TaskLaunchController {
     /// @param title stable user-facing task title
     /// @param dismissAction action closing or hiding the confirmation surface
     public void launch(TaskExecutor executor, String title, Runnable dismissAction) {
+        start(executor, title, dismissAction);
+        openTaskManager();
+    }
+
+    /// Starts one user-visible task and dismisses its confirmation surface without navigating.
+    ///
+    /// @param executor unstarted task executor
+    /// @param title stable user-facing task title
+    /// @param dismissAction action closing or hiding the confirmation surface
+    public void launchWithoutNavigation(TaskExecutor executor, String title, Runnable dismissAction) {
+        start(executor, title, dismissAction);
+    }
+
+    /// Registers and starts one user-visible task before dismissing its confirmation surface.
+    ///
+    /// @param executor unstarted task executor
+    /// @param title stable user-facing task title
+    /// @param dismissAction action closing or hiding the confirmation surface
+    private static void start(TaskExecutor executor, String title, Runnable dismissAction) {
         EdtDispatcher.requireEventDispatchThread();
         TaskExecutor source = Objects.requireNonNull(executor, "executor");
         source.setTaskExecutionPresentation(
@@ -57,7 +76,6 @@ public final class TaskLaunchController {
                 true);
         source.start();
         dismiss(dismissAction);
-        openTaskManager();
     }
 
     /// Dismisses an already-registered task surface and opens the task manager.

@@ -669,7 +669,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     private void removeAssets() {
         EdtDispatcher.requireEventDispatchThread();
         if (isReady() && interactions.confirmDestructive(this, strings.removeAssetsAction(), true)) {
-            startTask(service::removeAssets, strings.removeAssetsAction());
+            startLocalTask(service::removeAssets, strings.removeAssetsAction());
         }
     }
 
@@ -677,7 +677,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     private void removeLibraries() {
         EdtDispatcher.requireEventDispatchThread();
         if (isReady() && interactions.confirmDestructive(this, strings.removeLibrariesAction(), true)) {
-            startTask(service::removeLibraries, strings.removeLibrariesAction());
+            startLocalTask(service::removeLibraries, strings.removeLibrariesAction());
         }
     }
 
@@ -688,7 +688,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 this,
                 strings.cleanGeneratedFilesAction(),
                 false)) {
-            startTask(service::cleanGeneratedFiles, strings.cleanGeneratedFilesAction());
+            startLocalTask(service::cleanGeneratedFiles, strings.cleanGeneratedFilesAction());
         }
     }
 
@@ -813,11 +813,31 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateControls();
     }
 
-    /// Creates and starts one stopped Core maintenance task.
+    /// Creates and starts one local Core maintenance task without opening the task manager.
+    ///
+    /// @param taskSupplier deferred task construction boundary
+    /// @param title visible operation title
+    private void startLocalTask(MaintenanceTaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, false);
+    }
+
+    /// Creates and starts one stopped Core maintenance task and opens the task manager.
     ///
     /// @param taskSupplier deferred task construction boundary
     /// @param title visible operation title
     private void startTask(MaintenanceTaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, true);
+    }
+
+    /// Creates and starts one stopped Core maintenance task.
+    ///
+    /// @param taskSupplier deferred task construction boundary
+    /// @param title visible operation title
+    /// @param navigateToTaskManager whether successful startup should open the task manager
+    private void startTask(
+            MaintenanceTaskSupplier taskSupplier,
+            String title,
+            boolean navigateToTaskManager) {
         EdtDispatcher.requireEventDispatchThread();
         if (!isReady()) {
             return;
@@ -845,7 +865,14 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         statusLabel.setText(strings.workingStatus());
         updateControls();
         try {
-            taskLaunchController.launch(executor, requireNonBlank(title, "title"), () -> { });
+            if (navigateToTaskManager) {
+                taskLaunchController.launch(executor, requireNonBlank(title, "title"), () -> { });
+            } else {
+                taskLaunchController.launchWithoutNavigation(
+                        executor,
+                        requireNonBlank(title, "title"),
+                        () -> { });
+            }
         } catch (RuntimeException startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);

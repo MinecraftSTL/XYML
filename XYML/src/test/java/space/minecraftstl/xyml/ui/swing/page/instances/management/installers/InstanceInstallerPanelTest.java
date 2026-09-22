@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.DefaultGameLoaderCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogSource;
@@ -135,6 +136,9 @@ final class InstanceInstallerPanelTest {
                 InstanceOtherLibraryEntry.StructureState.CLEAR);
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of(uncertain, clear)));
+        EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
 
         EdtDispatcher.executeAndWait(() -> {
             JList<?> otherLibraries = findNamed(panel, "instanceInstallerOtherLibraryList", JList.class);
@@ -172,6 +176,9 @@ final class InstanceInstallerPanelTest {
                 LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR);
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
         activateWithSnapshot(panel, service, snapshot(List.of(uncertain, clear), List.of()));
+        EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
 
         EdtDispatcher.executeAndWait(() -> {
             JList<?> installedLoaders = findNamed(panel, "instanceInstallerInstalledLoaderList", JList.class);
@@ -196,7 +203,10 @@ final class InstanceInstallerPanelTest {
         RecordingInteractions interactions = new RecordingInteractions();
         Path chosenInstaller = Path.of("C:/offline/forge-installer.jar");
         interactions.chosenInstaller = chosenInstaller;
+        AtomicInteger navigationCount = new AtomicInteger();
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
+        EdtDispatcher.executeAndWait(() ->
+                panel.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet)));
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of()));
 
         EdtDispatcher.executeAndWait(() -> {
@@ -205,6 +215,7 @@ final class InstanceInstallerPanelTest {
             offline.doClick();
             assertEquals(1, service.offlineCalls.get());
             assertEquals(chosenInstaller, service.offlineInstaller);
+            assertEquals(1, navigationCount.get());
             panel.close();
         });
     }
@@ -244,7 +255,10 @@ final class InstanceInstallerPanelTest {
         RecordingInteractions interactions = new RecordingInteractions();
         LoaderSelectionWizardPanel wizard = wizardWith(List.of(
                 new GameLoaderCatalogItem(GameLoaderKind.FABRIC, fabric)));
+        AtomicInteger navigationCount = new AtomicInteger();
         InstanceInstallerPanel panel = createPanel(service, wizard, interactions);
+        EdtDispatcher.executeAndWait(() ->
+                panel.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet)));
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of()));
 
         EdtDispatcher.executeAndWait(() -> {
@@ -266,6 +280,7 @@ final class InstanceInstallerPanelTest {
             assertEquals(1, service.remoteInstallCalls.get());
             assertEquals(1, service.installedRemoteVersions.size());
             assertSame(fabric, service.installedRemoteVersions.get(0));
+            assertEquals(1, navigationCount.get());
             panel.close();
         });
     }
