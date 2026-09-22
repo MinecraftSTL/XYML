@@ -93,6 +93,11 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `test` | 使用與 `build` 相同的分支和版本解析規則測試目前工作樹。 |
 | `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
 | `run` | 始終重新建置 `XYML`、`XYMLCore` 和 `XYMLBoot`，然後執行目前工作樹製品。 |
+| `releasePromoteAlpha` | 把本機 `dev` 以雙親 `--no-ff` 合併晉升到 `alpha`，不推送。 |
+| `releasePromoteBeta` | 把本機 `alpha` 以雙親 `--no-ff` 合併晉升到 `beta`，不推送。 |
+| `releasePromoteMain` | 把本機 `beta` 晉升到 `main` 並完成 `main -> beta -> alpha -> dev` 反向同步，不推送。需 `-Pxyml.release.stableIncrement`（`major`、`minor` 或 `patch`）。 |
+
+`releasePromote*` 只讀取本機 `main`、`beta`、`alpha`、`dev` 參照：先建立臨時工作區，逐級產生雙親 `--no-ff` 合併，在合併提交建立前跑發佈門檻，最後用一次交易原子更新本機參照，並輸出推送與回復命令但不推送。可選屬性：`-Pxyml.release.verify=standard` 或 `full`、`-Pxyml.release.skipTests=true`、`-Pxyml.release.dryRun=true`。
 
 即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`build`、`test` 和 `run` 也始終使用目前倉庫根目錄；這些任務都不會切換分支或委託渠道任務。
 沒有 CI 版本輸入時，製品版本由目前分支與 `HEAD` 拓撲決定；未提交變更會進入製品，但不會使版本號遞增。

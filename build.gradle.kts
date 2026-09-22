@@ -4,6 +4,7 @@ import space.minecraftstl.xyml.gradle.ci.GitHubActionUtils
 import space.minecraftstl.xyml.gradle.ci.JenkinsUtils
 import space.minecraftstl.xyml.gradle.l10n.ParseLanguageSubtagRegistry
 import space.minecraftstl.xyml.gradle.pack.ReleaseType
+import space.minecraftstl.xyml.gradle.pack.ReleasePromotionTask
 import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
 import space.minecraftstl.xyml.gradle.pack.GitBranchGradleTask
 import space.minecraftstl.xyml.gradle.pack.GitVersionResolver
@@ -224,6 +225,31 @@ registerReleaseBranchBuild("buildMain", "main", ReleaseType.STABLE)
 registerReleaseBranchBuild("buildBeta", "beta", ReleaseType.BETA)
 registerReleaseBranchBuild("buildAlpha", "alpha", ReleaseType.ALPHA)
 registerReleaseBranchBuild("buildDev", "dev", ReleaseType.DEV)
+
+fun registerReleasePromotion(taskName: String, sourceBranch: String, targetBranch: String) =
+    tasks.register<ReleasePromotionTask>(taskName) {
+        group = xymlWorkflowGroup
+        description = "Promotes local $sourceBranch into $targetBranch with a two-parent --no-ff merge, without pushing."
+        this.sourceBranch.set(sourceBranch)
+        this.targetBranch.set(targetBranch)
+        this.stableIncrement.set(providers.gradleProperty("xyml.release.stableIncrement"))
+        this.verifyMode.set(providers.gradleProperty("xyml.release.verify").orElse("standard"))
+        this.skipTests.set(
+            providers.gradleProperty("xyml.release.skipTests")
+                .map { it.toBooleanStrict() }
+                .orElse(false)
+        )
+        this.dryRun.set(
+            providers.gradleProperty("xyml.release.dryRun")
+                .map { it.toBooleanStrict() }
+                .orElse(false)
+        )
+        repositoryDirectory.set(layout.projectDirectory)
+    }
+
+registerReleasePromotion("releasePromoteAlpha", "dev", "alpha")
+registerReleasePromotion("releasePromoteBeta", "alpha", "beta")
+registerReleasePromotion("releasePromoteMain", "beta", "main")
 val localBuildTasks = subprojects.map { "${it.path}:assemble" } + listOf(
     ":XYML:makeExecutables",
     ":XYML:makeDeb"

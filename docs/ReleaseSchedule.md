@@ -69,6 +69,7 @@ flowchart LR
 ```
 
 所有向更稳定渠道的合并都必须使用 `git merge --no-ff`，包括 `hotfix/* -> main`。只有稳定版晋升或紧急修订改变稳定版基线后，发布分支才可以向较低稳定度渠道同步，并且必须逐级进行：`main -> beta -> alpha -> dev`。每一步都必须直接使用上一渠道的对应基线载体，即 `main` 上的稳定版发布或紧急修订合并，以及其后的每个同步合并；不能在这条反向链中夹入普通提交。普通的 `alpha -> dev` 或 `beta -> alpha` 同步不是版本纪元边界，也不属于正常流程。共享发布分支不得 rebase 或强制推送。
+本地可以先在 `stl` 分组下用 `releasePromoteAlpha`、`releasePromoteBeta`、`releasePromoteMain` 执行这些晋升：任务只读本地发布分支，在临时工作区生成双亲 `--no-ff` 合并，在合并提交创建前跑 `checkstyle`、`checkTranslations` 与 `test` 门禁，随后用一次事务更新本地引用，不推送；`releasePromoteMain` 还会完成 `main -> beta -> alpha -> dev` 反向同步。CI 侧仍由发布策略工作流与 `config/release/validate-branch-flow.sh` 校验。
 
 发布策略工作流会在合并前检查准确的目标提交、来源提交和完整稳定版基线链，并在合并后审计发布合并。合并后审计要求合并结果从第二父提交取得 `stableVersion`。仓库规则还必须允许发布 PR 使用合并提交；合并后审计仍会发现绕过该要求的 squash 或 rebase 合并。
 

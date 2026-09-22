@@ -69,6 +69,7 @@ flowchart LR
 ```
 
 所有向更穩定渠道的合併都必須使用 `git merge --no-ff`，包括 `hotfix/* -> main`。只有穩定版晉升或緊急修訂改變穩定版基線後，發佈分支才可以向較低穩定度渠道同步，並且必須逐級進行：`main -> beta -> alpha -> dev`。每一步都必須直接使用上一渠道的對應基線載體，即 `main` 上的穩定版發佈或緊急修訂合併，以及其後的每個同步合併；不能在這條反向鏈中夾入普通提交。普通的 `alpha -> dev` 或 `beta -> alpha` 同步不是版本紀元邊界，也不屬於正常流程。共享發佈分支不得 rebase 或強制推送。
+本機可先在 `stl` 分類下用 `releasePromoteAlpha`、`releasePromoteBeta`、`releasePromoteMain` 執行這些晉升：任務只讀本機發佈分支，在臨時工作區產生雙親 `--no-ff` 合併，在合併提交建立前跑 `checkstyle`、`checkTranslations` 與 `test` 門檻，接著用一次交易更新本機參照，不推送；`releasePromoteMain` 還會完成 `main -> beta -> alpha -> dev` 反向同步。CI 仍由發佈策略工作流與 `config/release/validate-branch-flow.sh` 校驗。
 
 發佈策略工作流程會在合併前檢查準確的目標提交、來源提交和完整穩定版基線鏈，並在合併後稽核發佈合併。合併後稽核要求合併結果從第二父提交取得 `stableVersion`。儲存庫規則還必須允許發佈 PR 使用合併提交；合併後稽核仍會發現繞過該要求的 squash 或 rebase 合併。
 

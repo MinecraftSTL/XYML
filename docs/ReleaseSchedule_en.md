@@ -72,6 +72,7 @@ flowchart LR
 ```
 
 Every merge toward a more stable channel must use `git merge --no-ff`, including `hotfix/* -> main`. Release branches
+Locally the `stl` tasks `releasePromoteAlpha`, `releasePromoteBeta`, and `releasePromoteMain` perform these promotions: they read only local release branches, build the two-parent `--no-ff` merges in a temporary worktree, run the `checkstyle`, `checkTranslations`, and `test` gates before the merge commit is created, and then update the local refs in one transaction without pushing. `releasePromoteMain` also performs the `main -> beta -> alpha -> dev` synchronization. CI still validates release pull requests through the release policy workflow and `config/release/validate-branch-flow.sh`.
 may be synchronized toward a less stable channel only when a Stable promotion or hotfix has changed the Stable
 baseline, and only one adjacent channel at a time: `main -> beta -> alpha -> dev`. Ordinary `alpha -> dev` or
 `beta -> alpha` synchronization is not a release boundary and is not part of the normal workflow. Each synchronization
