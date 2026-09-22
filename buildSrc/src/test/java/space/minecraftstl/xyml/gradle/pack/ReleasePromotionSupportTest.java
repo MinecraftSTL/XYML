@@ -151,6 +151,16 @@ final class ReleasePromotionSupportTest {
                 "stableVersion=9.9.9".getBytes(StandardCharsets.UTF_8)));
     }
 
+    /// Forces nested Gradle gates to use a single-use daemon.
+    @Test
+    void addsNoDaemonToNestedGradleArguments() {
+        List<String> gate = List.of("checkstyle", "checkTranslations");
+        assertEquals(List.of("checkstyle", "checkTranslations", "--no-daemon"),
+                ReleasePromotionTask.withNoDaemon(gate));
+        List<String> probe = List.of(":XYML:validateReleaseMetadata", "--no-daemon", "--stacktrace");
+        assertEquals(probe, ReleasePromotionTask.withNoDaemon(probe));
+    }
+
     /// Keeps the nested Wrapper command identical on Windows and Unix.
     @Test
     void buildsCrossPlatformWrapperCommands() {

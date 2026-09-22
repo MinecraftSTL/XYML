@@ -86,6 +86,9 @@ public abstract class ReleasePromotionTask extends DefaultTask {
     /// Dev branch name used by the stable baseline chain.
     private static final String DEV_BRANCH = "dev";
 
+    /// Option that makes a nested Gradle build stop its single-use daemon before the Wrapper exits.
+    private static final String NO_DAEMON_OPTION = "--no-daemon";
+
     /// Environment variables that would override an inferred release version.
     private static final List<String> OVERRIDING_ENVIRONMENT = List.of(
             "BUILD_NUMBER",
@@ -403,7 +406,7 @@ public abstract class ReleasePromotionTask extends DefaultTask {
     /// @return inferred release version
     private String probeReleaseVersion(Path checkout, String branch) {
         String output = captureNestedGradle(checkout, nestedEnvironment(branch),
-                List.of(":XYML:validateReleaseMetadata", "--no-daemon", "--stacktrace"));
+                List.of(":XYML:validateReleaseMetadata", "--stacktrace"));
         Matcher matcher = RELEASE_VERSION_PATTERN.matcher(output);
         if (!matcher.find()) {
             throw new IllegalStateException("Nested build for " + branch + " did not report "
@@ -813,7 +816,8 @@ public abstract class ReleasePromotionTask extends DefaultTask {
     /// @param environment complete nested environment
     /// @param arguments Gradle arguments
     private void runNestedGradle(Path checkout, Map<String, Object> environment, List<String> arguments) {
-        runProcess(checkout, GitBranchGradleTask.nestedGradleCommand(checkout, isWindows(), arguments),
+        runProcess(checkout,
+                GitBranchGradleTask.nestedGradleCommand(checkout, isWindows(), withNoDaemon(arguments)),
                 environment, false);
     }
 
@@ -824,8 +828,24 @@ public abstract class ReleasePromotionTask extends DefaultTask {
     /// @param arguments Gradle arguments
     /// @return combined process output
     private String captureNestedGradle(Path checkout, Map<String, Object> environment, List<String> arguments) {
-        return captureProcess(checkout, GitBranchGradleTask.nestedGradleCommand(checkout, isWindows(), arguments),
+        return captureProcess(checkout,
+                GitBranchGradleTask.nestedGradleCommand(checkout, isWindows(), withNoDaemon(arguments)),
                 environment, null, false);
+    }
+
+    /// Adds `--no-daemon` so a nested Gradle gate cannot leave a long-lived daemon
+    /// holding the outer process output streams.
+    ///
+    /// @param arguments Gradle arguments
+    /// @return immutable arguments that request a single-use daemon for the nested build
+    static @Unmodifiable List<String> withNoDaemon(@Unmodifiable List<String> arguments) {
+        if (arguments.contains(NO_DAEMON_OPTION)) {
+            return List.copyOf(arguments);
+        }
+        List<String> result = new ArrayList<>(arguments.size() + 1);
+        result.addAll(arguments);
+        result.add(NO_DAEMON_OPTION);
+        return List.copyOf(result);
     }
 
     /// Reports whether the current platform uses the Windows Wrapper command.
