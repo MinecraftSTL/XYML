@@ -30,15 +30,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Verifies the complete, stable destination order and its bundled icon contract.
 @NotNullByDefault
 final class InstanceManagementPageIdTest {
-    /// Every recovered management function retains one stable declaration-order destination.
+    /// Every management function retains one stable declaration-order destination after data packs move under worlds.
     @Test
-    void preservesAllThirteenDestinationsInGroupedOrder() {
+    void preservesAllTwelveDestinationsInGroupedOrder() {
         @Unmodifiable List<InstanceManagementPageId> expectedPages = List.of(
                 InstanceManagementPageId.OVERVIEW,
                 InstanceManagementPageId.MODS,
                 InstanceManagementPageId.RESOURCE_PACKS,
                 InstanceManagementPageId.WORLDS,
-                InstanceManagementPageId.DATA_PACKS,
                 InstanceManagementPageId.SCHEMATICS,
                 InstanceManagementPageId.GAME_SETTINGS,
                 InstanceManagementPageId.AUTOMATIC_INSTALL,
@@ -51,16 +50,16 @@ final class InstanceManagementPageIdTest {
         assertEquals(expectedPages, InstanceManagementPageId.orderedValues());
         assertEquals(List.of(InstanceManagementPageId.OVERVIEW), InstanceManagementPageGroup.OVERVIEW.pages());
         assertEquals(
-                expectedPages.subList(1, 6),
+                expectedPages.subList(1, 5),
                 InstanceManagementPageGroup.CONTENT.pages());
         assertEquals(
-                expectedPages.subList(6, 8),
+                expectedPages.subList(5, 7),
                 InstanceManagementPageGroup.CONFIGURATION.pages());
         assertEquals(
-                expectedPages.subList(8, 12),
+                expectedPages.subList(7, 11),
                 InstanceManagementPageGroup.MAINTENANCE.pages());
         assertEquals(
-                expectedPages.subList(12, 13),
+                expectedPages.subList(11, 12),
                 InstanceManagementPageGroup.INSTANCE.pages());
         assertThrows(
                 UnsupportedOperationException.class,

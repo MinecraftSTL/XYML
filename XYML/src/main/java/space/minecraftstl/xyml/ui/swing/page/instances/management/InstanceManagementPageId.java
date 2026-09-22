@@ -51,12 +51,6 @@ public enum InstanceManagementPageId {
             "world.manage",
             "assets/swing/icons/folder-open.svg"),
 
-    /// Data-pack management for the selected world.
-    DATA_PACKS(
-            InstanceManagementPageGroup.CONTENT,
-            "datapack",
-            "assets/swing/icons/file-import.svg"),
-
     /// Local schematic browsing and management.
     SCHEMATICS(
             InstanceManagementPageGroup.CONTENT,

@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.download;
 
 import space.minecraftstl.xyml.task.Task;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -80,13 +81,28 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
             @Override
             public void execute() throws Exception {
                 if (isDependentsSucceeded()) {
-                    lock.writeLock().lock();
-                    try {
-                        versions.putAll(gameVersion, versionList.getVersions(gameVersion));
-                    } finally {
-                        lock.writeLock().unlock();
+                    List<RemoteVersion> sourceVersions = copyVersions(versionList, gameVersion);
+                    if (!sourceVersions.isEmpty()) {
+                        lock.writeLock().lock();
+                        try {
+                            versions.clear(gameVersion);
+                            versions.putAll(gameVersion, sourceVersions);
+                        } finally {
+                            lock.writeLock().unlock();
+                        }
+
+                        setResult(refreshTask.getResult());
+                        return;
                     }
 
+                    if (sourceIndex < backends.length - 1) {
+                        LOG.warning("Version list source returned no versions; trying another source");
+                        nextTask = refreshAsync(gameVersion, sourceIndex + 1);
+                        nextTask.storeTo(this::setResult);
+                        return;
+                    }
+
+                    // Preserve any previously loaded cache when every source succeeds without data.
                     setResult(refreshTask.getResult());
                 } else {
                     Exception exception = refreshTask.getException();
@@ -109,12 +125,23 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
     @Override
     public Task<?> refreshAsync(String gameVersion) {
         return Task.runAsync(() -> {
-            lock.writeLock().lock();
-            try {
-                versions.clear(gameVersion);
-            } finally {
-                lock.writeLock().unlock();
-            }
+            // Keep the existing cached bucket until a source publishes a non-empty replacement.
         }).asOrchestration().thenComposeAsync(() -> refreshAsync(gameVersion, 0)).asOrchestration();
+    }
+
+    /// Copies one backend's concrete versions without publishing its mutable collection.
+    ///
+    /// @param versionList backend list refreshed for the requested game version
+    /// @param gameVersion requested game version
+    /// @return immutable versions retaining their concrete runtime type
+    private static List<RemoteVersion> copyVersions(VersionList<?> versionList, String gameVersion) {
+        List<RemoteVersion> copied = new ArrayList<>();
+        for (Object value : versionList.getVersions(gameVersion)) {
+            if (!(value instanceof RemoteVersion remoteVersion)) {
+                throw new IllegalStateException("Version list returned a non-version value");
+            }
+            copied.add(remoteVersion);
+        }
+        return List.copyOf(copied);
     }
 }

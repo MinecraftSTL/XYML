@@ -22,6 +22,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
@@ -56,8 +57,6 @@ import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
-import javax.swing.JViewport;
-import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -66,6 +65,7 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -108,6 +108,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             32,
             32);
 
+    /// Card containing the world catalog.
+    private static final String CATALOG_CARD = "catalog";
+
+    /// Card containing one selected world's data packs.
+    private static final String DATA_PACKS_CARD = "dataPacks";
+
     /// Pure background model owned and closed by this page.
     private final WorldCatalogModel model;
 
@@ -120,6 +126,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Existing launch-service callbacks bound to this managed instance, or an unavailable boundary.
     private final WorldQuickPlayActions quickPlayActions;
 
+    /// Card host switching between the world list and one world's data packs.
+    private final JPanel contentCards = new JPanel(new CardLayout());
+
     /// Viewport-driven sparse list backed by the shallow source index.
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
 
@@ -128,6 +137,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
+
+    /// Opens the remote world download catalog.
+    private final JButton downloadButton = new JButton();
+
+    /// Opens the selected world's data-pack manager.
+    private final JButton dataPackButton = new JButton();
 
     /// Switches between the legacy current-version filter and every indexed world.
     private final JCheckBox showAllCheckBox = new JCheckBox(i18n("world.show_all"));
@@ -269,6 +284,24 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Guards terminal component cleanup and late asynchronous failures.
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    /// Command opening the remote world download catalog.
+    private volatile Runnable openDownloadsCommand = () -> { };
+
+    /// Repository used to construct the selected world's data-pack manager, or null in tests.
+    private @Nullable GameRepository dataPackRepository;
+
+    /// Managed instance identifier used by the selected world's data-pack manager.
+    private @Nullable GameInstanceID dataPackInstanceId;
+
+    /// Executor used by the selected world's data-pack manager.
+    private @Nullable Executor dataPackExecutor;
+
+    /// Current nested data-pack manager, or null while the world list is shown.
+    private @Nullable DataPackManagementPanel dataPackPanel;
+
+    /// Host component for the current nested data-pack manager.
+    private @Nullable JPanel dataPackHost;
+
     /// Last snapshot applied to the component tree.
     private WorldCatalogSnapshot displayedSnapshot;
 
@@ -304,6 +337,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 WorldCatalogStrings.localized(),
                 new DefaultWorldCatalogInteractions(WorldCatalogStrings.localized(), executor),
                 quickPlayActions);
+        dataPackRepository = repository;
+        dataPackInstanceId = instanceId;
+        dataPackExecutor = executor;
     }
 
     /// Creates a panel with injected catalog, interaction, and quick-play boundaries for deterministic tests.
@@ -342,8 +378,14 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
         catalogSplit = createCatalogSplit();
-        add(catalogSplit, BorderLayout.CENTER);
-        add(createStatusBand(), BorderLayout.SOUTH);
+        JPanel catalogCard = new JPanel(new BorderLayout());
+        catalogCard.setOpaque(false);
+        catalogCard.add(catalogSplit, BorderLayout.CENTER);
+        catalogCard.add(createStatusBand(), BorderLayout.SOUTH);
+        contentCards.setOpaque(false);
+        contentCards.setName("worldsContentCards");
+        contentCards.add(catalogCard, CATALOG_CARD);
+        add(contentCards, BorderLayout.CENTER);
         configureList();
         configureDetailsControls();
         showDetails(null);
@@ -358,6 +400,17 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedWorld,
                 this::importWorldArchive);
+    }
+
+    /// Installs the remote world-catalog navigation command.
+    ///
+    /// @param openDownloadsCommand command opening the remote world download catalog
+    public void setOpenDownloadsCommand(Runnable openDownloadsCommand) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            throw new IllegalStateException("World catalog is closed");
+        }
+        this.openDownloadsCommand = Objects.requireNonNull(openDownloadsCommand, "openDownloadsCommand");
     }
 
     /// Returns the visible tab title.
@@ -410,7 +463,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]12[]8[]8[]",
+                "[grow,fill][]12[]8[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
@@ -444,6 +497,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 strings.openSavesTooltip(),
                 this::openSavesDirectory);
         heading.add(openSavesButton, "w 40!, h 40!");
+        configureIconButton(
+                downloadButton,
+                "worldsDownload",
+                "assets/swing/icons/nav-downloads.svg",
+                i18n("world.download"),
+                () -> openDownloadsCommand.run());
+        heading.add(downloadButton, "w 40!, h 40!");
         return heading;
     }
 
@@ -605,8 +665,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         details.add(saveDetailsButton, "span 2, right, h 36!");
 
         JPanel actions = new JPanel(new MigLayout(
-                "insets 0, gap 8, wrap 4",
-                "[40!][40!][40!][40!]",
+                "insets 0, gap 8, wrap 5",
+                "[40!][40!][40!][40!][40!]",
                 "[40!][40!]"));
         actions.setOpaque(false);
         configureIconButton(
@@ -657,6 +717,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "assets/swing/icons/format-list-bulleted.svg",
                 i18n("button.edit") + ": level.dat",
                 this::editSelectedLevelData);
+        configureIconButton(
+                dataPackButton,
+                "worldsDataPacks",
+                "assets/swing/icons/file-import.svg",
+                i18n("datapack"),
+                this::openSelectedWorldDataPacks);
         actions.add(quickPlayButton, "w 40!, h 40!");
         actions.add(launchScriptButton, "w 40!, h 40!");
         actions.add(chunkBaseButton, "w 40!, h 40!");
@@ -665,6 +731,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
         actions.add(editLevelDataButton, "w 40!, h 40!");
+        actions.add(dataPackButton, "w 40!, h 40!");
         details.add(actions, "span 2, right, wmin 0");
 
         JScrollPane scroll = new JScrollPane(details);
@@ -947,6 +1014,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                     ? snapshot.operationText()
                     : Objects.requireNonNull(quickPlayOperationText));
             refreshButton.setEnabled(snapshot.refreshEnabled() && commandIdle);
+            downloadButton.setEnabled(commandIdle);
             showAllCheckBox.setSelected(model.showAll());
             showAllCheckBox.setEnabled(
                     model.supportsVersionFiltering()
@@ -1045,6 +1113,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         resetIconButton.setEnabled(mutableSelection && details != null && details.hasIcon());
         saveDetailsButton.setEnabled(editableDetails);
         editLevelDataButton.setEnabled(editableDetails);
+        dataPackButton.setEnabled(usableSelection
+                && Objects.requireNonNull(world).readable()
+                && dataPackRepository != null
+                && dataPackInstanceId != null
+                && dataPackExecutor != null);
 
         @Nullable WorldCatalogDetails.WorldSettings settings = details == null ? null : details.settings();
         allowCheatsCheckBox.setEnabled(editableDetails
@@ -1177,6 +1250,64 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
         if (selected != null) {
             observeFailure(interactions.openDirectory(selected.path()));
+        }
+    }
+
+    /// Opens the selected world's per-world data-pack manager inside this page.
+    private void openSelectedWorldDataPacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable GameRepository repository = dataPackRepository;
+        @Nullable GameInstanceID instanceId = dataPackInstanceId;
+        @Nullable Executor executor = dataPackExecutor;
+        if (closed.get()
+                || selected == null
+                || !selected.readable()
+                || repository == null
+                || instanceId == null
+                || executor == null) {
+            return;
+        }
+        closeDataPackView();
+        DataPackManagementPanel panel = new DataPackManagementPanel(
+                repository,
+                instanceId,
+                executor,
+                selected.path());
+        JPanel host = new JPanel(new BorderLayout(0, 6));
+        host.setOpaque(false);
+        host.setName("worldsDataPacksHost");
+        JButton backButton = new JButton(i18n("schematics.return"));
+        backButton.setName("worldsDataPacksBack");
+        backButton.addActionListener(event -> showWorldCatalog());
+        host.add(backButton, BorderLayout.NORTH);
+        host.add(panel, BorderLayout.CENTER);
+        dataPackPanel = panel;
+        dataPackHost = host;
+        contentCards.add(host, DATA_PACKS_CARD);
+        ((CardLayout) contentCards.getLayout()).show(contentCards, DATA_PACKS_CARD);
+        panel.activate();
+    }
+
+    /// Returns from the nested data-pack manager to the world catalog.
+    private void showWorldCatalog() {
+        EdtDispatcher.requireEventDispatchThread();
+        ((CardLayout) contentCards.getLayout()).show(contentCards, CATALOG_CARD);
+        closeDataPackView();
+    }
+
+    /// Closes and removes the current nested data-pack manager, when present.
+    private void closeDataPackView() {
+        @Nullable DataPackManagementPanel panel = dataPackPanel;
+        if (panel == null) {
+            return;
+        }
+        dataPackPanel = null;
+        panel.close();
+        @Nullable JPanel host = dataPackHost;
+        dataPackHost = null;
+        if (host != null) {
+            contentCards.remove(host);
         }
     }
 
@@ -1794,6 +1925,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.close();
         model.close();
         refreshButton.setEnabled(false);
+        downloadButton.setEnabled(false);
         showAllCheckBox.setEnabled(false);
         importButton.setEnabled(false);
         openSavesButton.setEnabled(false);
@@ -1819,135 +1951,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         playerXpLevelField.setEnabled(false);
         saveDetailsButton.setEnabled(false);
         editLevelDataButton.setEnabled(false);
+        dataPackButton.setEnabled(false);
+        closeDataPackView();
         interactions.close();
         removeAll();
-    }
-
-    /// Keeps the world catalog split horizontal while preserving user-adjustable minimum widths.
-    @NotNullByDefault
-    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Original responsive breakpoint retained from the pre-existing page layout.
-        private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
-
-        /// Whether the divider ratio has been initialized.
-        private boolean dividerInitialized;
-
-        /// Whether the configured side minima currently fit the allocated width.
-        private boolean minimumsApplied;
-
-        /// List surface whose minimum width is applied when space permits.
-        private final JComponent leftComponent;
-
-        /// Details surface whose minimum width is applied when space permits.
-        private final JComponent rightComponent;
-
-        /// Computed minimum width of the list surface.
-        private final int leftMinimumWidth;
-
-        /// Computed minimum width of the details surface.
-        private final int rightMinimumWidth;
-
-        /// Creates a horizontal split whose children may shrink when the host is narrower than their minima.
-        ///
-        /// @param list list surface
-        /// @param details selected-world details surface
-        private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
-            super(JSplitPane.VERTICAL_SPLIT, list, details);
-            setName("worldsCatalogSplit");
-            setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder());
-            setContinuousLayout(true);
-            setResizeWeight(0.46D);
-            leftComponent = list;
-            rightComponent = details;
-            leftMinimumWidth = list.getMinimumSize().width;
-            rightMinimumWidth = details.getMinimumSize().width;
-            leftComponent.setMinimumSize(new Dimension(0, 0));
-            rightComponent.setMinimumSize(new Dimension(0, 0));
-        }
-
-        /// Returns the nearest outer viewport width or the split width without a viewport.
-        ///
-        /// @return available host width
-        private int availableViewportWidth() {
-            Component parent = getParent();
-            while (parent != null) {
-                if (parent instanceof JViewport viewport
-                        && viewport.getWidth() > 0) {
-                    return viewport.getWidth();
-                }
-                if (parent instanceof SwingHorizontalScrollPane scroll) {
-                    return scroll.getWidth();
-                }
-                parent = parent.getParent();
-            }
-            return getWidth();
-        }
-
-        /// Enables the page-level horizontal fallback only while this split is horizontal.
-        ///
-        /// @param horizontal whether the original page threshold selects horizontal presentation
-        private void updateOuterHorizontalScroll(boolean horizontal) {
-            Component parent = getParent();
-            while (parent != null) {
-                if (parent instanceof SwingHorizontalScrollPane scroll) {
-                    scroll.setMinimumContentWidth(horizontal ? requiredMinimumWidth() : 0);
-                    return;
-                }
-                parent = parent.getParent();
-            }
-        }
-
-        /// Returns the width required by both columns and the divider.
-        ///
-        /// @return complete workspace minimum width
-        private int requiredMinimumWidth() {
-            return leftMinimumWidth + rightMinimumWidth + Math.max(1, getDividerSize());
-        }
-
-        /// Applies side minima when possible and clamps a user-adjusted divider without changing orientation.
-        @Override
-        public void doLayout() {
-            int availableWidth = availableViewportWidth();
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
-            int desired = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            if (getOrientation() != desired) {
-                setOrientation(desired);
-                dividerInitialized = false;
-                minimumsApplied = false;
-            }
-            updateOuterHorizontalScroll(horizontal);
-            boolean canApplyMinimums = getOrientation() == HORIZONTAL_SPLIT
-                    && getWidth() >= leftMinimumWidth + rightMinimumWidth + getDividerSize();
-            if (canApplyMinimums != minimumsApplied) {
-                minimumsApplied = canApplyMinimums;
-                leftComponent.setMinimumSize(canApplyMinimums
-                        ? new Dimension(leftMinimumWidth, 0)
-                        : new Dimension(0, 0));
-                rightComponent.setMinimumSize(canApplyMinimums
-                        ? new Dimension(rightMinimumWidth, 0)
-                        : new Dimension(0, 0));
-            }
-            if (!dividerInitialized && getWidth() > 1) {
-                setDividerLocation((int) Math.round(
-                        (getWidth() - getDividerSize()) * 0.46D));
-                dividerInitialized = true;
-            }
-            if (canApplyMinimums && getWidth() > 0) {
-                int maximum = Math.max(leftMinimumWidth, getWidth() - getDividerSize() - rightMinimumWidth);
-                int location = Math.max(leftMinimumWidth, Math.min(getDividerLocation(), maximum));
-                if (location != getDividerLocation()) {
-                    setDividerLocation(location);
-                }
-            }
-            super.doLayout();
-        }
-
-        /// Allows the shell to constrain both children without honoring their preferred widths.
-        @Override
-        public Dimension getMinimumSize() {
-            return new Dimension(0, 0);
-        }
     }
 
     /// Removes asynchronous wrapper exceptions and returns concise failure detail.

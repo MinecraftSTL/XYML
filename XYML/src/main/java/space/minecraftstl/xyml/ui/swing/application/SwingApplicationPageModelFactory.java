@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import java.util.function.Consumer;
@@ -32,6 +33,9 @@ public interface SwingApplicationPageModelFactory {
     /// hosted shell once the window factory has returned.
     ///
     /// @param navigateCommand command that selects a stable shell destination
+    /// @param downloadsNavigation request channel for lazily selecting a download category
     /// @return page models and ordered owned resources
-    SwingApplicationPageModels createModels(Consumer<ShellPageId> navigateCommand);
+    SwingApplicationPageModels createModels(
+            Consumer<ShellPageId> navigateCommand,
+            DownloadPageNavigation downloadsNavigation);
 }

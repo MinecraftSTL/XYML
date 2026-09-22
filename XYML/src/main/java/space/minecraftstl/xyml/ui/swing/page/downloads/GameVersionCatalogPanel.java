@@ -90,6 +90,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -355,6 +356,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Whether this panel has released its subscription and viewport resources.
     private boolean closed;
 
+    /// Optional shell-owned category navigation registration.
+    private @Nullable DownloadPageNavigation downloadPageNavigation;
+
+    /// Stable callback registered with the shell-owned navigation boundary.
+    private final Consumer<DownloadPageTarget> downloadTargetConsumer = this::selectDownloadTarget;
+
     /// Creates a production game-version catalog panel on the Swing event dispatch thread.
     ///
     /// @param model toolkit-neutral lazy catalog model
@@ -617,6 +624,34 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         }
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
         downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion);
+    }
+
+    /// Attaches the shell-owned request channel used by instance-management shortcuts.
+    ///
+    /// @param navigation shell-owned download-page request channel
+    public void attachDownloadPageNavigation(DownloadPageNavigation navigation) {
+        EdtDispatcher.requireEventDispatchThread();
+        DownloadPageNavigation requested = Objects.requireNonNull(navigation, "navigation");
+        if (closed) {
+            throw new IllegalStateException("Game-version catalog is closed");
+        }
+        if (downloadPageNavigation == requested) {
+            return;
+        }
+        @Nullable DownloadPageNavigation previous = downloadPageNavigation;
+        if (previous != null) {
+            previous.detach(downloadTargetConsumer);
+        }
+        requested.attach(downloadTargetConsumer);
+        downloadPageNavigation = requested;
+    }
+
+    /// Applies one externally requested content category.
+    ///
+    /// @param target requested download category
+    private void selectDownloadTarget(DownloadPageTarget target) {
+        downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
+        downloadCategoryPanel.selectTarget(target);
     }
 
     /// Starts the lazy source load after this page first becomes displayable.
@@ -1354,14 +1389,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         if (!installButton.isEnabled() || !isOpen() || workflowView != WorkflowView.CATALOG) {
             return;
         }
-
         @Nullable GameVersionCatalogItem selected = choiceList.getSelectedValue();
         @Nullable String versionId = selectedVersionId;
         if (selected == null || versionId == null || !versionId.equals(selected.versionId())) {
             synchronizeLoadedSelection();
             return;
         }
-
         GameInstallRequest request = new GameInstallRequest(
                 instanceNameField.getText(),
                 versionId,
@@ -1382,7 +1415,6 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             updateInstallAction();
             return;
         }
-
         installStatusLabel.setText("");
         installStatusLabel.setToolTipText(null);
         presentInstallSession(session);
@@ -1394,7 +1426,6 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private void presentInstallSession(GameInstallSession session) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(session, "session");
-
         @Nullable Subscription replacementSubscription = null;
         @Nullable Subscription replacementSubmittedSubscription = null;
         try {
@@ -1667,6 +1698,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 displayedInstallSession = null;
             }
             @Nullable Throwable cleanupFailure = null;
+            final @Nullable DownloadPageNavigation navigation = downloadPageNavigation;
+            downloadPageNavigation = null;
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> {
+                        if (navigation != null) {
+                            navigation.detach(downloadTargetConsumer);
+                        }
+                    });
             cleanupFailure = attemptCleanup(cleanupFailure, modelSubscription::unsubscribe);
             final @Nullable Subscription detachedStatusSubscription = statusSubscription;
             cleanupFailure = attemptCleanup(

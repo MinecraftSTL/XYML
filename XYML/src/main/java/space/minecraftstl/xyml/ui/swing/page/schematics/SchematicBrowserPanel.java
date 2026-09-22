@@ -79,6 +79,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Swing schematic browser backed by a shallow, viewport-driven toolkit-neutral model.
 ///
 /// Construction must occur on the EDT and performs no model loading. [#start()] or the first
@@ -146,6 +148,12 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
 
     /// Direct child-directory creation command.
     private final JButton createDirectoryButton = new JButton();
+
+    /// Opens the managed schematic root directory.
+    private final JButton openFolderButton = new JButton();
+
+    /// Opens the Mods download catalog for installing a projection mod.
+    private final JButton projectionModButton = new JButton();
 
     /// Selected child-directory navigation command.
     private final JButton openDirectoryButton = new JButton();
@@ -245,6 +253,12 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Whether owned Swing and model resources have been released on the EDT.
     private boolean resourcesClosed;
 
+    /// Command opening the Mods download catalog for projection mods.
+    private Runnable openProjectionModCommand = () -> { };
+
+    /// Whether production supplied the projection-mod destination command.
+    private boolean projectionModAvailable;
+
     /// Whether one platform reveal completion remains outstanding.
     private boolean revealPending;
 
@@ -281,6 +295,21 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 this,
                 this::supportsDroppedSchematic,
                 this::importDroppedFiles);
+    }
+
+    /// Enables the projection-mod shortcut with one explicit download navigation command.
+    ///
+    /// @param command command opening the Mods download catalog
+    public void setOpenProjectionModCommand(Runnable command) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Schematic browser is closed");
+        }
+        openProjectionModCommand = Objects.requireNonNull(command, "command");
+        projectionModAvailable = true;
+        if (displayedSnapshot != null) {
+            applySnapshot(displayedSnapshot);
+        }
     }
 
     /// Returns the immutable snapshot currently represented by the panel.
@@ -395,6 +424,28 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 "assets/swing/icons/create-new-folder.svg");
         createDirectoryButton.addActionListener(event -> promptAndCreateDirectory());
         toolbarActions.addAction(createDirectoryButton);
+
+        configureActionButton(
+                openFolderButton,
+                "schematicsOpenFolder",
+                i18n("button.reveal_dir"),
+                i18n("folder.schematics"),
+                "assets/swing/icons/folder-open.svg");
+        openFolderButton.addActionListener(event -> openSchematicsFolder());
+        toolbarActions.addAction(openFolderButton);
+
+        configureActionButton(
+                projectionModButton,
+                "schematicsInstallMod",
+                i18n("schematics.install_mod"),
+                i18n("schematics.install_mod"),
+                "assets/swing/icons/nav-downloads.svg");
+        projectionModButton.addActionListener(event -> {
+            if (projectionModAvailable) {
+                openProjectionModCommand.run();
+            }
+        });
+        toolbarActions.addAction(projectionModButton);
         toolbar.add(toolbarActions, "growx, wmin 0, h 40!");
         add(toolbar, "growx");
 
@@ -583,6 +634,8 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         refreshButton.setEnabled(!loading && !writeBusy);
         importButton.setEnabled(exactReady && !writeBusy);
         createDirectoryButton.setEnabled(exactReady && !writeBusy);
+        openFolderButton.setEnabled(!writeBusy);
+        projectionModButton.setEnabled(projectionModAvailable && !writeBusy);
         retryButton.setEnabled(snapshot.status() == SchematicBrowserStatus.ERROR && !writeBusy);
         choiceList.setEnabled(snapshot.status() == SchematicBrowserStatus.READY && !writeBusy);
         choiceList.getList().setEnabled(snapshot.status() == SchematicBrowserStatus.READY && !writeBusy);
@@ -606,6 +659,29 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         if (selected instanceof SchematicDirectoryItem directory) {
             model.openDirectory(directory.path());
         }
+    }
+
+    /// Opens the managed schematic root directory without changing browser navigation.
+    private void openSchematicsFolder() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable SchematicBrowserSnapshot snapshot = displayedSnapshot;
+        if (snapshot == null || closed) {
+            return;
+        }
+        final CompletionStage<@Nullable Void> completion;
+        try {
+            completion = Objects.requireNonNull(
+                    interactions.openDirectory(snapshot.rootDirectory()),
+                    "interactions.openDirectory returned null");
+        } catch (RuntimeException failure) {
+            showOperationFailure(failure);
+            return;
+        }
+        completion.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) -> {
+            if (failure != null) {
+                EdtDispatcher.execute(() -> showOperationFailure(failure));
+            }
+        });
     }
 
     /// Chooses source files and starts an import only if the modal result still targets the same directory.
@@ -1137,6 +1213,8 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             failure = attemptCleanup(failure, () -> refreshButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> importButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> createDirectoryButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> openFolderButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> projectionModButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> openDirectoryButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> revealButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> deleteButton.setEnabled(false));
