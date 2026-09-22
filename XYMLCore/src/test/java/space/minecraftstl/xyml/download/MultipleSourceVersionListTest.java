@@ -27,10 +27,11 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies ordered fallback and cache preservation for [MultipleSourceVersionList].
+/// Verifies ordered fallback and cache clearing for [MultipleSourceVersionList].
 @NotNullByDefault
 public final class MultipleSourceVersionListTest {
     /// A successful empty primary response does not prevent a later source from supplying versions.
@@ -66,21 +67,41 @@ public final class MultipleSourceVersionListTest {
         assertSame(expected, versions.get(0));
     }
 
-    /// An empty refresh does not erase the last successfully published version bucket.
+    /// An empty refresh clears the last successfully published version bucket.
     @Test
-    public void preservesCachedVersionsWhenAllSourcesReturnEmpty() {
+    public void clearsCachedVersionsWhenAllSourcesReturnEmpty() {
         RemoteVersion cached = remoteVersion("quilt", "0.26.3");
         MutableVersionList primary = new MutableVersionList(cached);
         MultipleSourceVersionList list = new MultipleSourceVersionList(
                 new VersionList<?>[] {primary});
 
         assertTrue(list.refreshAsync("1.20.1").test());
+        assertTrue(list.isLoaded("1.20.1"));
+
         primary.setVersion(null);
         assertTrue(list.refreshAsync("1.20.1").test());
 
-        List<RemoteVersion> versions = List.copyOf(list.getVersions("1.20.1"));
-        assertEquals(1, versions.size());
-        assertSame(cached, versions.get(0));
+        assertFalse(list.isLoaded("1.20.1"));
+        assertTrue(list.getVersions("1.20.1").isEmpty());
+    }
+
+    /// A failed refresh also clears the last successfully published version bucket.
+    @Test
+    public void clearsCachedVersionsWhenAllSourcesFail() {
+        RemoteVersion cached = remoteVersion("quilt", "0.26.3");
+        MutableVersionList primary = new MutableVersionList(cached);
+        MultipleSourceVersionList list = new MultipleSourceVersionList(
+                new VersionList<?>[] {primary});
+
+        assertTrue(list.refreshAsync("1.20.1").test());
+        assertTrue(list.isLoaded("1.20.1"));
+
+        primary.setVersion(null);
+        primary.failWith(new IOException("primary unavailable"));
+        assertFalse(list.refreshAsync("1.20.1").test());
+
+        assertFalse(list.isLoaded("1.20.1"));
+        assertTrue(list.getVersions("1.20.1").isEmpty());
     }
 
     /// Creates one concrete remote version fixture.

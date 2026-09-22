@@ -102,7 +102,8 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
                         return;
                     }
 
-                    // Preserve any previously loaded cache when every source succeeds without data.
+                    // The previous bucket was cleared before the first source attempt,
+                    // so an empty success remains unloaded.
                     setResult(refreshTask.getResult());
                 } else {
                     Exception exception = refreshTask.getException();
@@ -122,10 +123,19 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
         };
     }
 
+    /// Clears the cached game-version bucket before refreshing it from the first backend.
+    ///
+    /// @param gameVersion game version whose version list must be reloaded
+    /// @return orchestration task that clears the old bucket before running the ordered fallback chain
     @Override
     public Task<?> refreshAsync(String gameVersion) {
         return Task.runAsync(() -> {
-            // Keep the existing cached bucket until a source publishes a non-empty replacement.
+            lock.writeLock().lock();
+            try {
+                versions.clear(gameVersion);
+            } finally {
+                lock.writeLock().unlock();
+            }
         }).asOrchestration().thenComposeAsync(() -> refreshAsync(gameVersion, 0)).asOrchestration();
     }
 
