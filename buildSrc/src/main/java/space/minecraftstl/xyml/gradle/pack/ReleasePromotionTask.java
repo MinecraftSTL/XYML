@@ -229,7 +229,7 @@ public abstract class ReleasePromotionTask extends DefaultTask {
         String sourceCandidate = sourceTip;
         if (stableTargetVersion != null) {
             expectedTips.put(GitBranchGradleTask.localBranchRef(sourceBranch), sourceTip);
-            sourceCandidate = commitStableVersion(repository, checkout, stableTargetVersion);
+            sourceCandidate = commitStableVersion(checkout, stableTargetVersion);
             getLogger().lifecycle("XYML {} stable version preparation: {}", sourceBranch, sourceCandidate);
         }
 
@@ -243,7 +243,7 @@ public abstract class ReleasePromotionTask extends DefaultTask {
         stageMerge(checkout, sourceCandidate, mergeMessage);
         getLogger().lifecycle("XYML staged {} -> {} merge; running release gates", sourceBranch, targetBranch);
         runGates(checkout, targetBranch, verifyMode);
-        String promotionMerge = commitMerge(repository, checkout, mergeMessage);
+        String promotionMerge = commitMerge(checkout, mergeMessage);
         requireTwoParentMerge(repository, promotionMerge, targetTip, sourceCandidate);
         requireBaselineFromSecondParent(repository, promotionMerge, sourceCandidate);
         getLogger().lifecycle("XYML {} promotion merge: {}", targetBranch, promotionMerge);
@@ -252,7 +252,7 @@ public abstract class ReleasePromotionTask extends DefaultTask {
         String finalMessage = promotionMessage(sourceBranch, sourceVersion, targetBranch, targetVersion);
         if (!finalMessage.equals(mergeMessage)) {
             amendCommitMessage(checkout, finalMessage);
-            promotionMerge = GitVersionResolver.resolveCommit(repository, "HEAD");
+            promotionMerge = GitVersionResolver.resolveCommit(checkout, "HEAD");
             getLogger().lifecycle("XYML corrected promotion merge message: {}", promotionMerge);
         }
         versions.put(targetBranch, targetVersion);
@@ -272,17 +272,17 @@ public abstract class ReleasePromotionTask extends DefaultTask {
             expectedTips.put(GitBranchGradleTask.localBranchRef(ALPHA_BRANCH), alphaTip);
             expectedTips.put(GitBranchGradleTask.localBranchRef(DEV_BRANCH), devTip);
 
-            String betaSync = mergeCommit(repository, checkout, sourceCandidate, promotionMerge,
+            String betaSync = mergeCommit(checkout, sourceCandidate, promotionMerge,
                     syncMessage(stableTargetVersion, sourceBranch));
             verifyBaselineCarrier(repository, sourceBranch, betaSync, stableTargetVersion);
             versions.put(sourceBranch, probeReleaseVersion(checkout, sourceBranch));
 
-            String alphaSync = mergeCommit(repository, checkout, alphaTip, betaSync,
+            String alphaSync = mergeCommit(checkout, alphaTip, betaSync,
                     syncMessage(stableTargetVersion, ALPHA_BRANCH));
             verifyBaselineCarrier(repository, ALPHA_BRANCH, alphaSync, stableTargetVersion);
             versions.put(ALPHA_BRANCH, probeReleaseVersion(checkout, ALPHA_BRANCH));
 
-            String devSync = mergeCommit(repository, checkout, devTip, alphaSync,
+            String devSync = mergeCommit(checkout, devTip, alphaSync,
                     syncMessage(stableTargetVersion, DEV_BRANCH));
             verifyBaselineCarrier(repository, DEV_BRANCH, devSync, stableTargetVersion);
             versions.put(DEV_BRANCH, probeReleaseVersion(checkout, DEV_BRANCH));
@@ -302,13 +302,12 @@ public abstract class ReleasePromotionTask extends DefaultTask {
 
     /// Writes the requested stable version into the tracked property file and commits it.
     ///
-    /// @param repository Git repository root
     /// @param checkout temporary detached worktree positioned on the source tip
     /// @param stableVersion requested stable version
     /// @return preparation commit id
-    private String commitStableVersion(Path repository, Path checkout, String stableVersion) throws IOException {
+    String commitStableVersion(Path checkout, String stableVersion) throws IOException {
         Path properties = checkout.resolve(STABLE_VERSION_FILE);
-        String currentVersion = GitVersionResolver.readStableVersion(repository, "HEAD");
+        String currentVersion = GitVersionResolver.readStableVersion(checkout, "HEAD");
         byte[] current = (STABLE_VERSION_KEY + "=" + currentVersion).getBytes(StandardCharsets.UTF_8);
         byte[] target = (STABLE_VERSION_KEY + "=" + stableVersion).getBytes(StandardCharsets.UTF_8);
         byte[] content = Files.readAllBytes(properties);
@@ -321,13 +320,13 @@ public abstract class ReleasePromotionTask extends DefaultTask {
         git(checkout, false, "add", "--", STABLE_VERSION_FILE);
         git(checkout, false, "commit", "-F",
                 writeMessage(checkout, "build: prepare stable version " + stableVersion));
-        @Unmodifiable List<String> changed = changedPaths(repository, "HEAD^", "HEAD");
+        @Unmodifiable List<String> changed = changedPaths(checkout, "HEAD^", "HEAD");
         if (!changed.equals(List.of(STABLE_VERSION_FILE))) {
             throw new IllegalStateException("Stable version preparation must only change " + STABLE_VERSION_FILE
                     + " but changed " + changed);
         }
         requireCleanWorktree(checkout);
-        return GitVersionResolver.resolveCommit(repository, "HEAD");
+        return GitVersionResolver.resolveCommit(checkout, "HEAD");
     }
 
     /// Stages a two-parent merge in the current worktree without creating the merge commit.
@@ -347,14 +346,13 @@ public abstract class ReleasePromotionTask extends DefaultTask {
 
     /// Commits the staged merge.
     ///
-    /// @param repository Git repository root
     /// @param checkout temporary detached worktree with a staged merge
     /// @param message merge message
     /// @return merge commit id
-    private String commitMerge(Path repository, Path checkout, String message) {
+    String commitMerge(Path checkout, String message) {
         git(checkout, false, "commit", "-F", writeMessage(checkout, message));
         requireCleanWorktree(checkout);
-        return GitVersionResolver.resolveCommit(repository, "HEAD");
+        return GitVersionResolver.resolveCommit(checkout, "HEAD");
     }
 
     /// Creates a committed two-parent merge without running release gates.
@@ -365,14 +363,13 @@ public abstract class ReleasePromotionTask extends DefaultTask {
     /// @param message merge message
     /// @return merge commit id
     private String mergeCommit(
-            Path repository,
             Path checkout,
             String firstParent,
             String secondParent,
             String message) {
         git(checkout, false, "checkout", "--detach", firstParent);
         stageMerge(checkout, secondParent, message);
-        return commitMerge(repository, checkout, message);
+        return commitMerge(checkout, message);
     }
 
     /// Rewrites the current commit message without changing its parents or content.

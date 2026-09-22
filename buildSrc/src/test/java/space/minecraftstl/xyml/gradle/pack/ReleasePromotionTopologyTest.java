@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.gradle.pack;
 
+import org.gradle.testfixtures.ProjectBuilder;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,9 +31,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/// Verifies the stable baseline chain checks against synthetic Git repositories.
+/// Verifies release promotion topology and worktree behavior against synthetic Git repositories.
 @NotNullByDefault
 final class ReleasePromotionTopologyTest {
     /// Accepts a complete carrier chain and rejects wrong carriers and baselines.
@@ -89,6 +91,66 @@ final class ReleasePromotionTopologyTest {
                 () -> audit.requireBaselineCarrier("main", unchangedMain, "1.0.1"));
     }
 
+    /// Commits a staged merge from the temporary worktree instead of the controlling checkout.
+    ///
+    /// @param directory temporary test directory
+    /// @throws IOException when Git cannot prepare the repository
+    @Test
+    void commitsInTemporaryWorktree(@TempDir Path directory) throws IOException {
+        Repository repository = new Repository(directory.resolve("repository"));
+        repository.writeText("base.txt", "base\n");
+        String base = repository.commit("test: base");
+        repository.writeText("main.txt", "main\n");
+        String mainHead = repository.commit("test: main");
+
+        Path checkout = directory.resolve("checkout");
+        repository.git("worktree", "add", "--detach", checkout.toString(), base);
+        repository.git("-C", checkout.toString(), "merge", "--no-ff", "--no-commit", mainHead);
+
+        ReleasePromotionTask task = newPromotionTask(repository);
+        String worktreeHead = task.commitMerge(checkout, "test: merge in temporary worktree");
+
+        assertEquals(repository.gitOutput("-C", checkout.toString(), "rev-parse", "HEAD").trim(), worktreeHead);
+        assertEquals(worktreeHead + " " + base + " " + mainHead,
+                repository.gitOutput(
+                        "-C", checkout.toString(), "rev-list", "--parents", "-n", "1", worktreeHead).trim());
+        assertNotEquals(mainHead, worktreeHead);
+    }
+
+    /// Prepares a stable version in the temporary worktree without reading the controlling checkout.
+    ///
+    /// @param directory temporary test directory
+    /// @throws IOException when Git cannot prepare the repository
+    @Test
+    void preparesStableVersionInTemporaryWorktree(@TempDir Path directory) throws IOException {
+        Repository repository = new Repository(directory.resolve("repository"));
+        repository.writeStableVersion("1.0.0");
+        String base = repository.commit("test: base");
+        repository.writeText("main.txt", "main\n");
+        String mainHead = repository.commit("test: main");
+
+        Path checkout = directory.resolve("checkout");
+        repository.git("worktree", "add", "--detach", checkout.toString(), base);
+        ReleasePromotionTask task = newPromotionTask(repository);
+        String prepared = task.commitStableVersion(checkout, "1.0.1");
+
+        assertEquals(repository.gitOutput("-C", checkout.toString(), "rev-parse", "HEAD").trim(), prepared);
+        assertNotEquals(mainHead, prepared);
+        assertEquals("1.0.1", GitVersionResolver.readStableVersion(checkout, "HEAD"));
+    }
+
+    /// Creates a promotion task with Gradle's process service for real temporary-worktree Git calls.
+    ///
+    /// @param repository synthetic repository
+    /// @return configured promotion task
+    private static ReleasePromotionTask newPromotionTask(Repository repository) {
+        return ProjectBuilder.builder()
+                .withProjectDir(repository.root.toFile())
+                .build()
+                .getTasks()
+                .create("releasePromoteAlpha", ReleasePromotionTask.class);
+    }
+
     /// Minimal synthetic repository used by the topology checks.
     @NotNullByDefault
     private static final class Repository {
@@ -101,6 +163,7 @@ final class ReleasePromotionTopologyTest {
         /// @throws IOException when Git cannot be prepared
         Repository(Path root) throws IOException {
             this.root = root;
+            Files.createDirectories(root);
             git("init", "--initial-branch=main");
             git("config", "user.name", "XYML Test");
             git("config", "user.email", "xyml-test@example.com");
