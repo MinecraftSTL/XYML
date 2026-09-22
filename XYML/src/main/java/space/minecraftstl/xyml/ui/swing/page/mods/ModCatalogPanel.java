@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
@@ -267,7 +268,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                         item -> "",
                         ModCatalogPanel::modRowIcon,
                         ModCatalogItem::description,
-                        item -> !item.enabled()));
+                        item -> !item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         searchListener = createSearchListener();
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;

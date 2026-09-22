@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
@@ -332,7 +333,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                         this::worldRowDetail,
                         this::worldRowBadge,
                         this::worldRowIcon,
-                        this::worldRowTooltip));
+                        this::worldRowTooltip), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;
 

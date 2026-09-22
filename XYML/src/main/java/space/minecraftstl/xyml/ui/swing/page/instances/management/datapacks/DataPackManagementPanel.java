@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
@@ -279,7 +280,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                         this::worldRowDetail,
                         this::worldRowBadge,
                         item -> WORLD_ROW_ICON,
-                        item -> item.path().toString()));
+                        item -> item.path().toString()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         dataPackChoiceList = new ViewportChoiceList<>(
                 dataPackSource,
                 new RichChoiceListCellRenderer<>(
@@ -287,7 +288,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                         this::dataPackDetail,
                         this::dataPackBadge,
                         item -> DATA_PACK_ROW_ICON,
-                        this::dataPackTooltip));
+                        this::dataPackTooltip), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         configureComponents();
         worldChoiceList.getList().addListSelectionListener(worldSelectionListener);

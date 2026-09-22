@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.task.Schedulers;
 
@@ -182,7 +183,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interaction = Objects.requireNonNull(interaction, "interaction");
-        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer());
+        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer(), RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
         configureComponents(strings);
         modelSubscription = model.subscribe(this::modelChanged);

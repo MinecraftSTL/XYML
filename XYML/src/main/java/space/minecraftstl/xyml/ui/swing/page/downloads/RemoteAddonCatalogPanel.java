@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
@@ -467,7 +468,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                         RemoteAddonCatalogItem::rowDetail,
                         item -> item.source().displayName(),
                         item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
-                        item -> item.addon().pageUrl()));
+                        item -> item.addon().pageUrl()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         choiceList.getViewport().addChangeListener(viewportListener);
         configureComponents();
         updateControls();

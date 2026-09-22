@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
@@ -350,14 +351,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             showingListener = this::showingChanged;
             filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
             acquiredChoiceList = new ViewportChoiceList<>(
-                    filteredDataSource,
-                    new RichChoiceListCellRenderer<>(
+                    filteredDataSource, new RichChoiceListCellRenderer<>(
                             ResourcePackCatalogItem::displayText,
                             item -> resourcePackRowDetail(item),
                             item -> resourcePackRowBadge(item),
                             item -> RESOURCE_PACK_ROW_ICON,
                             ResourcePackCatalogItem::description,
-                            item -> !item.enabled()));
+                            item -> !item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
             choiceList = acquiredChoiceList;
             ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                     choiceList,

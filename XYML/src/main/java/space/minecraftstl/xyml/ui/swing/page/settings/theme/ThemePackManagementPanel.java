@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -193,7 +194,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         this.exportService = exportService;
         displayedSnapshot = this.model.snapshot();
         itemRenderer = new ThemePackItemRenderer(this.strings);
-        choiceList = new ViewportChoiceList<>(this.model, itemRenderer);
+        choiceList = new ViewportChoiceList<>(this.model, itemRenderer, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
         setName("themePackManagementPanel");
         setOpaque(false);
