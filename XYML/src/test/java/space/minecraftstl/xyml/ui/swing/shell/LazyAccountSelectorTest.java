@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListItem;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsSnapshot;
 
+import javax.swing.JList;
 import javax.swing.SwingUtilities;
 import java.awt.Dimension;
 import java.util.List;
@@ -55,16 +56,7 @@ public final class LazyAccountSelectorTest {
         AtomicReference<@Nullable LazyAccountSelector> selectorReference = new AtomicReference<>();
 
         SwingUtilities.invokeAndWait(() -> {
-            LazyAccountSelector selector = new LazyAccountSelector(
-                    model,
-                    ShellRecentSelections.transientSelections(),
-                    "Account",
-                    "No account",
-                    "Add account",
-                    "Sign in or add an offline account",
-                    "Account list",
-                    "Open account management",
-                    ignored -> { });
+            LazyAccountSelector selector = createSelector(model);
             selectorReference.set(selector);
             assertNull(model.requestedRange());
 
@@ -84,6 +76,39 @@ public final class LazyAccountSelectorTest {
         assertEquals(0, model.selectionCount());
 
         SwingUtilities.invokeAndWait(() -> Objects.requireNonNull(selectorReference.get()).close());
+    }
+
+    /// The account drop-down exposes selection but not account reordering.
+    @Test
+    public void disablesAccountReordering() throws Exception {
+        AtomicReference<@Nullable LazyAccountSelector> selectorReference = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            LazyAccountSelector selector = createSelector(new DelayedAccountsModel());
+            selectorReference.set(selector);
+            JList<?> list = selector.choiceList().getList();
+            assertFalse(list.getDragEnabled());
+            assertNull(list.getTransferHandler());
+        });
+
+        SwingUtilities.invokeAndWait(() -> Objects.requireNonNull(selectorReference.get()).close());
+    }
+
+    /// Creates one account selector with stable test labels.
+    ///
+    /// @param model account source under test
+    /// @return initialized selector
+    private static LazyAccountSelector createSelector(AccountsModel model) {
+        return new LazyAccountSelector(
+                model,
+                ShellRecentSelections.transientSelections(),
+                "Account",
+                "No account",
+                "Add account",
+                "Sign in or add an offline account",
+                "Account list",
+                "Open account management",
+                ignored -> { });
     }
 
     /// Two-account source whose only range request remains pending until the test releases it.
