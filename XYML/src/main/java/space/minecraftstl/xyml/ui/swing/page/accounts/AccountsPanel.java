@@ -606,6 +606,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     }
 
     /// Applies one already-validated same-group account move with read-only recovery consent.
+    /// A successful move selects the moved account at its final position.
     ///
     /// @param selected selected loaded account row
     /// @param targetIndex final zero-based list index
@@ -617,6 +618,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         }
         try {
             model.moveAccount(selected.accountId(), targetIndex, false);
+            model.selectAccount(selected.accountId());
             return true;
         } catch (AccountStorageOverwriteRequiredException failure) {
             if (!selected.accountId().equals(failure.accountId())) {
@@ -628,6 +630,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
             }
             try {
                 model.moveAccount(selected.accountId(), targetIndex, true);
+                model.selectAccount(selected.accountId());
                 return true;
             } catch (RuntimeException retryFailure) {
                 showActionFailure(retryFailure);
