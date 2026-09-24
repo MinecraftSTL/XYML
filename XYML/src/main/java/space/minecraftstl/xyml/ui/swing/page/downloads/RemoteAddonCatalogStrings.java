@@ -151,6 +151,19 @@ public record RemoteAddonCatalogStrings(
                 "Unable to load versions for this project.");
     }
 
+    /// Selects the stable top-level task title for one remote acquisition request.
+    ///
+    /// @param item selected remote project
+    /// @param strings localized catalog text
+    /// @return mod download title, or the existing generic install title
+    static String installTaskTitle(RemoteAddonCatalogItem item, RemoteAddonCatalogStrings strings) {
+        Objects.requireNonNull(item, "item");
+        Objects.requireNonNull(strings, "strings");
+        return item.kind() == RemoteAddonCatalogKind.MOD
+                ? i18n("mods.download")
+                : strings.installingStatus();
+    }
+
     /// Resolves production catalog text from existing launcher translations.
     ///
     /// @param kind category represented by the future panel

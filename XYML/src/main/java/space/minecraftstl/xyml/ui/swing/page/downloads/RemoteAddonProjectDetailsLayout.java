@@ -42,7 +42,7 @@ final class RemoteAddonProjectDetailsLayout {
     /// @param upstreamAction action that opens the selected upstream page
     /// @param prerequisitesLabel prerequisite-section label
     /// @param prerequisitesText localized prerequisite-section text
-    /// @param prerequisiteButtons wrapped prerequisite command container
+    /// @param prerequisiteControls wrapped prerequisite command container
     /// @return responsive project-details container
     static JPanel create(
             JLabel summaryLabel,
@@ -51,7 +51,7 @@ final class RemoteAddonProjectDetailsLayout {
             Runnable upstreamAction,
             JLabel prerequisitesLabel,
             String prerequisitesText,
-            JPanel prerequisiteButtons) {
+            JPanel prerequisiteControls) {
         summaryLabel.setName("remoteAddonProjectSummary");
         summaryLabel.setMinimumSize(new Dimension(0, 0));
         summaryLabel.setToolTipText(null);
@@ -67,11 +67,10 @@ final class RemoteAddonProjectDetailsLayout {
         prerequisitesLabel.setMinimumSize(new Dimension(0, 0));
         prerequisitesLabel.setVisible(false);
 
-        prerequisiteButtons.setName("remoteAddonDependencyButtons");
-        prerequisiteButtons.setOpaque(false);
-        prerequisiteButtons.setMinimumSize(new Dimension(0, 0));
-        prerequisiteButtons.setVisible(false);
-        prerequisiteButtons.setLayout(new MigLayout("insets 0, fillx, wrap 1", "[grow,fill]", "[]"));
+        prerequisiteControls.setName("remoteAddonDependencyControls");
+        prerequisiteControls.setOpaque(false);
+        prerequisiteControls.setMinimumSize(new Dimension(0, 0));
+        prerequisiteControls.setVisible(false);
 
         JPanel details = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
@@ -83,7 +82,7 @@ final class RemoteAddonProjectDetailsLayout {
         details.add(summaryLabel, "growx, wmin 0");
         details.add(upstreamButton, "growx, wmin 0, h 32!");
         details.add(prerequisitesLabel, "growx, wmin 0");
-        details.add(prerequisiteButtons, "growx, wmin 0");
+        details.add(prerequisiteControls, "growx, wmin 0");
         return details;
     }
 }
