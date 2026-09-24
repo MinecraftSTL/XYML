@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+
+import java.util.Objects;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.io.IOException;
@@ -56,6 +58,24 @@ public interface RemoteAddonCatalogBackend {
     /// @return immutable provider-ordered downloadable versions
     /// @throws IOException when the provider cannot complete the request
     @Unmodifiable List<RemoteAddon.Version> loadVersions(RemoteAddonCatalogItem item) throws IOException;
+
+    /// Resolves a provider project identifier to a human-readable dependency name.
+    ///
+    /// Implementations may access the network, so callers invoke this method only from a worker.
+    /// A null result means that the dependency has no usable identifier or that name resolution is
+    /// not supported by the backend.
+    ///
+    /// @param item selected remote project providing the fallback provider
+    /// @param dependency provider dependency metadata
+    /// @return resolved display name, or null when unavailable
+    /// @throws IOException when the provider request fails
+    default @Nullable String resolveDependencyDisplayName(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Dependency dependency) throws IOException {
+        Objects.requireNonNull(item, "item");
+        Objects.requireNonNull(dependency, "dependency");
+        return null;
+    }
 
     /// Loads one selected version's changelog on demand.
     ///

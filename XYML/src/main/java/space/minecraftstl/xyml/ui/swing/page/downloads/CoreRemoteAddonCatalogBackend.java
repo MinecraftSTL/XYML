@@ -103,6 +103,36 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
                 downloadProvider).toList();
     }
 
+    /// Resolves a dependency through its declared source and returns a readable project name.
+    ///
+    /// @param item selected project providing the fallback provider when the dependency omits one
+    /// @param dependency provider dependency metadata
+    /// @return title, slug, or identifier in fallback order, or null when no identifier exists
+    /// @throws IOException when the provider request fails
+    @Override
+    public @Nullable String resolveDependencyDisplayName(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Dependency dependency) throws IOException {
+        RemoteAddonCatalogItem selected = Objects.requireNonNull(item, "item");
+        RemoteAddon.Dependency requested = Objects.requireNonNull(dependency, "dependency");
+        @Nullable String rawId = requested.getId();
+        if (rawId == null || rawId.isBlank()) {
+            return null;
+        }
+        String identifier = rawId.trim();
+        @Nullable RemoteAddon.Source declaredSource = requested.getSource();
+        RemoteAddon.Source source = declaredSource == null
+                ? selected.source().coreSource()
+                : declaredSource;
+        RemoteAddon resolved = source.getCommonRepo().resolveDependency(downloadProvider, identifier);
+        String title = resolved.title().trim();
+        if (!title.isBlank()) {
+            return title;
+        }
+        String slug = resolved.slug().trim();
+        return slug.isBlank() ? identifier : slug;
+    }
+
     /// {@inheritDoc}
     @Override
     public @Nullable String loadChangelog(RemoteAddonCatalogItem item, RemoteAddon.Version version) throws IOException {

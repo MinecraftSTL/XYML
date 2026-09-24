@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
@@ -34,6 +35,9 @@ import java.util.Optional;
 final class RemoteAddonCatalogPageCache {
     /// Hard upper bound for user-visited pages retained within one exact query and viewport scope.
     static final int MAXIMUM_PAGE_COUNT = 8;
+
+    /// Hard upper bound for all query scopes retained by one catalog panel.
+    static final int MAXIMUM_ENTRY_COUNT = 64;
 
     /// Access-order store used only to break ties between equally distant visited pages.
     private final LinkedHashMap<CacheKey, RemoteAddonCatalogPage> entries = new LinkedHashMap<>(
@@ -61,15 +65,19 @@ final class RemoteAddonCatalogPageCache {
         RemoteAddonCatalogQuery request = Objects.requireNonNull(query, "query");
         RemoteAddonCatalogPage result = Objects.requireNonNull(page, "page");
         CacheKey currentKey = new CacheKey(request);
-        entries.entrySet().removeIf(entry -> !entry.getKey().sameScope(currentKey)
-                || result.totalPages() > 0 && entry.getKey().pageOffset() >= result.totalPages());
+        entries.entrySet().removeIf(entry -> entry.getKey().sameScope(currentKey)
+                && result.totalPages() > 0
+                && entry.getKey().pageOffset() >= result.totalPages());
         entries.put(currentKey, result);
 
-        int capacity = Math.min(MAXIMUM_PAGE_COUNT, Math.max(1, result.totalPages()));
-        while (entries.size() > capacity) {
+        int scopeCapacity = Math.min(MAXIMUM_PAGE_COUNT, Math.max(1, result.totalPages()));
+        while (countScopeEntries(currentKey) > scopeCapacity) {
             @Nullable CacheKey eviction = null;
             int greatestDistance = -1;
             for (CacheKey key : entries.keySet()) {
+                if (!key.sameScope(currentKey)) {
+                    continue;
+                }
                 int distance = Math.abs(key.pageOffset() - currentKey.pageOffset());
                 if (distance > greatestDistance) {
                     eviction = key;
@@ -78,6 +86,33 @@ final class RemoteAddonCatalogPageCache {
             }
             entries.remove(Objects.requireNonNull(eviction, "eviction"));
         }
+
+        while (entries.size() > MAXIMUM_ENTRY_COUNT) {
+            Iterator<CacheKey> iterator = entries.keySet().iterator();
+            iterator.next();
+            iterator.remove();
+        }
+    }
+
+    /// Counts retained pages belonging to one exact query and viewport scope.
+    ///
+    /// @param scope exact scope to count
+    /// @return number of retained pages in the scope
+    private int countScopeEntries(CacheKey scope) {
+        int count = 0;
+        for (CacheKey key : entries.keySet()) {
+            if (key.sameScope(scope)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /// Returns the number of retained exact page entries.
+    ///
+    /// @return retained page count
+    int size() {
+        return entries.size();
     }
 
     /// Clears all retained pages during panel closure.

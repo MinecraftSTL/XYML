@@ -54,7 +54,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
-import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Desktop;
 import java.awt.Dimension;
@@ -67,13 +66,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -181,8 +176,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Label introducing downloadable prerequisite mods for the selected version.
     private final JLabel prerequisitesLabel = new JLabel();
 
-    /// Wrapped prerequisite search commands for the selected version.
-    private final JPanel prerequisiteButtons = new JPanel();
+    /// Compact prerequisite selector and provider-name resolver.
+    private final RemoteAddonDependencySelector dependencySelector;
+
+    /// Search text that belongs to programmatic prerequisite navigation while it is being applied.
+    private @Nullable String pendingDependencySearch;
+
+    /// Whether a source or criteria callback is part of prerequisite navigation.
+    private boolean dependencyNavigationInProgress;
 
     /// Current catalog, version, selected-target, and task feedback.
     private final JLabel statusLabel = new JLabel();
@@ -438,6 +439,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver");
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
+        dependencySelector = new RemoteAddonDependencySelector(
+                this.backend,
+                this.workerExecutor,
+                this::openDependencySearch);
         this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         targetInstanceSelector = this.kind == RemoteAddonCatalogKind.WORLD || instancesModel == null
                 ? null
@@ -521,6 +526,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (closed) {
             return;
         }
+        pendingDependencySearch = null;
+        dependencyNavigationInProgress = false;
         if (catalogLoading) {
             catalogRequestRevision.incrementAndGet();
             catalogLoading = false;
@@ -758,7 +765,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 this::openUpstreamPage,
                 prerequisitesLabel,
                 i18n("swing.download.prerequisites"),
-                prerequisiteButtons), "growx, wmin 0");
+                dependencySelector), "growx, wmin 0");
 
         int selectorColumnCount = targetInstanceSelector == null ? 4 : 6;
         JPanel installBand = new JPanel(new MigLayout(
@@ -834,7 +841,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         gameVersionField.addActionListener(event -> criteriaChanged());
     }
 
-    /// Updates project metadata, upstream availability, and version-specific prerequisite buttons.
+    /// Updates project metadata, upstream availability, and version-specific prerequisite controls.
     ///
     /// @param item selected remote project, or null when no row is selected
     /// @param version selected installable version, or null while versions are loading
@@ -847,9 +854,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             upstreamButton.putClientProperty("remoteAddonUpstreamUri", null);
             upstreamButton.setToolTipText(null);
             upstreamButton.setVisible(false);
+            dependencySelector.clear();
             prerequisitesLabel.setVisible(false);
-            prerequisiteButtons.setVisible(false);
-            prerequisiteButtons.removeAll();
             return;
         }
 
@@ -881,47 +887,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         upstreamButton.setVisible(upstream != null);
         upstreamButton.setEnabled(upstream != null && !closed && activeExecutor == null);
 
-        prerequisiteButtons.removeAll();
         if (kind == RemoteAddonCatalogKind.MOD && version != null) {
-            addDependencyButtons(version);
-        }
-        boolean hasDependencies = prerequisiteButtons.getComponentCount() > 0;
-        prerequisitesLabel.setVisible(hasDependencies);
-        prerequisiteButtons.setVisible(hasDependencies);
-        prerequisiteButtons.revalidate();
-        prerequisiteButtons.repaint();
-    }
-
-    /// Adds one button for each downloadable prerequisite in the selected version.
-    ///
-    /// Embedded, incompatible, and broken entries are intentionally omitted because they cannot
-    /// be acquired through the mod search route.
-    ///
-    /// @param version selected provider version
-    private void addDependencyButtons(RemoteAddon.Version version) {
-        Set<RemoteAddon.DependencyType> downloadable = EnumSet.of(
-                RemoteAddon.DependencyType.REQUIRED,
-                RemoteAddon.DependencyType.OPTIONAL,
-                RemoteAddon.DependencyType.TOOL);
-        Set<String> identifiers = new LinkedHashSet<>();
-        for (RemoteAddon.Dependency dependency : version.dependencies()) {
-            RemoteAddon.DependencyType type = dependency.getType();
-            @Nullable String rawId = dependency.getId();
-            if (!downloadable.contains(type) || rawId == null || rawId.isBlank()) {
-                continue;
+            if (dependencySelector.showDependencies(item, version)) {
+                pageCache.clear();
             }
-            String id = rawId.trim();
-            if (!identifiers.add(id)) {
-                continue;
-            }
-            JButton dependencyButton = new JButton(id);
-            dependencyButton.setName("remoteAddonDependency_" + dependencyComponentName(id));
-            dependencyButton.setToolTipText(i18n(
-                    "addon.dependency." + type.name().toLowerCase(Locale.ROOT)));
-            dependencyButton.setMinimumSize(new Dimension(0, 32));
-            dependencyButton.addActionListener(event -> openDependencySearch(dependency, id));
-            prerequisiteButtons.add(dependencyButton, "growx, wmin 0, h 32!");
+        } else {
+            dependencySelector.clear();
         }
+        prerequisitesLabel.setVisible(dependencySelector.hasDependencies());
     }
 
     /// Selects a dependency's provider when available, then opens its Mod search route.
@@ -930,17 +903,26 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @param identifier non-blank provider project identifier
     private void openDependencySearch(RemoteAddon.Dependency dependency, String identifier) {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable RemoteAddon.Source dependencySource = dependency.getSource();
-        if (dependencySource != null) {
-            for (RemoteAddonCatalogSource candidate : RemoteAddonCatalogSource.values()) {
-                if (candidate.coreSource() == dependencySource
-                        && candidate.supports(RemoteAddonCatalogKind.MOD)) {
-                    sourceBox.setSelectedItem(candidate);
-                    break;
+        if (closed || activeExecutor != null) {
+            return;
+        }
+        pendingDependencySearch = identifier;
+        dependencyNavigationInProgress = true;
+        try {
+            @Nullable RemoteAddon.Source dependencySource = dependency.getSource();
+            if (dependencySource != null) {
+                for (RemoteAddonCatalogSource candidate : RemoteAddonCatalogSource.values()) {
+                    if (candidate.coreSource() == dependencySource
+                            && candidate.supports(RemoteAddonCatalogKind.MOD)) {
+                        sourceBox.setSelectedItem(candidate);
+                        break;
+                    }
                 }
             }
+            openSearch(identifier);
+        } finally {
+            dependencyNavigationInProgress = false;
         }
-        openSearch(identifier);
     }
 
     /// Opens a selected project's upstream page in the platform browser.
@@ -1025,15 +1007,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         } catch (IllegalArgumentException failure) {
             return null;
         }
-    }
-
-    /// Converts a provider dependency id into a stable Swing component name fragment.
-    ///
-    /// @param id dependency identifier
-    /// @return non-blank name-safe fragment
-    private static String dependencyComponentName(String id) {
-        String normalized = Objects.requireNonNull(id, "id").replaceAll("[^A-Za-z0-9_.-]", "_");
-        return normalized.isBlank() ? "dependency" : normalized;
     }
 
     /// Returns the first meaningful line from optional multiline metadata.
@@ -1275,10 +1248,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
 
+        String searchText = searchField.getText().trim();
+        boolean dependencySearch = pendingDependencySearch != null
+                && pendingDependencySearch.equals(searchText);
+        pendingDependencySearch = null;
         RemoteAddonCatalogQuery query = new RemoteAddonCatalogQuery(
                 kind,
                 source,
-                searchField.getText(),
+                searchText,
                 SwingTextFields.comboText(gameVersionField),
                 selectedCategory(),
                 selectedSortType(),
@@ -1288,7 +1265,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         selectionRequestRevision.incrementAndGet();
         completedQuery = null;
         displayedPage = null;
-        clearSelectedProject();
+        if (!dependencySearch) {
+            clearSelectedProject();
+        }
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
         @Nullable RemoteAddonCatalogPage cachedPage = pageCache.get(query).orElse(null);
@@ -1619,7 +1598,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         setStatus(strings.installingStatus());
         updateControls();
         try {
-            taskLaunchController.launch(executor, strings.installingStatus(), () -> { });
+            taskLaunchController.launch(executor, RemoteAddonCatalogStrings.installTaskTitle(item, strings), () -> { });
         } catch (RuntimeException | Error startFailure) {
             LOG.warning("Failed to start selected remote add-on installation", startFailure);
             cleanupFailedTaskStart(completionSubscription);
@@ -1662,11 +1641,26 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (closed || catalogLoading || activeExecutor != null) {
             return;
         }
+        boolean dependencyNavigation = dependencyNavigationInProgress
+                || pendingDependencySearch != null
+                && pendingDependencySearch.equals(searchField.getText().trim());
+        if (dependencyNavigation) {
+            catalogRequestRevision.incrementAndGet();
+            completedQuery = null;
+            displayedPage = null;
+            dataSource.replaceItems(List.of());
+            choiceList.reloadData();
+            setCatalogIdleStatus(strings.initialStatus());
+            updateControls();
+            return;
+        }
+        pendingDependencySearch = null;
         catalogRequestRevision.incrementAndGet();
         selectionRequestRevision.incrementAndGet();
         completedQuery = null;
         displayedPage = null;
         pageCache.clear();
+        dependencySelector.clear();
         clearSelectedProject();
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
@@ -1815,9 +1809,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 && !loadedVersions.isEmpty());
         upstreamButton.setEnabled(inputsEnabled && upstreamButton.isVisible()
                 && upstreamButton.getClientProperty("remoteAddonUpstreamUri") instanceof URI);
-        for (Component component : prerequisiteButtons.getComponents()) {
-            component.setEnabled(inputsEnabled);
-        }
+        dependencySelector.setInputsEnabled(inputsEnabled);
         changelogButton.setEnabled(inputsEnabled
                 && selectedItem != null
                 && !versionLoading
@@ -1922,9 +1914,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         installButton.setEnabled(false);
         upstreamButton.setEnabled(false);
         upstreamButton.setVisible(false);
+        pendingDependencySearch = null;
+        dependencyNavigationInProgress = false;
+        dependencySelector.close();
         prerequisitesLabel.setVisible(false);
-        prerequisiteButtons.setVisible(false);
-        prerequisiteButtons.removeAll();
     }
 
     /// Removes one optional task terminal-listener registration.
