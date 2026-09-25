@@ -25,15 +25,20 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.UIManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.plaf.basic.BasicFileChooserUI;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Insets;
 import java.io.File;
+import java.io.IOError;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -69,6 +74,9 @@ public final class EditablePathChooser extends JFileChooser {
     /// Icon action that applies the typed directory without approving the chooser.
     private final JButton navigateDirectoryButton = new JButton();
 
+    /// Inline selection failure shown without closing the chooser or opening a modal dialog.
+    private final JLabel selectionErrorLabel = new JLabel(" ");
+
     /// Current directory-input validation detail, or `null` when the field is valid.
     private @Nullable String directoryValidation;
 
@@ -100,6 +108,18 @@ public final class EditablePathChooser extends JFileChooser {
         return dialog;
     }
 
+    /// Normalizes supported Windows filename quoting and rejects selections that cannot be represented as NIO paths.
+    @Override
+    public void approveSelection() {
+        clearSelectionValidation();
+        @Nullable String invalidPath = invalidSelectionPath();
+        if (invalidPath != null) {
+            showSelectionValidation(i18n("swing.path_chooser.error.invalid", invalidPath));
+            return;
+        }
+        super.approveSelection();
+    }
+
     /// Configures the current-folder field, navigation action, and directory synchronization.
     private void initializeDirectoryBar() {
         String fieldDescription = i18n("swing.path_chooser.current_directory");
@@ -123,12 +143,24 @@ public final class EditablePathChooser extends JFileChooser {
         navigateDirectoryButton.setMargin(new Insets(4, 8, 4, 8));
         navigateDirectoryButton.addActionListener(event -> navigateToTypedDirectory());
 
+        @Nullable Color selectionErrorColor = UIManager.getColor("Component.error.focusedBorderColor");
+        if (selectionErrorColor != null) {
+            selectionErrorLabel.setForeground(selectionErrorColor);
+        }
+        selectionErrorLabel.setName("editablePathChooser.selectionError");
+
         directoryBar.setName("editablePathChooser.directoryBar");
         directoryBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
         directoryBar.add(currentDirectoryInput, BorderLayout.CENTER);
         directoryBar.add(navigateDirectoryButton, BorderLayout.EAST);
+        directoryBar.add(selectionErrorLabel, BorderLayout.SOUTH);
 
-        addPropertyChangeListener(DIRECTORY_CHANGED_PROPERTY, event -> synchronizeDirectoryInput());
+        addPropertyChangeListener(DIRECTORY_CHANGED_PROPERTY, event -> {
+            synchronizeDirectoryInput();
+            clearSelectionValidation();
+        });
+        addPropertyChangeListener(SELECTED_FILE_CHANGED_PROPERTY, event -> clearSelectionValidation());
+        addPropertyChangeListener(SELECTED_FILES_CHANGED_PROPERTY, event -> clearSelectionValidation());
         synchronizeDirectoryInput();
     }
 
@@ -239,6 +271,141 @@ public final class EditablePathChooser extends JFileChooser {
         currentDirectoryInput.setToolTipText(i18n("swing.path_chooser.current_directory"));
     }
 
+    /// Returns the selected path that cannot be approved, or `null` when every selected path is valid.
+    ///
+    /// @return offending path text, or `null` when no path prevents approval
+    private @Nullable String invalidSelectionPath() {
+        @Nullable String quotedPathError = normalizeQuotedWindowsSelection();
+        if (quotedPathError != null) {
+            return quotedPathError;
+        }
+
+        @Nullable File[] selectedFiles = selectedFilesForValidation();
+        if (selectedFiles == null) {
+            return null;
+        }
+        for (File selectedFile : selectedFiles) {
+            try {
+                selectedFile.toPath();
+            } catch (InvalidPathException | SecurityException | IOError ignored) {
+                return selectedFile.getPath();
+            }
+        }
+        return null;
+    }
+
+    /// Removes one layer of double quotes around an absolute Windows filename when the native input uses that form.
+    ///
+    /// @return offending raw filename, or `null` when no supported normalization was required or it succeeded
+    private @Nullable String normalizeQuotedWindowsSelection() {
+        if (File.separatorChar != '\\') {
+            return null;
+        }
+
+        @Nullable String filenameError = normalizeQuotedWindowsFilename();
+        if (filenameError != null) {
+            return filenameError;
+        }
+        return normalizeQuotedWindowsSelectedPath();
+    }
+
+    /// Removes one layer of double quotes from the current native filename when the UI exposes that text.
+    ///
+    /// @return offending raw filename, or `null` when no supported normalization was required or it succeeded
+    private @Nullable String normalizeQuotedWindowsFilename() {
+        if (!(getUI() instanceof BasicFileChooserUI chooserUi)) {
+            return null;
+        }
+
+        @Nullable String fileName = chooserUi.getFileName();
+        if (!isSingleDoubleQuotedLayer(fileName)) {
+            return null;
+        }
+        String value = Objects.requireNonNull(fileName, "fileName");
+        String candidateText = value.substring(1, value.length() - 1);
+        try {
+            Path candidate = Path.of(candidateText);
+            if (!candidate.isAbsolute()) {
+                return value;
+            }
+            setSelectedFile(candidate.toFile());
+            return null;
+        } catch (InvalidPathException | SecurityException | IOError ignored) {
+            return value;
+        }
+    }
+
+    /// Removes one layer of double quotes from a Windows path already resolved by the chooser.
+    ///
+    /// @return offending selected path, or `null` when no supported normalization was required or it succeeded
+    private @Nullable String normalizeQuotedWindowsSelectedPath() {
+        @Nullable File selectedFile = getSelectedFile();
+        if (selectedFile == null) {
+            return null;
+        }
+
+        String selectedPath = selectedFile.getPath();
+        int openingQuote = selectedPath.indexOf('"');
+        int closingQuote = selectedPath.lastIndexOf('"');
+        if (openingQuote < 0 || closingQuote <= openingQuote + 1 || closingQuote != selectedPath.length() - 1) {
+            return null;
+        }
+
+        String candidateText = selectedPath.substring(openingQuote + 1, closingQuote);
+        try {
+            Path candidate = Path.of(candidateText);
+            if (!candidate.isAbsolute()) {
+                return selectedPath;
+            }
+            setSelectedFile(candidate.toFile());
+            return null;
+        } catch (InvalidPathException | SecurityException | IOError ignored) {
+            return selectedPath;
+        }
+    }
+
+    /// Tests whether one native filename contains exactly one enclosing double-quote layer.
+    ///
+    /// @param value native filename input, or `null` when unavailable
+    /// @return whether one pair of enclosing double quotes can be removed safely
+    private static boolean isSingleDoubleQuotedLayer(@Nullable String value) {
+        if (value == null || value.length() < 3) {
+            return false;
+        }
+        if (value.charAt(0) != '"' || value.charAt(value.length() - 1) != '"') {
+            return false;
+        }
+        String inner = value.substring(1, value.length() - 1);
+        return !inner.startsWith("\"") && !inner.endsWith("\"");
+    }
+
+    /// Returns the current selection as files requiring NIO path validation.
+    ///
+    /// @return selected files, or `null` when no file is selected
+    private @Nullable File[] selectedFilesForValidation() {
+        if (isMultiSelectionEnabled()) {
+            File[] selectedFiles = getSelectedFiles();
+            return selectedFiles.length == 0 ? null : selectedFiles;
+        }
+
+        @Nullable File selectedFile = getSelectedFile();
+        return selectedFile == null ? null : new File[]{selectedFile};
+    }
+
+    /// Shows one selection failure in the directory bar without closing the chooser.
+    ///
+    /// @param message localized selection failure
+    private void showSelectionValidation(String message) {
+        selectionErrorLabel.setText(Objects.requireNonNull(message, "message"));
+        selectionErrorLabel.setToolTipText(message);
+    }
+
+    /// Clears stale selection failure feedback after a new selection or before another approval attempt.
+    private void clearSelectionValidation() {
+        selectionErrorLabel.setText(" ");
+        selectionErrorLabel.setToolTipText(null);
+    }
+
     /// Removes matching single or double quotes commonly produced by platform copy-as-path actions.
     ///
     /// @param input stripped input text
@@ -274,6 +441,14 @@ public final class EditablePathChooser extends JFileChooser {
     /// @return validation detail, or an empty string when no error is shown
     String validationText() {
         return directoryValidation == null ? "" : directoryValidation;
+    }
+
+    /// Returns the inline selection-validation detail for package-local focused tests.
+    ///
+    /// @return selection detail, or an empty string when no error is shown
+    String selectionValidationText() {
+        @Nullable String text = selectionErrorLabel.getText();
+        return text == null ? "" : text.strip();
     }
 
     /// Clears directory validation whenever the user edits the top field.

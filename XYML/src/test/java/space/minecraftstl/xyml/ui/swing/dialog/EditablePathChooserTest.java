@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -244,6 +245,130 @@ final class EditablePathChooserTest {
                 () -> assertTrue(approved.get()),
                 () -> assertEquals(normalize(selectedFile), normalize(chooser.getSelectedFile().toPath())),
                 () -> assertEquals(normalize(temporaryDirectory), chooser.currentDirectoryInput().getText()));
+    }
+
+    /// Approves a Windows absolute file path pasted with one pair of enclosing double quotes.
+    ///
+    /// @throws IOException when the fixture file cannot be created
+    @Test
+    void approvesDoubleQuotedWindowsAbsolutePathThroughNativeFilenameField() throws IOException {
+        assumeTrue(File.separatorChar == '\\', "Windows path semantics are required");
+        Path selectedFile = Files.createFile(temporaryDirectory.resolve("selected skin.png"));
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+        AtomicBoolean approved = new AtomicBoolean();
+
+        onEventDispatchThread(() -> {
+            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            chooser.addActionListener(event -> approved.set(
+                    JFileChooser.APPROVE_SELECTION.equals(event.getActionCommand())));
+            BasicFileChooserUI chooserUi = assertInstanceOf(BasicFileChooserUI.class, chooser.getUI());
+            chooserUi.setFileName("\"" + selectedFile + "\"");
+            chooserUi.getApproveSelectionAction().actionPerformed(
+                    new ActionEvent(chooser, ActionEvent.ACTION_PERFORMED, "approveSelection"));
+        });
+
+        assertAll(
+                () -> assertTrue(approved.get()),
+                () -> assertEquals(normalize(selectedFile), normalize(chooser.getSelectedFile().toPath())),
+                () -> assertTrue(chooser.selectionValidationText().isEmpty()));
+    }
+
+    /// Rejects an unparseable selected file without firing approval or closing the chooser.
+    ///
+    /// @throws IOException when the valid recovery fixture cannot be created
+    @Test
+    void rejectsUnparseableSelectedFileWithoutApproval() throws IOException {
+        Path validFile = Files.createFile(temporaryDirectory.resolve("valid.jar"));
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+        AtomicBoolean approved = new AtomicBoolean();
+
+        onEventDispatchThread(() -> {
+            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            chooser.addActionListener(event -> approved.set(
+                    JFileChooser.APPROVE_SELECTION.equals(event.getActionCommand())));
+            chooser.setSelectedFile(new File("invalid\0path"));
+            chooser.approveSelection();
+            assertFalse(chooser.selectionValidationText().isEmpty());
+
+            chooser.setSelectedFile(validFile.toFile());
+            assertTrue(chooser.selectionValidationText().isEmpty());
+        });
+
+        assertAll(
+                () -> assertFalse(approved.get()),
+                () -> assertEquals(normalize(validFile), normalize(chooser.getSelectedFile().toPath())));
+    }
+
+    /// Rejects a virtual Shell selection that cannot be represented as a NIO path.
+    @Test
+    void rejectsVirtualShellSelectionWithoutApproval() {
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+        AtomicBoolean approved = new AtomicBoolean();
+
+        onEventDispatchThread(() -> {
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.addActionListener(event -> approved.set(
+                    JFileChooser.APPROVE_SELECTION.equals(event.getActionCommand())));
+            chooser.setSelectedFile(new VirtualShellFolder());
+            chooser.approveSelection();
+        });
+
+        assertAll(
+                () -> assertFalse(approved.get()),
+                () -> assertFalse(chooser.selectionValidationText().isEmpty()));
+    }
+
+    /// Rejects quoted relative, nested, and unpaired filename input without approving it.
+    @Test
+    void rejectsUnsupportedNativeFilenameQuoting() {
+        assumeTrue(File.separatorChar == '\\', "Windows path semantics are required");
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+        AtomicBoolean approved = new AtomicBoolean();
+        String nestedPath = "\"\"" + temporaryDirectory.resolve("nested.jar") + "\"\"";
+        String unpairedPath = "\"" + temporaryDirectory.resolve("unpaired.jar");
+
+        onEventDispatchThread(() -> chooser.addActionListener(event -> approved.set(
+                JFileChooser.APPROVE_SELECTION.equals(event.getActionCommand()))));
+
+        for (String fileName : new String[]{"\"relative.jar\"", nestedPath, unpairedPath}) {
+            onEventDispatchThread(() -> {
+                BasicFileChooserUI chooserUi = assertInstanceOf(BasicFileChooserUI.class, chooser.getUI());
+                chooserUi.setFileName(fileName);
+                chooserUi.getApproveSelectionAction().actionPerformed(
+                        new ActionEvent(chooser, ActionEvent.ACTION_PERFORMED, "approveSelection"));
+            });
+            assertAll(
+                    () -> assertFalse(approved.get()),
+                    () -> assertFalse(chooser.selectionValidationText().isEmpty()));
+        }
+    }
+
+    /// Rejects an unparseable path in a multi-selection before approving any selected item.
+    ///
+    /// @throws IOException when the valid fixture file cannot be created
+    @Test
+    void rejectsUnparseableFileInMultiSelection() throws IOException {
+        Path validFile = Files.createFile(temporaryDirectory.resolve("valid-multi.jar"));
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+        AtomicBoolean approved = new AtomicBoolean();
+
+        onEventDispatchThread(() -> {
+            chooser.setMultiSelectionEnabled(true);
+            chooser.addActionListener(event -> approved.set(
+                    JFileChooser.APPROVE_SELECTION.equals(event.getActionCommand())));
+            chooser.setSelectedFiles(new File[]{validFile.toFile(), new File("invalid\0multi.jar")});
+            chooser.approveSelection();
+        });
+
+        assertAll(
+                () -> assertFalse(approved.get()),
+                () -> assertFalse(chooser.selectionValidationText().isEmpty()),
+                () -> assertEquals(2, chooser.getSelectedFiles().length));
     }
 
     /// Clears stale multi-selection when the directory bar changes the visible folder.
