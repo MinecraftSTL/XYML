@@ -159,7 +159,9 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
     private final JLabel status = new JLabel(" ");
 
     /// Stable decoded-image preview surface.
-    private final OfflineSkinPreviewPanel preview = new OfflineSkinPreviewPanel();
+    private final OfflineSkinPreviewControls previewControls = new OfflineSkinPreviewControls();
+
+    private final OfflineSkinPreviewPanel preview = previewControls.preview();
 
     /// Page-scoped local-skin drop route attached to the preview surface.
     private final OfflineSkinDropController dropController;
@@ -293,7 +295,7 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
                 "[grow,fill][320:360:420,fill]",
                 "[grow,fill]"));
         content.add(editor, "grow");
-        content.add(preview, "grow");
+        content.add(previewControls, "grow");
 
         JPanel root = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",

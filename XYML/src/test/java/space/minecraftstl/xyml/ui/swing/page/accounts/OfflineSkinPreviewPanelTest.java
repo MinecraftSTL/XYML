@@ -24,12 +24,18 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.awt.Color;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Exercises the offscreen Swing skin projection and its mouse rotation interaction.
+/// Exercises the offscreen Swing skin projection and its mouse interactions.
 @NotNullByDefault
 public final class OfflineSkinPreviewPanelTest {
     /// A decoded texture paints visible player pixels into a stable offscreen surface.
@@ -58,14 +64,94 @@ public final class OfflineSkinPreviewPanelTest {
         EdtDispatcher.executeAndWait(() -> {
             OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
             panel.setSize(320, 360);
-            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_PRESSED, 80));
-            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_DRAGGED, 180));
-            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_RELEASED, 180));
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_PRESSED, 80, 120));
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_DRAGGED, 180, 120));
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_RELEASED, 180, 120));
             yaw.set(panel.yawDegrees());
             assertTrue(panel.getWidth() == 320 && panel.getHeight() == 360);
         });
 
         assertTrue(yaw.get() > 45.0);
+    }
+
+    /// Vertical drag input changes preview pitch without invoking the wheel path.
+    @Test
+    public void tiltsPreviewWithVerticalMouseDrag() {
+        AtomicReference<Double> pitch = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
+            panel.setSize(320, 360);
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_PRESSED, 120, 80));
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_DRAGGED, 120, 20));
+            panel.dispatchEvent(mouseEvent(panel, MouseEvent.MOUSE_RELEASED, 120, 20));
+            pitch.set(panel.pitchDegrees());
+        });
+
+        assertTrue(pitch.get() > 20.0);
+    }
+
+    /// Mouse-wheel input changes and bounds the fitted zoom factor.
+    @Test
+    public void zoomsPreviewWithMouseWheel() {
+        AtomicReference<Double> zoom = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
+            panel.setSize(320, 360);
+            panel.dispatchEvent(wheelEvent(panel, -3.0));
+            zoom.set(panel.zoomFactor());
+        });
+
+        assertTrue(zoom.get() > 1.2);
+    }
+
+    /// Movement and posture selections produce distinct offscreen frames.
+    @Test
+    public void rendersDistinctStateFrames() {
+        AtomicReference<List<Integer>> fingerprints = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
+            panel.setSize(320, 360);
+            panel.showPreview(new OfflineSkinPreview(
+                    TextureModel.WIDE,
+                    solidTexture(new Color(217, 48, 92, 255)),
+                    null));
+            List<State> states = List.of(
+                    new State(SkinPreviewMotion.IDLE, SkinPreviewPosture.STANDING),
+                    new State(SkinPreviewMotion.WALKING, SkinPreviewPosture.STANDING),
+                    new State(SkinPreviewMotion.IDLE, SkinPreviewPosture.SNEAKING),
+                    new State(SkinPreviewMotion.IDLE, SkinPreviewPosture.RIDING),
+                    new State(SkinPreviewMotion.WALKING, SkinPreviewPosture.PRONE));
+            List<Integer> rendered = new ArrayList<>();
+            for (State state : states) {
+                panel.setMotion(state.motion());
+                panel.setPosture(state.posture());
+                BufferedImage image = new BufferedImage(panel.getWidth(), panel.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                panel.paint(image.getGraphics());
+                rendered.add(fingerprint(image));
+            }
+            fingerprints.set(List.copyOf(rendered));
+        });
+
+        assertEquals(fingerprints.get().size(), new HashSet<>(fingerprints.get()).size());
+    }
+
+    /// Movement and posture state remain valid while independently selectable.
+    @Test
+    public void storesMovementAndPosture() {
+        EdtDispatcher.executeAndWait(() -> {
+            OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
+            panel.setPosture(SkinPreviewPosture.PRONE);
+            panel.setMotion(SkinPreviewMotion.SPRINTING);
+            assertAll(
+                    () -> assertEquals(SkinPreviewMotion.SPRINTING, panel.motion()),
+                    () -> assertEquals(SkinPreviewPosture.STANDING, panel.posture()));
+            panel.setPosture(SkinPreviewPosture.PRONE);
+            assertAll(
+                    () -> assertEquals(SkinPreviewMotion.WALKING, panel.motion()),
+                    () -> assertEquals(SkinPreviewPosture.PRONE, panel.posture()));
+        });
     }
 
     /// Creates a uniformly opaque test skin.
@@ -82,23 +168,60 @@ public final class OfflineSkinPreviewPanelTest {
         return image;
     }
 
-    /// Creates one synthetic mouse event at a horizontal coordinate.
+    /// Creates one synthetic mouse event at a coordinate.
     ///
     /// @param panel event target
     /// @param identifier AWT mouse event identifier
     /// @param x horizontal coordinate
+    /// @param y vertical coordinate
     /// @return synthetic event
-    private static MouseEvent mouseEvent(OfflineSkinPreviewPanel panel, int identifier, int x) {
+    private static MouseEvent mouseEvent(OfflineSkinPreviewPanel panel, int identifier, int x, int y) {
         return new MouseEvent(
                 panel,
                 identifier,
                 System.currentTimeMillis(),
-                0,
+                identifier == MouseEvent.MOUSE_DRAGGED ? MouseEvent.BUTTON1_DOWN_MASK : 0,
                 x,
-                120,
+                y,
                 1,
                 false,
                 MouseEvent.BUTTON1);
+    }
+
+    /// Creates one synthetic wheel event.
+    ///
+    /// @param panel event target
+    /// @param rotation precise wheel rotation
+    /// @return synthetic wheel event
+    private static MouseWheelEvent wheelEvent(OfflineSkinPreviewPanel panel, double rotation) {
+        return new MouseWheelEvent(
+                panel,
+                MouseWheelEvent.MOUSE_WHEEL,
+                System.currentTimeMillis(),
+                0,
+                160,
+                180,
+                160,
+                180,
+                MouseEvent.NOBUTTON,
+                false,
+                MouseWheelEvent.WHEEL_UNIT_SCROLL,
+                1,
+                (int) rotation);
+    }
+
+    /// Computes a sampled frame fingerprint.
+    ///
+    /// @param image rendered image
+    /// @return sampled frame hash
+    private static int fingerprint(BufferedImage image) {
+        int hash = 1;
+        for (int y = 0; y < image.getHeight(); y += 4) {
+            for (int x = 0; x < image.getWidth(); x += 4) {
+                hash = 31 * hash + image.getRGB(x, y);
+            }
+        }
+        return hash;
     }
 
     /// Counts pixels matching one exact ARGB value.
@@ -116,5 +239,13 @@ public final class OfflineSkinPreviewPanelTest {
             }
         }
         return matches;
+    }
+
+    /// One movement and posture fixture.
+    ///
+    /// @param motion movement cycle
+    /// @param posture body posture
+    @NotNullByDefault
+    private record State(SkinPreviewMotion motion, SkinPreviewPosture posture) {
     }
 }

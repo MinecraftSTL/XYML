@@ -75,8 +75,11 @@ final class SwingOnlineSkinUploadDialog extends JDialog implements AutoCloseable
     /// Detected wide or slim model.
     private final JLabel detectedModel = new JLabel(" ");
 
-    /// Pixel-accurate local skin preview.
-    private final OfflineSkinPreviewPanel preview = new OfflineSkinPreviewPanel();
+    /// Interactive software preview with movement and posture controls.
+    private final OfflineSkinPreviewControls previewControls = new OfflineSkinPreviewControls();
+
+    /// Nested software-rendered preview surface.
+    private final OfflineSkinPreviewPanel preview = previewControls.preview();
 
     /// Inline validation and operation state.
     private final JLabel status = new JLabel(" ");
@@ -192,7 +195,7 @@ final class SwingOnlineSkinUploadDialog extends JDialog implements AutoCloseable
 
         root.add(new JLabel(i18n("account.skin.profile")));
         root.add(profileName, "span 2, growx");
-        root.add(preview, "cell 3 0, span 1 4, grow");
+        root.add(previewControls, "cell 3 0, span 1 4, grow");
         root.add(new JLabel(i18n("account.skin.file")));
         root.add(selectedFileField, "growx");
         root.add(chooseButton, "h 36!");
@@ -339,6 +342,7 @@ final class SwingOnlineSkinUploadDialog extends JDialog implements AutoCloseable
         chooseButton.setEnabled(!closed && !uploading && !validating);
         uploadButton.setEnabled(!closed && !uploading && !validating && selection != null);
         cancelButton.setEnabled(!closed && !uploading);
+        previewControls.setAnimationControlsEnabled(!closed && !uploading && !validating && selection != null);
     }
 
     /// Validates, decodes, normalizes, and detects the model of one selected PNG.
