@@ -34,6 +34,8 @@ import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 
@@ -103,28 +105,78 @@ final class SoftwareSkinRenderer {
             paint.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
             boolean modern = skin.getHeight() >= skin.getWidth();
-            Model scene = buildModel(model, motion, posture, seconds, modern, cape);
             SkinPreviewTransform view = SkinPreviewTransform.rotateX(pitchDegrees)
                     .multiply(SkinPreviewTransform.rotateY(yawDegrees));
+            Model scene = buildModel(model, motion, posture, seconds, modern, cape);
             List<RawFace> faces = transformFaces(scene, view, skin, cape);
             if (faces.isEmpty()) {
                 return;
             }
 
-            Bounds bounds = bounds(faces);
+            List<RawFace> referenceFaces = referenceFaces(model, motion, posture, modern, cape, view, skin);
+            Bounds bounds = referenceFaces.isEmpty() ? bounds(faces) : bounds(referenceFaces);
             Projection projection = projection(width, height, bounds, zoom);
             paintShadow(paint, bounds, projection);
             faces.sort(Comparator.comparingDouble(RawFace::depth).reversed()
                     .thenComparingInt(RawFace::layer));
+            Map<ShadedTexture, BufferedImage> shadedTextures = new HashMap<>();
             for (RawFace face : faces) {
-                paintFace(paint, face, projection);
+                paintFace(paint, face, projection, shadedTextures);
             }
         } finally {
             paint.dispose();
         }
     }
 
-    /// Builds the player model and its postured animation transforms.
+    /// Builds stable projection samples for the selected posture and movement.
+    ///
+    /// @param model arm model
+    /// @param motion movement cycle
+    /// @param posture body posture
+    /// @param modern whether the texture has modern lower layers
+    /// @param cape decoded cape texture, or null
+    /// @param view camera rotation
+    /// @param skin decoded player texture
+    /// @return reference faces independent of the current animation phase
+    private static List<RawFace> referenceFaces(
+            TextureModel model,
+            SkinPreviewMotion motion,
+            SkinPreviewPosture posture,
+            boolean modern,
+            @Nullable BufferedImage cape,
+            SkinPreviewTransform view,
+            BufferedImage skin) {
+        List<RawFace> faces = new ArrayList<>();
+        faces.addAll(transformFaces(buildModel(model, motion, posture, 0.0, modern, cape), view, skin, cape));
+        double halfPeriod = halfPeriod(motion);
+        if (halfPeriod > 0.0) {
+            faces.addAll(transformFaces(buildModel(model, motion, posture, halfPeriod, modern, cape), view, skin, cape));
+        }
+        return faces;
+    }
+
+    /// Returns the 1.21 horizontal movement amount used by limb swing.
+    ///
+    /// @param motion movement cycle
+    /// @return limb swing amount
+    private static double limbAmount(SkinPreviewMotion motion) {
+        return switch (motion) {
+            case IDLE -> 0.0;
+            case WALKING -> 0.4;
+            case SPRINTING -> 0.52;
+        };
+    }
+
+    /// Returns one half limb-swing period for stable framing samples.
+    ///
+    /// @param motion movement cycle
+    /// @return half period in seconds, or zero for idle
+    private static double halfPeriod(SkinPreviewMotion motion) {
+        double amount = limbAmount(motion);
+        return amount == 0.0 ? 0.0 : Math.PI / (20.0 * amount * 0.6662);
+    }
+
+    /// Builds the player model using Minecraft Java 1.21 limb and pose rules.
     ///
     /// @param model arm model
     /// @param motion requested movement cycle
@@ -132,7 +184,7 @@ final class SoftwareSkinRenderer {
     /// @param seconds animation time in seconds
     /// @param modern whether the texture contains modern lower layers
     /// @param cape decoded cape texture, or null
-    /// @return base cuboids and pixel-accurate outer-layer surfaces
+    /// @return base cuboids and six-face outer shells
     private static Model buildModel(
             TextureModel model,
             SkinPreviewMotion motion,
@@ -144,32 +196,25 @@ final class SoftwareSkinRenderer {
                 && posture != SkinPreviewPosture.STANDING
                 ? SkinPreviewMotion.WALKING
                 : motion;
-        double cyclesPerSecond = switch (effectiveMotion) {
-            case IDLE -> 0.0;
-            case WALKING -> 1.25;
-            case SPRINTING -> 1.85;
-        };
-        double phase = seconds * cyclesPerSecond * Math.PI * 2.0;
-        double cycle = Math.cos(phase);
+        double limbAmount = limbAmount(effectiveMotion);
+        double limbPhase = seconds * 20.0 * limbAmount * 0.6662;
+        double swing = Math.cos(limbPhase);
+        double walkLegPitch = Math.toDegrees(1.4 * limbAmount * swing);
+        double walkArmPitch = Math.toDegrees(-limbAmount * swing);
 
-        double rightLegPitch = 0.0;
-        double leftLegPitch = 0.0;
-        double rightArmPitch = 0.0;
-        double leftArmPitch = 0.0;
+        double rightLegPitch = walkLegPitch;
+        double leftLegPitch = -walkLegPitch;
+        double rightArmPitch = walkArmPitch;
+        double leftArmPitch = -walkArmPitch;
         double rightArmYaw = 0.0;
         double leftArmYaw = 0.0;
-        if (effectiveMotion == SkinPreviewMotion.WALKING
-                || effectiveMotion == SkinPreviewMotion.SPRINTING) {
-            rightLegPitch = 80.21 * cycle;
-            leftLegPitch = -rightLegPitch;
-            rightArmPitch = -57.30 * cycle;
-            leftArmPitch = -rightArmPitch;
-            if (effectiveMotion == SkinPreviewMotion.SPRINTING) {
-                rightArmPitch -= 22.92;
-                leftArmPitch -= 22.92;
-                rightArmYaw = -11.46;
-                leftArmYaw = 11.46;
-            }
+        double rightArmRoll = 0.0;
+        double leftArmRoll = 0.0;
+        if (effectiveMotion == SkinPreviewMotion.SPRINTING) {
+            rightArmPitch -= 22.9183;
+            leftArmPitch -= 22.9183;
+            rightArmYaw = -11.4592;
+            leftArmYaw = 11.4592;
         }
 
         double rootY = 0.0;
@@ -179,42 +224,61 @@ final class SoftwareSkinRenderer {
         double leftLegYaw = 0.0;
         double rightLegRoll = 0.0;
         double leftLegRoll = 0.0;
-        double capePitch = 5.0 + cycle * 4.0;
+        double capePitch = 5.0;
         SkinPreviewTransform root = SkinPreviewTransform.identity();
         switch (posture) {
             case STANDING -> {
-                // Standing uses the base limb cycle without additional joint offsets.
+                // Minecraft 1.21 standing pose.
             }
             case SNEAKING -> {
-                rootY = -1.0;
-                bodyPitch = 28.65;
-                rightArmPitch += 22.92;
-                leftArmPitch += 22.92;
-                rightLegPitch -= 22.92;
-                leftLegPitch -= 22.92;
-                capePitch += 13.0;
+                bodyPitch = 28.6479;
+                rightArmPitch += 22.9183;
+                leftArmPitch += 22.9183;
+                rightLegPitch -= 22.9183;
+                leftLegPitch -= 22.9183;
+                capePitch += 10.0;
             }
             case RIDING -> {
-                rightLegPitch = -81.03;
-                leftLegPitch = -81.03;
+                rightLegPitch = -81.0289;
+                leftLegPitch = -81.0289;
                 rightLegYaw = 18.0;
                 leftLegYaw = -18.0;
                 rightLegRoll = 4.5;
                 leftLegRoll = -4.5;
-                capePitch += 12.0;
+                capePitch += 10.0;
             }
-            case PRONE -> {
+            case SWIMMING -> {
                 root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
-                        .multiply(SkinPreviewTransform.rotateX(90.0))
-                        .multiply(SkinPreviewTransform.rotateZ(180.0));
-                headPitch = -45.0;
-                rightArmPitch = -90.0;
-                leftArmPitch = -90.0;
-                rightArmYaw = -45.0;
-                leftArmYaw = 45.0;
-                rightLegPitch = -90.0;
-                leftLegPitch = -90.0;
+                        .multiply(SkinPreviewTransform.rotateX(90.0));
+                headPitch = 0.0;
+                rightArmPitch = 180.0;
+                leftArmPitch = 180.0;
+                rightArmYaw = -20.0;
+                leftArmYaw = 20.0;
+                rightLegPitch = 0.0;
+                leftLegPitch = 0.0;
                 capePitch = 18.0;
+            }
+            case SLEEPING -> {
+                root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
+                        .multiply(SkinPreviewTransform.rotateZ(90.0));
+                rightArmPitch = 0.0;
+                leftArmPitch = 0.0;
+                rightLegPitch = 0.0;
+                leftLegPitch = 0.0;
+                capePitch = 0.0;
+            }
+            case FALL_FLYING -> {
+                root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
+                        .multiply(SkinPreviewTransform.rotateX(90.0));
+                headPitch = 0.0;
+                rightArmPitch = 0.0;
+                leftArmPitch = 0.0;
+                rightArmRoll = 90.0;
+                leftArmRoll = -90.0;
+                rightLegPitch = 0.0;
+                leftLegPitch = 0.0;
+                capePitch = 12.0;
             }
         }
         root = SkinPreviewTransform.translate(0.0, rootY, 0.0).multiply(root);
@@ -223,11 +287,10 @@ final class SoftwareSkinRenderer {
                 new SkinPreviewTransform.Vector(0.0, 2.0, 0.0),
                 SkinPreviewTransform.Axis.X,
                 bodyPitch));
-        SkinPreviewTransform head = torso
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        headPitch));
+        SkinPreviewTransform head = torso.multiply(SkinPreviewTransform.around(
+                new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
+                SkinPreviewTransform.Axis.X,
+                headPitch));
 
         int armWidth = model == TextureModel.SLIM ? 3 : 4;
         double armCenterX = 4.0 + armWidth / 2.0;
@@ -239,7 +302,11 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
-                        rightArmYaw));
+                        rightArmYaw))
+                .multiply(SkinPreviewTransform.around(
+                        new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
+                        SkinPreviewTransform.Axis.Z,
+                        rightArmRoll));
         SkinPreviewTransform leftArm = torso
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
@@ -248,7 +315,11 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
-                        leftArmYaw));
+                        leftArmYaw))
+                .multiply(SkinPreviewTransform.around(
+                        new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
+                        SkinPreviewTransform.Axis.Z,
+                        leftArmRoll));
         SkinPreviewTransform rightLeg = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
@@ -317,28 +388,28 @@ final class SoftwareSkinRenderer {
         List<OuterPart> outerParts = new ArrayList<>();
         outerParts.add(new OuterPart(
                 boxTexture(32, 0, 8, 8, 8),
-                4.5, 4.5, 4.5, 0.2,
+                4.5, 4.5, 4.5,
                 head.multiply(SkinPreviewTransform.translate(0.0, 12.0, 0.0))));
         if (modern) {
             outerParts.add(new OuterPart(
                     boxTexture(16, 32, 8, 12, 4),
-                    4.0, 6.0, 2.0, 0.2,
+                    4.25, 6.25, 2.25,
                     torso.multiply(SkinPreviewTransform.translate(0.0, 2.0, 0.0))));
             outerParts.add(new OuterPart(
                     boxTexture(40, 32, armWidth, 12, 4),
-                    armWidth * 1.0625 / 2.0, 6.375, 2.125, 0.2,
+                    (armWidth + 0.5) / 2.0, 6.25, 2.25,
                     rightArm.multiply(SkinPreviewTransform.translate(armCenterX, 2.0, 0.0))));
             outerParts.add(new OuterPart(
                     boxTexture(48, 48, armWidth, 12, 4),
-                    armWidth * 1.0625 / 2.0, 6.375, 2.125, 0.2,
+                    (armWidth + 0.5) / 2.0, 6.25, 2.25,
                     leftArm.multiply(SkinPreviewTransform.translate(-armCenterX, 2.0, 0.0))));
             outerParts.add(new OuterPart(
                     boxTexture(0, 32, 4, 12, 4),
-                    2.125, 6.375, 2.125, 0.2,
+                    2.25, 6.25, 2.25,
                     rightLeg.multiply(SkinPreviewTransform.translate(2.0, -10.0, 0.0))));
             outerParts.add(new OuterPart(
                     boxTexture(0, 48, 4, 12, 4),
-                    2.125, 6.375, 2.125, 0.2,
+                    2.25, 6.25, 2.25,
                     leftLeg.multiply(SkinPreviewTransform.translate(-2.0, -10.0, 0.0))));
         }
         return new Model(List.copyOf(parts), List.copyOf(outerParts));
@@ -366,7 +437,7 @@ final class SoftwareSkinRenderer {
 
     /// Adds the six textured outer-layer planes used by double-layer skin textures.
     ///
-    /// The outer layer follows the upstream pixel-cell spacing but each complete face is rendered as one textured quad,
+    /// Every outer face uses the Minecraft 1.21 dilation of 0.25 on each side and is rendered as one textured quad,
     /// preserving alpha instead of converting transparent pixels into opaque solid tiles.
     ///
     /// @param faces destination faces
@@ -382,9 +453,9 @@ final class SoftwareSkinRenderer {
         double x = part.halfWidth();
         double y = part.halfHeight();
         double z = part.halfDepth();
-        double planeX = x + part.thickness();
-        double planeY = y + part.thickness();
-        double planeZ = z + part.thickness();
+        double planeX = x;
+        double planeY = y;
+        double planeZ = z;
         BoxTexture texture = part.texture();
 
         addFace(
@@ -641,7 +712,7 @@ final class SoftwareSkinRenderer {
         return new RawPoint(point.x() / depth, -point.y() / depth, depth);
     }
 
-    /// Computes normalized projection bounds for automatic model fitting.
+    /// Computes normalized projection bounds for stable model framing.
     ///
     /// @param faces visible faces
     /// @return projection bounds
@@ -706,7 +777,11 @@ final class SoftwareSkinRenderer {
     /// @param paint destination graphics
     /// @param face projected face
     /// @param projection screen projection
-    private static void paintFace(Graphics2D paint, RawFace face, Projection projection) {
+    private static void paintFace(
+            Graphics2D paint,
+            RawFace face,
+            Projection projection,
+            Map<ShadedTexture, BufferedImage> shadedTextures) {
         double p0x = projection.x(face.p0().x());
         double p0y = projection.y(face.p0().y());
         double p1x = projection.x(face.p1().x());
@@ -715,19 +790,13 @@ final class SoftwareSkinRenderer {
         double p2y = projection.y(face.p2().y());
         double p3x = projection.x(face.p3().x());
         double p3y = projection.y(face.p3().y());
-        Path2D.Double outline = new Path2D.Double();
-        outline.moveTo(p0x, p0y);
-        outline.lineTo(p1x, p1y);
-        outline.lineTo(p2x, p2y);
-        outline.lineTo(p3x, p3y);
-        outline.closePath();
-
         BufferedImage image = Objects.requireNonNull(face.image(), "image");
+        BufferedImage renderImage = shadedImage(image, face.shade(), shadedTextures);
         TextureRegion region = Objects.requireNonNull(face.region(), "region");
         ImageRegion imageRegion = imageRegion(image, region);
         drawTexturedTriangle(
                 paint,
-                image,
+                renderImage,
                 imageRegion,
                 p0x, p0y,
                 p1x, p1y,
@@ -735,21 +804,44 @@ final class SoftwareSkinRenderer {
                 false);
         drawTexturedTriangle(
                 paint,
-                image,
+                renderImage,
                 imageRegion,
                 p0x, p0y,
                 p2x, p2y,
                 p3x, p3y,
                 true);
-        if (face.shade() < 1.0) {
-            int alpha = (int) Math.round((1.0 - face.shade()) * 255.0);
-            paint.setColor(new Color(0, 0, 0, Math.min(180, alpha)));
-            paint.fill(outline);
-        } else if (face.shade() > 1.0) {
-            int alpha = (int) Math.round((face.shade() - 1.0) * 180.0);
-            paint.setColor(new Color(255, 255, 255, Math.min(80, alpha)));
-            paint.fill(outline);
+    }
+
+    /// Returns one alpha-preserving shaded texture.
+    ///
+    /// @param source source texture
+    /// @param shade face brightness multiplier
+    /// @param cache per-frame shaded texture cache
+    /// @return shaded texture, or the source texture for an identity shade
+    private static BufferedImage shadedImage(
+            BufferedImage source,
+            double shade,
+            Map<ShadedTexture, BufferedImage> cache) {
+        if (Math.abs(shade - 1.0) < 0.000001) {
+            return source;
         }
+        return cache.computeIfAbsent(new ShadedTexture(source, shade), key -> {
+            BufferedImage shaded = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < source.getHeight(); ++y) {
+                for (int x = 0; x < source.getWidth(); ++x) {
+                    int argb = source.getRGB(x, y);
+                    int alpha = argb >>> 24;
+                    if (alpha == 0) {
+                        continue;
+                    }
+                    int red = Math.min(255, (int) Math.round(((argb >> 16) & 0xFF) * shade));
+                    int green = Math.min(255, (int) Math.round(((argb >> 8) & 0xFF) * shade));
+                    int blue = Math.min(255, (int) Math.round((argb & 0xFF) * shade));
+                    shaded.setRGB(x, y, alpha << 24 | red << 16 | green << 8 | blue);
+                }
+            }
+            return shaded;
+        });
     }
 
     /// Paints one source triangle through an exact affine texture mapping.
@@ -961,7 +1053,7 @@ final class SoftwareSkinRenderer {
     /// Complete renderable model.
     ///
     /// @param parts textured base and cape cuboids
-    /// @param outerParts pixel-accurate outer-layer surfaces
+    /// @param outerParts expanded outer-shell surfaces
     @NotNullByDefault
     private record Model(
             List<BoxPart> parts,
@@ -979,7 +1071,6 @@ final class SoftwareSkinRenderer {
     /// @param halfWidth half width of the expanded outer plane
     /// @param halfHeight half height of the expanded outer plane
     /// @param halfDepth half depth of the expanded outer plane
-    /// @param thickness outward shell thickness
     /// @param transform model transform
     @NotNullByDefault
     private record OuterPart(
@@ -987,7 +1078,6 @@ final class SoftwareSkinRenderer {
             double halfWidth,
             double halfHeight,
             double halfDepth,
-            double thickness,
             SkinPreviewTransform transform) {
     }
 
@@ -1036,6 +1126,14 @@ final class SoftwareSkinRenderer {
     /// @param depth camera depth
     @NotNullByDefault
     private record RawPoint(double x, double y, double depth) {
+    }
+
+    /// One per-frame shaded texture cache key.
+    ///
+    /// @param source source texture
+    /// @param shade face brightness multiplier
+    @NotNullByDefault
+    private record ShadedTexture(BufferedImage source, double shade) {
     }
 
     /// One visible projected face.

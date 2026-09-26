@@ -71,7 +71,36 @@ public final class OfflineSkinPreviewPanelTest {
             painted.set(output);
         });
 
-        assertTrue(countColor(painted.get(), new Color(220, 40, 40).getRGB()) > 1_000);
+        assertAll(
+                () -> assertTrue(countColor(painted.get(), new Color(220, 40, 40).getRGB()) > 1_000),
+                () -> assertEquals(0, countColor(painted.get(), new Color(40, 80, 220).getRGB())));
+    }
+
+    /// Fixed projection keeps the torso and head anchored during the sprint animation.
+    @Test
+    public void keepsSprintTorsoFixed() {
+        BufferedImage texture = solidTexture(new Color(217, 48, 92, 255));
+        BufferedImage first = renderFrame(texture, SkinPreviewMotion.SPRINTING, 0.0);
+        BufferedImage second = renderFrame(texture, SkinPreviewMotion.SPRINTING, 0.45);
+
+        int firstTop = topOpaqueY(first);
+        int secondTop = topOpaqueY(second);
+        assertAll(
+                () -> assertTrue(firstTop > 0),
+                () -> assertTrue(Math.abs(firstTop - secondTop) <= 1));
+    }
+
+    /// Fully transparent textures do not gain gray shading pixels.
+    @Test
+    public void keepsTransparentTextureTransparent() {
+        BufferedImage texture = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage output = renderFrame(texture, SkinPreviewMotion.IDLE, 0.0);
+
+        for (int y = 0; y < output.getHeight() / 2; ++y) {
+            for (int x = 0; x < output.getWidth(); ++x) {
+                assertEquals(0, output.getRGB(x, y) >>> 24);
+            }
+        }
     }
 
     /// Horizontal drag input changes preview yaw without changing component dimensions.
@@ -140,7 +169,7 @@ public final class OfflineSkinPreviewPanelTest {
                     new State(SkinPreviewMotion.WALKING, SkinPreviewPosture.STANDING),
                     new State(SkinPreviewMotion.IDLE, SkinPreviewPosture.SNEAKING),
                     new State(SkinPreviewMotion.IDLE, SkinPreviewPosture.RIDING),
-                    new State(SkinPreviewMotion.WALKING, SkinPreviewPosture.PRONE));
+                    new State(SkinPreviewMotion.WALKING, SkinPreviewPosture.SWIMMING));
             List<Integer> rendered = new ArrayList<>();
             for (State state : states) {
                 panel.setMotion(state.motion());
@@ -160,16 +189,55 @@ public final class OfflineSkinPreviewPanelTest {
     public void storesMovementAndPosture() {
         EdtDispatcher.executeAndWait(() -> {
             OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
-            panel.setPosture(SkinPreviewPosture.PRONE);
+            panel.setPosture(SkinPreviewPosture.SWIMMING);
             panel.setMotion(SkinPreviewMotion.SPRINTING);
             assertAll(
                     () -> assertEquals(SkinPreviewMotion.SPRINTING, panel.motion()),
                     () -> assertEquals(SkinPreviewPosture.STANDING, panel.posture()));
-            panel.setPosture(SkinPreviewPosture.PRONE);
+            panel.setPosture(SkinPreviewPosture.SWIMMING);
             assertAll(
                     () -> assertEquals(SkinPreviewMotion.WALKING, panel.motion()),
-                    () -> assertEquals(SkinPreviewPosture.PRONE, panel.posture()));
+                    () -> assertEquals(SkinPreviewPosture.SWIMMING, panel.posture()));
         });
+    }
+
+    /// Renders one deterministic software frame.
+    ///
+    /// @param texture decoded skin texture
+    /// @param motion movement cycle
+    /// @param seconds animation time
+    /// @return rendered frame
+    private static BufferedImage renderFrame(BufferedImage texture, SkinPreviewMotion motion, double seconds) {
+        BufferedImage output = new BufferedImage(320, 360, BufferedImage.TYPE_INT_ARGB);
+        SoftwareSkinRenderer.render(
+                output.createGraphics(),
+                output.getWidth(),
+                output.getHeight(),
+                texture,
+                null,
+                TextureModel.WIDE,
+                motion,
+                SkinPreviewPosture.STANDING,
+                30.0,
+                15.0,
+                1.0,
+                seconds);
+        return output;
+    }
+
+    /// Finds the first visible Y coordinate.
+    ///
+    /// @param image rendered frame
+    /// @return topmost opaque Y, or -1 when no pixels are visible
+    private static int topOpaqueY(BufferedImage image) {
+        for (int y = 0; y < image.getHeight(); ++y) {
+            for (int x = 0; x < image.getWidth(); ++x) {
+                if ((image.getRGB(x, y) >>> 24) != 0) {
+                    return y;
+                }
+            }
+        }
+        return -1;
     }
 
     /// Creates a blue base skin with an opaque red modern outer layer.

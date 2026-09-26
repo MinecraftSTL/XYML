@@ -48,11 +48,11 @@ public final class OfflineSkinPreviewControlsTest {
                     () -> assertEquals(SkinPreviewMotion.SPRINTING, controls.preview().motion()),
                     () -> assertEquals(SkinPreviewPosture.STANDING, controls.preview().posture()));
 
-            posture.setSelectedItem(SkinPreviewPosture.PRONE);
+            posture.setSelectedItem(SkinPreviewPosture.SWIMMING);
             assertAll(
                     () -> assertEquals(SkinPreviewMotion.WALKING, motion.getSelectedItem()),
                     () -> assertEquals(SkinPreviewMotion.WALKING, controls.preview().motion()),
-                    () -> assertEquals(SkinPreviewPosture.PRONE, controls.preview().posture()));
+                    () -> assertEquals(SkinPreviewPosture.SWIMMING, controls.preview().posture()));
         });
     }
 

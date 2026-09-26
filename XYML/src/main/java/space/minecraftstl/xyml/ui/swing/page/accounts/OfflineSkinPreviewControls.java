@@ -218,7 +218,9 @@ final class OfflineSkinPreviewControls extends JPanel {
             case STANDING -> i18n("account.skin.preview.posture.standing");
             case SNEAKING -> i18n("account.skin.preview.posture.sneaking");
             case RIDING -> i18n("account.skin.preview.posture.riding");
-            case PRONE -> i18n("account.skin.preview.posture.prone");
+            case SWIMMING -> i18n("account.skin.preview.posture.swimming");
+            case SLEEPING -> i18n("account.skin.preview.posture.sleeping");
+            case FALL_FLYING -> i18n("account.skin.preview.posture.fall_flying");
         };
     }
 }
