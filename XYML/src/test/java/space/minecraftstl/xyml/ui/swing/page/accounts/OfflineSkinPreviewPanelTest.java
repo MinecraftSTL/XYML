@@ -23,10 +23,13 @@ import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.awt.Color;
+import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -74,6 +77,43 @@ public final class OfflineSkinPreviewPanelTest {
         assertAll(
                 () -> assertTrue(countColor(painted.get(), new Color(220, 40, 40).getRGB()) > 1_000),
                 () -> assertEquals(0, countColor(painted.get(), new Color(40, 80, 220).getRGB())));
+    }
+
+    /// Verifies crouch walking keeps both rendered legs connected to the torso.
+    @Test
+    public void keepsCrouchLegsAttachedWhileWalking() {
+        BufferedImage texture = solidTexture(new Color(217, 48, 92, 255));
+        for (double seconds : new double[] {0.0, 0.45, 0.9, 1.35}) {
+            BufferedImage output = renderFrame(
+                    texture,
+                    SkinPreviewMotion.WALKING,
+                    SkinPreviewPosture.SNEAKING,
+                    seconds,
+                    22.5,
+                    10.0);
+            assertEquals(1, countOpaqueComponents(output), "seconds=" + seconds);
+        }
+    }
+
+    /// Verifies the swimming walk advances the hand stroke between distinct phases.
+    @Test
+    public void animatesSwimmingWalkHands() {
+        BufferedImage texture = solidTexture(new Color(217, 48, 92, 255));
+        BufferedImage first = renderFrame(
+                texture,
+                SkinPreviewMotion.WALKING,
+                SkinPreviewPosture.SWIMMING,
+                0.0,
+                22.5,
+                10.0);
+        BufferedImage second = renderFrame(
+                texture,
+                SkinPreviewMotion.WALKING,
+                SkinPreviewPosture.SWIMMING,
+                0.45,
+                22.5,
+                10.0);
+        assertTrue(fingerprint(first) != fingerprint(second));
     }
 
     /// Fixed projection keeps the torso and head anchored during the sprint animation.
@@ -201,13 +241,38 @@ public final class OfflineSkinPreviewPanelTest {
         });
     }
 
-    /// Renders one deterministic software frame.
+    /// Renders one deterministic software frame with the default posture.
     ///
     /// @param texture decoded skin texture
     /// @param motion movement cycle
     /// @param seconds animation time
     /// @return rendered frame
     private static BufferedImage renderFrame(BufferedImage texture, SkinPreviewMotion motion, double seconds) {
+        return renderFrame(
+                texture,
+                motion,
+                SkinPreviewPosture.STANDING,
+                seconds,
+                30.0,
+                15.0);
+    }
+
+    /// Renders one deterministic software frame with an explicit posture and camera.
+    ///
+    /// @param texture decoded skin texture
+    /// @param motion movement cycle
+    /// @param posture body posture
+    /// @param seconds animation time
+    /// @param yaw camera yaw in degrees
+    /// @param pitch camera pitch in degrees
+    /// @return rendered frame
+    private static BufferedImage renderFrame(
+            BufferedImage texture,
+            SkinPreviewMotion motion,
+            SkinPreviewPosture posture,
+            double seconds,
+            double yaw,
+            double pitch) {
         BufferedImage output = new BufferedImage(320, 360, BufferedImage.TYPE_INT_ARGB);
         SoftwareSkinRenderer.render(
                 output.createGraphics(),
@@ -217,9 +282,9 @@ public final class OfflineSkinPreviewPanelTest {
                 null,
                 TextureModel.WIDE,
                 motion,
-                SkinPreviewPosture.STANDING,
-                30.0,
-                15.0,
+                posture,
+                yaw,
+                pitch,
                 1.0,
                 seconds);
         return output;
@@ -238,6 +303,61 @@ public final class OfflineSkinPreviewPanelTest {
             }
         }
         return -1;
+    }
+
+    /// Counts opaque, four-connected silhouette components while ignoring the soft shadow.
+    ///
+    /// @param image rendered frame
+    /// @return number of connected components with alpha greater than 200
+    private static int countOpaqueComponents(BufferedImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        boolean[] visited = new boolean[width * height];
+        int components = 0;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int index = y * width + x;
+                if (visited[index] || (image.getRGB(x, y) >>> 24) <= 200) {
+                    continue;
+                }
+                ++components;
+                Deque<Point> queue = new ArrayDeque<>();
+                visited[index] = true;
+                queue.add(new Point(x, y));
+                while (!queue.isEmpty()) {
+                    Point point = queue.removeFirst();
+                    enqueueOpaqueNeighbor(queue, visited, image, point.x - 1, point.y);
+                    enqueueOpaqueNeighbor(queue, visited, image, point.x + 1, point.y);
+                    enqueueOpaqueNeighbor(queue, visited, image, point.x, point.y - 1);
+                    enqueueOpaqueNeighbor(queue, visited, image, point.x, point.y + 1);
+                }
+            }
+        }
+        return components;
+    }
+
+    /// Enqueues one opaque four-connected neighbor when it is inside the image.
+    ///
+    /// @param queue pending pixels
+    /// @param visited visited-pixel flags
+    /// @param image rendered frame
+    /// @param x neighbor X
+    /// @param y neighbor Y
+    private static void enqueueOpaqueNeighbor(
+            Deque<Point> queue,
+            boolean[] visited,
+            BufferedImage image,
+            int x,
+            int y) {
+        if (x < 0 || x >= image.getWidth() || y < 0 || y >= image.getHeight()) {
+            return;
+        }
+        int index = y * image.getWidth() + x;
+        if (visited[index] || (image.getRGB(x, y) >>> 24) <= 200) {
+            return;
+        }
+        visited[index] = true;
+        queue.addLast(new Point(x, y));
     }
 
     /// Creates a blue base skin with an opaque red modern outer layer.
