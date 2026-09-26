@@ -313,13 +313,13 @@ final class SoftwareSkinRenderer {
 
         SkinPreviewTransform torso = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(0.0, 2.0, 0.0),
+                        new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         bodyPitch))
                 .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0));
         SkinPreviewTransform head = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
+                        new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         headPitch))
                 .multiply(SkinPreviewTransform.translate(0.0, headYOffset, 0.0));
@@ -328,57 +328,57 @@ final class SoftwareSkinRenderer {
         double armCenterX = 4.0 + armWidth / 2.0;
         SkinPreviewTransform rightArm = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         rightArmPitch))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
                         rightArmYaw))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
                         rightArmRoll))
                 .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
         SkinPreviewTransform leftArm = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         leftArmPitch))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
                         leftArmYaw))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
+                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
                         leftArmRoll))
                 .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
         SkinPreviewTransform rightLeg = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         rightLegPitch))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
                         rightLegYaw))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
                         rightLegRoll))
                 .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
         SkinPreviewTransform leftLeg = root
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.X,
                         leftLegPitch))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Y,
                         leftLegYaw))
                 .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-2.0, -4.0, 0.0),
+                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
                         leftLegRoll))
                 .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
