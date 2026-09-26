@@ -56,6 +56,24 @@ public final class OfflineSkinPreviewPanelTest {
         assertTrue(countColor(painted.get(), texture.getRGB(0, 0)) > 1_000);
     }
 
+    /// An opaque modern outer layer covers the base cuboids despite the default rotated view.
+    @Test
+    public void paintsOpaqueOuterLayer() {
+        BufferedImage texture = doubleLayerTexture();
+        AtomicReference<BufferedImage> painted = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            OfflineSkinPreviewPanel panel = new OfflineSkinPreviewPanel();
+            panel.setSize(320, 360);
+            panel.showPreview(new OfflineSkinPreview(TextureModel.WIDE, texture, null));
+            BufferedImage output = new BufferedImage(320, 360, BufferedImage.TYPE_INT_ARGB);
+            panel.paint(output.getGraphics());
+            painted.set(output);
+        });
+
+        assertTrue(countColor(painted.get(), new Color(220, 40, 40).getRGB()) > 1_000);
+    }
+
     /// Horizontal drag input changes preview yaw without changing component dimensions.
     @Test
     public void rotatesPreviewWithMouseDrag() {
@@ -152,6 +170,37 @@ public final class OfflineSkinPreviewPanelTest {
                     () -> assertEquals(SkinPreviewMotion.WALKING, panel.motion()),
                     () -> assertEquals(SkinPreviewPosture.PRONE, panel.posture()));
         });
+    }
+
+    /// Creates a blue base skin with an opaque red modern outer layer.
+    ///
+    /// @return 64 by 64 double-layer texture
+    private static BufferedImage doubleLayerTexture() {
+        BufferedImage image = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+        fill(image, 0, 0, 64, 64, new Color(220, 40, 40));
+        fill(image, 0, 0, 32, 16, new Color(40, 80, 220));
+        fill(image, 16, 16, 40, 32, new Color(40, 80, 220));
+        fill(image, 40, 16, 56, 32, new Color(40, 80, 220));
+        fill(image, 0, 16, 16, 32, new Color(40, 80, 220));
+        fill(image, 32, 48, 48, 64, new Color(40, 80, 220));
+        fill(image, 16, 48, 32, 64, new Color(40, 80, 220));
+        return image;
+    }
+
+    /// Fills one half-open texture rectangle.
+    ///
+    /// @param image destination image
+    /// @param x1 left X
+    /// @param y1 top Y
+    /// @param x2 right X
+    /// @param y2 bottom Y
+    /// @param color fill color
+    private static void fill(BufferedImage image, int x1, int y1, int x2, int y2, Color color) {
+        for (int y = y1; y < y2; ++y) {
+            for (int x = x1; x < x2; ++x) {
+                image.setRGB(x, y, color.getRGB());
+            }
+        }
     }
 
     /// Creates a uniformly opaque test skin.
