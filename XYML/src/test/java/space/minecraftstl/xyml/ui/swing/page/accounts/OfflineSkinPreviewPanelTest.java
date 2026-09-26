@@ -95,6 +95,31 @@ public final class OfflineSkinPreviewPanelTest {
         }
     }
 
+    /// Verifies airborne postures omit the grounded shadow while standing keeps it.
+    @Test
+    public void omitsGroundShadowForAirbornePostures() {
+        BufferedImage texture = solidTexture(new Color(217, 48, 92, 255));
+        BufferedImage standing = renderFrame(texture, SkinPreviewMotion.IDLE, 0.0);
+        BufferedImage riding = renderFrame(
+                texture,
+                SkinPreviewMotion.IDLE,
+                SkinPreviewPosture.RIDING,
+                0.0,
+                22.5,
+                10.0);
+        BufferedImage swimming = renderFrame(
+                texture,
+                SkinPreviewMotion.IDLE,
+                SkinPreviewPosture.SWIMMING,
+                0.0,
+                22.5,
+                10.0);
+        assertAll(
+                () -> assertTrue(countTranslucentPixels(standing) > 0),
+                () -> assertEquals(0, countTranslucentPixels(riding)),
+                () -> assertEquals(0, countTranslucentPixels(swimming)));
+    }
+
     /// Verifies the swimming walk advances the hand stroke between distinct phases.
     @Test
     public void animatesSwimmingWalkHands() {
@@ -303,6 +328,23 @@ public final class OfflineSkinPreviewPanelTest {
             }
         }
         return -1;
+    }
+
+    /// Counts pixels that are partially transparent.
+    ///
+    /// @param image rendered frame
+    /// @return number of pixels with alpha between 1 and 254
+    private static int countTranslucentPixels(BufferedImage image) {
+        int matches = 0;
+        for (int y = 0; y < image.getHeight(); ++y) {
+            for (int x = 0; x < image.getWidth(); ++x) {
+                int alpha = image.getRGB(x, y) >>> 24;
+                if (alpha > 0 && alpha < 255) {
+                    ++matches;
+                }
+            }
+        }
+        return matches;
     }
 
     /// Counts opaque, four-connected silhouette components while ignoring the soft shadow.

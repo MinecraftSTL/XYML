@@ -110,7 +110,9 @@ final class SoftwareSkinRenderer {
             List<RawFace> referenceFaces = referenceFaces(model, motion, posture, modern, cape, view, skin);
             Bounds bounds = referenceFaces.isEmpty() ? bounds(faces) : bounds(referenceFaces);
             Projection projection = projection(width, height, bounds, zoom);
-            paintShadow(paint, bounds, projection);
+            if (posture == SkinPreviewPosture.STANDING || posture == SkinPreviewPosture.SNEAKING) {
+                paintShadow(paint, bounds, projection);
+            }
             rasterize(paint, faces, projection, width, height);
         } finally {
             paint.dispose();
@@ -153,8 +155,8 @@ final class SoftwareSkinRenderer {
         double normalized = Math.floorMod((int) Math.floor(phase), 26) + phase - Math.floor(phase);
         double rightArmPitch;
         double leftArmPitch;
-        double rightArmYaw = -180.0;
-        double leftArmYaw = -180.0;
+        double rightArmYaw = 180.0;
+        double leftArmYaw = 180.0;
         double rightArmRoll;
         double leftArmRoll;
         if (normalized < 14.0) {
@@ -165,20 +167,20 @@ final class SoftwareSkinRenderer {
             rightArmRoll = Math.toDegrees(Math.PI - 1.8707964 * progress);
         } else if (normalized < 22.0) {
             double progress = (normalized - 14.0) / 8.0;
-            rightArmPitch = -90.0 * progress;
-            leftArmPitch = -90.0 * progress;
+            rightArmPitch = 90.0 * progress;
+            leftArmPitch = 90.0 * progress;
             leftArmRoll = Math.toDegrees(5.012389 - 1.8707964 * progress);
             rightArmRoll = Math.toDegrees(1.2707963 + 1.8707964 * progress);
         } else {
             double progress = (normalized - 22.0) / 4.0;
-            rightArmPitch = -90.0 * (1.0 - progress);
-            leftArmPitch = -90.0 * (1.0 - progress);
+            rightArmPitch = 90.0 * (1.0 - progress);
+            leftArmPitch = 90.0 * (1.0 - progress);
             rightArmRoll = 180.0;
             leftArmRoll = 180.0;
         }
         double legSwing = 0.3;
-        double rightLegPitch = -Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334));
-        double leftLegPitch = -Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334 + Math.PI));
+        double rightLegPitch = Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334));
+        double leftLegPitch = Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334 + Math.PI));
         return new SwimPose(
                 rightArmPitch,
                 leftArmPitch,
@@ -244,8 +246,8 @@ final class SoftwareSkinRenderer {
         double limbSwing = seconds * 20.0 * limbAmount;
         double limbPhase = limbSwing * 0.6662;
         double swing = Math.cos(limbPhase);
-        double walkLegPitch = -Math.toDegrees(1.4 * limbAmount * swing);
-        double walkArmPitch = Math.toDegrees(limbAmount * swing);
+        double walkLegPitch = Math.toDegrees(1.4 * limbAmount * swing);
+        double walkArmPitch = Math.toDegrees(-limbAmount * swing);
 
         double rightLegPitch = walkLegPitch;
         double leftLegPitch = -walkLegPitch;
@@ -282,23 +284,23 @@ final class SoftwareSkinRenderer {
                 // Minecraft 1.21 standing pose.
             }
             case SNEAKING -> {
-                bodyPitch = -28.6479;
+                bodyPitch = 28.6479;
                 bodyYOffset = -3.2;
                 headYOffset = -4.2;
                 armYOffset = -3.2;
                 legYOffset = -0.2;
-                legZOffset = 4.0;
-                armPitchOffset = -22.9183;
+                legZOffset = -4.0;
+                armPitchOffset = 22.9183;
                 capePitch += 10.0;
             }
             case RIDING -> {
-                rightLegPitch = 81.0289;
-                leftLegPitch = 81.0289;
-                rightLegYaw = -18.0;
-                leftLegYaw = 18.0;
+                rightLegPitch = -81.0289;
+                leftLegPitch = -81.0289;
+                rightLegYaw = 18.0;
+                leftLegYaw = -18.0;
                 rightLegRoll = 4.5;
                 leftLegRoll = -4.5;
-                armPitchOffset = 36.0;
+                armPitchOffset = -36.0;
                 capePitch += 10.0;
             }
             case SWIMMING -> {
@@ -326,21 +328,22 @@ final class SoftwareSkinRenderer {
         leftArmPitch += armPitchOffset;
 
         SkinPreviewTransform torso = root
+                .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        bodyPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0));
+                        bodyPitch));
         SkinPreviewTransform head = root
+                .multiply(SkinPreviewTransform.translate(0.0, headYOffset, 0.0))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        headPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, headYOffset, 0.0));
+                        headPitch));
 
         int armWidth = model == TextureModel.SLIM ? 3 : 4;
         double armCenterX = 4.0 + armWidth / 2.0;
         SkinPreviewTransform rightArm = root
+                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
@@ -352,9 +355,9 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        rightArmPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
+                        rightArmPitch));
         SkinPreviewTransform leftArm = root
+                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
@@ -366,9 +369,9 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        leftArmPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
+                        leftArmPitch));
         SkinPreviewTransform rightLeg = root
+                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
@@ -380,9 +383,9 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        rightLegPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
+                        rightLegPitch));
         SkinPreviewTransform leftLeg = root
+                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset))
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
@@ -394,8 +397,7 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
                         SkinPreviewTransform.Axis.X,
-                        leftLegPitch))
-                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
+                        leftLegPitch));
 
         List<BoxPart> parts = new ArrayList<>();
         parts.add(boxPart(
