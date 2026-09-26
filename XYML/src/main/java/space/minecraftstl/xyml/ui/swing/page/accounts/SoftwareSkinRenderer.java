@@ -22,20 +22,14 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 
 import java.awt.AlphaComposite;
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.Shape;
-import java.awt.geom.AffineTransform;
-import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
-import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 
@@ -117,12 +111,7 @@ final class SoftwareSkinRenderer {
             Bounds bounds = referenceFaces.isEmpty() ? bounds(faces) : bounds(referenceFaces);
             Projection projection = projection(width, height, bounds, zoom);
             paintShadow(paint, bounds, projection);
-            faces.sort(Comparator.comparingDouble(RawFace::depth).reversed()
-                    .thenComparingInt(RawFace::layer));
-            Map<ShadedTexture, BufferedImage> shadedTextures = new HashMap<>();
-            for (RawFace face : faces) {
-                paintFace(paint, face, projection, shadedTextures);
-            }
+            rasterize(paint, faces, projection, width, height);
         } finally {
             paint.dispose();
         }
@@ -153,6 +142,52 @@ final class SoftwareSkinRenderer {
             faces.addAll(transformFaces(buildModel(model, motion, posture, halfPeriod, modern, cape), view, skin, cape));
         }
         return faces;
+    }
+
+    /// Resolves the exact 1.21 three-stage swimming animation, converted to this renderer's Y-up axes.
+    ///
+    /// @param phase limb swing modulo 26, as used by HumanoidModel
+    /// @param limbSwing continuous limb swing used by the leg kick
+    /// @return coordinate-converted swim joint angles
+    private static SwimPose swimPose(double phase, double limbSwing) {
+        double normalized = Math.floorMod((int) Math.floor(phase), 26) + phase - Math.floor(phase);
+        double rightArmPitch;
+        double leftArmPitch;
+        double rightArmYaw = -180.0;
+        double leftArmYaw = -180.0;
+        double rightArmRoll;
+        double leftArmRoll;
+        if (normalized < 14.0) {
+            rightArmPitch = 0.0;
+            leftArmPitch = 0.0;
+            double progress = normalized / 14.0;
+            leftArmRoll = -Math.toDegrees(Math.PI + 1.8707964 * progress);
+            rightArmRoll = -Math.toDegrees(Math.PI - 1.8707964 * progress);
+        } else if (normalized < 22.0) {
+            double progress = (normalized - 14.0) / 8.0;
+            rightArmPitch = -90.0 * progress;
+            leftArmPitch = -90.0 * progress;
+            leftArmRoll = -Math.toDegrees(5.012389 - 1.8707964 * progress);
+            rightArmRoll = -Math.toDegrees(1.2707963 + 1.8707964 * progress);
+        } else {
+            double progress = (normalized - 22.0) / 4.0;
+            rightArmPitch = -90.0 * (1.0 - progress);
+            leftArmPitch = -90.0 * (1.0 - progress);
+            rightArmRoll = -180.0;
+            leftArmRoll = -180.0;
+        }
+        double legSwing = 0.3;
+        double rightLegPitch = -Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334 + Math.PI));
+        double leftLegPitch = -Math.toDegrees(legSwing * Math.cos(limbSwing * 0.33333334));
+        return new SwimPose(
+                rightArmPitch,
+                leftArmPitch,
+                rightArmYaw,
+                leftArmYaw,
+                rightArmRoll,
+                leftArmRoll,
+                rightLegPitch,
+                leftLegPitch);
     }
 
     /// Returns the 1.21 horizontal movement amount used by limb swing.
@@ -197,7 +232,8 @@ final class SoftwareSkinRenderer {
                 ? SkinPreviewMotion.WALKING
                 : motion;
         double limbAmount = limbAmount(effectiveMotion);
-        double limbPhase = seconds * 20.0 * limbAmount * 0.6662;
+        double limbSwing = seconds * 20.0 * limbAmount;
+        double limbPhase = limbSwing * 0.6662;
         double swing = Math.cos(limbPhase);
         double walkLegPitch = Math.toDegrees(1.4 * limbAmount * swing);
         double walkArmPitch = Math.toDegrees(-limbAmount * swing);
@@ -219,7 +255,12 @@ final class SoftwareSkinRenderer {
 
         double rootY = 0.0;
         double bodyPitch = 0.0;
+        double bodyYOffset = 0.0;
         double headPitch = 0.0;
+        double headYOffset = 0.0;
+        double armYOffset = 0.0;
+        double legYOffset = 0.0;
+        double legZOffset = 0.0;
         double rightLegYaw = 0.0;
         double leftLegYaw = 0.0;
         double rightLegRoll = 0.0;
@@ -232,10 +273,11 @@ final class SoftwareSkinRenderer {
             }
             case SNEAKING -> {
                 bodyPitch = 28.6479;
-                rightArmPitch += 22.9183;
-                leftArmPitch += 22.9183;
-                rightLegPitch -= 22.9183;
-                leftLegPitch -= 22.9183;
+                bodyYOffset = -3.2;
+                headYOffset = -4.2;
+                armYOffset = -3.2;
+                legYOffset = -0.2;
+                legZOffset = 4.0;
                 capePitch += 10.0;
             }
             case RIDING -> {
@@ -255,42 +297,32 @@ final class SoftwareSkinRenderer {
                 leftArmPitch = 180.0;
                 rightArmYaw = -20.0;
                 leftArmYaw = 20.0;
-                rightLegPitch = 0.0;
-                leftLegPitch = 0.0;
+                SwimPose swim = swimPose(limbSwing % 26.0, limbSwing);
+                rightArmPitch = swim.rightArmPitch();
+                leftArmPitch = swim.leftArmPitch();
+                rightArmYaw = swim.rightArmYaw();
+                leftArmYaw = swim.leftArmYaw();
+                rightArmRoll = swim.rightArmRoll();
+                leftArmRoll = swim.leftArmRoll();
+                rightLegPitch = swim.rightLegPitch();
+                leftLegPitch = swim.leftLegPitch();
                 capePitch = 18.0;
-            }
-            case SLEEPING -> {
-                root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
-                        .multiply(SkinPreviewTransform.rotateZ(90.0));
-                rightArmPitch = 0.0;
-                leftArmPitch = 0.0;
-                rightLegPitch = 0.0;
-                leftLegPitch = 0.0;
-                capePitch = 0.0;
-            }
-            case FALL_FLYING -> {
-                root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
-                        .multiply(SkinPreviewTransform.rotateX(90.0));
-                headPitch = 0.0;
-                rightArmPitch = 0.0;
-                leftArmPitch = 0.0;
-                rightArmRoll = 90.0;
-                leftArmRoll = -90.0;
-                rightLegPitch = 0.0;
-                leftLegPitch = 0.0;
-                capePitch = 12.0;
             }
         }
         root = SkinPreviewTransform.translate(0.0, rootY, 0.0).multiply(root);
 
-        SkinPreviewTransform torso = root.multiply(SkinPreviewTransform.around(
-                new SkinPreviewTransform.Vector(0.0, 2.0, 0.0),
-                SkinPreviewTransform.Axis.X,
-                bodyPitch));
-        SkinPreviewTransform head = torso.multiply(SkinPreviewTransform.around(
-                new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
-                SkinPreviewTransform.Axis.X,
-                headPitch));
+        SkinPreviewTransform torso = root
+                .multiply(SkinPreviewTransform.around(
+                        new SkinPreviewTransform.Vector(0.0, 2.0, 0.0),
+                        SkinPreviewTransform.Axis.X,
+                        bodyPitch))
+                .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0));
+        SkinPreviewTransform head = torso
+                .multiply(SkinPreviewTransform.around(
+                        new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
+                        SkinPreviewTransform.Axis.X,
+                        headPitch))
+                .multiply(SkinPreviewTransform.translate(0.0, headYOffset, 0.0));
 
         int armWidth = model == TextureModel.SLIM ? 3 : 4;
         double armCenterX = 4.0 + armWidth / 2.0;
@@ -306,7 +338,8 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
-                        rightArmRoll));
+                        rightArmRoll))
+                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
         SkinPreviewTransform leftArm = torso
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
@@ -319,7 +352,8 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
-                        leftArmRoll));
+                        leftArmRoll))
+                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
         SkinPreviewTransform rightLeg = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
@@ -332,7 +366,8 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(2.0, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
-                        rightLegRoll));
+                        rightLegRoll))
+                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
         SkinPreviewTransform leftLeg = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-2.0, -4.0, 0.0),
@@ -345,7 +380,8 @@ final class SoftwareSkinRenderer {
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-2.0, -4.0, 0.0),
                         SkinPreviewTransform.Axis.Z,
-                        leftLegRoll));
+                        leftLegRoll))
+                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset));
 
         List<BoxPart> parts = new ArrayList<>();
         parts.add(boxPart(
@@ -772,169 +808,185 @@ final class SoftwareSkinRenderer {
                 height));
     }
 
-    /// Paints one projected textured face.
+    /// Rasterizes base geometry and outer layers through a CPU depth buffer.
     ///
     /// @param paint destination graphics
+    /// @param faces projected faces
+    /// @param projection screen projection
+    /// @param width destination width
+    /// @param height destination height
+    private static void rasterize(
+            Graphics2D paint,
+            List<RawFace> faces,
+            Projection projection,
+            int width,
+            int height) {
+        int[] pixels = new int[width * height];
+        double[] depth = new double[pixels.length];
+        Arrays.fill(depth, Double.POSITIVE_INFINITY);
+
+        List<RawFace> baseFaces = new ArrayList<>();
+        List<RawFace> outerFaces = new ArrayList<>();
+        for (RawFace face : faces) {
+            (face.layer() == 1 ? outerFaces : baseFaces).add(face);
+        }
+        baseFaces.sort(Comparator.comparingDouble(RawFace::depth).reversed());
+        outerFaces.sort(Comparator.comparingDouble(RawFace::depth).reversed());
+        for (RawFace face : baseFaces) {
+            rasterizeFace(face, projection, pixels, depth, width, height);
+        }
+        for (RawFace face : outerFaces) {
+            rasterizeFace(face, projection, pixels, depth, width, height);
+        }
+
+        BufferedImage output = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        output.setRGB(0, 0, width, height, pixels, 0, width);
+        paint.drawImage(output, 0, 0, null);
+    }
+
+    /// Rasterizes both triangles of one projected face.
+    ///
     /// @param face projected face
     /// @param projection screen projection
-    private static void paintFace(
-            Graphics2D paint,
+    /// @param pixels destination ARGB pixels
+    /// @param depth destination depth buffer
+    /// @param width destination width
+    /// @param height destination height
+    private static void rasterizeFace(
             RawFace face,
             Projection projection,
-            Map<ShadedTexture, BufferedImage> shadedTextures) {
-        double p0x = projection.x(face.p0().x());
-        double p0y = projection.y(face.p0().y());
-        double p1x = projection.x(face.p1().x());
-        double p1y = projection.y(face.p1().y());
-        double p2x = projection.x(face.p2().x());
-        double p2y = projection.y(face.p2().y());
-        double p3x = projection.x(face.p3().x());
-        double p3y = projection.y(face.p3().y());
+            int[] pixels,
+            double[] depth,
+            int width,
+            int height) {
         BufferedImage image = Objects.requireNonNull(face.image(), "image");
-        BufferedImage renderImage = shadedImage(image, face.shade(), shadedTextures);
         TextureRegion region = Objects.requireNonNull(face.region(), "region");
-        ImageRegion imageRegion = imageRegion(image, region);
-        drawTexturedTriangle(
-                paint,
-                renderImage,
-                imageRegion,
-                p0x, p0y,
-                p1x, p1y,
-                p2x, p2y,
-                false);
-        drawTexturedTriangle(
-                paint,
-                renderImage,
-                imageRegion,
-                p0x, p0y,
-                p2x, p2y,
-                p3x, p3y,
-                true);
+        ImageRegion source = imageRegion(image, region);
+        ScreenVertex v0 = screenVertex(face.p0(), projection, 0.0, 0.0);
+        ScreenVertex v1 = screenVertex(face.p1(), projection, 1.0, 0.0);
+        ScreenVertex v2 = screenVertex(face.p2(), projection, 1.0, 1.0);
+        ScreenVertex v3 = screenVertex(face.p3(), projection, 0.0, 1.0);
+        rasterizeTriangle(v0, v1, v2, image, source, face.shade(), pixels, depth, width, height);
+        rasterizeTriangle(v0, v2, v3, image, source, face.shade(), pixels, depth, width, height);
     }
 
-    /// Returns one alpha-preserving shaded texture.
+    /// Creates one screen-space vertex with UV coordinates.
     ///
-    /// @param source source texture
+    /// @param point projected point
+    /// @param projection screen projection
+    /// @param u texture U
+    /// @param v texture V
+    /// @return screen vertex
+    private static ScreenVertex screenVertex(RawPoint point, Projection projection, double u, double v) {
+        return new ScreenVertex(projection.x(point.x()), projection.y(point.y()), point.depth(), u, v);
+    }
+
+    /// Rasterizes one textured triangle with perspective-correct UV interpolation.
+    ///
+    /// @param v0 first vertex
+    /// @param v1 second vertex
+    /// @param v2 third vertex
+    /// @param image source texture
+    /// @param source source image region
     /// @param shade face brightness multiplier
-    /// @param cache per-frame shaded texture cache
-    /// @return shaded texture, or the source texture for an identity shade
-    private static BufferedImage shadedImage(
-            BufferedImage source,
-            double shade,
-            Map<ShadedTexture, BufferedImage> cache) {
-        if (Math.abs(shade - 1.0) < 0.000001) {
-            return source;
-        }
-        return cache.computeIfAbsent(new ShadedTexture(source, shade), key -> {
-            BufferedImage shaded = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            for (int y = 0; y < source.getHeight(); ++y) {
-                for (int x = 0; x < source.getWidth(); ++x) {
-                    int argb = source.getRGB(x, y);
-                    int alpha = argb >>> 24;
-                    if (alpha == 0) {
-                        continue;
-                    }
-                    int red = Math.min(255, (int) Math.round(((argb >> 16) & 0xFF) * shade));
-                    int green = Math.min(255, (int) Math.round(((argb >> 8) & 0xFF) * shade));
-                    int blue = Math.min(255, (int) Math.round((argb & 0xFF) * shade));
-                    shaded.setRGB(x, y, alpha << 24 | red << 16 | green << 8 | blue);
-                }
-            }
-            return shaded;
-        });
-    }
-
-    /// Paints one source triangle through an exact affine texture mapping.
-    ///
-    /// @param paint destination graphics
-    /// @param image source image
-    /// @param imageRegion scalar source rectangle
-    /// @param x0 destination X0
-    /// @param y0 destination Y0
-    /// @param x1 destination X1
-    /// @param y1 destination Y1
-    /// @param x2 destination X2
-    /// @param y2 destination Y2
-    /// @param secondTriangle whether this is the second half of the quad
-    private static void drawTexturedTriangle(
-            Graphics2D paint,
+    /// @param pixels destination ARGB pixels
+    /// @param depth destination depth buffer
+    /// @param width destination width
+    /// @param height destination height
+    private static void rasterizeTriangle(
+            ScreenVertex v0,
+            ScreenVertex v1,
+            ScreenVertex v2,
             BufferedImage image,
-            ImageRegion imageRegion,
-            double x0,
-            double y0,
-            double x1,
-            double y1,
-            double x2,
-            double y2,
-            boolean secondTriangle) {
-        double sx0 = imageRegion.x();
-        double sy0 = imageRegion.y();
-        double sx1 = imageRegion.x() + imageRegion.width();
-        double sy1 = imageRegion.y() + imageRegion.height();
-        double sourceX0 = sx0;
-        double sourceY0 = sy0;
-        double sourceX1;
-        double sourceY1;
-        double sourceX2;
-        double sourceY2;
-        if (secondTriangle) {
-            sourceX1 = sx1;
-            sourceY1 = sy1;
-            sourceX2 = sx0;
-            sourceY2 = sy1;
-        } else {
-            sourceX1 = sx1;
-            sourceY1 = sy0;
-            sourceX2 = sx1;
-            sourceY2 = sy1;
-        }
-
-        double determinant = (sourceX1 - sourceX0) * (sourceY2 - sourceY0)
-                - (sourceX2 - sourceX0) * (sourceY1 - sourceY0);
-        if (Math.abs(determinant) < 0.000001) {
+            ImageRegion source,
+            double shade,
+            int[] pixels,
+            double[] depth,
+            int width,
+            int height) {
+        double area = edge(v0.x(), v0.y(), v1.x(), v1.y(), v2.x(), v2.y());
+        if (Math.abs(area) < 0.000001) {
             return;
         }
-        double m00 = ((x1 - x0) * (sourceY2 - sourceY0) - (x2 - x0) * (sourceY1 - sourceY0))
-                / determinant;
-        double m10 = ((y1 - y0) * (sourceY2 - sourceY0) - (y2 - y0) * (sourceY1 - sourceY0))
-                / determinant;
-        double m01 = ((x2 - x0) * (sourceX1 - sourceX0) - (x1 - x0) * (sourceX2 - sourceX0))
-                / determinant;
-        double m11 = ((y2 - y0) * (sourceX1 - sourceX0) - (y1 - y0) * (sourceX2 - sourceX0))
-                / determinant;
-        double m02 = x0 - m00 * sourceX0 - m01 * sourceY0;
-        double m12 = y0 - m10 * sourceX0 - m11 * sourceY0;
-        Path2D.Double clip = new Path2D.Double();
-        clip.moveTo(x0, y0);
-        clip.lineTo(x1, y1);
-        clip.lineTo(x2, y2);
-        clip.closePath();
-
-        Shape oldClip = paint.getClip();
-        AffineTransform oldTransform = paint.getTransform();
-        Area expandedClip = new Area(clip);
-        expandedClip.add(new Area(new BasicStroke(
-                1.0f,
-                BasicStroke.CAP_ROUND,
-                BasicStroke.JOIN_ROUND).createStrokedShape(clip)));
-        try {
-            paint.clip(expandedClip);
-            paint.transform(new AffineTransform(m00, m10, m01, m11, m02, m12));
-            paint.drawImage(
-                    image,
-                    (int) Math.floor(imageRegion.x()),
-                    (int) Math.floor(imageRegion.y()),
-                    (int) Math.ceil(imageRegion.x() + imageRegion.width()),
-                    (int) Math.ceil(imageRegion.y() + imageRegion.height()),
-                    (int) Math.floor(imageRegion.x()),
-                    (int) Math.floor(imageRegion.y()),
-                    (int) Math.ceil(imageRegion.x() + imageRegion.width()),
-                    (int) Math.ceil(imageRegion.y() + imageRegion.height()),
-                    null);
-        } finally {
-            paint.setTransform(oldTransform);
-            paint.setClip(oldClip);
+        int minX = Math.max(0, (int) Math.floor(Math.min(v0.x(), Math.min(v1.x(), v2.x()))));
+        int maxX = Math.min(width - 1, (int) Math.ceil(Math.max(v0.x(), Math.max(v1.x(), v2.x()))));
+        int minY = Math.max(0, (int) Math.floor(Math.min(v0.y(), Math.min(v1.y(), v2.y()))));
+        int maxY = Math.min(height - 1, (int) Math.ceil(Math.max(v0.y(), Math.max(v1.y(), v2.y()))));
+        double invW0 = 1.0 / v0.depth();
+        double invW1 = 1.0 / v1.depth();
+        double invW2 = 1.0 / v2.depth();
+        for (int y = minY; y <= maxY; ++y) {
+            double py = y + 0.5;
+            for (int x = minX; x <= maxX; ++x) {
+                double px = x + 0.5;
+                double w0 = edge(v1.x(), v1.y(), v2.x(), v2.y(), px, py) / area;
+                double w1 = edge(v2.x(), v2.y(), v0.x(), v0.y(), px, py) / area;
+                double w2 = edge(v0.x(), v0.y(), v1.x(), v1.y(), px, py) / area;
+                if (w0 < -0.000001 || w1 < -0.000001 || w2 < -0.000001) {
+                    continue;
+                }
+                double oneOverW = w0 * invW0 + w1 * invW1 + w2 * invW2;
+                if (oneOverW <= 0.0) {
+                    continue;
+                }
+                double pixelDepth = 1.0 / oneOverW;
+                int index = y * width + x;
+                if (pixelDepth >= depth[index]) {
+                    continue;
+                }
+                double u = (w0 * v0.u() * invW0 + w1 * v1.u() * invW1 + w2 * v2.u() * invW2) / oneOverW;
+                double v = (w0 * v0.v() * invW0 + w1 * v1.v() * invW1 + w2 * v2.v() * invW2) / oneOverW;
+                int sourceX = Math.min(image.getWidth() - 1, Math.max(0, (int) (source.x() + u * source.width())));
+                int sourceY = Math.min(image.getHeight() - 1, Math.max(0, (int) (source.y() + v * source.height())));
+                int argb = image.getRGB(sourceX, sourceY);
+                int alpha = argb >>> 24;
+                if (alpha == 0) {
+                    continue;
+                }
+                int red = Math.min(255, (int) Math.round(((argb >> 16) & 0xFF) * shade));
+                int green = Math.min(255, (int) Math.round(((argb >> 8) & 0xFF) * shade));
+                int blue = Math.min(255, (int) Math.round((argb & 0xFF) * shade));
+                pixels[index] = blend(pixels[index], alpha, red, green, blue);
+                depth[index] = pixelDepth;
+            }
         }
+    }
+
+    /// Computes a triangle edge function.
+    ///
+    /// @param ax first point X
+    /// @param ay first point Y
+    /// @param bx second point X
+    /// @param by second point Y
+    /// @param px test point X
+    /// @param py test point Y
+    /// @return signed edge value
+    private static double edge(double ax, double ay, double bx, double by, double px, double py) {
+        return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+    }
+
+    /// Alpha-blends one source pixel over one destination pixel.
+    ///
+    /// @param destination destination ARGB
+    /// @param sourceAlpha source alpha
+    /// @param sourceRed source red
+    /// @param sourceGreen source green
+    /// @param sourceBlue source blue
+    /// @return blended ARGB
+    private static int blend(int destination, int sourceAlpha, int sourceRed, int sourceGreen, int sourceBlue) {
+        int destinationAlpha = destination >>> 24;
+        int inverseAlpha = 255 - sourceAlpha;
+        int outputAlpha = sourceAlpha + destinationAlpha * inverseAlpha / 255;
+        if (outputAlpha == 0) {
+            return 0;
+        }
+        int destinationRed = (destination >> 16) & 0xFF;
+        int destinationGreen = (destination >> 8) & 0xFF;
+        int destinationBlue = destination & 0xFF;
+        int outputRed = (sourceRed * sourceAlpha + destinationRed * destinationAlpha * inverseAlpha / 255) / outputAlpha;
+        int outputGreen = (sourceGreen * sourceAlpha + destinationGreen * destinationAlpha * inverseAlpha / 255) / outputAlpha;
+        int outputBlue = (sourceBlue * sourceAlpha + destinationBlue * destinationAlpha * inverseAlpha / 255) / outputAlpha;
+        return outputAlpha << 24 | outputRed << 16 | outputGreen << 8 | outputBlue;
     }
 
     /// Converts a canonical 64-pixel texture region into actual image pixels.
@@ -1128,12 +1180,37 @@ final class SoftwareSkinRenderer {
     private record RawPoint(double x, double y, double depth) {
     }
 
-    /// One per-frame shaded texture cache key.
+    /// Coordinate-converted 1.21 swimming pose.
     ///
-    /// @param source source texture
-    /// @param shade face brightness multiplier
+    /// @param rightArmPitch right arm X rotation
+    /// @param leftArmPitch left arm X rotation
+    /// @param rightArmYaw right arm Y rotation
+    /// @param leftArmYaw left arm Y rotation
+    /// @param rightArmRoll right arm Z rotation
+    /// @param leftArmRoll left arm Z rotation
+    /// @param rightLegPitch right leg X rotation
+    /// @param leftLegPitch left leg X rotation
     @NotNullByDefault
-    private record ShadedTexture(BufferedImage source, double shade) {
+    private record SwimPose(
+            double rightArmPitch,
+            double leftArmPitch,
+            double rightArmYaw,
+            double leftArmYaw,
+            double rightArmRoll,
+            double leftArmRoll,
+            double rightLegPitch,
+            double leftLegPitch) {
+    }
+
+    /// One screen-space vertex used by the software rasterizer.
+    ///
+    /// @param x screen X
+    /// @param y screen Y
+    /// @param depth camera depth
+    /// @param u texture U
+    /// @param v texture V
+    @NotNullByDefault
+    private record ScreenVertex(double x, double y, double depth, double u, double v) {
     }
 
     /// One visible projected face.

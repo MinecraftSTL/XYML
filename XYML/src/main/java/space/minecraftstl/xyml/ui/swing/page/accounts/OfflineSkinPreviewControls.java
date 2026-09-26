@@ -46,6 +46,9 @@ final class OfflineSkinPreviewControls extends JPanel {
     /// Guards programmatic selector synchronization from recursive action delivery.
     private boolean synchronizingSelection;
 
+    /// Whether the surrounding dialog currently permits animation selection.
+    private boolean animationControlsEnabled = true;
+
     /// Creates localized preview controls with valid default movement and posture.
     OfflineSkinPreviewControls() {
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[grow,fill][]4[]"));
@@ -80,8 +83,9 @@ final class OfflineSkinPreviewControls extends JPanel {
     ///
     /// @param enabled whether selectors accept input
     void setAnimationControlsEnabled(boolean enabled) {
-        motion.setEnabled(enabled);
+        animationControlsEnabled = enabled;
         posture.setEnabled(enabled);
+        updateMotionControlState();
     }
 
     /// Configures accessible names, localized renderers, and valid state synchronization.
@@ -134,15 +138,26 @@ final class OfflineSkinPreviewControls extends JPanel {
         }
         SkinPreviewPosture selectedPosture = selectedPosture();
         SkinPreviewMotion selectedMotion = selectedMotion();
-        if (selectedMotion == SkinPreviewMotion.SPRINTING
+        if (selectedPosture == SkinPreviewPosture.RIDING) {
+            selectedMotion = SkinPreviewMotion.IDLE;
+            synchronizingSelection = true;
+            motion.setSelectedItem(selectedMotion);
+            synchronizingSelection = false;
+        } else if (selectedMotion == SkinPreviewMotion.SPRINTING
                 && selectedPosture != SkinPreviewPosture.STANDING) {
             selectedMotion = SkinPreviewMotion.WALKING;
             synchronizingSelection = true;
             motion.setSelectedItem(selectedMotion);
             synchronizingSelection = false;
         }
+        updateMotionControlState();
         preview.setMotion(selectedMotion);
         preview.setPosture(selectedPosture);
+    }
+
+    /// Enables movement only for postures where vanilla permits it.
+    private void updateMotionControlState() {
+        motion.setEnabled(animationControlsEnabled && selectedPosture() != SkinPreviewPosture.RIDING);
     }
 
     /// Returns the selected movement, falling back to idle for an unexpected empty model.
@@ -219,8 +234,6 @@ final class OfflineSkinPreviewControls extends JPanel {
             case SNEAKING -> i18n("account.skin.preview.posture.sneaking");
             case RIDING -> i18n("account.skin.preview.posture.riding");
             case SWIMMING -> i18n("account.skin.preview.posture.swimming");
-            case SLEEPING -> i18n("account.skin.preview.posture.sleeping");
-            case FALL_FLYING -> i18n("account.skin.preview.posture.fall_flying");
         };
     }
 }

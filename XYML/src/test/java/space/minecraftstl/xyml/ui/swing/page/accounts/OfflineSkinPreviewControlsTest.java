@@ -29,6 +29,7 @@ import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /// Exercises movement and posture selector synchronization.
 @NotNullByDefault
@@ -53,6 +54,13 @@ public final class OfflineSkinPreviewControlsTest {
                     () -> assertEquals(SkinPreviewMotion.WALKING, motion.getSelectedItem()),
                     () -> assertEquals(SkinPreviewMotion.WALKING, controls.preview().motion()),
                     () -> assertEquals(SkinPreviewPosture.SWIMMING, controls.preview().posture()));
+
+            posture.setSelectedItem(SkinPreviewPosture.RIDING);
+            assertAll(
+                    () -> assertFalse(motion.isEnabled()),
+                    () -> assertEquals(SkinPreviewMotion.IDLE, motion.getSelectedItem()),
+                    () -> assertEquals(SkinPreviewMotion.IDLE, controls.preview().motion()),
+                    () -> assertEquals(SkinPreviewPosture.RIDING, controls.preview().posture()));
         });
     }
 

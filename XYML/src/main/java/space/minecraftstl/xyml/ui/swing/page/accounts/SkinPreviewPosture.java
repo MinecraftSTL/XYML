@@ -32,11 +32,5 @@ enum SkinPreviewPosture {
     RIDING,
 
     /// Minecraft 1.21 swimming pose, also used by block-constrained crawling.
-    SWIMMING,
-
-    /// Side-lying sleeping pose.
-    SLEEPING,
-
-    /// Minecraft 1.21 elytra fall-flying pose.
-    FALL_FLYING
+    SWIMMING
 }
