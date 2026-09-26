@@ -303,7 +303,7 @@ final class OfflineSkinPreviewPanel extends JComponent {
                 }
                 yawDegrees = dragOriginYaw + (event.getX() - originX) * 0.7;
                 pitchDegrees = clamp(
-                        dragOriginPitch - (event.getY() - originY) * 0.65,
+                        dragOriginPitch + (event.getY() - originY) * 0.65,
                         MIN_PITCH,
                         MAX_PITCH);
                 repaint();

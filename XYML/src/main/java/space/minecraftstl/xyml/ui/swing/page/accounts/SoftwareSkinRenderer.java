@@ -317,7 +317,7 @@ final class SoftwareSkinRenderer {
                         SkinPreviewTransform.Axis.X,
                         bodyPitch))
                 .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0));
-        SkinPreviewTransform head = torso
+        SkinPreviewTransform head = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(0.0, 12.0, 0.0),
                         SkinPreviewTransform.Axis.X,
@@ -326,7 +326,7 @@ final class SoftwareSkinRenderer {
 
         int armWidth = model == TextureModel.SLIM ? 3 : 4;
         double armCenterX = 4.0 + armWidth / 2.0;
-        SkinPreviewTransform rightArm = torso
+        SkinPreviewTransform rightArm = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,
@@ -340,7 +340,7 @@ final class SoftwareSkinRenderer {
                         SkinPreviewTransform.Axis.Z,
                         rightArmRoll))
                 .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0));
-        SkinPreviewTransform leftArm = torso
+        SkinPreviewTransform leftArm = root
                 .multiply(SkinPreviewTransform.around(
                         new SkinPreviewTransform.Vector(-armCenterX, 8.0, 0.0),
                         SkinPreviewTransform.Axis.X,

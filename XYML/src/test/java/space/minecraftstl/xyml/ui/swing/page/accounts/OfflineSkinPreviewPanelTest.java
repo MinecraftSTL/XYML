@@ -135,7 +135,7 @@ public final class OfflineSkinPreviewPanelTest {
             pitch.set(panel.pitchDegrees());
         });
 
-        assertTrue(pitch.get() > 20.0);
+        assertTrue(pitch.get() < -20.0);
     }
 
     /// Mouse-wheel input changes and bounds the fitted zoom factor.
