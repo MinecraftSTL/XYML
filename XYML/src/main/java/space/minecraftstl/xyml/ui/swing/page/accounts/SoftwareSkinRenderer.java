@@ -277,7 +277,7 @@ final class SoftwareSkinRenderer {
                 headYOffset = -4.2;
                 armYOffset = -3.2;
                 legYOffset = -0.2;
-                legZOffset = 4.0;
+                legZOffset = -4.0;
                 capePitch += 10.0;
             }
             case RIDING -> {
