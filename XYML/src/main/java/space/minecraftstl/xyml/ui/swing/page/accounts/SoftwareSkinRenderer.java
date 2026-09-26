@@ -205,19 +205,16 @@ final class SoftwareSkinRenderer {
             }
             case PRONE -> {
                 root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
-                        .multiply(SkinPreviewTransform.rotateX(90.0));
-                headPitch = -22.0;
-                rightArmPitch = 180.0;
-                leftArmPitch = 180.0;
-                rightArmYaw = 18.0;
-                leftArmYaw = -18.0;
-                if (effectiveMotion != SkinPreviewMotion.IDLE) {
-                    rightArmPitch += 8.0 * cycle;
-                    leftArmPitch -= 8.0 * cycle;
-                    rightLegPitch = 10.0 * cycle;
-                    leftLegPitch = -rightLegPitch;
-                }
-                capePitch = 22.0 + cycle * 8.0;
+                        .multiply(SkinPreviewTransform.rotateX(90.0))
+                        .multiply(SkinPreviewTransform.rotateZ(180.0));
+                headPitch = -45.0;
+                rightArmPitch = -90.0;
+                leftArmPitch = -90.0;
+                rightArmYaw = -45.0;
+                leftArmYaw = 45.0;
+                rightLegPitch = -90.0;
+                leftLegPitch = -90.0;
+                capePitch = 18.0;
             }
         }
         root = SkinPreviewTransform.translate(0.0, rootY, 0.0).multiply(root);
@@ -319,23 +316,29 @@ final class SoftwareSkinRenderer {
 
         List<OuterPart> outerParts = new ArrayList<>();
         outerParts.add(new OuterPart(
-                8, 8, 8, 32, 0, 1.125, 0.2,
+                boxTexture(32, 0, 8, 8, 8),
+                4.5, 4.5, 4.5, 0.2,
                 head.multiply(SkinPreviewTransform.translate(0.0, 12.0, 0.0))));
         if (modern) {
             outerParts.add(new OuterPart(
-                    8, 12, 4, 16, 32, 1.0, 0.2,
+                    boxTexture(16, 32, 8, 12, 4),
+                    4.0, 6.0, 2.0, 0.2,
                     torso.multiply(SkinPreviewTransform.translate(0.0, 2.0, 0.0))));
             outerParts.add(new OuterPart(
-                    armWidth, 12, 4, 40, 32, 1.0625, 0.2,
+                    boxTexture(40, 32, armWidth, 12, 4),
+                    armWidth * 1.0625 / 2.0, 6.375, 2.125, 0.2,
                     rightArm.multiply(SkinPreviewTransform.translate(armCenterX, 2.0, 0.0))));
             outerParts.add(new OuterPart(
-                    armWidth, 12, 4, 48, 48, 1.0625, 0.2,
+                    boxTexture(48, 48, armWidth, 12, 4),
+                    armWidth * 1.0625 / 2.0, 6.375, 2.125, 0.2,
                     leftArm.multiply(SkinPreviewTransform.translate(-armCenterX, 2.0, 0.0))));
             outerParts.add(new OuterPart(
-                    4, 12, 4, 0, 32, 1.0625, 0.2,
+                    boxTexture(0, 32, 4, 12, 4),
+                    2.125, 6.375, 2.125, 0.2,
                     rightLeg.multiply(SkinPreviewTransform.translate(2.0, -10.0, 0.0))));
             outerParts.add(new OuterPart(
-                    4, 12, 4, 0, 48, 1.0625, 0.2,
+                    boxTexture(0, 48, 4, 12, 4),
+                    2.125, 6.375, 2.125, 0.2,
                     leftLeg.multiply(SkinPreviewTransform.translate(-2.0, -10.0, 0.0))));
         }
         return new Model(List.copyOf(parts), List.copyOf(outerParts));
@@ -361,7 +364,10 @@ final class SoftwareSkinRenderer {
         return faces;
     }
 
-    /// Adds the pixel-accurate outer layer used by double-layer skin textures.
+    /// Adds the six textured outer-layer planes used by double-layer skin textures.
+    ///
+    /// The outer layer follows the upstream pixel-cell spacing but each complete face is rendered as one textured quad,
+    /// preserving alpha instead of converting transparent pixels into opaque solid tiles.
     ///
     /// @param faces destination faces
     /// @param part outer layer surface definition
@@ -373,236 +379,86 @@ final class SoftwareSkinRenderer {
             SkinPreviewTransform view,
             BufferedImage skin) {
         SkinPreviewTransform transform = view.multiply(part.transform());
-        double halfLength = part.length() / 2.0 + 0.05;
-        double planeX = (part.width() * part.length() + part.thickness() * 2.0) / 2.0;
-        double planeY = (part.height() * part.length() + part.thickness() * 2.0) / 2.0;
-        double planeZ = (part.depth() * part.length() + part.thickness() * 2.0) / 2.0;
+        double x = part.halfWidth();
+        double y = part.halfHeight();
+        double z = part.halfDepth();
+        double planeX = x + part.thickness();
+        double planeY = y + part.thickness();
+        double planeZ = z + part.thickness();
+        BoxTexture texture = part.texture();
 
-        for (int x = 0; x < part.width(); ++x) {
-            for (int y = 0; y < part.height(); ++y) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.depth() + x,
-                        part.textureY() + part.depth() + y);
-                if (color == null) {
-                    continue;
-                }
-                double centerX = ((part.width() - 1) / 2.0 - x) * part.length();
-                double centerY = ((part.height() - 1) / 2.0 - y) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(centerX - halfLength, centerY + halfLength, planeZ),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, centerY + halfLength, planeZ),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, centerY - halfLength, planeZ),
-                        new SkinPreviewTransform.Vector(centerX - halfLength, centerY - halfLength, planeZ),
-                        new SkinPreviewTransform.Vector(0.0, 0.0, 1.0),
-                        color,
-                        1.0,
-                        transform);
-            }
-        }
-
-        for (int x = 0; x < part.width(); ++x) {
-            for (int y = 0; y < part.height(); ++y) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.width() + part.depth() * 2 + part.width() - 1 - x,
-                        part.textureY() + part.depth() + y);
-                if (color == null) {
-                    continue;
-                }
-                double centerX = ((part.width() - 1) / 2.0 - x) * part.length();
-                double centerY = ((part.height() - 1) / 2.0 - y) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(centerX + halfLength, centerY + halfLength, -planeZ),
-                        new SkinPreviewTransform.Vector(centerX - halfLength, centerY + halfLength, -planeZ),
-                        new SkinPreviewTransform.Vector(centerX - halfLength, centerY - halfLength, -planeZ),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, centerY - halfLength, -planeZ),
-                        new SkinPreviewTransform.Vector(0.0, 0.0, -1.0),
-                        color,
-                        0.78,
-                        transform);
-            }
-        }
-
-        for (int x = 0; x < part.depth(); ++x) {
-            for (int y = 0; y < part.height(); ++y) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.depth() - 1 - x,
-                        part.textureY() + part.depth() + y);
-                if (color == null) {
-                    continue;
-                }
-                double centerY = ((part.height() - 1) / 2.0 - y) * part.length();
-                double centerZ = ((part.depth() - 1) / 2.0 - x) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(planeX, centerY + halfLength, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(planeX, centerY + halfLength, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(planeX, centerY - halfLength, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(planeX, centerY - halfLength, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(1.0, 0.0, 0.0),
-                        color,
-                        0.88,
-                        transform);
-            }
-        }
-
-        for (int x = 0; x < part.depth(); ++x) {
-            for (int y = 0; y < part.height(); ++y) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.width() + part.depth() + x,
-                        part.textureY() + part.depth() + y);
-                if (color == null) {
-                    continue;
-                }
-                double centerY = ((part.height() - 1) / 2.0 - y) * part.length();
-                double centerZ = ((part.depth() - 1) / 2.0 - x) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(-planeX, centerY + halfLength, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(-planeX, centerY + halfLength, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(-planeX, centerY - halfLength, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(-planeX, centerY - halfLength, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(-1.0, 0.0, 0.0),
-                        color,
-                        0.88,
-                        transform);
-            }
-        }
-
-        for (int x = 0; x < part.width(); ++x) {
-            for (int z = 0; z < part.depth(); ++z) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.depth() + x,
-                        part.textureY() + z);
-                if (color == null) {
-                    continue;
-                }
-                double centerX = ((part.width() - 1) / 2.0 - x) * part.length();
-                double centerZ = -((part.depth() - 1) / 2.0 - z) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(centerX - halfLength, planeY, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, planeY, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, planeY, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(centerX - halfLength, planeY, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(0.0, 1.0, 0.0),
-                        color,
-                        1.05,
-                        transform);
-            }
-        }
-
-        for (int x = 0; x < part.width(); ++x) {
-            for (int z = 0; z < part.depth(); ++z) {
-                @Nullable Color color = outerPixel(
-                        skin,
-                        part.textureX() + part.width() + part.depth() + x,
-                        part.textureY() + z);
-                if (color == null) {
-                    continue;
-                }
-                double centerX = ((part.width() - 1) / 2.0 - x) * part.length();
-                double centerZ = -((part.depth() - 1) / 2.0 - z) * part.length();
-                addSolidFace(
-                        faces,
-                        new SkinPreviewTransform.Vector(centerX - halfLength, -planeY, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, -planeY, centerZ - halfLength),
-                        new SkinPreviewTransform.Vector(centerX + halfLength, -planeY, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(centerX - halfLength, -planeY, centerZ + halfLength),
-                        new SkinPreviewTransform.Vector(0.0, -1.0, 0.0),
-                        color,
-                        0.68,
-                        transform);
-            }
-        }
-    }
-
-    /// Adds one visible solid-color outer-layer pixel face.
-    ///
-    /// @param faces destination faces
-    /// @param p0 first vertex
-    /// @param p1 second vertex
-    /// @param p2 third vertex
-    /// @param p3 fourth vertex
-    /// @param normal outward normal
-    /// @param color pixel color
-    /// @param shade face brightness multiplier
-    /// @param transform model-to-view transform
-    private static void addSolidFace(
-            List<RawFace> faces,
-            SkinPreviewTransform.Vector p0,
-            SkinPreviewTransform.Vector p1,
-            SkinPreviewTransform.Vector p2,
-            SkinPreviewTransform.Vector p3,
-            SkinPreviewTransform.Vector normal,
-            Color color,
-            double shade,
-            SkinPreviewTransform transform) {
-        SkinPreviewTransform.Vector t0 = transform.apply(p0);
-        SkinPreviewTransform.Vector t1 = transform.apply(p1);
-        SkinPreviewTransform.Vector t2 = transform.apply(p2);
-        SkinPreviewTransform.Vector t3 = transform.apply(p3);
-        SkinPreviewTransform.Vector transformedNormal = transform.applyDirection(normal);
-        SkinPreviewTransform.Vector centroid = t0.add(t1).add(t2).add(t3).multiply(0.25);
-        SkinPreviewTransform.Vector toCamera = new SkinPreviewTransform.Vector(
-                -centroid.x(), -centroid.y(), VIEW_DISTANCE - centroid.z());
-        if (transformedNormal.dot(toCamera) <= 0.0) {
-            return;
-        }
-        @Nullable RawFace projected = projectSolidFace(t0, t1, t2, t3, color, shade);
-        if (projected != null) {
-            faces.add(projected);
-        }
-    }
-
-    /// Projects one solid-color face.
-    ///
-    /// @param p0 first transformed vertex
-    /// @param p1 second transformed vertex
-    /// @param p2 third transformed vertex
-    /// @param p3 fourth transformed vertex
-    /// @param color pixel color
-    /// @param shade face brightness multiplier
-    /// @return projected face, or null when clipped
-    private static @Nullable RawFace projectSolidFace(
-            SkinPreviewTransform.Vector p0,
-            SkinPreviewTransform.Vector p1,
-            SkinPreviewTransform.Vector p2,
-            SkinPreviewTransform.Vector p3,
-            Color color,
-            double shade) {
-        @Nullable RawPoint r0 = projectPoint(p0);
-        @Nullable RawPoint r1 = projectPoint(p1);
-        @Nullable RawPoint r2 = projectPoint(p2);
-        @Nullable RawPoint r3 = projectPoint(p3);
-        if (r0 == null || r1 == null || r2 == null || r3 == null) {
-            return null;
-        }
-        double depth = (r0.depth() + r1.depth() + r2.depth() + r3.depth()) * 0.25 - 3.0;
-        return new RawFace(r0, r1, r2, r3, depth, null, shade, 1, null, color);
-    }
-
-    /// Samples one canonical skin pixel for an outer-layer surface.
-    ///
-    /// @param skin decoded texture
-    /// @param x canonical texture X
-    /// @param y canonical texture Y
-    /// @return opaque color, or null for transparent pixels
-    private static @Nullable Color outerPixel(BufferedImage skin, int x, int y) {
-        int interval = Math.max(1, skin.getWidth() / 64);
-        int sourceX = Math.min(skin.getWidth() - 1, Math.max(0, x) * interval);
-        int sourceY = Math.min(skin.getHeight() - 1, Math.max(0, y) * interval);
-        int argb = skin.getRGB(sourceX, sourceY);
-        if (argb == 0) {
-            return null;
-        }
-        return new Color((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(-x, y, planeZ),
+                new SkinPreviewTransform.Vector(x, y, planeZ),
+                new SkinPreviewTransform.Vector(x, -y, planeZ),
+                new SkinPreviewTransform.Vector(-x, -y, planeZ),
+                new SkinPreviewTransform.Vector(0.0, 0.0, 1.0),
+                texture.front(),
+                1.0,
+                1,
+                transform,
+                skin);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(x, y, -planeZ),
+                new SkinPreviewTransform.Vector(-x, y, -planeZ),
+                new SkinPreviewTransform.Vector(-x, -y, -planeZ),
+                new SkinPreviewTransform.Vector(x, -y, -planeZ),
+                new SkinPreviewTransform.Vector(0.0, 0.0, -1.0),
+                texture.back(),
+                0.78,
+                1,
+                transform,
+                skin);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(planeX, y, z),
+                new SkinPreviewTransform.Vector(planeX, y, -z),
+                new SkinPreviewTransform.Vector(planeX, -y, -z),
+                new SkinPreviewTransform.Vector(planeX, -y, z),
+                new SkinPreviewTransform.Vector(1.0, 0.0, 0.0),
+                texture.right(),
+                0.88,
+                1,
+                transform,
+                skin);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(-planeX, y, z),
+                new SkinPreviewTransform.Vector(-planeX, y, -z),
+                new SkinPreviewTransform.Vector(-planeX, -y, -z),
+                new SkinPreviewTransform.Vector(-planeX, -y, z),
+                new SkinPreviewTransform.Vector(-1.0, 0.0, 0.0),
+                texture.left(),
+                0.88,
+                1,
+                transform,
+                skin);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(-x, planeY, -z),
+                new SkinPreviewTransform.Vector(x, planeY, -z),
+                new SkinPreviewTransform.Vector(x, planeY, z),
+                new SkinPreviewTransform.Vector(-x, planeY, z),
+                new SkinPreviewTransform.Vector(0.0, 1.0, 0.0),
+                texture.top(),
+                1.05,
+                1,
+                transform,
+                skin);
+        addFace(
+                faces,
+                new SkinPreviewTransform.Vector(-x, -planeY, -z),
+                new SkinPreviewTransform.Vector(x, -planeY, -z),
+                new SkinPreviewTransform.Vector(x, -planeY, z),
+                new SkinPreviewTransform.Vector(-x, -planeY, z),
+                new SkinPreviewTransform.Vector(0.0, -1.0, 0.0),
+                texture.bottom(),
+                0.68,
+                1,
+                transform,
+                skin);
     }
 
     /// Adds the visible faces of one transformed cuboid.
@@ -770,7 +626,7 @@ final class SoftwareSkinRenderer {
             return null;
         }
         double depth = (r0.depth() + r1.depth() + r2.depth() + r3.depth()) * 0.25;
-        return new RawFace(r0, r1, r2, r3, depth, region, shade, layer, image, null);
+        return new RawFace(r0, r1, r2, r3, depth, region, shade, layer, image);
     }
 
     /// Projects one model point to normalized camera coordinates.
@@ -866,13 +722,6 @@ final class SoftwareSkinRenderer {
         outline.lineTo(p3x, p3y);
         outline.closePath();
 
-        @Nullable Color solidColor = face.color();
-        if (solidColor != null) {
-            paint.setColor(shadedColor(solidColor, face.shade()));
-            paint.fill(outline);
-            return;
-        }
-
         BufferedImage image = Objects.requireNonNull(face.image(), "image");
         TextureRegion region = Objects.requireNonNull(face.region(), "region");
         ImageRegion imageRegion = imageRegion(image, region);
@@ -901,18 +750,6 @@ final class SoftwareSkinRenderer {
             paint.setColor(new Color(255, 255, 255, Math.min(80, alpha)));
             paint.fill(outline);
         }
-    }
-
-    /// Applies one brightness multiplier to a solid outer-layer pixel.
-    ///
-    /// @param color source color
-    /// @param shade face brightness multiplier
-    /// @return shaded opaque color
-    private static Color shadedColor(Color color, double shade) {
-        int red = Math.min(255, (int) Math.round(color.getRed() * shade));
-        int green = Math.min(255, (int) Math.round(color.getGreen() * shade));
-        int blue = Math.min(255, (int) Math.round(color.getBlue() * shade));
-        return new Color(red, green, blue);
     }
 
     /// Paints one source triangle through an exact affine texture mapping.
@@ -1136,24 +973,20 @@ final class SoftwareSkinRenderer {
         }
     }
 
-    /// One pixel-accurate outer-layer surface definition.
+    /// One outer-layer plane definition.
     ///
-    /// @param width texture width in canonical pixels
-    /// @param height texture height in canonical pixels
-    /// @param depth texture depth in canonical pixels
-    /// @param textureX texture origin X
-    /// @param textureY texture origin Y
-    /// @param length pixel-cell edge length
+    /// @param texture six face texture regions
+    /// @param halfWidth half width of the expanded outer plane
+    /// @param halfHeight half height of the expanded outer plane
+    /// @param halfDepth half depth of the expanded outer plane
     /// @param thickness outward shell thickness
     /// @param transform model transform
     @NotNullByDefault
     private record OuterPart(
-            int width,
-            int height,
-            int depth,
-            int textureX,
-            int textureY,
-            double length,
+            BoxTexture texture,
+            double halfWidth,
+            double halfHeight,
+            double halfDepth,
             double thickness,
             SkinPreviewTransform transform) {
     }
@@ -1223,11 +1056,10 @@ final class SoftwareSkinRenderer {
             RawPoint p2,
             RawPoint p3,
             double depth,
-            @Nullable TextureRegion region,
+            TextureRegion region,
             double shade,
             int layer,
-            @Nullable BufferedImage image,
-            @Nullable Color color) {
+            BufferedImage image) {
     }
 
     /// Normalized model bounds used for automatic fitting.
