@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies delayed and fail-closed missing-dependency search task creation for MCP repair actions.
 @NotNullByDefault
@@ -66,6 +67,17 @@ final class SwingMcpMissingDependencySearchTest {
 
         assertEquals(1, resolutions.get());
         assertEquals(List.of("fabric-api"), runtime.searches());
+    }
+
+    /// Supplies a localized task-manager title before an executor records the search.
+    @Test
+    void exposesLocalizedTaskManagerTitle() {
+        SwingMcpMissingDependencySearch search =
+                SwingMcpMissingDependencySearch.forRuntimeResolver(() -> null, () -> true);
+
+        Task<?> task = search.createTask(List.of("fabric-api"));
+
+        assertEquals(i18n("game.crash.search_missing_dependency"), task.getName());
     }
 
     /// Fails the task explicitly when no Swing runtime exists at execution time.

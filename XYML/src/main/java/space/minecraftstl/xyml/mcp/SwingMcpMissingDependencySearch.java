@@ -756,6 +756,7 @@ public final class SwingMcpMissingDependencySearch implements LogAnalyzable.Miss
             this.owner = Objects.requireNonNull(owner, "owner");
             this.dependencyIds = List.copyOf(Objects.requireNonNull(dependencyIds, "dependencyIds"));
             this.gameVersion = Objects.requireNonNull(gameVersion, "gameVersion");
+            setName(i18n("game.crash.search_missing_dependency"));
             getProperties().put(RepairTaskPhase.TASK_PROPERTY, phase);
         }
 
