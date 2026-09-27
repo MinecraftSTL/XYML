@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
@@ -613,17 +614,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadCategoryPanel.openModSearch(searchText);
     }
 
-    /// Selects the download-content tab and opens one version-aware missing-dependency search.
-    ///
+    /// Selects the download-content tab for one loader-aware missing-dependency search.
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
-    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion, @Nullable ModLoaderType modLoader) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
-            return;
-        }
+        if (closed) return;
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
-        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion);
+        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion, modLoader);
     }
 
     /// Attaches the shell-owned request channel used by instance-management shortcuts.

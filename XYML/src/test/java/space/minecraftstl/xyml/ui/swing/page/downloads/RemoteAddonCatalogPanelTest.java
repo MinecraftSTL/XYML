@@ -194,6 +194,68 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Uses the current instance loader as the missing-dependency category filter.
+    @Test
+    void missingDependencySearchUsesCurrentInstanceLoaderFilter() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                assertNotNull(category);
+                assertEquals(4, category.getItemCount());
+                panel.openMissingDependencySearch("fabric-api", "1.20.1", ModLoaderType.FABRIC);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> category = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonCategory",
+                        JComboBox.class);
+                assertNotNull(category);
+                assertTrue(category.getSelectedItem() instanceof RemoteCatalogCategoryOption);
+                RemoteCatalogCategoryOption selected = (RemoteCatalogCategoryOption) category.getSelectedItem();
+                assertNotNull(selected.category());
+                assertEquals("fabric", Objects.requireNonNull(selected.category()).id());
+            });
+
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertAll(
+                    () -> assertEquals("fabric-api", query.searchText()),
+                    () -> assertEquals("1.20.1", query.gameVersion()),
+                    () -> assertNotNull(query.category()),
+                    () -> assertEquals("fabric", Objects.requireNonNull(query.category()).id()));
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Shows the upstream project and opens a selected version's provider-specific prerequisite search.
     @Test
     void exposesUpstreamAndSearchesSelectedVersionPrerequisite() throws Exception {
@@ -993,7 +1055,7 @@ final class RemoteAddonCatalogPanelTest {
                 assertNotNull(versionSortBox);
                 assertNotNull(gameVersionBox);
                 assertNotNull(search);
-                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(4, categoryBox.getItemCount());
                 assertEquals(6, sortBox.getItemCount());
                 assertEquals(RemoteAddonRepository.SortType.POPULARITY, sortBox.getSelectedItem());
                 assertEquals(3, versionSortBox.getItemCount());
@@ -1071,7 +1133,7 @@ final class RemoteAddonCatalogPanelTest {
                 JLabel status = findNamed(panel, "remoteAddonStatus", JLabel.class);
                 assertNotNull(categoryBox);
                 assertNotNull(status);
-                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(4, categoryBox.getItemCount());
                 assertEquals(RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD).initialStatus(),
                         status.getText());
             });
@@ -1534,10 +1596,15 @@ final class RemoteAddonCatalogPanelTest {
                     new Object(),
                     "technology-child",
                     List.of());
-            return List.of(new RemoteAddonRepository.Category(
-                    new Object(),
-                    "technology",
-                    List.of(child)));
+            return List.of(
+                    new RemoteAddonRepository.Category(
+                            new Object(),
+                            "technology",
+                            List.of(child)),
+                    new RemoteAddonRepository.Category(
+                            new Object(),
+                            "fabric",
+                            List.of()));
         }
 
         /// Resolves one dependency name with deterministic fixture text.

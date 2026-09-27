@@ -21,6 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorUrl;
 import space.minecraftstl.xyml.game.ExportedCrashBundleReader;
 import space.minecraftstl.xyml.game.ModpackHelper;
@@ -478,6 +479,18 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param dependencyId validated missing mod identifier used as the search query
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        openMissingDependencySearch(dependencyId, gameVersion, null);
+    }
+
+    /// Navigates to one read-only missing-dependency search with version and current-instance loader filters.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(
+            String dependencyId,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
         EdtDispatcher.requireEventDispatchThread();
         String query = Objects.requireNonNull(dependencyId, "dependencyId").trim();
         if (query.isEmpty()) {
@@ -488,7 +501,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
             throw new IllegalStateException("Downloads page does not expose the game-version catalog");
         }
-        catalogPanel.openMissingDependencySearch(query, gameVersion);
+        catalogPanel.openMissingDependencySearch(query, gameVersion, modLoader);
     }
 
     /// Opens or toggles one side destination from the left navigation rail.

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
@@ -404,12 +405,24 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param dependencyId validated missing mod identifier used as the search query
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        openMissingDependencySearch(dependencyId, gameVersion, null);
+    }
+
+    /// Opens a missing-dependency catalog search with the analyzer's version and current-instance loader.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(
+            String dependencyId,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
         if (closed.get()) {
             throw new IllegalStateException("Swing application composition is closed");
         }
         String query = Objects.requireNonNull(dependencyId, "dependencyId");
         window.open();
-        window.openMissingDependencySearch(query, gameVersion);
+        window.openMissingDependencySearch(query, gameVersion, modLoader);
     }
 
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
@@ -1384,6 +1397,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// @param gameVersion analyzed Minecraft version, or null when unavailable
         @Override
         public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            openMissingDependencySearch(dependencyId, gameVersion, null);
+        }
+
+        /// Routes a loader-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        /// @param modLoader current instance mod loader, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(
+                String dependencyId,
+                @Nullable String gameVersion,
+                @Nullable ModLoaderType modLoader) {
             Objects.requireNonNull(dependencyId, "dependencyId");
             if (closed.get()) {
                 throw new IllegalStateException("Swing application window is closed");
@@ -1392,7 +1418,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 if (closed.get()) {
                     throw new IllegalStateException("Swing application window is closed");
                 }
-                frame.shellPanel().openMissingDependencySearch(dependencyId, gameVersion);
+                frame.shellPanel().openMissingDependencySearch(dependencyId, gameVersion, modLoader);
                 frame.toFront();
                 frame.requestFocusInWindow();
             });

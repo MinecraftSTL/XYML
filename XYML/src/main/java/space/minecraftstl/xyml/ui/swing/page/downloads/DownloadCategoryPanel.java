@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
@@ -218,12 +219,24 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        openMissingDependencySearch(searchText, gameVersion, null);
+    }
+
+    /// Selects the Mods category and starts one loader-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(
+            String searchText,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
             return;
         }
         categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
-        modsCatalog.openMissingDependencySearch(searchText, gameVersion);
+        modsCatalog.openMissingDependencySearch(searchText, gameVersion, modLoader);
     }
 
     /// Selects one content category and activates its lazy workflow.

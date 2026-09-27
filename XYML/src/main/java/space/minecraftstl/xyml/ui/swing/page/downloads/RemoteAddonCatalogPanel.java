@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -132,6 +133,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Provider category selector populated asynchronously after the panel becomes displayable.
     private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
+
+    /// Programmatic category selection and loader-category mapping for this panel.
+    private final RemoteAddonCategoryControls categoryControls = new RemoteAddonCategoryControls(categoryBox);
 
     /// Core-supported server result ordering selector.
     private final JComboBox<RemoteAddonRepository.SortType> sortBox = new JComboBox<>();
@@ -249,9 +253,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Whether the current provider category tree is loading in the background.
     private boolean categoryLoading;
-
-    /// Whether selector mutations are internal category publication rather than user criteria edits.
-    private boolean applyingCategoryOptions;
 
     /// Whether sort selector mutations are internal source publication rather than user criteria edits.
     private boolean applyingSortOptions;
@@ -505,7 +506,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         searchField.setText(query);
         pendingSearchText = query;
-        if (measuredPageSize() > 0 && !catalogLoading && activeExecutor == null) {
+        if (measuredPageSize() > 0 && !catalogLoading && activeExecutor == null
+                && !categoryControls.hasPendingDependencyCategory()) {
             pendingSearchText = null;
             submitFirstPageSearch();
         } else {
@@ -513,30 +515,60 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Opens a read-only missing-dependency query using the same fixed scope as candidate discovery.
+    /// Opens a read-only missing-dependency query using the current instance context when available.
     ///
-    /// Programmatic diagnosis navigation always uses Modrinth, all categories, popularity ordering, and the
-    /// analyzer's captured Minecraft version. An older read-only request is made stale before these criteria are
-    /// applied, while an active installation remains owned by its existing task and merely delays the new search.
+    /// Programmatic diagnosis navigation uses Modrinth and popularity ordering, forwards the analyzed Minecraft
+    /// version, and selects the current instance loader category when provider metadata exposes it. If the loader
+    /// category is unavailable, the query falls back to all categories rather than reporting a false failure.
     ///
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        openMissingDependencySearch(searchText, gameVersion, null);
+    }
+
+    /// Opens a read-only missing-dependency query using the analyzed version and current-instance loader.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable or unsupported
+    public void openMissingDependencySearch(
+            String searchText,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
             return;
         }
         pendingDependencySearch = null;
-        dependencyNavigationInProgress = false;
-        if (catalogLoading) {
-            catalogRequestRevision.incrementAndGet();
-            catalogLoading = false;
+        categoryControls.clearPending();
+        dependencyNavigationInProgress = true;
+        try {
+            if (catalogLoading) {
+                catalogRequestRevision.incrementAndGet();
+                catalogLoading = false;
+            }
+            sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
+            boolean categoriesReady = loadedCategorySource == RemoteAddonCatalogSource.MODRINTH
+                    && !categoryLoading;
+            @Nullable String dependencyCategoryId = RemoteAddonCategoryControls.dependencyCategoryId(modLoader);
+            if (dependencyCategoryId == null || !categoriesReady) {
+                categoryControls.reset();
+            }
+            resetSortOptions();
+            SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(gameVersion, "").trim());
+
+            if (dependencyCategoryId != null && !categoryControls.select(dependencyCategoryId)) {
+                if (categoriesReady) {
+                    categoryControls.reset();
+                } else {
+                    categoryControls.defer(dependencyCategoryId);
+                }
+            }
+            openSearch(searchText);
+        } finally {
+            dependencyNavigationInProgress = false;
         }
-        sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
-        resetCategoryOptions();
-        resetSortOptions();
-        SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(gameVersion, "").trim());
-        openSearch(searchText);
     }
 
     /// Queues one pending-search check after the current EDT event completes.
@@ -561,7 +593,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             pendingSearchText = null;
             return;
         }
-        if (catalogLoading || activeExecutor != null) {
+        if (catalogLoading || activeExecutor != null || categoryControls.hasPendingDependencyCategory()) {
             return;
         }
         if (measuredPageSize() <= 0) {
@@ -677,7 +709,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryBox.setRenderer(new RemoteCatalogCategoryRenderer(
                 () -> selectedSource() == RemoteAddonCatalogSource.MODRINTH,
                 filterStrings));
-        resetCategoryOptions();
+        categoryControls.reset();
         categoryBox.addActionListener(event -> categoryChanged());
         criteriaBand.add(RemoteCatalogFilterField.create(categoryLabel, categoryBox), "growx, wmin 0");
 
@@ -1028,7 +1060,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryLoading = false;
         loadedCategorySource = null;
         categoryLoadFailed = false;
-        resetCategoryOptions();
+        categoryControls.reset();
         resetSortOptions();
         criteriaChanged();
         if (isDisplayable()) {
@@ -1039,7 +1071,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Clears stale results after a user category selection while ignoring internal option publication.
     private void categoryChanged() {
         EdtDispatcher.requireEventDispatchThread();
-        if (!applyingCategoryOptions) {
+        if (!categoryControls.isApplying()) {
             criteriaChanged();
         }
     }
@@ -1112,11 +1144,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryLoading = false;
         loadedCategorySource = source;
         categoryLoadFailed = false;
-        applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        categoryControls.apply(RemoteCatalogCategoryOption.flatten(categories));
         if (failureStatusVisible) {
             setStatus(catalogIdleStatus());
         }
         updateControls();
+        schedulePendingSearchCheck();
     }
 
     /// Restores the all-categories selector after a current provider category request fails.
@@ -1131,11 +1164,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             categoryLoading = false;
             loadedCategorySource = null;
             categoryLoadFailed = true;
-            resetCategoryOptions();
+            categoryControls.reset();
             if (canShowCategoryFailure()) {
                 setStatus(strings.categoryLoadFailedStatus(), this::retryCategories);
             }
             updateControls();
+            schedulePendingSearchCheck();
         });
     }
 
@@ -1146,29 +1180,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         requestCategoriesForSelectedSource();
-    }
-
-    /// Replaces category options without interpreting combo-box events as user filter edits.
-    ///
-    /// @param options immutable flattened provider category options
-    private void applyCategoryOptions(@Unmodifiable List<RemoteCatalogCategoryOption> options) {
-        applyingCategoryOptions = true;
-        try {
-            categoryBox.removeAllItems();
-            for (RemoteCatalogCategoryOption option : Objects.requireNonNull(options, "options")) {
-                categoryBox.addItem(option);
-            }
-            if (categoryBox.getItemCount() > 0) {
-                categoryBox.setSelectedIndex(0);
-            }
-        } finally {
-            applyingCategoryOptions = false;
-        }
-    }
-
-    /// Restores the selector's local all-categories option without performing provider work.
-    private void resetCategoryOptions() {
-        applyCategoryOptions(List.of(RemoteCatalogCategoryOption.all()));
     }
 
     /// Publishes every ordering exposed by the current provider catalog control.
@@ -1655,6 +1666,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         pendingDependencySearch = null;
+        categoryControls.clearPending();
         catalogRequestRevision.incrementAndGet();
         selectionRequestRevision.incrementAndGet();
         completedQuery = null;
@@ -1915,6 +1927,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         upstreamButton.setEnabled(false);
         upstreamButton.setVisible(false);
         pendingDependencySearch = null;
+        categoryControls.clearPending();
         dependencyNavigationInProgress = false;
         dependencySelector.close();
         prerequisitesLabel.setVisible(false);
