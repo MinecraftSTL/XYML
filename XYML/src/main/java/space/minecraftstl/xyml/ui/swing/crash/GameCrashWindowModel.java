@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.mcp.SwingMcpMissingDependencySearch;
 import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchAction;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
@@ -211,11 +212,12 @@ final class GameCrashWindowModel {
         @Nullable SwingMcpMissingDependencySearch missingDependencySearch = null;
         if (openMissingModSearch != null) {
             @Nullable ModLoaderType dependencyModLoader = modLoader;
-            MissingDependencySearchAction contextualSearch =
-                    (dependencyId, analyzedVersion) -> openMissingModSearch.open(
+            MissingDependencySearchAction contextualSearch = (dependencyId, analyzedVersion) ->
+                    openMissingModSearch.open(new MissingDependencySearchRequest(
                             dependencyId,
                             analyzedVersion,
-                            dependencyModLoader);
+                            dependencyModLoader,
+                            manifest.id()));
             missingDependencySearch = SwingMcpMissingDependencySearch.forMissingDependencySearchAction(
                     contextualSearch);
             logAnalyzable = logAnalyzable.withMissingDependencySearch(missingDependencySearch);

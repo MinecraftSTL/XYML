@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -223,7 +224,7 @@ final class RemoteAddonCatalogPanelTest {
                 JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
                 assertNotNull(category);
                 assertEquals(4, category.getItemCount());
-                panel.openMissingDependencySearch("fabric-api", "1.20.1", ModLoaderType.FABRIC);
+                panel.openMissingDependencySearch(new MissingDependencySearchRequest("fabric-api", "1.20.1", ModLoaderType.FABRIC, null));
             });
             awaitBackgroundWork(executor);
 

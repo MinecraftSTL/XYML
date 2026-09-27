@@ -23,10 +23,10 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
-import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -524,7 +524,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
-        openMissingDependencySearch(searchText, gameVersion, null);
+        openMissingDependencySearch(new MissingDependencySearchRequest(searchText, gameVersion, null, null));
     }
 
     /// Opens a read-only missing-dependency query using the analyzed version and current-instance loader.
@@ -532,13 +532,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     /// @param modLoader current instance mod loader, or null when unavailable or unsupported
-    public void openMissingDependencySearch(
-            String searchText,
-            @Nullable String gameVersion,
-            @Nullable ModLoaderType modLoader) {
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
         EdtDispatcher.requireEventDispatchThread();
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
         if (closed) {
             return;
+        }
+        if (targetInstanceSelector != null && checked.targetInstanceId() != null) {
+            targetInstanceSelector.selectInstance(checked.targetInstanceId());
         }
         pendingDependencySearch = null;
         categoryControls.clearPending();
@@ -551,12 +552,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
             boolean categoriesReady = loadedCategorySource == RemoteAddonCatalogSource.MODRINTH
                     && !categoryLoading;
-            @Nullable String dependencyCategoryId = RemoteAddonCategoryControls.dependencyCategoryId(modLoader);
+            @Nullable String dependencyCategoryId = RemoteAddonCategoryControls.dependencyCategoryId(checked.modLoader());
             if (dependencyCategoryId == null || !categoriesReady) {
                 categoryControls.reset();
             }
             resetSortOptions();
-            SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(gameVersion, "").trim());
+            SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(checked.gameVersion(), "").trim());
 
             if (dependencyCategoryId != null && !categoryControls.select(dependencyCategoryId)) {
                 if (categoriesReady) {
@@ -565,7 +566,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                     categoryControls.defer(dependencyCategoryId);
                 }
             }
-            openSearch(searchText);
+            openSearch(checked.dependencyId());
         } finally {
             dependencyNavigationInProgress = false;
         }

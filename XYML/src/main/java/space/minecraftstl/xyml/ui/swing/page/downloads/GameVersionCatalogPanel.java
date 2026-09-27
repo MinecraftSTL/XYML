@@ -22,7 +22,6 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
@@ -35,6 +34,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -618,11 +618,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     /// @param modLoader current instance mod loader, or null when unavailable
-    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion, @Nullable ModLoaderType modLoader) {
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) return;
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
-        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion, modLoader);
+        downloadCategoryPanel.openMissingDependencySearch(checked);
     }
 
     /// Attaches the shell-owned request channel used by instance-management shortcuts.

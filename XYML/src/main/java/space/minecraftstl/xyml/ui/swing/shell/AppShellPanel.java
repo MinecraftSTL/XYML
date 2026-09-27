@@ -21,6 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorUrl;
 import space.minecraftstl.xyml.game.ExportedCrashBundleReader;
@@ -501,7 +502,25 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
             throw new IllegalStateException("Downloads page does not expose the game-version catalog");
         }
-        catalogPanel.openMissingDependencySearch(query, gameVersion, modLoader);
+        catalogPanel.openMissingDependencySearch(new MissingDependencySearchRequest(query, gameVersion, modLoader, null));
+    }
+
+    /// Navigates to one read-only missing-dependency search with its captured target instance.
+    ///
+    /// @param request validated missing-dependency search request
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+        EdtDispatcher.requireEventDispatchThread();
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+        String query = checked.dependencyId().trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("dependencyId must not be blank");
+        }
+        navigateTo(ShellPageId.DOWNLOADS);
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
+            throw new IllegalStateException("Downloads page does not expose the game-version catalog");
+        }
+        catalogPanel.openMissingDependencySearch(checked);
     }
 
     /// Opens or toggles one side destination from the left navigation rail.

@@ -61,6 +61,9 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
     /// Local target retained across ordinary instance-list refreshes.
     private @Nullable GameInstanceID selectedInstanceId;
 
+    /// Explicit instance requested by programmatic navigation, or null when none is pending.
+    private @Nullable GameInstanceID requestedInstanceId;
+
     /// Whether combo-box events currently reflect an internal item publication.
     private boolean applyingEntries;
 
@@ -110,6 +113,20 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         return selectedInstanceId;
     }
 
+    /// Requests one explicit local target, independent of the model-selected index.
+    ///
+    /// @param instanceId exact target instance identifier
+    void selectInstance(GameInstanceID instanceId) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        requestedInstanceId = Objects.requireNonNull(instanceId, "instanceId");
+        if (started) {
+            synchronizeFromModel();
+        }
+    }
+
     /// Reconciles local options with the model's latest repository context and content snapshot.
     void synchronizeFromModel() {
         EdtDispatcher.requireEventDispatchThread();
@@ -123,13 +140,21 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         }
 
         long currentContextRevision = model.selectionContextRevision();
+        @Nullable GameInstanceID requestedSelection = requestedInstanceId;
         @Nullable GameInstanceID retainedSelection = currentContextRevision == selectionContextRevision
                 ? selectedInstanceId
                 : null;
         @Nullable GameInstanceID preferredSelection = preferredSelection(snapshot, entries);
-        @Nullable GameInstanceID nextSelection = contains(entries, retainedSelection)
-                ? retainedSelection
-                : preferredSelection;
+        @Nullable GameInstanceID nextSelection;
+        if (requestedSelection != null && contains(entries, requestedSelection)) {
+            nextSelection = requestedSelection;
+            requestedInstanceId = null;
+        } else {
+            requestedInstanceId = null;
+            nextSelection = contains(entries, retainedSelection)
+                    ? retainedSelection
+                    : preferredSelection;
+        }
 
         applyingEntries = true;
         try {
