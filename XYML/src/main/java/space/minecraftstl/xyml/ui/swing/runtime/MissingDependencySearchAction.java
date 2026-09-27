@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.runtime;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 
 /// Opens a read-only missing-dependency catalog search with the analyzer's captured query context.
 @FunctionalInterface
@@ -29,4 +30,15 @@ public interface MissingDependencySearchAction {
     /// @param dependencyId validated dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     void open(String dependencyId, @Nullable String gameVersion);
+
+    /// Opens one dependency query while retaining the current instance loader when supplied.
+    ///
+    /// Implementations that do not model loader filtering retain the version-only behavior.
+    ///
+    /// @param dependencyId validated dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable or unsupported
+    default void open(String dependencyId, @Nullable String gameVersion, @Nullable ModLoaderType modLoader) {
+        open(dependencyId, gameVersion);
+    }
 }

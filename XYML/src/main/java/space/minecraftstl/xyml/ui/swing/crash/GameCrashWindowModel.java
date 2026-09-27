@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.ExportedCrashBundle;
@@ -177,6 +178,7 @@ final class GameCrashWindowModel {
 
         @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
         LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
+        @Nullable ModLoaderType modLoader = primaryModLoader(analyzer);
         for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
             if (!type.getPatchId().isEmpty()) {
                 analyzer.getVersion(type).ifPresent(loaderVersion -> details.add(new Detail(
@@ -208,8 +210,14 @@ final class GameCrashWindowModel {
                 capturedLogs.stream().map(Log::getLog).toList());
         @Nullable SwingMcpMissingDependencySearch missingDependencySearch = null;
         if (openMissingModSearch != null) {
+            @Nullable ModLoaderType dependencyModLoader = modLoader;
+            MissingDependencySearchAction contextualSearch =
+                    (dependencyId, analyzedVersion) -> openMissingModSearch.open(
+                            dependencyId,
+                            analyzedVersion,
+                            dependencyModLoader);
             missingDependencySearch = SwingMcpMissingDependencySearch.forMissingDependencySearchAction(
-                    openMissingModSearch);
+                    contextualSearch);
             logAnalyzable = logAnalyzable.withMissingDependencySearch(missingDependencySearch);
         }
         if (repository instanceof XYMLGameRepository xymlRepository) {
@@ -328,6 +336,23 @@ final class GameCrashWindowModel {
             return launchOptions.getJava().getVersion();
         }
         return launchOptions.getJava().getVersion() + " (" + architecture.getDisplayName() + ")";
+    }
+
+    /// Resolves the deterministic primary mod loader declared by one analyzed instance.
+    ///
+    /// The library declaration order selects the first supported loader, which keeps multi-loader instances
+    /// deterministic while unknown or unmodded instances return null.
+    ///
+    /// @param analyzer analyzed instance libraries
+    /// @return primary supported mod loader, or null when the instance has none
+    private static @Nullable ModLoaderType primaryModLoader(LibraryAnalyzer analyzer) {
+        LibraryAnalyzer analyzed = Objects.requireNonNull(analyzer, "analyzer");
+        for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
+            if (type.getModLoaderType() != null && analyzed.has(type)) {
+                return type.getModLoaderType();
+            }
+        }
+        return null;
     }
 
     /// Resolves the exact declared Java recommendation or the vanilla minimum for the detected game version.
