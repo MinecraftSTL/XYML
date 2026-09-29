@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -236,7 +237,20 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             return;
         }
         categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
-        modsCatalog.openMissingDependencySearch(searchText, gameVersion, modLoader);
+        modsCatalog.openMissingDependencySearch(new MissingDependencySearchRequest(searchText, gameVersion, modLoader, null));
+    }
+
+    /// Selects the Mods category and starts one target-aware missing-dependency search.
+    ///
+    /// @param request validated missing-dependency search request
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+        EdtDispatcher.requireEventDispatchThread();
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openMissingDependencySearch(checked);
     }
 
     /// Selects one content category and activates its lazy workflow.

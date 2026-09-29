@@ -49,6 +49,7 @@ import space.minecraftstl.xyml.ui.swing.SwingLauncherFontManager;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
@@ -408,7 +409,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         openMissingDependencySearch(dependencyId, gameVersion, null);
     }
 
-    /// Opens a missing-dependency catalog search with the analyzer's version and current-instance loader.
+    /// Opens a missing-dependency catalog search with the loader and captured target instance.
     ///
     /// @param dependencyId validated missing mod identifier used as the search query
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
@@ -417,12 +418,23 @@ public final class SwingApplicationComposition implements AutoCloseable {
             String dependencyId,
             @Nullable String gameVersion,
             @Nullable ModLoaderType modLoader) {
+        openMissingDependencySearch(new MissingDependencySearchRequest(
+                dependencyId,
+                gameVersion,
+                modLoader,
+                null));
+    }
+
+    /// Opens a missing-dependency catalog search with its captured target-instance context.
+    ///
+    /// @param request validated missing-dependency search request
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
         if (closed.get()) {
             throw new IllegalStateException("Swing application composition is closed");
         }
-        String query = Objects.requireNonNull(dependencyId, "dependencyId");
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
         window.open();
-        window.openMissingDependencySearch(query, gameVersion, modLoader);
+        window.openMissingDependencySearch(checked);
     }
 
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
@@ -1419,6 +1431,25 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     throw new IllegalStateException("Swing application window is closed");
                 }
                 frame.shellPanel().openMissingDependencySearch(dependencyId, gameVersion, modLoader);
+                frame.toFront();
+                frame.requestFocusInWindow();
+            });
+        }
+
+        /// Routes a target-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param request validated missing-dependency search request
+        @Override
+        public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+            MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openMissingDependencySearch(checked);
                 frame.toFront();
                 frame.requestFocusInWindow();
             });

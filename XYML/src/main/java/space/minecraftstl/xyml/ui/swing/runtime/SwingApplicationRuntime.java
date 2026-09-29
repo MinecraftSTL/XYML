@@ -314,25 +314,21 @@ public final class SwingApplicationRuntime implements AutoCloseable {
     /// @param dependencyId validated missing mod identifier used as the search query
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     private void openMissingDependencySearchIfOpen(String dependencyId, @Nullable String gameVersion) {
-        openMissingDependencySearchIfOpen(dependencyId, gameVersion, null);
+        openMissingDependencySearchIfOpen(new MissingDependencySearchRequest(
+                dependencyId,
+                gameVersion,
+                null,
+                null));
     }
 
-    /// Opens a missing-dependency search with optional current-instance loader metadata.
+    /// Opens a missing-dependency search with its captured instance context.
     ///
-    /// @param dependencyId validated missing mod identifier used as the search query
-    /// @param gameVersion analyzed Minecraft version, or null when unavailable
-    /// @param modLoader current instance mod loader, or null when unavailable
-    private void openMissingDependencySearchIfOpen(
-            String dependencyId,
-            @Nullable String gameVersion,
-            @Nullable ModLoaderType modLoader) {
+    /// @param request validated missing-dependency search request
+    private void openMissingDependencySearchIfOpen(MissingDependencySearchRequest request) {
         if (closed.get()) {
             throw new IllegalStateException("Launcher Swing application runtime is closed");
         }
-        composition.openMissingDependencySearch(
-                Objects.requireNonNull(dependencyId, "dependencyId"),
-                gameVersion,
-                modLoader);
+        composition.openMissingDependencySearch(Objects.requireNonNull(request, "request"));
     }
 
     /// Adapts runtime navigation while retaining the optional current-instance loader context.
@@ -351,17 +347,12 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                 checkedRuntime.openMissingDependencySearchIfOpen(dependencyId, gameVersion);
             }
 
-            /// Opens one search with the current instance loader when supplied.
+            /// Opens one search with the captured target-instance context.
             ///
-            /// @param dependencyId validated missing mod identifier used as the search query
-            /// @param gameVersion analyzed Minecraft version, or null when unavailable
-            /// @param modLoader current instance mod loader, or null when unavailable
+            /// @param request validated missing-dependency search request
             @Override
-            public void open(
-                    String dependencyId,
-                    @Nullable String gameVersion,
-                    @Nullable ModLoaderType modLoader) {
-                checkedRuntime.openMissingDependencySearchIfOpen(dependencyId, gameVersion, modLoader);
+            public void open(MissingDependencySearchRequest request) {
+                checkedRuntime.openMissingDependencySearchIfOpen(request);
             }
         };
     }
@@ -508,6 +499,16 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             openMissingDependencySearch(dependencyId, gameVersion);
         }
 
+        /// Opens one missing-dependency query with its full captured request context.
+        ///
+        /// Lightweight lifecycle test doubles retain the loader-aware behavior by default.
+        ///
+        /// @param request validated missing-dependency search request
+        default void openMissingDependencySearch(MissingDependencySearchRequest request) {
+            MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+            openMissingDependencySearch(checked.dependencyId(), checked.gameVersion(), checked.modLoader());
+        }
+
         /// Closes the application surface.
         @Override
         void close();
@@ -623,6 +624,14 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                     Objects.requireNonNull(dependencyId, "dependencyId"),
                     gameVersion,
                     modLoader);
+        }
+
+        /// Opens the concrete composition with one captured target-instance request.
+        ///
+        /// @param request validated missing-dependency search request
+        @Override
+        public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+            composition.openMissingDependencySearch(Objects.requireNonNull(request, "request"));
         }
 
         /// Closes the concrete Swing composition.
@@ -781,6 +790,14 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                         @Nullable ModLoaderType modLoader) {
                     requestMissingDependencySearch(dependencyId, gameVersion, modLoader);
                 }
+
+                /// Queues or forwards one target-aware search.
+                ///
+                /// @param request validated missing-dependency search request
+                @Override
+                public void open(MissingDependencySearchRequest request) {
+                    requestMissingDependencySearch(request);
+                }
             };
         }
 
@@ -790,6 +807,14 @@ public final class SwingApplicationRuntime implements AutoCloseable {
         private void requestModSearch(String dependencyId) {
             String query = Objects.requireNonNull(dependencyId, "dependencyId");
             request(actions -> actions.openModSearch().accept(query));
+        }
+
+        /// Queues or immediately forwards one target-aware missing-dependency search request.
+        ///
+        /// @param request validated missing-dependency search request
+        private void requestMissingDependencySearch(MissingDependencySearchRequest request) {
+            MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+            request(actions -> actions.openMissingDependencySearch().open(checked));
         }
 
         /// Queues or immediately forwards one version-aware missing-dependency search request.

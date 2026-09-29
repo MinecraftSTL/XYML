@@ -65,6 +65,38 @@ public final class RemoteAddonTargetInstanceSelectorTest {
         });
     }
 
+    /// Selects one explicit target independently from the model-selected index.
+    @Test
+    public void explicitSelectionOverridesModelSelection() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 1);
+            try (RemoteAddonTargetInstanceSelector selector = new RemoteAddonTargetInstanceSelector(model)) {
+                selector.start();
+                selector.selectInstance(FIRST_ID);
+
+                assertEquals(FIRST_ID, selector.selectedInstanceId());
+                assertEquals(FIRST_ID, selectedEntry(selector).stableId());
+                assertEquals(0, model.selectCalls());
+            }
+        });
+    }
+
+    /// Applies an explicit target requested before the model has been started.
+    @Test
+    public void explicitSelectionWaitsForModelStart() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 0);
+            try (RemoteAddonTargetInstanceSelector selector = new RemoteAddonTargetInstanceSelector(model)) {
+                selector.selectInstance(SECOND_ID);
+                selector.start();
+
+                assertEquals(SECOND_ID, selector.selectedInstanceId());
+                assertEquals(SECOND_ID, selectedEntry(selector).stableId());
+                assertEquals(0, model.selectCalls());
+            }
+        });
+    }
+
     /// Keeps an explicit page-local selection out of the shared instance model.
     @Test
     public void userSelectionDoesNotChangeGlobalModelSelection() {
