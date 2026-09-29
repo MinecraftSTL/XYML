@@ -265,6 +265,48 @@ final class NBTEditorPanelTest {
         }
     }
 
+    /// Keeps fixed heading actions visible when the displayed source path exceeds the available width.
+    @Test
+    void longPathTextKeepsHeadingActionsInsideEditor() {
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(Path.of("placeholder.dat")),
+                () -> { },
+                iconExecutor));
+        try {
+            iconExecutor.runAll();
+            flushEdt();
+            onEdt(() -> {
+                JLabel path = findNamed(panel, "nbtEditorPath", JLabel.class);
+                path.setText("C:\\".concat("very-long-directory-".repeat(24)).concat("save.dat"));
+                panel.setSize(900, 560);
+                layoutRecursively(panel);
+
+                Rectangle open = componentBounds(panel, findNamed(panel, "nbtEditorOpen", AbstractButton.class));
+                Rectangle reload = componentBounds(panel, findNamed(panel, "nbtEditorReload", AbstractButton.class));
+                Rectangle save = componentBounds(panel, findNamed(panel, "nbtEditorSave", AbstractButton.class));
+                assertTrue(path.getPreferredSize().width > path.getWidth());
+                assertEquals(40, open.width);
+                assertEquals(40, open.height);
+                assertEquals(40, reload.width);
+                assertEquals(40, reload.height);
+                assertEquals(40, save.width);
+                assertEquals(40, save.height);
+                assertFalse(open.intersects(reload));
+                assertFalse(reload.intersects(save));
+                assertTrue(save.getMaxX() <= panel.getWidth());
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Exercises the complete headless page workflow without performing NBT I/O on the EDT.
     @Test
     void rendersAndRoutesTheCompleteEditorWorkflow() throws Exception {
