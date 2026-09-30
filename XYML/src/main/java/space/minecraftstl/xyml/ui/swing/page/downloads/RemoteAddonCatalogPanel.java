@@ -633,7 +633,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Rejects future callbacks, cancels an active task, and releases owned presentation resources.
+    /// Rejects future callbacks and releases owned presentation resources.
+    ///
+    /// Submitted installations remain owned by the task system after this page closes; use the task manager
+    /// to cancel them.
     @Override
     public void close() {
         if (closed) {
@@ -1758,7 +1761,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         return Math.max(1, Math.floorDiv(extent.height + rowHeight - 1, rowHeight));
     }
 
-    /// Reconciles all command availability from catalog, version, target, task, and lifecycle state.
+    /// Reconciles all command availability from catalog, version, target, and lifecycle state.
     private void updateControls() {
         EdtDispatcher.requireEventDispatchThread();
         boolean inputsEnabled = !closed;

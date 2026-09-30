@@ -751,7 +751,6 @@ final class RemoteAddonCatalogPanelTest {
             });
             drainEdt();
 
-            awaitInstallCompletion(panel);
             EdtDispatcher.executeAndWait(() -> {
                 JComponent progressHost = findNamed(panel, "remoteAddonInstallProgress", JComponent.class);
                 JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
@@ -784,11 +783,11 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
-    /// Keeps the catalog usable while a submitted installation has not reached a terminal callback yet.
+    /// Keeps the catalog usable and leaves a running installation submitted after the page closes.
     @Test
-    void permitsSearchAndSecondInstallationWhileInstallationRuns() throws Exception {
+    void permitsSearchAndSecondInstallationWhileInstallationRunsAndCloseKeepsTask() throws Exception {
         RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
-        RecordingInstallLauncher installLauncher = new RecordingInstallLauncher();
+        CancelTrackingInstallFixture installLauncher = new CancelTrackingInstallFixture();
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
         try {
@@ -818,19 +817,35 @@ final class RemoteAddonCatalogPanelTest {
                         () -> assertTrue(install.isEnabled()),
                         () -> assertTrue(searchField.isEnabled()),
                         () -> assertTrue(search.isEnabled()));
+            });
+            assertTrue(installLauncher.awaitStarted(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> {
+                JButton install = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonInstall", JButton.class), "install");
+                JTextField searchField = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonSearch", JTextField.class), "searchField");
+                JButton search = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonSearchAction", JButton.class), "search");
                 install.doClick();
                 searchField.setText("running-installation-query");
                 search.doClick();
             });
+            assertTrue(installLauncher.awaitStarted(5, TimeUnit.SECONDS));
             drainEdt();
-            assertEquals(2, installLauncher.submitted.get());
+            assertEquals(2, installLauncher.submitted());
             awaitBackgroundWork(executor);
             assertEquals(2, backend.searchRequests.get());
+
+            EdtDispatcher.executeAndWait(panel::close);
+            installLauncher.release();
+            assertTrue(installLauncher.awaitFinished(5, TimeUnit.SECONDS));
+            assertFalse(installLauncher.cancellationObserved());
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {
                 panel.close();
             }
+            installLauncher.release();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
@@ -1597,25 +1612,6 @@ final class RemoteAddonCatalogPanelTest {
         drainEdt();
     }
 
-    /// Waits until the completed installation callback has re-enabled catalog controls.
-    ///
-    /// @param panel catalog panel whose installation must reach a terminal callback
-    /// @throws InterruptedException when the test thread is interrupted while polling
-    private static void awaitInstallCompletion(RemoteAddonCatalogPanel panel) throws InterruptedException {
-        for (int attempt = 0; attempt < 500; attempt++) {
-            AtomicBoolean enabled = new AtomicBoolean();
-            EdtDispatcher.executeAndWait(() -> {
-                @Nullable JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
-                enabled.set(install != null && install.isEnabled());
-            });
-            if (enabled.get()) {
-                return;
-            }
-            Thread.sleep(10L);
-        }
-        throw new AssertionError("Timed out waiting for remote add-on installation completion");
-    }
-
     /// Flushes callbacks already queued onto the Swing event dispatch thread.
     private static void drainEdt() {
         EdtDispatcher.executeAndWait(() -> { });
@@ -1890,9 +1886,6 @@ final class RemoteAddonCatalogPanelTest {
         /// Last install request, or null before user action.
         private final AtomicReference<@Nullable RemoteAddonInstallRequest> request = new AtomicReference<>();
 
-        /// Number of submitted installation requests in this test.
-        private final AtomicInteger submitted = new AtomicInteger();
-
         /// Records one selected artifact request and supplies a successful no-op task.
         ///
         /// @param request selected artifact and selected-instance target
@@ -1900,11 +1893,9 @@ final class RemoteAddonCatalogPanelTest {
         @Override
         public Task<?> createInstallTask(RemoteAddonInstallRequest request) {
             this.request.set(Objects.requireNonNull(request, "request"));
-            submitted.incrementAndGet();
             return Task.completed(null);
         }
     }
-
 
     /// Interactive target substitute proving control refreshes never trigger destination selection.
     @NotNullByDefault
