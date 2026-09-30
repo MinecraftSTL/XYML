@@ -784,6 +784,58 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Keeps the catalog usable while a submitted installation has not reached a terminal callback yet.
+    @Test
+    void permitsSearchAndSecondInstallationWhileInstallationRuns() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        RecordingInstallLauncher installLauncher = new RecordingInstallLauncher();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD, backend, installLauncher,
+                    kind -> Optional.of(fixtureTarget()), executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(), null, Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                findNamed(panel, "remoteAddonSearchAction", JButton.class).doClick();
+            });
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> panel.choiceList().getList().setSelectedIndex(0));
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
+                JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(install);
+                assertNotNull(searchField);
+                assertNotNull(search);
+                install.doClick();
+                assertAll(
+                        () -> assertTrue(install.isEnabled()),
+                        () -> assertTrue(searchField.isEnabled()),
+                        () -> assertTrue(search.isEnabled()));
+                install.doClick();
+                searchField.setText("running-installation-query");
+                search.doClick();
+            });
+            drainEdt();
+            assertEquals(2, installLauncher.submitted.get());
+            awaitBackgroundWork(executor);
+            assertEquals(2, backend.searchRequests.get());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Retries failed catalog and selected-version requests when their status text is clicked.
     @Test
     void retriesFailedCatalogAndVersionLoadsFromStatusLabel() throws Exception {
@@ -1838,6 +1890,9 @@ final class RemoteAddonCatalogPanelTest {
         /// Last install request, or null before user action.
         private final AtomicReference<@Nullable RemoteAddonInstallRequest> request = new AtomicReference<>();
 
+        /// Number of submitted installation requests in this test.
+        private final AtomicInteger submitted = new AtomicInteger();
+
         /// Records one selected artifact request and supplies a successful no-op task.
         ///
         /// @param request selected artifact and selected-instance target
@@ -1845,9 +1900,11 @@ final class RemoteAddonCatalogPanelTest {
         @Override
         public Task<?> createInstallTask(RemoteAddonInstallRequest request) {
             this.request.set(Objects.requireNonNull(request, "request"));
+            submitted.incrementAndGet();
             return Task.completed(null);
         }
     }
+
 
     /// Interactive target substitute proving control refreshes never trigger destination selection.
     @NotNullByDefault
