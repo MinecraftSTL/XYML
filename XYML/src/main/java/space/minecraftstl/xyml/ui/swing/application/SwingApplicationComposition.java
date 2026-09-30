@@ -57,6 +57,8 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountStore;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageRequest;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
@@ -616,9 +618,24 @@ public final class SwingApplicationComposition implements AutoCloseable {
         ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
                 presentation.modsActions(),
                 Schedulers.io());
-        InstanceContentNavigation contentNavigation = target -> {
-            navigateCommand.accept(ShellPageId.DOWNLOADS);
-            downloadsNavigation.request(target);
+        InstanceContentNavigation contentNavigation = new InstanceContentNavigation() {
+            /// Opens one plain download category request.
+            @Override
+            public void openDownloads(DownloadPageTarget target) {
+                requestDownloads(DownloadPageRequest.of(target));
+            }
+
+            /// Opens one download category request bound to an explicit instance context.
+            @Override
+            public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID instanceId) {
+                requestDownloads(new DownloadPageRequest(target, instanceId));
+            }
+
+            /// Selects the downloads destination before its lazily created page applies the request.
+            private void requestDownloads(DownloadPageRequest request) {
+                navigateCommand.accept(ShellPageId.DOWNLOADS);
+                downloadsNavigation.request(request);
+            }
         };
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(

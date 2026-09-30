@@ -227,6 +227,22 @@ public final class LibraryAnalyzer implements Iterable<LibraryAnalyzer.LibraryMa
                 .collect(Collectors.toSet());
     }
 
+    /// Returns the deterministic primary supported mod loader declared by this analysis.
+    ///
+    /// The library declaration order selects the first supported loader, which keeps multi-loader
+    /// instances deterministic while unmodded instances return `null`.
+    ///
+    /// @return primary supported mod loader, or `null` when the instance has none
+    public @Nullable ModLoaderType getPrimaryModLoader() {
+        for (LibraryType type : LibraryType.values()) {
+            @Nullable ModLoaderType modLoader = type.getModLoaderType();
+            if (modLoader != null && has(type)) {
+                return modLoader;
+            }
+        }
+        return null;
+    }
+
     public enum LibraryType {
         MINECRAFT(true, "game", "^$", "^$", null),
         LEGACY_FABRIC(true, "legacyfabric", "net\\.fabricmc", "fabric-loader", ModLoaderType.LEGACY_FABRIC) {

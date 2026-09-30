@@ -35,6 +35,7 @@ import java.awt.Component;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.function.Consumer;
 
 /// Keeps a download page's target-instance choice independent from the launcher's global selection.
 ///
@@ -48,6 +49,9 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
 
     /// Compact local selector rendered with each instance's cheap display name.
     private final JComboBox<InstanceSearchEntry> comboBox = new JComboBox<>();
+
+    /// Notified whenever the local target changes to a different non-null instance.
+    private final Consumer<GameInstanceID> selectionListener;
 
     /// Independently removable model listener, or null before the page becomes displayable.
     private @Nullable Subscription modelSubscription;
@@ -74,8 +78,17 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
     ///
     /// @param model application-owned source of installed-instance identities
     RemoteAddonTargetInstanceSelector(InstancesModel model) {
+        this(model, instanceId -> { });
+    }
+
+    /// Creates a local target selector that reports every changed target instance.
+    ///
+    /// @param model application-owned source of installed-instance identities
+    /// @param selectionListener notified with a different non-null target instance on the EDT
+    RemoteAddonTargetInstanceSelector(InstancesModel model, Consumer<GameInstanceID> selectionListener) {
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
+        this.selectionListener = Objects.requireNonNull(selectionListener, "selectionListener");
         comboBox.setRenderer(new InstanceRenderer());
         comboBox.setMinimumSize(new java.awt.Dimension(0, 0));
         comboBox.addActionListener(event -> selectedEntryChanged());
@@ -140,6 +153,7 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         }
 
         long currentContextRevision = model.selectionContextRevision();
+        @Nullable GameInstanceID previousSelection = selectedInstanceId;
         @Nullable GameInstanceID requestedSelection = requestedInstanceId;
         @Nullable GameInstanceID retainedSelection = currentContextRevision == selectionContextRevision
                 ? selectedInstanceId
@@ -168,6 +182,7 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         }
         selectionContextRevision = currentContextRevision;
         selectedInstanceId = nextSelection;
+        publishSelection(previousSelection, nextSelection);
     }
 
     /// Releases the borrowed model subscription without closing the application-owned model.
@@ -190,8 +205,22 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         if (closed || applyingEntries) {
             return;
         }
+        @Nullable GameInstanceID previousSelection = selectedInstanceId;
         @Nullable Object selected = comboBox.getSelectedItem();
         selectedInstanceId = selected instanceof InstanceSearchEntry entry ? entry.stableId() : null;
+        publishSelection(previousSelection, selectedInstanceId);
+    }
+
+    /// Reports one changed non-null target instance to the owning catalog.
+    ///
+    /// @param previous previous local selection, or null when none was selected
+    /// @param current new local selection, or null when the selector became empty
+    private void publishSelection(
+            @Nullable GameInstanceID previous,
+            @Nullable GameInstanceID current) {
+        if (current != null && !current.equals(previous)) {
+            selectionListener.accept(current);
+        }
     }
 
     /// Returns the model-selected instance represented by one consistent identity list.

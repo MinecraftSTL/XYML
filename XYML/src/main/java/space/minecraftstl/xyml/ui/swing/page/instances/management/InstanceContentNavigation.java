@@ -18,7 +18,10 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
+
+import java.util.Objects;
 
 /// Supplies cross-page content navigation from an instance-management action.
 @FunctionalInterface
@@ -28,6 +31,17 @@ public interface InstanceContentNavigation {
     ///
     /// @param target requested download category
     void openDownloads(DownloadPageTarget target);
+
+    /// Opens one download category and prefills it from an explicit instance context.
+    ///
+    /// Implementations that model no instance context retain the plain category transition.
+    ///
+    /// @param target requested download category
+    /// @param instanceId instance whose analyzed context should prefill the category
+    default void openInstanceDownloads(DownloadPageTarget target, GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        openDownloads(Objects.requireNonNull(target, "target"));
+    }
 
     /// Returns a disabled navigation boundary for headless construction.
     ///

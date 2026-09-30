@@ -361,7 +361,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private @Nullable DownloadPageNavigation downloadPageNavigation;
 
     /// Stable callback registered with the shell-owned navigation boundary.
-    private final Consumer<DownloadPageTarget> downloadTargetConsumer = this::selectDownloadTarget;
+    private final Consumer<DownloadPageRequest> downloadTargetConsumer = this::selectDownloadTarget;
 
     /// Creates a production game-version catalog panel on the Swing event dispatch thread.
     ///
@@ -646,12 +646,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadPageNavigation = requested;
     }
 
-    /// Applies one externally requested content category.
+    /// Applies one externally requested content category with its optional instance context.
     ///
-    /// @param target requested download category
-    private void selectDownloadTarget(DownloadPageTarget target) {
+    /// @param request requested download category and optional instance context
+    private void selectDownloadTarget(DownloadPageRequest request) {
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
-        downloadCategoryPanel.selectTarget(target);
+        downloadCategoryPanel.selectTarget(request);
     }
 
     /// Starts the lazy source load after this page first becomes displayable.
