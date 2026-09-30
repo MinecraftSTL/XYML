@@ -18,19 +18,16 @@
 package space.minecraftstl.xyml.download.java.disco;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.task.BoundedTextFetchTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.platform.Platform;
 
-import org.glavo.url.WebURL;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -49,7 +46,7 @@ final class DiscoFetchJavaListTaskResourceTest {
     @Test
     void separatesParsingFromStatefulMetadataFetch() {
         DiscoFetchJavaListTask task = new DiscoFetchJavaListTask(
-                new IdentityDownloadProvider(),
+                new DownloadProvider(),
                 DiscoJavaDistribution.LIBERICA,
                 Platform.SYSTEM_PLATFORM);
 
@@ -65,52 +62,5 @@ final class DiscoFetchJavaListTaskResourceTest {
         assertEquals(
                 List.of(TaskResource.Kind.CACHE_OPERATION),
                 fetchTask.getResources().stream().map(TaskResource::getKind).toList());
-    }
-
-    /// Download provider preserving the Disco API URI for resource-only construction tests.
-    @NotNullByDefault
-    private static final class IdentityDownloadProvider implements DownloadProvider {
-        /// Returns no game-version endpoints because this test constructs only the Disco request.
-        ///
-        /// @return empty endpoint list
-        @Override
-        public @Unmodifiable List<WebURL> getVersionListURLs() {
-            return List.of();
-        }
-
-        /// Returns no asset candidates because this test constructs only the Disco request.
-        ///
-        /// @param assetObjectLocation unused asset location
-        @Override
-        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
-            return List.of();
-        }
-
-        /// Preserves the supplied Disco API URI.
-        ///
-        /// @param baseURL original URI text
-        /// @return the unchanged URI text
-        @Override
-        public String injectURL(String baseURL) {
-            return baseURL;
-        }
-
-        /// Rejects unrelated version-list access.
-        ///
-        /// @param id requested list identifier
-        /// @return never returns normally
-        /// @throws IllegalArgumentException for every identifier
-        @Override
-        public VersionList<?> getVersionListById(String id) {
-            throw new IllegalArgumentException(id);
-        }
-
-        /// Returns one permitted transfer for the construction-only provider.
-        ///
-        /// @return one permitted transfer
-        @Override
-        public int getConcurrency() {
-            return 1;
-        }
     }
 }

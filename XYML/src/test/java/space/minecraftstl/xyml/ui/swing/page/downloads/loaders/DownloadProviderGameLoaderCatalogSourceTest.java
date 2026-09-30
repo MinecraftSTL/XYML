@@ -18,49 +18,52 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads.loaders;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersionList;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.download.VersionList;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
-import org.glavo.url.WebURL;
-import java.time.Instant;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/// Verifies the Core DownloadProvider source remains offline until one selected loader is explicitly refreshed.
+/// Verifies the Core DownloadProvider loader source stays offline until one selected loader is explicitly refreshed.
 @NotNullByDefault
 final class DownloadProviderGameLoaderCatalogSourceTest {
-    /// Calls only the selected Fabric list, preserves concrete RemoteVersion identity, and starts no work at construction.
+    /// Queries only the selected loader task and preserves the exact concrete remote version instance.
     @Test
     void refreshesOnlyExplicitSelectedListAndPreservesConcreteRemoteVersion() {
         RecordingProvider provider = new RecordingProvider();
-        RecordingVersionList fabricList = new RecordingVersionList();
-        RemoteVersion fabricVersion = remoteVersion("fabric", "1.20.1", "0.16.0");
-        fabricList.add("1.20.1", fabricVersion);
-        provider.add("fabric", fabricList);
+        ComponentRemoteVersion fabricVersion =
+                new TestComponentRemoteVersion(GameComponentType.FABRIC, "1.20.1", "0.16.0");
+        provider.add(GameComponentType.FABRIC, List.of(fabricVersion));
         AtomicInteger taskRuns = new AtomicInteger();
 
-        DownloadProviderGameLoaderCatalogSource source =
-                new DownloadProviderGameLoaderCatalogSource(
-                        provider,
-                        task -> {
-                            taskRuns.incrementAndGet();
-                            return CompletableFuture.completedFuture(null);
-                        });
+        DownloadProviderGameLoaderCatalogSource source = new DownloadProviderGameLoaderCatalogSource(
+                provider,
+                task -> {
+                    taskRuns.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                });
 
         assertAll(
-                () -> assertEquals(0, provider.versionListRequests()),
-                () -> assertEquals(0, fabricList.refreshRequests()),
+                () -> assertEquals(0, provider.requestedTypes().size()),
                 () -> assertEquals(0, taskRuns.get()));
 
         List<GameLoaderCatalogItem> items = source.refreshAsync(
@@ -69,166 +72,119 @@ final class DownloadProviderGameLoaderCatalogSourceTest {
                 .join();
 
         assertAll(
-                () -> assertEquals(1, provider.versionListRequests()),
-                () -> assertEquals(List.of("fabric"), provider.requestedListIds()),
-                () -> assertEquals(1, fabricList.refreshRequests()),
-                () -> assertEquals(List.of("1.20.1"), fabricList.requestedGameVersions()),
+                () -> assertEquals(List.of("fabric"), provider.requestedTypes()),
+                () -> assertEquals(List.of("1.20.1"), provider.requestedGameVersions()),
                 () -> assertEquals(1, taskRuns.get()),
                 () -> assertEquals(1, items.size()),
                 () -> assertEquals(GameLoaderKind.FABRIC, items.get(0).kind()),
                 () -> assertSame(fabricVersion, items.get(0).remoteVersion()));
     }
 
-    /// Creates one Core remote-version fixture for source identity tests.
-    ///
-    /// @param libraryId Core version-list identifier
-    /// @param gameVersion target Minecraft version
-    /// @param selfVersion concrete remote loader version
-    /// @return stable remote version fixture
-    private static RemoteVersion remoteVersion(
-            String libraryId,
-            String gameVersion,
-            String selfVersion) {
-        return new RemoteVersion(
-                libraryId,
-                gameVersion,
-                selfVersion,
-                Instant.EPOCH,
-                List.of("https://example.invalid/" + libraryId + ".jar"));
-    }
-
-    /// Provides only explicit version-list lookup behavior needed by the source test.
-    @NotNullByDefault
-    private static final class RecordingProvider implements DownloadProvider {
-        /// Configured test lists by Core ID.
-        private final Map<String, VersionList<?>> versionLists = new HashMap<>();
-
-        /// List IDs requested by the source after explicit refresh actions.
-        private final List<String> requestedListIds = new java.util.ArrayList<>();
-
-        /// Adds one locally controlled version list.
-        ///
-        /// @param id Core version-list ID
-        /// @param versionList controlled list
-        private void add(String id, VersionList<?> versionList) {
-            versionLists.put(id, versionList);
-        }
-
-        /// Returns the number of version-list lookups.
-        ///
-        /// @return explicit lookup count
-        private int versionListRequests() {
-            return requestedListIds.size();
-        }
-
-        /// Returns immutable requested list IDs in invocation order.
-        ///
-        /// @return immutable requested IDs
-        private @Unmodifiable List<String> requestedListIds() {
-            return List.copyOf(requestedListIds);
-        }
-
-        /// Returns no global version-list URLs because the test never calls them.
-        ///
-        /// @return empty immutable URL list
-        @Override
-        public @Unmodifiable List<WebURL> getVersionListURLs() {
-            return List.of();
-        }
-
-        /// Returns no asset candidates because the test never resolves artifacts.
-        ///
-        /// @param assetObjectLocation unused asset location
-        /// @return empty immutable URL list
-        @Override
-        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
-            return List.of();
-        }
-
-        /// Preserves an unused URL in the test provider.
-        ///
-        /// @param baseURL unused source URL
-        /// @return unchanged source URL
-        @Override
-        public String injectURL(String baseURL) {
-            return baseURL;
-        }
-
-        /// Returns one configured list only after an explicit source request.
-        ///
-        /// @param id requested Core version-list ID
-        /// @return configured controlled list
-        @Override
-        public VersionList<?> getVersionListById(String id) {
-            requestedListIds.add(id);
-            VersionList<?> versionList = versionLists.get(id);
-            if (versionList == null) {
-                throw new IllegalArgumentException("No recording version list for " + id);
+    /// Fails the refresh stage without starting a task when the provider rejects the request.
+    @Test
+    void failsTheStageWhenTheProviderThrows() {
+        IllegalStateException failure = new IllegalStateException("loader list rejected");
+        DownloadProvider provider = new DownloadProvider() {
+            /// Rejects every loader list request with the configured failure.
+            ///
+            /// @param type        requested component type
+            /// @param gameVersion requested game version
+            /// @param refresh     whether a refresh was requested
+            /// @return never returns normally
+            @Override
+            public @Unmodifiable Task<ComponentRemoteVersionList<?>> getVersionsAsync(
+                    GameComponentType type, @Nullable GameVersionNumber gameVersion, boolean refresh) {
+                throw failure;
             }
-            return versionList;
-        }
+        };
+        AtomicInteger taskRuns = new AtomicInteger();
 
-        /// Returns a harmless test concurrency limit.
-        ///
-        /// @return fixed positive concurrency
-        @Override
-        public int getConcurrency() {
-            return 1;
-        }
+        DownloadProviderGameLoaderCatalogSource source = new DownloadProviderGameLoaderCatalogSource(
+                provider,
+                task -> {
+                    taskRuns.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                });
+
+        CompletionException completionFailure = assertThrows(
+                CompletionException.class,
+                () -> source.refreshAsync(new GameLoaderCatalogRequest("1.20.1", GameLoaderKind.FABRIC))
+                        .toCompletableFuture()
+                        .join());
+        assertAll(
+                () -> assertSame(failure, completionFailure.getCause()),
+                () -> assertEquals(0, taskRuns.get()));
     }
 
-    /// Supplies one mutable in-memory Core version list with refresh invocation recording.
+    /// Download provider returning one exact fetched row list per requested component type.
     @NotNullByDefault
-    private static final class RecordingVersionList extends VersionList<RemoteVersion> {
-        /// Requested game versions in refresh invocation order.
-        private final List<String> requestedGameVersions = new java.util.ArrayList<>();
+    private static final class RecordingProvider extends DownloadProvider {
+        /// Configured rows by component type.
+        private final Map<GameComponentType, List<ComponentRemoteVersion>> rows =
+                new EnumMap<>(GameComponentType.class);
 
-        /// Adds one concrete remote version to the requested game-version bucket.
+        /// Requested component identifiers in invocation order.
+        private final List<String> requestedTypes = new ArrayList<>();
+
+        /// Requested game versions in invocation order.
+        private final List<String> requestedGameVersions = new ArrayList<>();
+
+        /// Adds one locally controlled row list.
         ///
-        /// @param gameVersion target Minecraft version
-        /// @param remoteVersion exact Core remote version
-        private void add(String gameVersion, RemoteVersion remoteVersion) {
-            versions.putAll(gameVersion, List.of(remoteVersion));
+        /// @param type     requested component type
+        /// @param versions fetched rows
+        private void add(GameComponentType type, List<ComponentRemoteVersion> versions) {
+            rows.put(type, List.copyOf(versions));
         }
 
-        /// Returns the number of explicit refresh calls.
+        /// Records the request and returns one stopped task exposing the fixed rows.
         ///
-        /// @return refresh invocation count
-        private int refreshRequests() {
-            return requestedGameVersions.size();
+        /// @param type        requested component type
+        /// @param gameVersion requested game version
+        /// @param refresh     whether a refresh was requested
+        /// @return stopped task exposing the configured rows
+        @Override
+        public @Unmodifiable Task<ComponentRemoteVersionList<?>> getVersionsAsync(
+                GameComponentType type, @Nullable GameVersionNumber gameVersion, boolean refresh) {
+            requestedTypes.add(type.getPatchId());
+            requestedGameVersions.add(gameVersion == null ? "" : gameVersion.toString());
+            List<ComponentRemoteVersion> versions = rows.get(type);
+            if (versions == null) {
+                throw new IllegalArgumentException("No recording rows for " + type);
+            }
+            return new RowsTask(type, versions);
         }
 
-        /// Returns immutable requested game-version values.
+        /// Returns immutable requested component identifiers.
         ///
-        /// @return immutable refresh game-version history
+        /// @return requested identifiers
+        private @Unmodifiable List<String> requestedTypes() {
+            return List.copyOf(requestedTypes);
+        }
+
+        /// Returns immutable requested game versions.
+        ///
+        /// @return requested game versions
         private @Unmodifiable List<String> requestedGameVersions() {
             return List.copyOf(requestedGameVersions);
         }
+    }
 
-        /// Declares this controlled list as a typed version list.
+    /// Stopped task that exposes one fixed row snapshot to the loader catalog source.
+    @NotNullByDefault
+    private static final class RowsTask extends Task<ComponentRemoteVersionList<?>> {
+        /// Creates one stopped task for a fixed row snapshot.
         ///
-        /// @return true for test completeness
-        @Override
-        public boolean hasType() {
-            return true;
+        /// @param type requested component type
+        /// @param rows fetched rows
+        RowsTask(GameComponentType type, List<ComponentRemoteVersion> rows) {
+            setResult(ComponentRemoteVersionList.of(type, new TreeSet<>(rows)));
         }
 
-        /// Records a whole-list refresh request.
-        ///
-        /// @return completed test task
+        /// Performs no work because the test runner owns the terminal event.
         @Override
-        public Task<?> refreshAsync() {
-            return Task.completed(null);
-        }
-
-        /// Records one selected-game refresh request without performing network I/O.
-        ///
-        /// @param gameVersion selected Minecraft version
-        /// @return completed test task
-        @Override
-        public Task<?> refreshAsync(String gameVersion) {
-            requestedGameVersions.add(gameVersion);
-            return Task.completed(null);
+        public void execute() {
+            // The test runner never runs the task.
         }
     }
 }

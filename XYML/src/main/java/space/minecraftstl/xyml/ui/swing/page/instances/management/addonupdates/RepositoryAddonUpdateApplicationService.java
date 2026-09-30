@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.download.DownloadCandidate;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -235,8 +236,11 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                     remoteVersion.file(),
                     "update.targetVersion.file");
             String remoteUrl = Objects.requireNonNull(remoteFile.url(), "remote file URL");
-            @Unmodifiable List<WebURL> candidates = List.copyOf(
-                    downloadProvider.injectURLWithCandidates(remoteUrl));
+            @Unmodifiable List<WebURL> candidates = downloadProvider.getDownloadCandidates(remoteUrl)
+                    .getCandidates().stream()
+                    .map(DownloadCandidate::url)
+                    .filter(Objects::nonNull)
+                    .toList();
             if (candidates.isEmpty()) {
                 throw new IOException("Download provider returned no candidates for " + remoteUrl);
             }

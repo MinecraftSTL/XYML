@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.download.cleanroom;
 
+import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
@@ -117,7 +118,7 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
                     .normalize();
 
             dependent = new FileDownloadTask(
-                    dependencyManager.getDownloadProvider().injectURLsWithCandidates(remote.getUrls()),
+                    dependencyManager.getDownloadProvider().getDownloadCandidates(remote.getUrls()),
                     installer, null);
             dependent.setCacheRepository(dependencyManager.getCacheRepository());
             dependent.setCaching(true);
@@ -152,11 +153,23 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
     public void execute() throws IOException, VersionMismatchException, UnsupportedInstallationException {
         Task<GameInstancePatch> installationTask;
         if (selfVersion == null) {
-            installationTask = new ForgeNewInstallTask(dependencyManager, manifest, remote.getSelfVersion(), installer)
+            installationTask = new GameDownloadTask(dependencyManager, null, manifest)
+                    .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                            dependencyManager,
+                            manifest,
+                            minecraftJar,
+                            remote.getSelfVersion(),
+                            installer))
                     .thenApplyAsync(version -> version.withId(LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId()))
                     .asOrchestration();
         } else {
-            installationTask = new ForgeNewInstallTask(dependencyManager, manifest, selfVersion, installer)
+            installationTask = new GameDownloadTask(dependencyManager, null, manifest)
+                    .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                            dependencyManager,
+                            manifest,
+                            minecraftJar,
+                            selfVersion,
+                            installer))
                     .thenApplyAsync(version -> version.withId(LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId()))
                     .asOrchestration();
         }

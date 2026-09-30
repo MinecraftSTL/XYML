@@ -19,14 +19,13 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.ChecksumMismatchException;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
 
 import java.io.IOException;
-import org.glavo.url.WebURL;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -36,7 +35,6 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Objects;
 
 /// Downloads one checksummed Java archive into a random managed temporary file under a hard byte ceiling.
@@ -59,18 +57,18 @@ final class ManagedJavaArchiveDownloadTask extends FetchTask<Path> {
 
     /// Creates a stopped bounded download task over ordered provider candidates.
     ///
-    /// @param urls immutable ordered download candidates
+    /// @param candidates ordered provider download candidates
     /// @param archiveSuffix parser-significant `.zip` or `.tar.gz` suffix
     /// @param checksumAlgorithm normalized JCA checksum algorithm
     /// @param expectedChecksum expected lowercase hexadecimal checksum
     /// @param maximumBytes positive decoded-byte ceiling
     ManagedJavaArchiveDownloadTask(
-            @Unmodifiable List<WebURL> urls,
+            DownloadCandidates candidates,
             String archiveSuffix,
             String checksumAlgorithm,
             String expectedChecksum,
             long maximumBytes) {
-        super(List.copyOf(Objects.requireNonNull(urls, "urls")));
+        super(candidates);
         if (!(archiveSuffix.equals(".zip") || archiveSuffix.equals(".tar.gz"))) {
             throw new IllegalArgumentException("Unsupported Java archive suffix: " + archiveSuffix);
         }

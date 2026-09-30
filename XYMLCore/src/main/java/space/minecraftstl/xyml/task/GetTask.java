@@ -18,8 +18,8 @@
 package space.minecraftstl.xyml.task;
 
 import com.google.gson.reflect.TypeToken;
-import org.jetbrains.annotations.NotNullByDefault;
 import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
@@ -33,62 +33,45 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/// Fetches UTF-compatible text and supports pure asynchronous JSON decoding continuations.
-///
-/// ETag and content-cache writes are serialized by the configured cache repository, so the fetch itself uses a shared
-/// cache-operation resource rather than the conservative global fallback.
-///
-/// @author huangyuhui
-@NotNullByDefault
+/// Downloads text, decoding HTTP responses using their declared charset or UTF-8.
 public final class GetTask extends FetchTask<String> {
 
-    /// Creates a text fetch from one URL string.
+    /// Creates a text download task for an absolute URL string.
     ///
-    /// @param url source URL string
+    /// @param url absolute URL text
     public GetTask(String url) {
         this(WebURL.parse(url));
     }
 
-    /// Creates a text fetch from one URL.
-    ///
-    /// @param url source URL
+    /// Creates a text download task for one URL.
     public GetTask(WebURL url) {
         this(List.of(url));
         setName(url.toString());
     }
 
-    /// Creates a text fetch from ordered candidate URLs.
-    ///
-    /// @param url immutable candidate URL list
+    /// Creates a text download task with a snapshot of nonempty candidate URLs in attempt order.
     public GetTask(List<WebURL> url) {
-        super(url);
+        super(DownloadCandidates.ofUrls(url));
         setName(url.get(0).toString());
         useCacheOperationResource();
     }
 
-    /// Enables the existing ETag cache for text responses.
-    ///
-    /// @return ETag-aware fetch policy
+    public GetTask(DownloadCandidates candidates) {
+        super(candidates);
+        setName(candidates.getPrimaryCandidate().displayUrl());
+        useCacheOperationResource();
+    }
+
     @Override
     protected EnumCheckETag shouldCheckETag() {
         return EnumCheckETag.CHECK_E_TAG;
     }
 
-    /// Reads a cached text result using the established default charset behavior.
-    ///
-    /// @param cachedFile cached response file
-    /// @throws IOException if the cached file cannot be read
     @Override
     protected void useCachedResult(Path cachedFile) throws IOException {
         setResult(Files.readString(cachedFile));
     }
 
-    /// Creates the in-memory response context and persists successful ETag text through the cache repository.
-    ///
-    /// @param response response metadata, or null for a non-HTTP source
-    /// @param checkETag whether successful text should update the validator cache
-    /// @param bmclapiHash ignored mirror checksum metadata
-    /// @return in-memory text response context
     @Override
     protected Context getContext(@Nullable UrlResponseInfo response, boolean checkETag, @Nullable String bmclapiHash) {
         long length = -1;
@@ -125,20 +108,10 @@ public final class GetTask extends FetchTask<String> {
         };
     }
 
-    /// Creates a pure JSON-decoding continuation for one concrete result class.
-    ///
-    /// @param type decoded result class
-    /// @param <T> decoded result type
-    /// @return orchestration continuation that decodes this fetch result
     public <T> Task<T> thenGetJsonAsync(Class<T> type) {
         return thenGetJsonAsync(TypeToken.get(type));
     }
 
-    /// Creates a pure JSON-decoding continuation for one generic result token.
-    ///
-    /// @param type decoded result token
-    /// @param <T> decoded result type
-    /// @return orchestration continuation that decodes this fetch result
     public <T> Task<T> thenGetJsonAsync(TypeToken<T> type) {
         return thenApplyAsync(jsonString -> JsonUtils.fromNonNullJson(jsonString, type)).asOrchestration();
     }

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.download.neoforge;
 
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.VersionMismatchException;
@@ -79,7 +80,7 @@ public final class NeoForgeInstallTask extends Task<GameInstancePatch> {
                 .normalize();
 
         dependent = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLsWithCandidates(remoteVersion.getUrls()),
+                dependencyManager.getDownloadProvider().getDownloadCandidates(remoteVersion.getUrls()),
                 installer, null
         );
         dependent.setCacheRepository(dependencyManager.getCacheRepository());
@@ -133,11 +134,14 @@ public final class NeoForgeInstallTask extends Task<GameInstancePatch> {
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
-                return setInstallationResources(new ForgeNewInstallTask(
-                        dependencyManager,
-                        version,
-                        modifyNeoForgeOldVersion(gameVersion.get(), profile.getVersion()),
-                        installer).thenApplyAsync(neoForgeVersion -> {
+                return setInstallationResources(new GameDownloadTask(dependencyManager, gameVersion.get(), version)
+                        .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                                dependencyManager,
+                                version,
+                                minecraftJar,
+                                modifyNeoForgeOldVersion(gameVersion.get(), profile.getVersion()),
+                                installer))
+                        .thenApplyAsync(neoForgeVersion -> {
                     if (!neoForgeVersion.id().equals(LibraryAnalyzer.LibraryType.FORGE.getPatchId()) || neoForgeVersion.version() == null) {
                         throw new IOException("Invalid neoforge version.");
                     }
@@ -151,11 +155,13 @@ public final class NeoForgeInstallTask extends Task<GameInstancePatch> {
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
                 return setInstallationResources(
-                        new NeoForgeOldInstallTask(
-                                dependencyManager,
-                                version,
-                                modifyNeoForgeNewVersion(profile.getVersion()),
-                                installer),
+                        new GameDownloadTask(dependencyManager, gameVersion.get(), version)
+                                .thenComposeAsync(minecraftJar -> new NeoForgeOldInstallTask(
+                                        dependencyManager,
+                                        version,
+                                        minecraftJar,
+                                        modifyNeoForgeNewVersion(profile.getVersion()),
+                                        installer)),
                         dependencyManager,
                         version,
                         installer);

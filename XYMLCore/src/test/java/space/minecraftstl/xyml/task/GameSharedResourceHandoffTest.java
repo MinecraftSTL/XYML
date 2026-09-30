@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
 import space.minecraftstl.xyml.download.game.GameAssetIndexDownloadTask;
 import space.minecraftstl.xyml.download.game.GameLibrariesTask;
@@ -101,7 +101,7 @@ final class GameSharedResourceHandoffTest {
     private DefaultDependencyManager dependencyManager(DefaultGameRepository repository) {
         return new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
     }
 

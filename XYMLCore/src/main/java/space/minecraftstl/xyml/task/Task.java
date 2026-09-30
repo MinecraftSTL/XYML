@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.Result;
 import space.minecraftstl.xyml.util.function.ExceptionalConsumer;
 import space.minecraftstl.xyml.util.function.ExceptionalFunction;
@@ -1239,6 +1240,24 @@ public abstract class Task<T> {
     }
 
     /// Creates a result-less task for the supplied action on the default scheduler.
+    public static <T, U> Task<Pair<T, U>> combine(Task<? extends T> task1, Task<? extends U> task2) {
+        return new Task<>() {
+            {
+                setSignificance(TaskSignificance.MINOR);
+            }
+
+            @Override
+            public void execute() {
+                setResult(Pair.pair(task1.getResult(), task2.getResult()));
+            }
+
+            @Override
+            public Collection<? extends Task<?>> getDependents() {
+                return List.of(task1, task2);
+            }
+        };
+    }
+
     public static Task<@Nullable Void> runAsync(ExceptionalRunnable<?> closure) {
         return runAsync(Schedulers.defaultScheduler(), closure);
     }

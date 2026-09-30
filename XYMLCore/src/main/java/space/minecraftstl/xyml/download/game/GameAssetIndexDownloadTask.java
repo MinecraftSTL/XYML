@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.download.game;
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.AssetIndex;
 import space.minecraftstl.xyml.game.AssetIndexInfo;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
@@ -102,8 +103,9 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
 
         // We should not check the hash code of asset index file since this file is not consistent
         // And Mojang will modify this file anytime. So assetIndex.hash might be outdated.
+        DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
         var task = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLWithCandidates(assetIndexInfo.getUrl()),
+                downloadProvider.getDownloadCandidates(assetIndexInfo.getUrl()),
                 assetIndexFile,
                 verifyHashCode ? new FileDownloadTask.IntegrityCheck("SHA-1", assetIndexInfo.getSha1()) : null
         );

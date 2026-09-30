@@ -22,8 +22,8 @@ import com.google.gson.annotations.SerializedName;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
@@ -287,7 +287,7 @@ public record Skin(
         ///
         /// @param url absolute texture URL
         private FetchBytesTask(String url) {
-            super(List.of(WebURL.parse(url)));
+            super(DownloadCandidates.of(url));
             useCacheOperationResource();
         }
 

@@ -18,12 +18,12 @@
 package space.minecraftstl.xyml.util;
 
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,7 +51,7 @@ public final class SettingsMapTest {
     }
 
     /// Creates a minimal remote version for installer state tests.
-    private static RemoteVersion remoteVersion(String libraryId) {
-        return new RemoteVersion(libraryId, "1.21.11", "test", Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remoteVersion(String libraryId) {
+        return new TestComponentRemoteVersion(GameComponentType.fromPatchId(libraryId), "1.21.11", "test");
     }
 }

@@ -23,11 +23,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.util.Collections;
@@ -48,14 +49,15 @@ final class OptiFineInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("optifine-resource-test"));
         OptiFineRemoteVersion remote = new OptiFineRemoteVersion(
-                "1.20.1",
+                GameVersionNumber.asGameVersion("1.20.1"),
                 "HD_U_I6",
                 Collections.singletonList("https://example.invalid/optifine-installer.jar"),
                 false);
+        Path minecraftJar = temporaryDirectory.resolve("minecraft.jar");
         Path installer = temporaryDirectory.resolve("optifine-installer.jar");
         @Unmodifiable Set<TaskResource> expectedRemote = Set.of(
                 TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
@@ -65,11 +67,12 @@ final class OptiFineInstallTaskResourceTest {
                 TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)),
                 TaskResource.archive(installer));
 
-        assertEquals(expectedRemote, new OptiFineInstallTask(dependencyManager, manifest, remote).getResources());
+        assertEquals(expectedRemote, new OptiFineInstallTask(dependencyManager, manifest, remote, minecraftJar).getResources());
         assertEquals(expectedLocal, new OptiFineInstallTask(
                 dependencyManager,
                 manifest,
                 remote,
+                minecraftJar,
                 installer).getResources());
     }
 }

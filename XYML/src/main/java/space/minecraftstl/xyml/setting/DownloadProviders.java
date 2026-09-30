@@ -17,23 +17,20 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import org.glavo.url.WebURL;
-import space.minecraftstl.xyml.download.*;
+import space.minecraftstl.xyml.download.ArtifactMalformedException;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.DownloadException;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.i18n.LocaleUtils;
 import space.minecraftstl.xyml.util.io.ResponseCodeException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 
 import javax.net.ssl.SSLHandshakeException;
 import java.io.FileNotFoundException;
 import java.net.SocketTimeoutException;
 import java.nio.file.AccessDeniedException;
-import java.util.List;
 import java.util.concurrent.CancellationException;
 
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
@@ -43,28 +40,17 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Owns the launcher-wide download provider selection and download error localization.
 @NotNullByDefault
 public final class DownloadProviders {
+    /// Default BMCLAPI mirror root used when no override is configured.
+    private static final String DEFAULT_BMCLAPI_ROOT = "https://bmclapi2.bangbang93.com";
+
+    /// Effective BMCLAPI mirror root without a trailing separator.
+    private static final String BMCLAPI_ROOT = resolveBMCLAPIROOT();
+
+    /// Stable provider whose source preferences follow the launcher settings.
+    private static final LauncherDownloadProvider PROVIDER = new LauncherDownloadProvider(BMCLAPI_ROOT);
+
     /// Prevents instantiation.
     private DownloadProviders() {
-    }
-
-    /// Stable delegating provider exposed to consumers while its selected backend changes.
-    private static final DownloadProviderWrapper PROVIDER_WRAPPER;
-
-    /// Official Mojang download backend.
-    private static final DownloadProvider MOJANG_PROVIDER;
-
-    /// BMCLAPI mirror download backend.
-    private static final BMCLAPIDownloadProvider BMCLAPI_PROVIDER;
-
-    /// Initial locale-aware provider composition.
-    private static final DownloadProvider DEFAULT_PROVIDER;
-
-    static {
-        String bmclapiRoot = System.getProperty("xyml.bmclapi.override", "https://bmclapi2.bangbang93.com");
-        BMCLAPI_PROVIDER = new BMCLAPIDownloadProvider(bmclapiRoot);
-        MOJANG_PROVIDER = new MojangDownloadProvider();
-        DEFAULT_PROVIDER = createDownloadProvider(DownloadSource.DEFAULT, DownloadSource.DEFAULT);
-        PROVIDER_WRAPPER = new DownloadProviderWrapper(DEFAULT_PROVIDER);
     }
 
     /// Initializes download provider settings and synchronizes download thread settings.
@@ -79,48 +65,36 @@ public final class DownloadProviders {
         onChangeDownloadThreads.run();
 
         Runnable onChangeDownloadSource = () -> {
-            PROVIDER_WRAPPER.setProvider(createDownloadProvider(
-                    settings().versionListSourceProperty().get(),
-                    settings().fileDownloadSourceProperty().get()));
+            PROVIDER.setVersionListSource(normalizeSource(settings().versionListSourceProperty().get()));
+            PROVIDER.setFileSource(normalizeSource(settings().fileDownloadSourceProperty().get()));
         };
         settings().versionListSourceProperty().subscribe(change -> onChangeDownloadSource.run());
         settings().fileDownloadSourceProperty().subscribe(change -> onChangeDownloadSource.run());
         onChangeDownloadSource.run();
     }
 
-    /// Creates a download provider with independent version-list and file download preferences.
+    /// Resolves the configured BMCLAPI mirror root, ignoring blank values.
     ///
-    /// @param versionListSource preferred version-list source, or `null` to use the locale-aware default
-    /// @param fileDownloadSource preferred artifact source, or `null` to use the locale-aware default
-    /// @return provider with ordered fallbacks for both operations
-    private static DownloadProvider createDownloadProvider(
-            @Nullable DownloadSource versionListSource,
-            @Nullable DownloadSource fileDownloadSource) {
-        return new AutoDownloadProvider(
-                getCandidates(versionListSource),
-                getCandidates(fileDownloadSource));
+    /// @return mirror root without a trailing separator
+    private static String resolveBMCLAPIROOT() {
+        @Nullable String override = System.getProperty("xyml.bmclapi.override");
+        String root = StringUtils.isBlank(override) ? DEFAULT_BMCLAPI_ROOT : override.trim();
+        return StringUtils.removeSuffix(root, "/");
     }
 
-    /// Returns provider candidates ordered by the given source preference.
+    /// Normalizes a nullable source preference to the automatic default.
     ///
-    /// @param source preferred source, or `null` to use the locale-aware default
-    /// @return immutable provider candidates in attempt order
-    private static @Unmodifiable List<DownloadProvider> getCandidates(@Nullable DownloadSource source) {
-        DownloadSource normalized = source != null ? source : DownloadSource.DEFAULT;
-        return switch (normalized) {
-            case DEFAULT -> LocaleUtils.IS_CHINA_MAINLAND
-                    ? List.of(BMCLAPI_PROVIDER, MOJANG_PROVIDER)
-                    : List.of(MOJANG_PROVIDER, BMCLAPI_PROVIDER);
-            case OFFICIAL -> List.of(MOJANG_PROVIDER);
-            case MIRROR -> List.of(BMCLAPI_PROVIDER, MOJANG_PROVIDER);
-        };
+    /// @param source configured source preference, or `null`
+    /// @return non-null source preference
+    private static DownloadSource normalizeSource(@Nullable DownloadSource source) {
+        return source != null ? source : DownloadSource.DEFAULT;
     }
 
-    /// Returns the stable launcher-wide provider wrapper.
+    /// Returns the stable launcher-wide download provider.
     ///
-    /// @return provider wrapper delegating to the current preference
+    /// @return stable provider delegating to the current source preference
     public static DownloadProvider getDownloadProvider() {
-        return PROVIDER_WRAPPER;
+        return PROVIDER;
     }
 
     /// Converts a download failure into a localized user-facing message and diagnostic detail.
@@ -129,7 +103,7 @@ public final class DownloadProviders {
     /// @return localized failure detail
     public static String localizeErrorMessage(Throwable exception) {
         if (exception instanceof DownloadException) {
-            @Nullable WebURL url = ((DownloadException) exception).getUrl();
+            String url = ((DownloadException) exception).getUrl();
             if (exception.getCause() instanceof SocketTimeoutException) {
                 return i18n("install.failed.downloading.timeout", url);
             } else if (exception.getCause() instanceof ResponseCodeException) {

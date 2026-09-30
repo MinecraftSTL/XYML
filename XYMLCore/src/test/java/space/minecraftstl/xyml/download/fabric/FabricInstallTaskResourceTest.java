@@ -24,11 +24,14 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -51,9 +54,10 @@ final class FabricInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory);
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
-        GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("fabric-example"));
+        GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("fabric-example"))
+                .withPatches(List.of(new GameInstancePatch(GameComponentType.GAME.getPatchId())));
         @Unmodifiable Set<TaskResource> expectedInstallResources = Set.of(
                 TaskResource.repositoryMetadata(repository.getBaseDirectory()));
         @Unmodifiable Set<TaskResource> expectedApiResources = Set.of(
@@ -64,7 +68,7 @@ final class FabricInstallTaskResourceTest {
                 new FabricInstallTask(
                         dependencyManager,
                         manifest,
-                        new FabricRemoteVersion("1.20.1", "0.15.11", List.of("https://example.invalid/fabric.json")))
+                        new FabricRemoteVersion(GameVersionNumber.asGameVersion("1.20.1"), "0.15.11", List.of("https://example.invalid/fabric.json")))
                         .getResources());
         assertEquals(expectedApiResources, new FabricAPIInstallTask(dependencyManager, manifest, apiVersion()).getResources());
     }
@@ -86,7 +90,7 @@ final class FabricInstallTaskResourceTest {
                 List.of("1.20.1"),
                 List.of());
         return new FabricAPIRemoteVersion(
-                "1.20.1",
+                GameVersionNumber.asGameVersion("1.20.1"),
                 "0.100.0",
                 "0.100.0+1.20.1",
                 Instant.EPOCH,

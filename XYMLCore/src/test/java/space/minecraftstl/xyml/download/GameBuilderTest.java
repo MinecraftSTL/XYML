@@ -20,9 +20,9 @@ package space.minecraftstl.xyml.download;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.task.Task;
 
-import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,16 +34,16 @@ public final class GameBuilderTest {
     /// Different loaders with equal self-version text retain their caller-supplied order.
     @Test
     public void remoteVersionsRetainOrderWithoutEqualityBasedDeduplication() {
-        RemoteVersion forge = remoteVersion("forge", "47.2.0");
-        RemoteVersion fabric = remoteVersion("fabric", "47.2.0");
-        RemoteVersion quilt = remoteVersion("quilt", "0.26.3");
+        ComponentRemoteVersion forge = remoteVersion(GameComponentType.FORGE, "47.2.0");
+        ComponentRemoteVersion fabric = remoteVersion(GameComponentType.FABRIC, "47.2.0");
+        ComponentRemoteVersion quilt = remoteVersion(GameComponentType.QUILT, "0.26.3");
         RecordingGameBuilder builder = new RecordingGameBuilder();
 
         builder.version(forge).version(fabric).version(quilt);
 
-        @Unmodifiable List<RemoteVersion> selected = builder.remoteVersionsSnapshot();
+        @Unmodifiable List<ComponentRemoteVersion> selected = builder.remoteVersionsSnapshot();
         assertEquals(List.of("forge", "fabric", "quilt"), selected.stream()
-                .map(RemoteVersion::getLibraryId)
+                .map(value -> value.getComponentType().getPatchId())
                 .toList());
         assertSame(forge, selected.get(0));
         assertSame(fabric, selected.get(1));
@@ -52,11 +52,11 @@ public final class GameBuilderTest {
 
     /// Creates minimal remote installer metadata for builder-selection tests.
     ///
-    /// @param libraryId selected installer identifier
+    /// @param componentType selected component type
     /// @param selfVersion selected installer version text
     /// @return remote installer metadata
-    private static RemoteVersion remoteVersion(String libraryId, String selfVersion) {
-        return new RemoteVersion(libraryId, "1.21.1", selfVersion, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remoteVersion(GameComponentType componentType, String selfVersion) {
+        return new TestComponentRemoteVersion(componentType, "1.21.1", selfVersion);
     }
 
     /// Captures protected builder state without starting a real installation task.
@@ -65,7 +65,7 @@ public final class GameBuilderTest {
         /// Returns an immutable snapshot of remote installers recorded by the base builder.
         ///
         /// @return immutable ordered remote installers
-        private @Unmodifiable List<RemoteVersion> remoteVersionsSnapshot() {
+        private @Unmodifiable List<ComponentRemoteVersion> remoteVersionsSnapshot() {
             return List.copyOf(remoteVersions);
         }
 

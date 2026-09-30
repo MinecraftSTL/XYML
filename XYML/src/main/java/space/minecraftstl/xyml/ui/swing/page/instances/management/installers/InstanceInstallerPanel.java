@@ -23,7 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -645,7 +645,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         if (!isReadyForMutation()) {
             return;
         }
-        List<RemoteVersion> selectedVersions = loaderWizard.selectedRemoteVersions();
+        List<ComponentRemoteVersion> selectedVersions = loaderWizard.selectedRemoteVersions();
         if (selectedVersions.isEmpty()) {
             updateControls();
             return;

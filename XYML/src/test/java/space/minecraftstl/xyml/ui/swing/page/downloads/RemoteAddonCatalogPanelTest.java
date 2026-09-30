@@ -1234,7 +1234,7 @@ final class RemoteAddonCatalogPanelTest {
                 assertNotNull(gameVersionBox);
                 assertNotNull(search);
                 assertEquals(4, categoryBox.getItemCount());
-                assertEquals(6, sortBox.getItemCount());
+                assertEquals(7, sortBox.getItemCount());
                 assertEquals(RemoteAddonRepository.SortType.POPULARITY, sortBox.getSelectedItem());
                 assertEquals(3, versionSortBox.getItemCount());
                 assertTrue(gameVersionBox.isEditable());

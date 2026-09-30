@@ -91,7 +91,7 @@ public final class ExistingInstanceRemoteModpackUpdateLauncher implements Remote
 
         Path archive = Files.createTempFile("xyml-remote-modpack-update-", ".zip");
         FileDownloadTask download = new FileDownloadTask(
-                downloadProvider.injectURLWithCandidates(updateRequest.version().file().url()),
+                downloadProvider.getDownloadCandidates(updateRequest.version().file().url()),
                 archive,
                 updateRequest.version().file().getIntegrityCheck());
         download.setName(updateRequest.version().name().isBlank()

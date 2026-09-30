@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.game.GameInstanceID;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.task.Task;
 
 import java.nio.file.Path;
@@ -48,7 +48,7 @@ public interface InstanceInstallerManagementService {
     /// @return stopped task that saves, refreshes, and returns the resulting installer snapshot
     Task<InstanceInstallerSnapshot> installRemoteVersions(
             GameInstanceID instanceId,
-            Collection<? extends RemoteVersion> remoteVersions);
+            Collection<? extends ComponentRemoteVersion> remoteVersions);
 
     /// Builds a task that removes one library identifier, saves metadata, refreshes, and returns a snapshot.
     ///

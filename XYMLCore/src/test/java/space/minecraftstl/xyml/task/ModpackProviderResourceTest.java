@@ -24,7 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
@@ -214,7 +214,7 @@ final class ModpackProviderResourceTest {
     private DefaultDependencyManager dependencyManager(DefaultGameRepository repository) {
         return new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
     }
 

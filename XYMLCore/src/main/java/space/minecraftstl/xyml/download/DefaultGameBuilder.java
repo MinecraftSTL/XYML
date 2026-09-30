@@ -79,10 +79,10 @@ public class DefaultGameBuilder extends GameBuilder {
             hints.add(new Task.StagesHint(String.format("xyml.install.%s:%s", entry.getKey(), entry.getValue())));
         }
 
-        for (RemoteVersion remoteVersion : remoteVersions) {
+        for (ComponentRemoteVersion remoteVersion : remoteVersions) {
             libraryTask = libraryTask.thenComposeAsync(version -> dependencyManager.installLibraryAsync(version, remoteVersion))
                     .asOrchestration();
-            hints.add(new Task.StagesHint(String.format("xyml.install.%s:%s", remoteVersion.getLibraryId(), remoteVersion.getSelfVersion())));
+            hints.add(new Task.StagesHint(String.format("xyml.install.%s:%s", remoteVersion.getComponentType().getPatchId(), remoteVersion.getSelfVersion())));
         }
 
         boolean isUpdate = repository.hasInstance(instanceId);

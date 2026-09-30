@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallTask;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile.Processor;
 import space.minecraftstl.xyml.game.Artifact;
@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.lang.reflect.Method;
 import java.nio.file.Path;
@@ -54,7 +55,7 @@ final class NeoForgeInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("neoforge-resource-test"));
         @Unmodifiable Set<TaskResource> expected = Set.of(
@@ -67,7 +68,8 @@ final class NeoForgeInstallTaskResourceTest {
                 dependencyManager,
                 manifest,
                 new NeoForgeRemoteVersion(
-                        "1.20.1",
+                        GameVersionNumber.asGameVersion("1.20.1"),
+                        "20.4.230",
                         "20.4.230",
                         List.of("https://example.invalid/neoforge-installer.jar")))
                 .getResources());
@@ -79,11 +81,13 @@ final class NeoForgeInstallTaskResourceTest {
         assertEquals(expectedLocal, new ForgeNewInstallTask(
                 dependencyManager,
                 manifest,
+                temporaryDirectory.resolve("minecraft.jar"),
                 "20.4.230",
                 installer).getResources());
         assertEquals(expectedLocal, new NeoForgeOldInstallTask(
                 dependencyManager,
                 manifest,
+                temporaryDirectory.resolve("minecraft.jar"),
                 "20.4.230",
                 installer).getResources());
     }
@@ -96,12 +100,13 @@ final class NeoForgeInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("neoforge-processor-resource-test"));
         NeoForgeOldInstallTask installation = new NeoForgeOldInstallTask(
                 dependencyManager,
                 manifest,
+                temporaryDirectory.resolve("minecraft.jar"),
                 "20.4.230",
                 temporaryDirectory.resolve("neoforge-installer.jar"));
 
@@ -118,11 +123,12 @@ final class NeoForgeInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         NeoForgeOldInstallTask installation = new NeoForgeOldInstallTask(
                 dependencyManager,
                 new GameInstanceManifest(new GameInstanceID("neoforge-mappings-resource-test")),
+                temporaryDirectory.resolve("minecraft.jar"),
                 "20.4.230",
                 temporaryDirectory.resolve("neoforge-installer.jar"));
 

@@ -20,9 +20,9 @@ package space.minecraftstl.xyml.java;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.platform.Platform;
@@ -60,11 +60,11 @@ public final class JavaManagerTaskResourceTest {
         Platform platform = Platform.SYSTEM_PLATFORM;
         GameJavaVersion version = GameJavaVersion.JAVA_17;
         Path archive = temporaryDirectory.resolve("runtime.zip");
-        Task<JavaRuntime> download = JavaManager.getDownloadJavaTask(new MojangDownloadProvider(), platform, version);
+        Task<JavaRuntime> download = JavaManager.getDownloadJavaTask(new DownloadProvider(), platform, version);
         Task<JavaRuntime> install = JavaManager.getInstallJavaTask(platform, "fixture", Map.of(), archive);
 
         assertEquals(
-                JavaManager.REPOSITORY.getDownloadJavaTask(new MojangDownloadProvider(), platform, version)
+                JavaManager.REPOSITORY.getDownloadJavaTask(new DownloadProvider(), platform, version)
                         .getResources(),
                 download.getResources());
         assertEquals(

@@ -58,9 +58,9 @@ Antes de contribuir, lee la [guía de contribución](./Contributing_en.md), que 
 
 ## Colaboradores
 
-Desde 2015, más de 120 colaboradores han participado en XYML. Gracias por su trabajo.
+Desde 2015, más de 130 colaboradores han participado en XYML. Gracias por su trabajo.
 
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 ## Licencia
 

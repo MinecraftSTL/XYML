@@ -19,19 +19,16 @@ package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import org.glavo.url.WebURL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Objects;
 
 /// Fetches text from ordered URLs while bounding both advertised and actually decoded response bytes.
 ///
@@ -48,17 +45,17 @@ public final class BoundedTextFetchTask extends FetchTask<String> {
 
     /// Creates a stopped bounded UTF-compatible text fetch task.
     ///
-    /// @param urls immutable ordered candidate URLs
+    /// @param candidates nonempty ordered download candidates
     /// @param maximumBytes positive decoded response byte ceiling
     public BoundedTextFetchTask(
-            @Unmodifiable List<WebURL> urls,
+            DownloadCandidates candidates,
             long maximumBytes) {
-        super(List.copyOf(Objects.requireNonNull(urls, "urls")));
+        super(candidates);
         if (maximumBytes <= 0L) {
             throw new IllegalArgumentException("maximumBytes must be positive");
         }
         this.maximumBytes = maximumBytes;
-        setName(this.urls.get(0).toString());
+        setName(candidates.getPrimaryCandidate().displayUrl());
         useCacheOperationResource();
     }
 

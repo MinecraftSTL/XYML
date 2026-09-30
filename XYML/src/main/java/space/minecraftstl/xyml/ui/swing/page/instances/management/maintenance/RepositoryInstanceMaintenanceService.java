@@ -41,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -160,7 +161,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
             Path temporaryDirectory = repository.getInstanceStateDirectory(instanceId).resolve("maintenance");
             Files.createDirectories(temporaryDirectory);
             Path temporaryArchive = Files.createTempFile(temporaryDirectory, "modpack-update-", ".zip");
-            FileDownloadTask downloadTask = new FileDownloadTask(WebURL.of(updateSource), temporaryArchive);
+            FileDownloadTask downloadTask = new FileDownloadTask(List.of(WebURL.of(updateSource)), temporaryArchive);
             downloadTask.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
             Task<@Nullable Void> acquisition = downloadTask.thenApplyAsync(ioExecutor, ignored -> (Void) null)
                     .setResources(instanceResource(), TaskResource.downloadTarget(temporaryArchive));

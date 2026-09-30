@@ -18,23 +18,19 @@
 package space.minecraftstl.xyml.addon.repository;
 
 import com.google.gson.reflect.TypeToken;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
-import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
+import space.minecraftstl.xyml.download.DownloadCandidate;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.util.Immutable;
 import space.minecraftstl.xyml.util.MurmurHash2;
-import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
-import space.minecraftstl.xyml.util.io.HttpRequest;
-import space.minecraftstl.xyml.util.io.JarUtils;
-import space.minecraftstl.xyml.util.io.NetworkUtils;
-import space.minecraftstl.xyml.util.io.NoCandidatesException;
-import space.minecraftstl.xyml.util.io.ResponseCodeException;
+import space.minecraftstl.xyml.util.io.*;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -56,19 +52,14 @@ import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// @see <a href="https://docs.curseforge.com/rest-api">CurseForge API Doc</a>
-@NotNullByDefault
 public final class CurseForgeRemoteAddonRepository implements RemoteAddonRepository {
 
     private static final String PREFIX = "https://api.curseforge.com";
-
-    /// Public CurseForge web origin used to build exact version links.
     private static final String BASE = "https://www.curseforge.com";
     private static final Semaphore SEMAPHORE = new Semaphore(16);
     private static final int DEFAULT_RETRY_COUNT = 3;
 
-    public static final String API_KEY = System.getProperty("xyml.curseforge.apikey", JarUtils.getAttribute("xyml.curseforge.apikey", ""));
-
-    private static final int WORD_PERFECT_MATCH_WEIGHT = 5;
+    public static final String API_KEY = System.getProperty("hmcl.curseforge.apikey", JarUtils.getAttribute("hmcl.curseforge.apikey", ""));
 
     private static <R extends HttpRequest> R withApiKey(R request) {
         if (request.getUrl().startsWith(PREFIX) && !API_KEY.isEmpty()) {
@@ -101,29 +92,25 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         return type;
     }
 
-    /// {@inheritDoc}
     @Override
     public String getApiBaseUrl() {
         return PREFIX;
     }
 
-    /// {@inheritDoc}
     @Override
     public String getBaseUrl() {
         return BASE;
     }
 
-    /// Converts one provider-neutral ordering into CurseForge's mod-search field.
-    ///
-    /// @param sort requested result ordering
-    /// @return CurseForge mod-search field identifier
     static int toModsSearchSortField(SortType sort) {
+        // https://docs.curseforge.com/rest-api/#tocS_ModsSearchSortField
         return switch (sort) {
+            case RELEVANCY -> 1; // This represents Featured, however test shows that they are quite similar
             case POPULARITY -> 2;
             case NAME -> 4;
-            case DATE_CREATED -> 1;
-            case LAST_UPDATED -> 3;
             case AUTHOR -> 5;
+            case DATE_CREATED -> 11;
+            case LAST_UPDATED -> 3;
             case TOTAL_DOWNLOADS -> 6;
         };
     }
@@ -140,7 +127,11 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         return (int) Math.ceil((double) Math.min(response.pagination.totalCount, 10000) / pageSize);
     }
 
-    /// {@inheritDoc}
+    /// Searches the configured section, preserving the order returned by the server.
+    ///
+    /// @throws UnsupportedOperationException if this repository has no configured section
+    /// @throws NoCandidatesException         if no response is obtained and no I/O failure was recorded
+    /// @throws IOException                   if all candidate requests fail with I/O errors
     @Override
     public SearchResult search(DownloadProvider downloadProvider, String gameVersion, @Nullable RemoteAddonRepository.Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder) throws IOException {
         if (type == null) throw new UnsupportedOperationException();
@@ -163,23 +154,20 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
             query.put("index", Integer.toString(pageOffset * pageSize));
             query.put("pageSize", Integer.toString(pageSize));
 
-            Response<List<CurseAddon>> response = null;
+            @Nullable Response<List<CurseAddon>> response = null;
 
-            IOException exception = null;
-            List<WebURL> candidates = downloadProvider.injectURLWithCandidates(NetworkUtils.withQuery(PREFIX + "/v1/mods/search", query));
-            for (WebURL candidate : candidates) {
+            @Nullable IOException exception = null;
+            DownloadCandidates candidates = downloadProvider.getDownloadCandidates(NetworkUtils.withQuery(PREFIX + "/v1/mods/search", query));
+            for (DownloadCandidate candidate : candidates.getCandidates()) {
                 LOG.info("Fetching " + candidate);
                 try {
-                    response = withApiKey(HttpRequest.GET(candidate.toString()))
+                    response = withApiKey(HttpRequest.GET(candidate.displayUrl()))
                             .retry(DEFAULT_RETRY_COUNT)
                             .getJson(Response.typeOf(listTypeOf(CurseAddon.class)));
-                    if (searchFilter.isEmpty()) {
-                        return new SearchResult(response.data().stream().map(CurseAddon::toAddon), calculateTotalPages(response, pageSize));
-                    }
                     break;
                 } catch (IOException e) {
                     LOG.warning("Failed to search addons: " + candidate, e);
-                    if (candidates.size() == 1) {
+                    if (candidates.getCandidates().size() == 1) {
                         exception = e;
                     } else {
                         if (exception == null) {
@@ -190,41 +178,16 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                 }
             }
 
-            if (response == null) {
-                throw exception != null ? exception : new NoCandidatesException();
-            }
+            if (response != null)
+                return new SearchResult(response.data().stream().map(CurseAddon::toAddon), calculateTotalPages(response, pageSize));
 
-            // https://github.com/HMCL-dev/HMCL/issues/1549
-            String lowerCaseSearchFilter = searchFilter.toLowerCase(Locale.ROOT);
-            Map<String, Integer> searchFilterWords = new HashMap<>();
-            for (String s : StringUtils.tokenize(lowerCaseSearchFilter)) {
-                searchFilterWords.put(s, searchFilterWords.getOrDefault(s, 0) + 1);
-            }
-
-            StringUtils.LevCalculator levCalculator = new StringUtils.LevCalculator();
-
-            return new SearchResult(response.data().stream().map(CurseAddon::toAddon).map(remoteAddon -> {
-                String lowerCaseResult = remoteAddon.title().toLowerCase(Locale.ROOT);
-                int diff = levCalculator.calc(lowerCaseSearchFilter, lowerCaseResult);
-
-                for (String s : StringUtils.tokenize(lowerCaseResult)) {
-                    if (searchFilterWords.containsKey(s)) {
-                        diff -= WORD_PERFECT_MATCH_WEIGHT * searchFilterWords.get(s) * s.length();
-                    }
-                }
-
-                return pair(remoteAddon, diff);
-            }).sorted(Comparator.comparingInt(Pair::getValue)).map(Pair::getKey), response.data().stream().map(CurseAddon::toAddon), calculateTotalPages(response, pageSize));
+            throw exception != null ? exception : new NoCandidatesException();
         } finally {
             SEMAPHORE.release();
         }
     }
 
     /// Calculates the CurseForge fingerprint without retaining the filtered file in memory.
-    ///
-    /// @param file the local file to fingerprint
-    /// @return the unsigned 32-bit fingerprint represented by a `long`
-    /// @throws IOException if the file cannot be read or its fingerprint cannot be completed
     static long calculateFingerprint(Path file) throws IOException {
         try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
             long startPosition = channel.position();
@@ -317,7 +280,6 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         }
     }
 
-    /// {@inheritDoc}
     @Override
     public RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException {
         try {
@@ -358,13 +320,11 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         }
     }
 
-    /// {@inheritDoc}
     @Override
-    public @Nullable String getAddonChangelog(DownloadProvider downloadProvider, String addonId, String versionId) throws IOException {
+    public String getAddonChangelog(DownloadProvider downloadProvider, String addonId, String versionId) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
-            Response<String> response = withApiKey(HttpRequest.GET(
-                    String.format("%s/v1/mods/%s/files/%s/changelog", PREFIX, addonId, versionId)))
+            Response<String> response = withApiKey(HttpRequest.GET(String.format("%s/v1/mods/%s/files/%s/changelog", PREFIX, addonId, versionId)))
                     .retry(DEFAULT_RETRY_COUNT)
                     .getJson(Response.typeOf(String.class));
             return response.data();
@@ -373,15 +333,16 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         }
     }
 
-    /// {@inheritDoc}
     @Override
-    public String getVersionPageUrl(RemoteAddon.Version version) throws IOException {
+    public @NotNull String getVersionPageUrl(RemoteAddon.Version version) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
             Response<CurseAddon> response = withApiKey(HttpRequest.GET(PREFIX + "/v1/mods/" + version.projectId()))
                     .retry(DEFAULT_RETRY_COUNT)
                     .getJson(Response.typeOf(CurseAddon.class));
-            String category = switch (response.data().classId()) {
+            var addon = response.data();
+            var classId = addon.classId();
+            var clazz = switch (classId) {
                 case SECTION_MOD -> "mc-mods";
                 case SECTION_RESOURCE_PACK -> "texture-packs";
                 case SECTION_WORLD -> "worlds";
@@ -391,10 +352,10 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                 case SECTION_ADDONS -> "mc-addons";
                 case SECTION_CUSTOMIZATION -> "customization";
                 case SECTION_SHADER -> "shaders";
-                default -> throw new IllegalArgumentException("Unsupported CurseForge class id ["
-                        + response.data().classId() + "]");
+                default ->
+                        throw new IllegalArgumentException("Unsupported CurseForge class id [%d]".formatted(classId));
             };
-            return BASE + "/minecraft/" + category + "/" + response.data().slug() + "/files/" + version.versionId();
+            return "%s/minecraft/%s/%s/files/%s".formatted(BASE, clazz, addon.slug(), version.versionId());
         } finally {
             SEMAPHORE.release();
         }
@@ -439,8 +400,6 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     public static final int SECTION_BUKKIT_PLUGIN = 5;
     public static final int SECTION_MOD = 6;
     public static final int SECTION_RESOURCE_PACK = 12;
-
-    /// CurseForge class identifier for Minecraft data packs.
     public static final int SECTION_DATAPACK = 6945;
     public static final int SECTION_WORLD = 17;
     public static final int SECTION_MODPACK = 4471;
@@ -590,7 +549,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
          * @see <a href="https://docs.curseforge.com/rest-api/#tocS_FileHash">Schema</a>
          */
         @Immutable
-        public record LatestFileHash(@Nullable String value, int algo) {
+        public record LatestFileHash(String value, int algo) {
         }
 
         /**
@@ -599,7 +558,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         @Immutable
         public record LatestFile(int id, int gameId, int modId, boolean isAvailable, String displayName,
                                  String fileName,
-                                 int releaseType, int fileStatus, @Nullable List<LatestFileHash> hashes, Instant fileDate,
+                                 int releaseType, int fileStatus, List<LatestFileHash> hashes, Instant fileDate,
                                  int fileLength, int downloadCount, String downloadUrl, List<String> gameVersions,
                                  List<Dependency> dependencies, int alternateFileId, boolean isServerPack,
                                  long fileFingerprint) implements RemoteAddon.IVersion {
@@ -627,15 +586,31 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                     default -> RemoteAddon.VersionType.Release;
                 };
 
+                Map<String, String> knownHashes;
+                if (hashes != null) {
+                    knownHashes = new HashMap<>();
+                    for (LatestFileHash hash : hashes) {
+                        if (hash.value != null) {
+                            switch (hash.algo) {
+                                case 1 -> knownHashes.put("sha1", hash.value);
+                                case 2 -> knownHashes.put("md5", hash.value);
+                            }
+                        }
+                    }
+                    knownHashes = Map.copyOf(knownHashes);
+                } else {
+                    knownHashes = Map.of();
+                }
+
                 return new RemoteAddon.Version(
                         this,
-                        Integer.toString(id),
-                        Integer.toString(modId),
+                        Integer.toString(id()),
+                        Integer.toString(modId()),
                         displayName(),
                         fileName(),
                         fileDate(),
                         versionType,
-                        new RemoteAddon.File(toHashes(), downloadUrl(), fileName()),
+                        new RemoteAddon.File(knownHashes, downloadUrl(), fileName()),
                         dependencies.stream().map(dependency -> {
                             if (!RELATION_TYPE.containsKey(dependency.relationType())) {
                                 throw new IllegalStateException("Broken datas.");
@@ -651,28 +626,6 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                             else return Stream.empty();
                         }).collect(Collectors.toList())
                 );
-            }
-
-            /// Converts CurseForge hash records to the normalized remote-file hash map.
-            ///
-            /// @return immutable hash map containing supported SHA-1 and MD5 values
-            private Map<String, String> toHashes() {
-                if (hashes == null || hashes.isEmpty()) {
-                    return Map.of();
-                }
-
-                Map<String, String> result = new HashMap<>();
-                for (LatestFileHash hash : hashes) {
-                    if (hash.value() == null) {
-                        continue;
-                    }
-                    if (hash.algo() == 1) {
-                        result.put("sha1", hash.value());
-                    } else if (hash.algo() == 2) {
-                        result.put("md5", hash.value());
-                    }
-                }
-                return Map.copyOf(result);
             }
         }
 

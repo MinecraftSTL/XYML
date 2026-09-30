@@ -23,7 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -325,7 +325,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private @Nullable String loaderGameVersionId;
 
     /// Exact selected loader objects retained for the currently selected base game version.
-    private @Unmodifiable List<RemoteVersion> selectedRemoteVersions = List.of();
+    private @Unmodifiable List<ComponentRemoteVersion> selectedRemoteVersions = List.of();
 
     /// Last version-derived instance name, or null after the user authored a different value.
     private @Nullable String suggestedInstanceName;
@@ -1348,11 +1348,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// @return suggested instance name
     static String defaultInstanceName(
             String versionId,
-            @Unmodifiable List<RemoteVersion> loaders) {
+            @Unmodifiable List<ComponentRemoteVersion> loaders) {
         StringBuilder name = new StringBuilder(Objects.requireNonNull(versionId, "versionId"));
-        for (RemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
+        for (ComponentRemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
             @Nullable LibraryAnalyzer.LibraryType type =
-                    LibraryAnalyzer.LibraryType.fromPatchId(loader.getLibraryId());
+                    LibraryAnalyzer.LibraryType.fromPatchId(loader.getComponentType().getPatchId());
             @Nullable String suffix = type == null ? null : switch (type) {
                 case FORGE -> "Forge";
                 case NEO_FORGE -> "NeoForge";

@@ -58,9 +58,9 @@ XYML — это открытый проект, развиваемый сообщ
 
 ## Участники
 
-С 2015 года в разработке XYML участвовали более 120 человек. Спасибо за ваш труд!
+С 2015 года в разработке XYML участвовали более 130 человек. Спасибо за ваш труд!
 
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 ## Лицензия
 

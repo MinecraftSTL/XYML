@@ -89,7 +89,7 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
         this.tempDir = Objects.requireNonNull(tempDir, "tempDir").toAbsolutePath().normalize();
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
         setResources(TaskResource.javaRuntime(this.target), TaskResource.javaRuntime(this.tempDir));
-        this.javaDownloadsTask = new GetTask(this.downloadProvider.injectURLWithCandidates(JAVA_LIST_URL))
+        this.javaDownloadsTask = new GetTask(this.downloadProvider.getDownloadCandidates(JAVA_LIST_URL))
                 .thenComposeAsync(javaDownloadsJson -> {
                     MojangJavaDownloads allDownloads = JsonUtils.fromNonNullJson(
                             javaDownloadsJson,
@@ -106,7 +106,7 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
                     for (MojangJavaDownloads.JavaDownload download : candidates) {
                         if (JavaInfo.parseVersion(download.version().name()) >= javaVersion.majorVersion()) {
                             this.download = download;
-                            return new GetTask(this.downloadProvider.injectURLWithCandidates(
+                            return new GetTask(this.downloadProvider.getDownloadCandidates(
                                     download.manifest().getUrl()));
                         }
                     }
@@ -167,7 +167,7 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
 
                     Path tempFile = tempDir.resolve(entry.getKey() + ".lzma");
                     var task = new FileDownloadTask(
-                            downloadProvider.injectURLWithCandidates(download.getUrl()),
+                            downloadProvider.getDownloadCandidates(download.getUrl()),
                             tempFile,
                             new FileDownloadTask.IntegrityCheck("SHA-1", download.getSha1()));
                     task.setName(entry.getKey());
@@ -208,7 +208,7 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
                             file.getDownloads().get("raw"),
                             "raw download");
                     var task = new FileDownloadTask(
-                            downloadProvider.injectURLWithCandidates(download.getUrl()),
+                            downloadProvider.getDownloadCandidates(download.getUrl()),
                             dest,
                             new FileDownloadTask.IntegrityCheck("SHA-1", download.getSha1()));
                     task.setName(entry.getKey());

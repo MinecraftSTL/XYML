@@ -21,7 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -63,7 +63,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /// [#selectGameVersion(String)]. Selecting a loader card is local-only. A Core VersionList refresh
 /// starts only after the user explicitly presses the loader-version action, while the returned rows
 /// use [ViewportChoiceList] to materialize only the current measured viewport. Added selections keep
-/// their original [RemoteVersion] objects in parent-before-API installation order.
+/// their original [ComponentRemoteVersion] objects in parent-before-API installation order.
 @NotNullByDefault
 public final class LoaderSelectionWizardPanel extends JPanel implements AutoCloseable {
     /// Toolkit-neutral catalog model that contacts its source only after an explicit refresh command.
@@ -91,7 +91,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     ///
     /// Retained kinds participate in compatibility and API-parent checks, but are intentionally absent
     /// from [#selectedRemoteVersions()] because this control must submit only newly selected exact
-    /// [RemoteVersion] objects to an installation task.
+    /// [ComponentRemoteVersion] objects to an installation task.
     private final Set<GameLoaderKind> retainedLoaderKinds = EnumSet.noneOf(GameLoaderKind.class);
 
     /// Small visual model of the currently selected installer components.
@@ -277,8 +277,8 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
 
     /// Returns an immutable exact Core version snapshot in dependency-safe installation order.
     ///
-    /// @return immutable selected original RemoteVersion objects
-    public @Unmodifiable List<RemoteVersion> selectedRemoteVersions() {
+    /// @return immutable selected original ComponentRemoteVersion objects
+    public @Unmodifiable List<ComponentRemoteVersion> selectedRemoteVersions() {
         EdtDispatcher.requireEventDispatchThread();
         return selectionSnapshot().selectedRemoteVersions();
     }
@@ -289,11 +289,11 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     public LoaderSelectionSnapshot selectionSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         @Unmodifiable List<GameLoaderCatalogItem> selectedItems = selectedItemsInInstallOrder();
-        List<RemoteVersion> remoteVersions = new ArrayList<>(selectedItems.size());
+        List<ComponentRemoteVersion> remoteVersions = new ArrayList<>(selectedItems.size());
         for (GameLoaderCatalogItem item : selectedItems) {
             remoteVersions.add(item.remoteVersion());
         }
-        @Unmodifiable List<RemoteVersion> immutableRemoteVersions = List.copyOf(remoteVersions);
+        @Unmodifiable List<ComponentRemoteVersion> immutableRemoteVersions = List.copyOf(remoteVersions);
         return new LoaderSelectionSnapshot(
                 catalogModel.snapshot().gameVersion(),
                 immutableRemoteVersions,
@@ -814,7 +814,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         return kinds;
     }
 
-    /// Formats one visible catalog row without replacing its original RemoteVersion object.
+    /// Formats one visible catalog row without replacing its original ComponentRemoteVersion object.
     ///
     /// @param item exact selected-loader catalog item
     /// @return concise localized loader and self-version text

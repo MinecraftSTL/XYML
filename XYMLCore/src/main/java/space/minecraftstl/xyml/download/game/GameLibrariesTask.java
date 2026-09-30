@@ -19,8 +19,9 @@ package space.minecraftstl.xyml.download.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
+import space.minecraftstl.xyml.download.DownloadCandidates;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -35,7 +36,6 @@ import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
-import org.jetbrains.annotations.Unmodifiable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileSystem;
@@ -175,8 +175,8 @@ public final class GameLibrariesTask extends Task<Void> {
                     for (FMLLib fmlLib : fmlLibs) {
                         Path file = libDir.resolve(fmlLib.name);
                         if (shouldDownloadFMLLib(fmlLib, file)) {
-                            @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider()
-                                    .injectURLWithCandidates(fmlLib.downloadUrl());
+                            DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
+                            DownloadCandidates urls = downloadProvider.getDownloadCandidates(fmlLib.downloadUrl());
                             dependencies.add(new FileDownloadTask(urls, file)
                                     .withCounter("xyml.install.libraries"));
                         }

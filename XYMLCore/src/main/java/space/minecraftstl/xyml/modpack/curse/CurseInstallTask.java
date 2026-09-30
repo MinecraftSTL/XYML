@@ -163,7 +163,7 @@ public final class CurseInstallTask extends Task<Void> {
             String ext = FileUtils.getExtension(StringUtils.substringAfter(iconUri.getPath(), '/')).toLowerCase(Locale.ROOT);
             if (Modpack.SUPPORTED_ICON_EXTS.contains(ext)) {
                 iconExt = ext;
-                dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().injectURLWithCandidates(iconUrl)));
+                dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().getDownloadCandidates(iconUrl)));
             }
         }
         dependencies.add(new CurseCompletionTask(dependencyManager, instanceId, manifest, excludedFiles));

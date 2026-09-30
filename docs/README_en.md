@@ -78,7 +78,7 @@ You can participate in XYML through the following channels:
 
 Thank you to everyone who contributes code, translations, testing, issue reports, and documentation to XYML.
 
-[![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 We also thank
 [HMCL's authors and contributors throughout its history](https://github.com/HMCL-dev/HMCL/graphs/contributors). The

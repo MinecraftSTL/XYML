@@ -28,12 +28,14 @@ import space.minecraftstl.xyml.download.neoforge.NeoForgeInstallTask;
 import space.minecraftstl.xyml.download.optifine.OptiFineInstallTask;
 import space.minecraftstl.xyml.game.Artifact;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -180,6 +182,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                                 tasks.add(OptiFineInstallTask.install(
                                                 DefaultDependencyManager.this,
                                                 original,
+                                                gameVersion,
                                                 repository.getLibraryFile(manifest, installer))
                                         .setResources(
                                                 TaskResource.gameInstance(repository.getInstanceRoot(original.id())),
@@ -201,6 +204,11 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 .setResources(operationResource, instanceResource);
     }
 
+    @Override
+    public Task<?> checkComponentCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
+        return new GameLibrariesTask(this, manifest, integrityCheck, manifest.getLibraries());
+    }
+
     /// {@inheritDoc}
     @Override
     public Task<GameInstanceManifest> installLibraryAsync(
@@ -208,12 +216,23 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             GameInstanceManifest baseVersion,
             String libraryId,
             String libraryVersion) {
-        VersionList<?> versionList = getVersionList(libraryId);
+        GameComponentType componentType = GameComponentType.fromPatchId(libraryId);
+        if (componentType == null) {
+            throw new IllegalArgumentException("Unknown remote component: " + libraryId);
+        }
         TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id()));
         TaskResource librariesResource = TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion));
-        Task<GameInstanceManifest> installation = versionList.loadAsync(gameVersion)
-                .thenComposeAsync(() -> installLibraryAsync(baseVersion, versionList.getVersion(gameVersion, libraryVersion)
-                        .orElseThrow(() -> new IOException("Remote library " + libraryId + " has no version " + libraryVersion))))
+        Task<GameInstanceManifest> installation = downloadProvider
+                .getVersionsAsync(componentType,
+                        componentType == GameComponentType.GAME ? null : GameVersionNumber.asGameVersion(gameVersion),
+                        false)
+                .thenComposeAsync(versions -> {
+                    ComponentRemoteVersion remoteVersion = versions.getRemoteVersion(libraryVersion);
+                    if (remoteVersion == null) {
+                        throw new IOException("Remote library " + libraryId + " has no version " + libraryVersion);
+                    }
+                    return installLibraryAsync(baseVersion, remoteVersion);
+                })
                 .setResources(instanceResource, librariesResource)
                 .releaseResourcesBeforeDependents()
                 .releaseResourcesBeforeDependencies();
@@ -222,15 +241,15 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
 
     /// {@inheritDoc}
     @Override
-    public Task<GameInstanceManifest> installLibraryAsync(GameInstanceManifest baseVersion, RemoteVersion libraryVersion) {
+    public Task<GameInstanceManifest> installLibraryAsync(GameInstanceManifest baseVersion, ComponentRemoteVersion libraryVersion) {
         AtomicReference<GameInstanceManifest> removedLibraryVersion = new AtomicReference<>();
         TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id()));
         TaskResource librariesResource = TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion));
 
-        Task<GameInstancePatch> installation = removeLibraryAsync(baseVersion, libraryVersion.getLibraryId())
+        Task<GameInstancePatch> installation = removeLibraryAsync(baseVersion, libraryVersion.getComponentType().getPatchId())
                 .thenComposeAsync(version -> {
                     removedLibraryVersion.set(version);
-                    return libraryVersion.getInstallTask(this, version);
+                    return libraryVersion.getInstallTask(this, version, repository.getModsDirectory(baseVersion.id()));
                 })
                 .setResources(instanceResource, librariesResource)
                 .releaseResourcesBeforeDependents()
@@ -248,7 +267,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 .releaseResourcesBeforeDependencies()
                 .withStage(String.format(
                         "xyml.install.%s:%s",
-                        libraryVersion.getLibraryId(),
+                        libraryVersion.getComponentType().getPatchId(),
                         libraryVersion.getSelfVersion()));
     }
 
@@ -278,7 +297,11 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             }
 
             try {
-                return OptiFineInstallTask.install(this, oldVersion, installerPath);
+                String installerGameVersion = repository.getGameVersion(oldVersion).orElse(null);
+                if (installerGameVersion == null) {
+                    throw new IOException("Cannot determine the game version of the target manifest");
+                }
+                return OptiFineInstallTask.install(this, oldVersion, installerGameVersion, installerPath);
             } catch (IOException ignore) {
             }
 

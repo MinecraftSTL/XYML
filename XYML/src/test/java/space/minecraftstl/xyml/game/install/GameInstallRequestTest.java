@@ -20,7 +20,8 @@ package space.minecraftstl.xyml.game.install;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,14 +38,14 @@ public final class GameInstallRequestTest {
     /// Request construction snapshots ordered installers without collapsing equal version text.
     @Test
     public void selectedRemoteVersionsAreImmutableAndKeepEqualVersionLoaders() {
-        RemoteVersion forge = remoteVersion("forge", "47.2.0");
-        RemoteVersion fabric = remoteVersion("fabric", "47.2.0");
-        List<RemoteVersion> submitted = new ArrayList<>(List.of(forge, fabric));
+        ComponentRemoteVersion forge = remoteVersion("forge", "47.2.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "47.2.0");
+        List<ComponentRemoteVersion> submitted = new ArrayList<>(List.of(forge, fabric));
 
         GameInstallRequest request = new GameInstallRequest("loader-instance", "1.21.1", submitted);
         submitted.clear();
 
-        @Unmodifiable List<RemoteVersion> selected = request.selectedRemoteVersions();
+        @Unmodifiable List<ComponentRemoteVersion> selected = request.selectedRemoteVersions();
         assertEquals(2, selected.size());
         assertSame(forge, selected.get(0));
         assertSame(fabric, selected.get(1));
@@ -64,7 +65,7 @@ public final class GameInstallRequestTest {
     /// @param libraryId selected installer identifier
     /// @param selfVersion selected installer version text
     /// @return remote installer metadata
-    private static RemoteVersion remoteVersion(String libraryId, String selfVersion) {
-        return new RemoteVersion(libraryId, "1.21.1", selfVersion, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String selfVersion) {
+        return new TestComponentRemoteVersion(libraryId, "1.21.1", selfVersion, Instant.EPOCH, List.of());
     }
 }

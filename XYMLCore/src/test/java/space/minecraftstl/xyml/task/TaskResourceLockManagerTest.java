@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.CacheRepository;
 
 import java.io.File;
@@ -129,7 +130,7 @@ public final class TaskResourceLockManagerTest {
     @Test
     public void fileDownloadDeclaresExactTargetResource() {
         Path targetPath = temporaryDirectory.resolve("downloads/../game.jar");
-        FileDownloadTask task = new FileDownloadTask(WebURL.parse("https://example.invalid/game.jar"), targetPath);
+        FileDownloadTask task = new FileDownloadTask(List.of(WebURL.parse("https://example.invalid/game.jar")), targetPath);
 
         assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), task.getResources());
         assertEquals(targetPath, task.getPath());
@@ -143,10 +144,10 @@ public final class TaskResourceLockManagerTest {
         cacheRepository.changeDirectory(commonDirectory);
         WebURL source = WebURL.parse("https://example.invalid/metadata.json");
         GetTask text = new GetTask(source);
-        BoundedTextFetchTask bounded = new BoundedTextFetchTask(List.of(source), 1_024L);
+        BoundedTextFetchTask bounded = new BoundedTextFetchTask(DownloadCandidates.ofUrls(List.of(source)), 1_024L);
         CacheFileTask cachedFile = new CacheFileTask(source);
         Path targetPath = temporaryDirectory.resolve("target.json");
-        FileDownloadTask targetDownload = new FileDownloadTask(source, targetPath);
+        FileDownloadTask targetDownload = new FileDownloadTask(List.of(source), targetPath);
 
         text.setCacheRepository(cacheRepository);
         bounded.setCacheRepository(cacheRepository);

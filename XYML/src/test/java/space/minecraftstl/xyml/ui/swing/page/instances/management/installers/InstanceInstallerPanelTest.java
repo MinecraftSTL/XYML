@@ -22,7 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -250,7 +251,7 @@ final class InstanceInstallerPanelTest {
     /// Online installation receives the original remote-version object selected by the embedded shared wizard.
     @Test
     void onlineInstallationPreservesOriginalRemoteVersionObjects() {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
         RecordingInstallerService service = new RecordingInstallerService();
         RecordingInteractions interactions = new RecordingInteractions();
         LoaderSelectionWizardPanel wizard = wizardWith(List.of(
@@ -316,7 +317,7 @@ final class InstanceInstallerPanelTest {
     /// A mutation remains single-flight while its worker is pending, and closing rejects its eventual late completion.
     @Test
     void activeMutationIsSingleFlightAndCloseSuppressesItsDelayedCompletion() {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
         RecordingInstallerService service = new RecordingInstallerService();
         QueuedExecutor queuedMutationExecutor = new QueuedExecutor();
         service.mutationExecutor = queuedMutationExecutor;
@@ -461,8 +462,8 @@ final class InstanceInstallerPanelTest {
     /// @param gameVersion target Minecraft version
     /// @param selfVersion concrete loader version
     /// @return exact Core remote version
-    private static RemoteVersion remoteVersion(String libraryId, String gameVersion, String selfVersion) {
-        return new RemoteVersion(
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String gameVersion, String selfVersion) {
+        return new TestComponentRemoteVersion(
                 Objects.requireNonNull(libraryId, "libraryId"),
                 Objects.requireNonNull(gameVersion, "gameVersion"),
                 Objects.requireNonNull(selfVersion, "selfVersion"),
@@ -532,7 +533,7 @@ final class InstanceInstallerPanelTest {
         private final AtomicInteger offlineCalls = new AtomicInteger();
 
         /// Exact original remote versions supplied by the panel, or an empty list before installation.
-        private List<RemoteVersion> installedRemoteVersions = List.of();
+        private List<ComponentRemoteVersion> installedRemoteVersions = List.of();
 
         /// Exact third-party library requested for removal, or null before a confirmed removal.
         private @Nullable String removedLibraryId;
@@ -565,7 +566,7 @@ final class InstanceInstallerPanelTest {
         @Override
         public Task<InstanceInstallerSnapshot> installRemoteVersions(
                 GameInstanceID instanceId,
-                Collection<? extends RemoteVersion> remoteVersions) {
+                Collection<? extends ComponentRemoteVersion> remoteVersions) {
             assertEquals(INSTANCE_ID, instanceId);
             remoteInstallCalls.incrementAndGet();
             installedRemoteVersions = List.copyOf(remoteVersions);

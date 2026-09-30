@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
@@ -42,10 +43,10 @@ final class InstanceInstallerCompatibilityTest {
     /// Preserves the caller's original remote objects and installation order for a compatible request.
     @Test
     void preservesOriginalRemoteVersionsInCompatibleOrder() {
-        RemoteVersion forge = remote("forge", "47.2.0");
-        RemoteVersion optiFine = remote("optifine", "HD_U_I6");
+        ComponentRemoteVersion forge = remote("forge", "47.2.0");
+        ComponentRemoteVersion optiFine = remote("optifine", "HD_U_I6");
 
-        @Unmodifiable List<RemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
+        @Unmodifiable List<ComponentRemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
                 snapshot(),
                 List.of(forge, optiFine));
 
@@ -109,7 +110,7 @@ final class InstanceInstallerCompatibilityTest {
                         "0.104.0",
                         LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
 
-        @Unmodifiable List<RemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
+        @Unmodifiable List<ComponentRemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
                 fabricInstance,
                 List.of(remote("fabric-api", "0.104.0")));
         InstanceInstallerValidationException removalFailure = assertThrows(
@@ -118,7 +119,7 @@ final class InstanceInstallerCompatibilityTest {
 
         assertAll(
                 () -> assertEquals(1, validated.size()),
-                () -> assertEquals("fabric-api", validated.get(0).getLibraryId()),
+                () -> assertEquals("fabric-api", validated.get(0).getComponentType().getPatchId()),
                 () -> assertEquals(
                         InstanceInstallerValidationException.Reason.REQUIRED_COMPANION_WOULD_BE_ORPHANED,
                         removalFailure.reason()));
@@ -258,7 +259,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @param libraryId Core library identifier
     /// @param selfVersion remote display version
     /// @return exact selected Core remote-version object
-    private static RemoteVersion remote(String libraryId, String selfVersion) {
+    private static ComponentRemoteVersion remote(String libraryId, String selfVersion) {
         return remote(libraryId, selfVersion, "1.21.1");
     }
 
@@ -268,7 +269,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @param selfVersion remote display version
     /// @param gameVersion matching Minecraft version
     /// @return exact selected Core remote-version object
-    private static RemoteVersion remote(String libraryId, String selfVersion, String gameVersion) {
-        return new RemoteVersion(libraryId, gameVersion, selfVersion, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remote(String libraryId, String selfVersion, String gameVersion) {
+        return new TestComponentRemoteVersion(libraryId, gameVersion, selfVersion, Instant.EPOCH, List.of());
     }
 }

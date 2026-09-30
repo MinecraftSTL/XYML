@@ -20,6 +20,8 @@ dependencies {
     implementation(libs.kala.compress.ar)
     implementation(libs.weburl)
     implementation(libs.xz)
+    implementation(libs.jsoup)
+    implementation("org.apache.maven:maven-artifact:3.9.16")
 
     testImplementation(gradleApi())
     testImplementation(libs.junit.jupiter)

@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,19 +18,21 @@
 package space.minecraftstl.xyml.task;
 
 import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.DownloadCandidate;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.*;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.*;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URLConnection;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
@@ -40,25 +42,16 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static space.minecraftstl.xyml.util.Lang.threadPool;
+import static space.minecraftstl.xyml.util.Lang.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Base task for fetching one resource from ordered mirror URLs with retry, cache, resume, and progress support.
-///
-/// @param <T> task result type produced by the concrete download context
+/// Downloads candidate URLs in order, with retries, HTTP caching, and supported range resumption.
 @NotNullByDefault
-public abstract class FetchTask<T> extends Task<T> {
+public abstract class FetchTask<T extends @UnknownNullability Object> extends Task<T> {
 
-    /// Default number of attempts made for each candidate URL.
     protected static final int DEFAULT_RETRY = 5;
 
-    /// Immutable, ordered candidate URL snapshot.
-    protected final @Unmodifiable List<WebURL> urls;
-
-    /// Maximum attempts for each candidate URL.
-    protected int retry = DEFAULT_RETRY;
-
-    /// Repository used for content-addressed and HTTP validator caches.
+    protected final DownloadCandidates candidates;
     protected CacheRepository repository = CacheRepository.getInstance();
 
     /// Whether this fetch occupies one cache-operation resource for its complete lifecycle.
@@ -67,30 +60,14 @@ public abstract class FetchTask<T> extends Task<T> {
     /// Normalized cache directory captured by the current resource declaration, or null when unconfigured.
     private @Nullable Path cacheDirectorySnapshot;
 
-    /// Creates a fetch task for one or more ordered candidate URLs.
+    /// Creates a download task with a snapshot of the candidate URLs.
     ///
-    /// @param urls candidate URLs; the first successful source wins
-    /// @throws IllegalArgumentException if the list is empty
-    public FetchTask(List<WebURL> urls) {
-        Objects.requireNonNull(urls);
-
-        this.urls = List.copyOf(urls);
-
-        if (this.urls.isEmpty())
-            throw new IllegalArgumentException("At least one URL is required");
-
+    /// @param candidates nonempty candidate URLs, with no null elements
+    /// @throws IllegalArgumentException if no candidates are supplied
+    /// @throws NullPointerException if the list or any element is null
+    public FetchTask(DownloadCandidates candidates) {
+        this.candidates = candidates;
         setExecutor(DOWNLOAD_EXECUTOR);
-    }
-
-    /// Changes the number of attempts made for each candidate URL.
-    ///
-    /// @param retry positive attempt count
-    /// @throws IllegalArgumentException if `retry` is not positive
-    public void setRetry(int retry) {
-        if (retry <= 0)
-            throw new IllegalArgumentException("Retry count must be greater than 0");
-
-        this.retry = retry;
     }
 
     /// Replaces the cache repository used by subsequent execution.
@@ -138,44 +115,23 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Runs immediately before each network attempt.
+    /// Invoked before each download attempt, after any cache lookup.
     ///
-    /// @param url original candidate URL
-    /// @throws IOException if preparation fails
+    /// @param url the candidate URL before redirects
+    /// @throws IOException if the attempt cannot be prepared
     protected void beforeDownload(WebURL url) throws IOException {
     }
 
-    /// Consumes a cache hit without opening a network response.
-    ///
-    /// @param cachedFile cached file path
-    /// @throws IOException if the cached result cannot be consumed
     protected abstract void useCachedResult(Path cachedFile) throws IOException;
 
-    /// Selects the cache validator strategy for this fetch.
-    ///
-    /// @return ETag strategy, or [EnumCheckETag#CACHED] when execution is already complete
     protected abstract EnumCheckETag shouldCheckETag();
 
-    /// Creates a context for a non-HTTP transfer.
-    ///
-    /// @return fresh transfer context
-    /// @throws IOException if the context cannot be created
     private Context getContext() throws IOException {
         return getContext(null, false, null);
     }
 
-    /// Creates a transfer context for an HTTP response.
-    ///
-    /// @param response response metadata, or `null` for a non-HTTP transfer
-    /// @param checkETag whether the context should persist HTTP validator metadata
-    /// @param bmclapiHash optional SHA-1 supplied by a BMCLAPI response
-    /// @return fresh transfer context
-    /// @throws IOException if the context cannot be created
     protected abstract Context getContext(@Nullable UrlResponseInfo response, boolean checkETag, @Nullable String bmclapiHash) throws IOException;
 
-    /// Tries each candidate URL, aggregating source failures and honoring task cancellation.
-    ///
-    /// @throws Exception if every candidate source fails
     @Override
     public void execute() throws Exception {
         validateCacheDirectorySnapshot();
@@ -193,12 +149,24 @@ public abstract class FetchTask<T> extends Task<T> {
         if (SEMAPHORE != null)
             SEMAPHORE.acquire();
         try {
-            for (WebURL url : urls) {
+            for (DownloadCandidate candidate : candidates.getCandidates()) {
+                WebURL url = candidate.url();
+                if (url == null) {
+                    if (exceptions == null)
+                        exceptions = new ArrayList<>();
+                    exceptions.add(new DownloadException(candidate.rawUrl(), new MalformedURLException("Invalid URL: " + candidate)));
+                    continue;
+                }
+
+                int retry = candidate.retry() >= 0 ? candidate.retry() : DEFAULT_RETRY;
+                Duration connectTimeout = Objects.requireNonNullElse(candidate.connectTimeout(), NetworkUtils.TIMEOUT);
+                Duration readTimeout = Objects.requireNonNullElse(candidate.readTimeout(), NetworkUtils.TIMEOUT);
+
                 try {
                     if (NetworkUtils.isHttpUri(url))
-                        downloadHttp(url, checkETag);
+                        downloadHttp(url, retry, connectTimeout, readTimeout, checkETag);
                     else
-                        downloadNotHttp(url);
+                        downloadNotHttp(url, retry, connectTimeout, readTimeout);
                     return;
                 } catch (DownloadException e) {
                     if (exceptions == null)
@@ -222,17 +190,9 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Tracks validators and byte counts required to resume an interrupted identity-encoded HTTP transfer.
-    @NotNullByDefault
     private static final class HttpResumeContext {
-        /// Strict parser for RFC-style byte content ranges used by resumed responses.
         private static final Pattern CONTENT_RANGE_PATTERN = Pattern.compile("bytes ([0-9]+)-([0-9]+)/([0-9]+)");
 
-        /// Creates resumable state only when the initial response has a known identity-encoded length and validator.
-        ///
-        /// @param response initial successful HTTP response
-        /// @return resume state, or `null` when the response cannot be resumed safely
-        /// @throws IOException if response headers cannot be interpreted
         static @Nullable FetchTask.HttpResumeContext of(UrlResponseInfo response) throws IOException {
             if (response.responseCode() != HttpURLConnection.HTTP_OK)
                 return null;
@@ -249,36 +209,24 @@ public abstract class FetchTask<T> extends Task<T> {
             if (contentLength < 0)
                 return null;
 
-            @Nullable String eTag = response.headers().firstValue("etag").orElse(null);
-            @Nullable String strongETag = isStrongETag(eTag) ? eTag : null;
-            @Nullable String lastModified = response.headers().firstValue("last-modified").orElse(null);
+            String eTag = response.headers().firstValue("etag").orElse(null);
+            String strongETag = isStrongETag(eTag) ? eTag : null;
+            String lastModified = response.headers().firstValue("last-modified").orElse(null);
             if (strongETag == null && StringUtils.isBlank(lastModified))
                 return null;
 
             return new HttpResumeContext(response.url(), contentLength, strongETag, lastModified);
         }
 
-        /// URL of the initial response, used to validate Last-Modified resumes.
+        /// Final response URL whose partial content is retained for resumption.
         private final WebURL url;
-
-        /// Total uncompressed resource length reported by the initial response.
         private final long contentLength;
-
-        /// Strong ETag preferred for `If-Range`, when supplied.
         private final @Nullable String strongETag;
-
-        /// Last-Modified validator used when no strong ETag exists.
         private final @Nullable String lastModified;
 
-        /// Number of uncompressed bytes already written to the current context.
         long countUncompressed;
 
-        /// Creates resume state from validated initial-response metadata.
-        ///
-        /// @param url initial response URL
-        /// @param contentLength total uncompressed resource length
-        /// @param strongETag optional strong ETag
-        /// @param lastModified optional Last-Modified validator
+        /// Records the response URL, total byte length, and available validators for resumption.
         private HttpResumeContext(WebURL url, long contentLength, @Nullable String strongETag, @Nullable String lastModified) {
             this.url = url;
             this.contentLength = contentLength;
@@ -286,27 +234,14 @@ public abstract class FetchTask<T> extends Task<T> {
             this.lastModified = lastModified;
         }
 
-        /// Tests whether an ETag is present and strong enough for `If-Range`.
-        ///
-        /// @param eTag optional ETag header value
-        /// @return `true` for a nonblank ETag without the weak `W/` prefix
         private static boolean isStrongETag(@Nullable String eTag) {
             return StringUtils.isNotBlank(eTag) && !eTag.regionMatches(true, 0, "W/", 0, 2);
         }
 
-        /// Returns the validator value for an `If-Range` request header.
-        ///
-        /// @return strong ETag or Last-Modified value
         String ifRange() {
             return strongETag != null ? strongETag : Objects.requireNonNull(lastModified);
         }
 
-        /// Verifies that a partial response continues exactly from the current output position.
-        ///
-        /// @param statusCode HTTP status code
-        /// @param response partial response metadata
-        /// @return `true` when the response can be appended to the current context
-        /// @throws IOException if response headers cannot be interpreted
         boolean canResume(int statusCode, UrlResponseInfo response) throws IOException {
             if (statusCode != HttpURLConnection.HTTP_PARTIAL)
                 return false;
@@ -320,7 +255,7 @@ public abstract class FetchTask<T> extends Task<T> {
                 return false;
 
             if (strongETag != null) {
-                @Nullable String eTag = response.headers().firstValue("etag").orElse(null);
+                String eTag = response.headers().firstValue("etag").orElse(null);
                 if (!strongETag.equals(eTag))
                     return false;
             } else {
@@ -351,30 +286,16 @@ public abstract class FetchTask<T> extends Task<T> {
             }
         }
 
-        /// Reports whether the current output has a nonempty incomplete prefix.
-        ///
-        /// @return `true` when a range request can continue the transfer
         boolean hasPartialContent() {
             return countUncompressed > 0 && countUncompressed < contentLength;
         }
     }
 
-    /// Copies one response body into a context while updating progress, resume state, and global speed metrics.
-    ///
-    /// @param context destination context
-    /// @param resume optional HTTP resume state
-    /// @param inputStream raw response stream
-    /// @param contentLength expected encoded response length, or a negative value when unknown
-    /// @param contentEncoding response content encoding
-    /// @throws IOException if reading, decoding, writing, or size validation fails
-    /// @throws InterruptedException if the task is cancelled
-    private void download(
-            Context context,
-            @Nullable FetchTask.HttpResumeContext resume,
-            InputStream inputStream,
-            long contentLength,
-            ContentEncoding contentEncoding) throws IOException, InterruptedException {
-        boolean success = false;
+    private void download(Context context,
+                          @Nullable FetchTask.HttpResumeContext resume, InputStream inputStream,
+                          long contentLength,
+                          ContentEncoding contentEncoding) throws IOException, InterruptedException {
+        boolean success;
         try (var counter = new CounterInputStream(inputStream);
              var input = contentEncoding.wrap(counter)) {
             long lastDownloaded = 0L;
@@ -420,13 +341,8 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Downloads one HTTP candidate with validators, redirects, retry, and resumable-transfer handling.
-    ///
-    /// @param url original HTTP candidate URL
-    /// @param checkETag whether HTTP validator caching is enabled
-    /// @throws DownloadException if all attempts fail
-    /// @throws InterruptedException if the task is cancelled
-    private void downloadHttp(WebURL url, boolean checkETag) throws DownloadException, InterruptedException {
+    /// Downloads an HTTP candidate, following HTTP(S) redirects and retrying recoverable failures.
+    private void downloadHttp(WebURL url, int retry, Duration connectTimeout, Duration readTimeout, boolean checkETag) throws DownloadException, InterruptedException {
         if (checkETag) {
             // Handle cache
             try {
@@ -446,7 +362,7 @@ public abstract class FetchTask<T> extends Task<T> {
         // If loading the cache fails, the cache should not be loaded again.
         boolean useCachedResult = true;
         try {
-            for (int retryTime = 0, retryLimit = retry; retryTime < retryLimit; retryTime++) {
+            for (int attempts = 0, attemptsLimit = retry + 1; attempts < attemptsLimit; attempts++) {
                 if (isCancelled()) {
                     throw new InterruptedException();
                 }
@@ -456,12 +372,12 @@ public abstract class FetchTask<T> extends Task<T> {
                     beforeDownload(url);
                     updateProgress(0);
 
-                    @Nullable HttpURLConnection connection = null;
+                    @Nullable HttpURLConnection connection;
                     UrlResponseInfo responseInfo;
                     @Nullable String bmclapiHash;
                     int responseCode;
 
-                    WebURL currentUrl = url;
+                    WebURL currentURI = url;
 
                     LinkedHashMap<String, String> headers = new LinkedHashMap<>();
                     headers.put("accept-encoding", "gzip");
@@ -475,7 +391,9 @@ public abstract class FetchTask<T> extends Task<T> {
                     }
 
                     do {
-                        connection = NetworkUtils.createHttpConnection(currentUrl);
+                        connection = NetworkUtils.createHttpConnection(currentURI);
+                        connection.setConnectTimeout((int) connectTimeout.toMillis());
+                        connection.setReadTimeout((int) readTimeout.toMillis());
                         boolean keepConnection = false;
                         try {
                             headers.forEach(connection::setRequestProperty);
@@ -503,13 +421,13 @@ public abstract class FetchTask<T> extends Task<T> {
                                 if (StringUtils.isBlank(location))
                                     throw new IOException("Redirected to an empty location");
 
-                                WebURL target = currentUrl.resolve(location);
+                                WebURL target = currentURI.resolve(location);
                                 redirects.add(target);
 
                                 if (!NetworkUtils.isHttpUri(target))
                                     throw new IOException("Redirected to non-HTTP URL: " + target);
 
-                                currentUrl = target;
+                                currentURI = target;
                             } else {
                                 keepConnection = true;
                                 break;
@@ -529,7 +447,7 @@ public abstract class FetchTask<T> extends Task<T> {
                             resumeContext = null;
                             discardContext(context);
                             context = null;
-                            retryLimit++;
+                            attemptsLimit++;
                             continue;
                         }
 
@@ -544,11 +462,11 @@ public abstract class FetchTask<T> extends Task<T> {
                                 LOG.info("Cache expired for " + NetworkUtils.dropQuery(url));
                             } catch (IOException e) {
                                 LOG.warning("Unable to use cached file, redownload " + NetworkUtils.dropQuery(url), e);
-                                repository.removeRemoteEntry(currentUrl);
+                                repository.removeRemoteEntry(currentURI);
                                 useCachedResult = false;
                                 // Now we must reconnect the server since 304 may result in empty content,
                                 // if we want to redownload the file, we must reconnect the server without etag settings.
-                                retryLimit++;
+                                attemptsLimit++;
                                 continue;
                             }
                         } else if (responseCode / 100 == 4) {
@@ -572,7 +490,7 @@ public abstract class FetchTask<T> extends Task<T> {
                                 resumeContext = null;
                                 discardContext(context);
                                 context = null;
-                                retryLimit++;
+                                attemptsLimit++;
                                 continue;
                             }
                         } else {
@@ -624,9 +542,9 @@ public abstract class FetchTask<T> extends Task<T> {
 
                     exceptions.add(ex);
 
-                    LOG.warning("Failed to download " + url + ", repeat times: " + retryTime + (redirects == null ? "" : ", redirects: " + redirects), ex);
+                    LOG.warning("Failed to download " + url + ", repeat times: " + attempts + (redirects == null ? "" : ", redirects: " + redirects), ex);
 
-                    if (retryTime < retryLimit - 1) {
+                    if (attempts < attemptsLimit - 1) {
                         // Wait for a while before retrying
                         Thread.sleep(200);
                     }
@@ -646,16 +564,11 @@ public abstract class FetchTask<T> extends Task<T> {
     }
 
     /// Disconnects an HTTP URL connection whose response body will not be consumed.
-    ///
-    /// @param connection connection to close
     private static void closeHttpConnection(HttpURLConnection connection) {
         IOUtils.closeQuietly(connection.getErrorStream());
         connection.disconnect();
     }
 
-    /// Marks an incomplete output context unsuccessful and closes it quietly.
-    ///
-    /// @param context context to discard, or `null` when none has been created
     private static void discardContext(@Nullable Context context) {
         if (context != null) {
             context.withResult(false);
@@ -663,14 +576,10 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Downloads a non-HTTP candidate with the configured retry count.
-    ///
-    /// @param url non-HTTP candidate URL
-    /// @throws DownloadException if all attempts fail
-    /// @throws InterruptedException if the task is cancelled
-    private void downloadNotHttp(WebURL url) throws DownloadException, InterruptedException {
+    /// Downloads a non-HTTP candidate through its installed URL handler, retrying I/O failures.
+    private void downloadNotHttp(WebURL url, int retry, Duration connectTimeout, Duration readTimeout) throws DownloadException, InterruptedException {
         @Nullable ArrayList<Exception> exceptions = null;
-        for (int retryTime = 0; retryTime < retry; retryTime++) {
+        for (int attempts = 0, attemptsLimit = retry + 1; attempts < attemptsLimit; attempts++) {
             if (isCancelled()) {
                 throw new InterruptedException();
             }
@@ -680,6 +589,8 @@ public abstract class FetchTask<T> extends Task<T> {
                 updateProgress(0);
 
                 URLConnection conn = NetworkUtils.createConnection(url);
+                conn.setConnectTimeout((int) connectTimeout.toMillis());
+                conn.setReadTimeout((int) readTimeout.toMillis());
                 try (Context context = getContext()) {
                     download(context,
                             null, conn.getInputStream(),
@@ -698,19 +609,14 @@ public abstract class FetchTask<T> extends Task<T> {
                     exceptions = new ArrayList<>();
 
                 exceptions.add(ex);
-                LOG.warning("Failed to download " + url + ", repeat times: " + retryTime, ex);
+                LOG.warning("Failed to download " + url + ", repeat times: " + attempts, ex);
             }
         }
 
         throw toDownloadException(url, null, exceptions);
     }
 
-    /// Combines one terminal failure and earlier attempt failures into a single download exception.
-    ///
-    /// @param url candidate URL
-    /// @param last terminal failure, or `null` when only retry failures are available
-    /// @param exceptions earlier retry failures, or `null` when none were collected
-    /// @return combined download exception
+    /// Wraps the final failure and attaches preceding failures as suppressed exceptions.
     private static DownloadException toDownloadException(WebURL url, @Nullable Exception last, @Nullable ArrayList<Exception> exceptions) {
         if (exceptions == null || exceptions.isEmpty()) {
             return new DownloadException(url, last != null
@@ -727,18 +633,12 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Daemon timer that publishes one aggregate download-speed sample per second.
     private static final Timer timer = new Timer("DownloadSpeedRecorder", true);
-
-    /// Bytes downloaded since the most recent speed sample.
     private static final AtomicLong downloadSpeed = new AtomicLong(0L);
-
-    /// Global channel carrying aggregate download-speed samples.
     public static final EventManager<SpeedEvent> SPEED_EVENT = EventBus.EVENT_BUS.channel(SpeedEvent.class);
 
     static {
         timer.schedule(new TimerTask() {
-            /// Publishes the accumulated byte count and starts the next sampling interval.
             @Override
             public void run() {
                 SPEED_EVENT.fireEvent(new SpeedEvent(SPEED_EVENT, downloadSpeed.getAndSet(0)));
@@ -746,30 +646,17 @@ public abstract class FetchTask<T> extends Task<T> {
         }, 0, 1000);
     }
 
-    /// Adds newly transferred bytes to the current global speed interval.
-    ///
-    /// @param speed newly transferred byte count
     private static void updateDownloadSpeed(long speed) {
         downloadSpeed.addAndGet(speed);
     }
 
-    /// Counts raw encoded bytes read from a response stream.
-    @NotNullByDefault
     private static final class CounterInputStream extends FilterInputStream {
-        /// Number of raw bytes successfully read through this stream.
         long downloaded;
 
-        /// Creates a counting wrapper.
-        ///
-        /// @param in wrapped response stream
         CounterInputStream(InputStream in) {
             super(in);
         }
 
-        /// Reads and counts one byte.
-        ///
-        /// @return byte value, or `-1` at end of stream
-        /// @throws IOException if the wrapped stream fails
         @Override
         public int read() throws IOException {
             int b = in.read();
@@ -778,13 +665,6 @@ public abstract class FetchTask<T> extends Task<T> {
             return b;
         }
 
-        /// Reads and counts a byte-array slice.
-        ///
-        /// @param b destination buffer
-        /// @param off destination offset
-        /// @param len maximum byte count
-        /// @return bytes read, or `-1` at end of stream
-        /// @throws IOException if the wrapped stream fails
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
             int n = in.read(b, off, len);
@@ -794,112 +674,68 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Event carrying the aggregate number of bytes downloaded during the preceding one-second interval.
-    @NotNullByDefault
     public static class SpeedEvent extends Event {
-        /// Bytes downloaded during the sample interval.
         private final long speed;
 
-        /// Creates a download-speed event.
-        ///
-        /// @param source event source
-        /// @param speed bytes downloaded during the sample interval
         public SpeedEvent(Object source, long speed) {
             super(source);
 
             this.speed = speed;
         }
 
-        /// Returns the sampled download speed in bytes per second.
-        ///
-        /// @return sampled byte count
+        /**
+         * Download speed in byte/sec.
+         *
+         * @return download speed
+         */
         public long getSpeed() {
             return speed;
         }
 
-        /// Returns a diagnostic representation containing the sampled speed.
-        ///
-        /// @return diagnostic event string
         @Override
         public String toString() {
             return new ToStringBuilder(this).append("speed", speed).toString();
         }
     }
 
-    /// Receives transfer bytes and commits or discards the concrete task result when closed.
-    @NotNullByDefault
     protected static abstract class Context implements Closeable {
-        /// Whether the transfer completed successfully.
         private boolean success;
-
-        /// Whether writing failed and the context can no longer be resumed.
         private boolean broken;
 
-        /// Reports whether the transfer completed successfully.
-        ///
-        /// @return `true` after all expected bytes have been written
         protected final boolean isSuccess() {
             return success;
         }
 
-        /// Records the final transfer result before the context is closed.
-        ///
-        /// @param success whether the transfer completed successfully
         public void withResult(boolean success) {
             this.success = success;
         }
 
-        /// Resets the destination so a fresh response can replace partial output.
-        ///
-        /// @throws IOException if the destination cannot be reset
         public abstract void reset() throws IOException;
 
-        /// Writes one decoded byte range to the destination.
-        ///
-        /// @param buffer source buffer
-        /// @param offset first source byte
-        /// @param len number of bytes to write
-        /// @throws IOException if the destination write fails
         public abstract void write(byte[] buffer, int offset, int len) throws IOException;
 
-        /// Closes the destination and commits or discards it according to [#isSuccess()].
-        ///
-        /// @throws IOException if closing or committing the destination fails
         @Override
         public abstract void close() throws IOException;
     }
 
-    /// Cache-validator decision returned by concrete fetch tasks.
-    @NotNullByDefault
     protected enum EnumCheckETag {
-        /// Perform HTTP cache validation and download when the cached entry is stale.
         CHECK_E_TAG,
-
-        /// Download without HTTP ETag validation.
         NOT_CHECK_E_TAG,
-
-        /// A cache-only result has already completed the task, so no transfer is required.
         CACHED
     }
 
 
-    /// Default global maximum number of concurrently active fetch tasks.
     public static int DEFAULT_CONCURRENCY = Math.min(Runtime.getRuntime().availableProcessors() * 4, 64);
-
-    /// Current configured global download concurrency.
     private static int downloadExecutorConcurrency = DEFAULT_CONCURRENCY;
 
     // For Java 21 or later, DOWNLOAD_EXECUTOR dispatches tasks to virtual threads, and concurrency is controlled by SEMAPHORE.
     // For versions earlier than Java 21, DOWNLOAD_EXECUTOR is a ThreadPoolExecutor, SEMAPHORE is null, and concurrency is controlled by the thread pool size.
 
-    /// Shared executor used by every fetch task.
     private static final ExecutorService DOWNLOAD_EXECUTOR;
-
-    /// Concurrency gate used with a virtual-thread executor, or `null` for a bounded platform-thread pool.
     private static final @Nullable Semaphore SEMAPHORE;
 
     static {
-        @Nullable ExecutorService executorService = Schedulers.newVirtualThreadPerTaskExecutor("Download");
+        ExecutorService executorService = Schedulers.newVirtualThreadPerTaskExecutor("Download");
         if (executorService != null) {
             DOWNLOAD_EXECUTOR = executorService;
             SEMAPHORE = new Semaphore(DEFAULT_CONCURRENCY);
@@ -909,9 +745,6 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Updates global download concurrency; callers must serialize configuration writes on the UI executor.
-    ///
-    /// @param concurrency requested positive concurrency limit
     public static void setDownloadExecutorConcurrency(int concurrency) {
         concurrency = Math.max(concurrency, 1);
 
@@ -951,17 +784,12 @@ public abstract class FetchTask<T> extends Task<T> {
         }
     }
 
-    /// Returns the current global download concurrency.
-    ///
-    /// @return positive concurrency limit
     public static int getDownloadExecutorConcurrency() {
         return downloadExecutorConcurrency;
     }
 
-    /// Lifecycle flag set once launcher initialization has completed.
     private static volatile boolean initialized = false;
 
-    /// Marks the fetch subsystem as initialized.
     public static void notifyInitialized() {
         initialized = true;
     }

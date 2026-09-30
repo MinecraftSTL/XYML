@@ -17,16 +17,24 @@
  */
 package space.minecraftstl.xyml.download.fabric;
 
+import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 
+import java.nio.file.Path;
 import java.util.List;
 
-public class FabricRemoteVersion extends RemoteVersion {
+@NotNullByDefault
+public final class FabricRemoteVersion extends ComponentRemoteVersion {
+    public static final WebURL LOADER_META_URL = WebURL.parse("https://meta.fabricmc.net/v2/versions/loader");
+    public static final WebURL GAME_META_URL = WebURL.parse("https://meta.fabricmc.net/v2/versions/game");
+
     /**
      * Constructor.
      *
@@ -34,12 +42,12 @@ public class FabricRemoteVersion extends RemoteVersion {
      * @param selfVersion the version string of the remote version.
      * @param urls        the installer or universal jar original URL.
      */
-    FabricRemoteVersion(String gameVersion, String selfVersion, List<String> urls) {
-        super(LibraryAnalyzer.LibraryType.FABRIC.getPatchId(), gameVersion, selfVersion, null, urls);
+    public FabricRemoteVersion(GameVersionNumber gameVersion, String selfVersion, List<String> urls) {
+        super(GameComponentType.FABRIC, gameVersion, selfVersion, null, Type.UNCATEGORIZED, urls);
     }
 
     @Override
-    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
-        return new FabricInstallTask(dependencyManager, baseVersion, this);
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseManifest, Path modsDirectory) {
+        return new FabricInstallTask(dependencyManager, baseManifest, this);
     }
 }

@@ -21,9 +21,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCompatibilityMatrix;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -38,7 +39,7 @@ import java.util.Set;
 /// Validates existing-instance installer mutations against the new-game loader compatibility matrix.
 ///
 /// Remote versions remain concrete Core objects throughout validation. This is essential because their
-/// subclasses carry installer-specific metadata and [RemoteVersion#getInstallTask] cannot be recreated
+/// subclasses carry installer-specific metadata and [ComponentRemoteVersion#getInstallTask] cannot be recreated
 /// from a library ID and display version alone.
 @NotNullByDefault
 public final class InstanceInstallerCompatibility {
@@ -68,26 +69,26 @@ public final class InstanceInstallerCompatibility {
     /// @param remoteVersions original caller-selected versions in intended installation order
     /// @return defensive immutable copy preserving the input object identity and order
     /// @throws InstanceInstallerValidationException when the resulting set is invalid or unsafe to order
-    public static @Unmodifiable List<RemoteVersion> validateRemoteInstallation(
+    public static @Unmodifiable List<ComponentRemoteVersion> validateRemoteInstallation(
             InstanceInstallerSnapshot snapshot,
-            Collection<? extends RemoteVersion> remoteVersions) {
+            Collection<? extends ComponentRemoteVersion> remoteVersions) {
         InstanceInstallerSnapshot current = Objects.requireNonNull(snapshot, "snapshot");
         String gameVersion = current.gameVersion().orElseThrow(() -> new InstanceInstallerValidationException(
                 InstanceInstallerValidationException.Reason.GAME_VERSION_UNAVAILABLE,
                 "The target instance has no detectable Minecraft version"));
-        Collection<? extends RemoteVersion> supplied = Objects.requireNonNull(remoteVersions, "remoteVersions");
+        Collection<? extends ComponentRemoteVersion> supplied = Objects.requireNonNull(remoteVersions, "remoteVersions");
         if (supplied.isEmpty()) {
             throw new InstanceInstallerValidationException(
                     InstanceInstallerValidationException.Reason.EMPTY_REMOTE_SELECTION,
                     "At least one remote loader version is required");
         }
 
-        List<RemoteVersion> orderedVersions = new ArrayList<>(supplied.size());
+        List<ComponentRemoteVersion> orderedVersions = new ArrayList<>(supplied.size());
         EnumMap<GameLoaderKind, Integer> requestedPositions = new EnumMap<>(GameLoaderKind.class);
-        for (RemoteVersion remoteVersion : supplied) {
-            RemoteVersion version = Objects.requireNonNull(remoteVersion, "remoteVersions contains null");
-            GameLoaderKind kind = requireManagedKind(version.getLibraryId());
-            if (!gameVersion.equals(version.getGameVersion())) {
+        for (ComponentRemoteVersion remoteVersion : supplied) {
+            ComponentRemoteVersion version = Objects.requireNonNull(remoteVersion, "remoteVersions contains null");
+            GameLoaderKind kind = requireManagedKind(version.getComponentType().getPatchId());
+            if (!GameVersionNumber.asGameVersion(gameVersion).equals(version.getGameVersion())) {
                 throw new InstanceInstallerValidationException(
                         InstanceInstallerValidationException.Reason.GAME_VERSION_MISMATCH,
                         "Remote " + kind + " targets " + version.getGameVersion()

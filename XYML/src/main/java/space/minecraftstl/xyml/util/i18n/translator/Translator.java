@@ -17,7 +17,7 @@
  */
 package space.minecraftstl.xyml.util.i18n.translator;
 
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
@@ -44,7 +44,7 @@ public class Translator {
         return displayLocale;
     }
 
-    public String getDisplayVersion(RemoteVersion remoteVersion) {
+    public String getDisplayVersion(ComponentRemoteVersion remoteVersion) {
         return remoteVersion.getSelfVersion();
     }
 

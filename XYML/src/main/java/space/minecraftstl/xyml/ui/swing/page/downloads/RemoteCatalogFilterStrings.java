@@ -44,6 +44,7 @@ public record RemoteCatalogFilterStrings(
         String categoryLabel,
         String allCategoriesLabel,
         String sortLabel,
+        String relevancySortLabel,
         String popularitySortLabel,
         String nameSortLabel,
         String dateCreatedSortLabel,
@@ -59,6 +60,7 @@ public record RemoteCatalogFilterStrings(
         Objects.requireNonNull(categoryLabel, "categoryLabel");
         Objects.requireNonNull(allCategoriesLabel, "allCategoriesLabel");
         Objects.requireNonNull(sortLabel, "sortLabel");
+        Objects.requireNonNull(relevancySortLabel, "relevancySortLabel");
         Objects.requireNonNull(popularitySortLabel, "popularitySortLabel");
         Objects.requireNonNull(nameSortLabel, "nameSortLabel");
         Objects.requireNonNull(dateCreatedSortLabel, "dateCreatedSortLabel");
@@ -77,6 +79,7 @@ public record RemoteCatalogFilterStrings(
     /// @return localized visible sort label
     public String sortTypeLabel(RemoteAddonRepository.SortType sortType) {
         return switch (Objects.requireNonNull(sortType, "sortType")) {
+            case RELEVANCY -> relevancySortLabel;
             case POPULARITY -> popularitySortLabel;
             case NAME -> nameSortLabel;
             case DATE_CREATED -> dateCreatedSortLabel;
@@ -106,6 +109,7 @@ public record RemoteCatalogFilterStrings(
                 "Category",
                 "All categories",
                 "Sort by",
+                "Relevance",
                 "Popularity",
                 "Name",
                 "Date created",
@@ -126,6 +130,7 @@ public record RemoteCatalogFilterStrings(
                 i18n("addon.category"),
                 i18n("curse.category.0"),
                 i18n("search.sort"),
+                i18n("curse.sort.relevance"),
                 i18n("curse.sort.popularity"),
                 i18n("curse.sort.name"),
                 i18n("curse.sort.date_created"),

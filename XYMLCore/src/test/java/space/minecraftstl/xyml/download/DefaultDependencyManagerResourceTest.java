@@ -47,7 +47,7 @@ final class DefaultDependencyManagerResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("example"));
         Path installer = Files.writeString(temporaryDirectory.resolve("unsupported-installer.jar"), "unsupported");

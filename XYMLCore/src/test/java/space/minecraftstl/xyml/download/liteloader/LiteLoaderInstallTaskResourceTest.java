@@ -23,12 +23,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -49,7 +50,7 @@ final class LiteLoaderInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory);
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("liteloader-example"));
         @Unmodifiable Set<TaskResource> expectedResources = Set.of(
@@ -62,9 +63,9 @@ final class LiteLoaderInstallTaskResourceTest {
                         dependencyManager,
                         manifest,
                         new LiteLoaderRemoteVersion(
-                                "1.12.2",
+                                GameVersionNumber.asGameVersion("1.12.2"),
                                 "1.12.2-SNAPSHOT",
-                                RemoteVersion.Type.RELEASE,
+                                ComponentRemoteVersion.Type.RELEASE,
                                 List.of("https://example.invalid/liteloader.json"),
                                 "com.mumfrey.liteloader.launch.LiteLoaderTweaker",
                                 List.of()))
