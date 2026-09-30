@@ -25,6 +25,9 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /// Supplies installed-instance state, viewport data, and commands without exposing JavaFX or Swing types.
 ///
@@ -52,6 +55,19 @@ public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListI
     ///
     /// @return immutable current search index
     @Unmodifiable List<InstanceSearchEntry> searchEntries();
+
+    /// Resolves one instance's analyzed Minecraft version and primary mod loader.
+    ///
+    /// Implementations that cannot resolve metadata complete the stage with an unresolved context instead of
+    /// failing it. Resolution may perform blocking metadata reads, so implementations run it away from the UI
+    /// threads and complete the returned stage on any thread.
+    ///
+    /// @param instanceId stable instance identifier
+    /// @return asynchronous analyzed add-on context
+    default CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
+        GameInstanceID checked = Objects.requireNonNull(instanceId, "instanceId");
+        return CompletableFuture.completedFuture(new InstanceAddonContext(checked, null, null));
+    }
 
     /// Selects a loaded instance by its stable repository identifier.
     ///

@@ -257,13 +257,25 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     ///
     /// @param target requested download category
     public void selectTarget(DownloadPageTarget target) {
+        selectTarget(DownloadPageRequest.of(target));
+    }
+
+    /// Selects one content category and applies its optional instance context.
+    ///
+    /// A request carrying an instance ID prefills the Mods catalog from that instance without starting a query.
+    ///
+    /// @param request requested download category and optional instance context
+    public void selectTarget(DownloadPageRequest request) {
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(target, "target");
+        DownloadPageRequest checked = Objects.requireNonNull(request, "request");
         if (closed) {
             return;
         }
-        categoryTabs.setSelectedIndex(target.ordinal());
+        categoryTabs.setSelectedIndex(checked.target().ordinal());
         activateSelectedCategory();
+        if (checked.target() == DownloadPageTarget.MODS && checked.targetInstanceId() != null) {
+            modsCatalog.instanceContext().applyNavigation(checked.targetInstanceId());
+        }
     }
 
     /// Selects the local-modpack category and displays a dropped archive.

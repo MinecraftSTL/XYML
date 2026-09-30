@@ -28,8 +28,11 @@ import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceAddonContext;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 
@@ -247,6 +250,180 @@ final class RemoteAddonCatalogPanelTest {
                     () -> assertEquals("1.20.1", query.gameVersion()),
                     () -> assertNotNull(query.category()),
                     () -> assertEquals("fabric", Objects.requireNonNull(query.category()).id()));
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Prefills the Mods catalog from one instance context without starting a project query.
+    @Test
+    void appliesInstanceContextWithoutStartingSearch() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        GameInstanceID targetInstanceId = new GameInstanceID("context-target");
+        try {
+            ContextInstancesModel instances = new ContextInstancesModel(
+                    List.of(
+                            ContextInstancesModel.entry(new GameInstanceID("context-other"), "Other"),
+                            ContextInstancesModel.entry(targetInstanceId, "Target")),
+                    0,
+                    Map.of(
+                            targetInstanceId,
+                            new InstanceAddonContext(targetInstanceId, "1.20.1", ModLoaderType.FABRIC)));
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO,
+                        instances);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(panelReference.get())
+                    .instanceContext()
+                    .applyNavigation(targetInstanceId));
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> target = findNamed(panel, "remoteAddonTargetInstance", JComboBox.class);
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                JTextField search = findNamed(panel, "remoteAddonSearch", JTextField.class);
+                assertNotNull(target);
+                assertNotNull(category);
+                assertNotNull(version);
+                assertNotNull(search);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertTrue(target.getSelectedItem() instanceof InstanceSearchEntry),
+                        () -> assertEquals(
+                                targetInstanceId,
+                                ((InstanceSearchEntry) Objects.requireNonNull(target.getSelectedItem())).stableId()),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()),
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertEquals("", search.getText()));
+            });
+            assertNull(backend.lastQuery.get());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Follows every changed target instance with its analyzed criteria.
+    @Test
+    void followsChangedTargetInstanceContext() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        GameInstanceID fabricInstance = new GameInstanceID("context-fabric");
+        GameInstanceID neoforgeInstance = new GameInstanceID("context-neoforge");
+        try {
+            ContextInstancesModel instances = new ContextInstancesModel(
+                    List.of(
+                            ContextInstancesModel.entry(fabricInstance, "Fabric"),
+                            ContextInstancesModel.entry(neoforgeInstance, "NeoForge")),
+                    0,
+                    Map.of(
+                            fabricInstance,
+                            new InstanceAddonContext(fabricInstance, "1.20.1", ModLoaderType.FABRIC),
+                            neoforgeInstance,
+                            new InstanceAddonContext(neoforgeInstance, "1.21.1", ModLoaderType.NEO_FORGE)));
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO,
+                        instances);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()));
+            });
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> target = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonTargetInstance",
+                        JComboBox.class);
+                assertNotNull(target);
+                target.setSelectedIndex(1);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                assertAll(
+                        () -> assertEquals("1.21.1", SwingTextFields.comboText(version)),
+                        () -> assertNull(selectedCategory(category)));
+            });
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> target = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonTargetInstance",
+                        JComboBox.class);
+                assertNotNull(target);
+                target.setSelectedIndex(0);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()));
+            });
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {
@@ -1750,5 +1927,13 @@ final class RemoteAddonCatalogPanelTest {
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture versions are supplied by the recording backend");
         }
+    }
+
+    /// Returns the provider category currently selected by one category combo box.
+    ///
+    /// @param category provider category selector
+    /// @return selected provider category, or null for the all-categories option
+    private static @Nullable RemoteAddonRepository.Category selectedCategory(JComboBox<?> category) {
+        return category.getSelectedItem() instanceof RemoteCatalogCategoryOption option ? option.category() : null;
     }
 }

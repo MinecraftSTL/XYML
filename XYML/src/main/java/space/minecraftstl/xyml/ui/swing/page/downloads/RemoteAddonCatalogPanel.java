@@ -279,6 +279,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Optional local target-instance selector used by direct-install categories.
     private final @Nullable RemoteAddonTargetInstanceSelector targetInstanceSelector;
 
+    private final RemoteAddonInstanceContextCoordinator instanceContext;
+
     /// Starts the local target selector when this catalog actually becomes visible.
     private final HierarchyListener showingListener;
 
@@ -445,9 +447,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 this.workerExecutor,
                 this::openDependencySearch);
         this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
+        instanceContext = new RemoteAddonInstanceContextCoordinator(
+                this.kind == RemoteAddonCatalogKind.WORLD ? null : instancesModel, sourceBox, gameVersionField,
+                categoryControls, () -> loadedCategorySource == RemoteAddonCatalogSource.MODRINTH && !categoryLoading,
+                this::resetSortOptions, searchField, () -> pendingSearchText = null);
         targetInstanceSelector = this.kind == RemoteAddonCatalogKind.WORLD || instancesModel == null
                 ? null
-                : new RemoteAddonTargetInstanceSelector(instancesModel);
+                : new RemoteAddonTargetInstanceSelector(instancesModel, this::instanceSelectionChanged);
+        instanceContext.attachTargetSelector(targetInstanceSelector);
         showingListener = event -> {
             if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0
                     && isShowing()
@@ -538,9 +545,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (closed) {
             return;
         }
-        if (targetInstanceSelector != null && checked.targetInstanceId() != null) {
-            targetInstanceSelector.selectInstance(checked.targetInstanceId());
-        }
         pendingDependencySearch = null;
         categoryControls.clearPending();
         dependencyNavigationInProgress = true;
@@ -549,26 +553,25 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 catalogRequestRevision.incrementAndGet();
                 catalogLoading = false;
             }
-            sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
-            boolean categoriesReady = loadedCategorySource == RemoteAddonCatalogSource.MODRINTH
-                    && !categoryLoading;
-            @Nullable String dependencyCategoryId = RemoteAddonCategoryControls.dependencyCategoryId(checked.modLoader());
-            if (dependencyCategoryId == null || !categoriesReady) {
-                categoryControls.reset();
+            if (targetInstanceSelector != null && checked.targetInstanceId() != null) {
+                targetInstanceSelector.selectInstance(checked.targetInstanceId());
             }
-            resetSortOptions();
-            SwingTextFields.textEditor(gameVersionField).setText(Objects.requireNonNullElse(checked.gameVersion(), "").trim());
-
-            if (dependencyCategoryId != null && !categoryControls.select(dependencyCategoryId)) {
-                if (categoriesReady) {
-                    categoryControls.reset();
-                } else {
-                    categoryControls.defer(dependencyCategoryId);
-                }
-            }
+            instanceContext.apply(checked.gameVersion(), checked.modLoader());
             openSearch(checked.dependencyId());
         } finally {
             dependencyNavigationInProgress = false;
+        }
+    }
+
+    /// Returns the coordinator applying analyzed target-instance criteria.
+    RemoteAddonInstanceContextCoordinator instanceContext() {
+        return instanceContext;
+    }
+
+    /// Follows one changed local target instance unless programmatic navigation owns the criteria.
+    private void instanceSelectionChanged(GameInstanceID instanceId) {
+        if (!closed && !dependencyNavigationInProgress) {
+            instanceContext.request(instanceId);
         }
     }
 
@@ -1930,6 +1933,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         pendingDependencySearch = null;
         categoryControls.clearPending();
         dependencyNavigationInProgress = false;
+        instanceContext.clear();
         dependencySelector.close();
         prerequisitesLabel.setVisible(false);
     }
