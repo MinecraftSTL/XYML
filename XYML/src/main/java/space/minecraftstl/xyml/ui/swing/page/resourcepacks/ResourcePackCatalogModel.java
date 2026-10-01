@@ -18,7 +18,9 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
@@ -26,7 +28,9 @@ import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
 
 /// Supplies lazy installed-resource-pack state without exposing JavaFX or Swing types.
 ///
@@ -71,6 +75,15 @@ public interface ResourcePackCatalogModel
 
     /// Clears the stable selection without changing indexed content.
     void clearSelection();
+
+    /// Loads one visible resource-pack icon on the model executor.
+    ///
+    /// @param path normalized absolute resource-pack path
+    /// @return future containing encoded icon data, or null when no pack.png exists
+    default CompletionStage<@Nullable EncodedImage> loadIcon(Path path) {
+        Objects.requireNonNull(path, "path");
+        return CompletableFuture.completedFuture(null);
+    }
 
     /// Imports multiple resource-pack archives or directories as one serialized catalog write.
     ///

@@ -25,6 +25,7 @@ import kala.encdet.EncodingDetector;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
@@ -191,6 +192,14 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             cancellation.throwIfCancelled();
             return loadItemsLocked(paths, cancellation);
         }
+    }
+
+    /// Loads one pack icon from the already bound resource-pack manager.
+    @Override
+    public @Nullable EncodedImage loadIcon(Path path) throws IOException {
+        Path normalizedPath = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        ResourcePackFile resourcePack = ResourcePackFile.fromFile(manager, normalizedPath);
+        return resourcePack == null ? null : resourcePack.loadIconData();
     }
 
     /// Parses exact rows while the shared operation gate is held.

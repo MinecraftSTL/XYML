@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 package space.minecraftstl.xyml.ui.swing.page.downloads;
-
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -40,7 +39,6 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -71,7 +69,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
-
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -274,7 +271,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Optional local target-instance selector used by direct-install categories.
     private final @Nullable RemoteAddonTargetInstanceSelector targetInstanceSelector;
-
     private final RemoteAddonInstanceContextCoordinator instanceContext;
 
     /// Starts the local target selector when this catalog actually becomes visible.
@@ -658,7 +654,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         setName("remoteAddonCatalog" + kind.name());
         setOpaque(false);
         setMinimumSize(new Dimension(0, 0));
-
         sourceBox.removeAllItems();
         for (RemoteAddonCatalogSource source : RemoteAddonCatalogSource.values()) {
             if (source.supports(kind)) {
@@ -668,7 +663,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (sourceBox.getItemCount() == 0) {
             throw new IllegalArgumentException("No remote source supports " + kind.name());
         }
-
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
         headingBand.setMinimumSize(new Dimension(0, 0));
@@ -677,7 +671,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
         headingBand.add(heading, "growx");
         add(headingBand, "growx");
-
         JPanel filterBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 1",
                 "[grow,fill]",
@@ -685,7 +678,6 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         filterBand.setName("remoteAddonFilterBand");
         filterBand.setOpaque(false);
         filterBand.setMinimumSize(new Dimension(0, 0));
-
         JPanel criteriaBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 4",
                 "[grow,fill][grow,fill][grow,fill][grow,fill]",
@@ -693,13 +685,11 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         criteriaBand.setName("remoteAddonCriteriaBand");
         criteriaBand.setOpaque(false);
         criteriaBand.setMinimumSize(new Dimension(0, 0));
-
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
         sourceBox.setName("remoteAddonSource");
         sourceBox.addActionListener(event -> sourceChanged());
         criteriaBand.add(RemoteCatalogFilterField.create(sourceLabel, sourceBox), "growx, wmin 0");
-
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
         gameVersionField.setName("remoteAddonGameVersion");
@@ -1878,6 +1868,17 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             LOG.warning("Failed to inspect remote acquisition target availability", targetFailure);
             return false;
         }
+    }
+
+    /// Returns the instance currently selected by this download tab.
+    /// @return selected existing instance, or null when this tab has no valid selection
+    public @Nullable GameInstanceID selectedInstanceId() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (targetInstanceSelector == null) {
+            return null;
+        }
+        targetInstanceSelector.synchronizeFromModel();
+        return targetInstanceSelector.selectedInstanceId();
     }
 
     /// Applies current non-null feedback text with a matching accessibility tooltip.

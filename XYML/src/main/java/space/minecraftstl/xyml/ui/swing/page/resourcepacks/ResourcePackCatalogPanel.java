@@ -40,7 +40,6 @@ import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
-import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -112,12 +111,6 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Minimum allocated width that presents list and details side by side.
     private static final int WIDE_LAYOUT_MINIMUM_WIDTH = 720;
 
-    /// Stable icon shown for every installed resource-pack row.
-    private static final Icon RESOURCE_PACK_ROW_ICON = new FlatSVGIcon(
-            "assets/swing/icons/folder-fill.svg",
-            32,
-            32);
-
     /// Lock guarding close state and coalesced model notification revisions.
     private final Object stateLock = new Object();
 
@@ -144,6 +137,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Search-filtered path source that preserves viewport-only metadata resolution.
     private final FilteredResourcePackCatalogDataSource filteredDataSource;
+
+    /// Lazy local icon cache shared by the visible resource-pack rows.
+    private final ResourcePackIconCache iconCache;
 
     /// Viewport-measured multi-choice list.
     private final ViewportChoiceList<ResourcePackCatalogItem> choiceList;
@@ -361,12 +357,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             searchListener = createSearchListener();
             showingListener = this::showingChanged;
             filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
+            iconCache = new ResourcePackIconCache();
             acquiredChoiceList = new ViewportChoiceList<>(
                     filteredDataSource, new RichChoiceListCellRenderer<>(
                             ResourcePackCatalogItem::displayText,
                             item -> resourcePackRowDetail(item),
                             item -> resourcePackRowBadge(item),
-                            item -> RESOURCE_PACK_ROW_ICON,
+                            item -> iconCache.iconFor(model, item, iconRepaintList()),
                             ResourcePackCatalogItem::description,
                             item -> !item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
             choiceList = acquiredChoiceList;
@@ -946,6 +943,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 || previous.contentRevision() != snapshot.contentRevision()
                 || !previous.itemCount().equals(snapshot.itemCount());
         displayedSnapshot = snapshot;
+        if (contentChanged) {
+            iconCache.clear();
+        }
 
         applyingSnapshot = true;
         try {
@@ -1783,6 +1783,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         return message == null || message.isBlank()
                 ? failure.getClass().getSimpleName()
                 : message;
+    }
+
+    /// Returns the list used to repaint rows after asynchronous icon completion.
+    ///
+    /// @return current resource-pack list
+    private JList<?> iconRepaintList() {
+        return choiceList.getList();
     }
 
     /// Configures one fixed-size icon command with visible tooltip and accessible text.
