@@ -114,23 +114,65 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
             RemoteAddonCatalogItem item,
             RemoteAddon.Dependency dependency) throws IOException {
         RemoteAddonCatalogItem selected = Objects.requireNonNull(item, "item");
-        RemoteAddon.Dependency requested = Objects.requireNonNull(dependency, "dependency");
-        @Nullable String rawId = requested.getId();
-        if (rawId == null || rawId.isBlank()) {
+        RemoteAddon resolved = resolveDependency(selected, dependency);
+        @Nullable String rawId = dependency.getId();
+        if (resolved == RemoteAddon.BROKEN || rawId == null || rawId.isBlank()) {
             return null;
         }
         String identifier = rawId.trim();
-        @Nullable RemoteAddon.Source declaredSource = requested.getSource();
-        RemoteAddon.Source source = declaredSource == null
-                ? selected.source().coreSource()
-                : declaredSource;
-        RemoteAddon resolved = source.getCommonRepo().resolveDependency(downloadProvider, identifier);
         String title = resolved.title().trim();
         if (!title.isBlank()) {
             return title;
         }
         String slug = resolved.slug().trim();
         return slug.isBlank() ? identifier : slug;
+    }
+
+    /// Resolves a dependency to a validated public mod page.
+    ///
+    /// @param item selected project providing the fallback provider when the dependency omits one
+    /// @param dependency provider dependency metadata
+    /// @return public HTTP(S) mod page, or null when the project is unavailable
+    /// @throws IOException when the provider request fails
+    @Override
+    public @Nullable URI resolveDependencyPage(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Dependency dependency) throws IOException {
+        RemoteAddon resolved = resolveDependency(Objects.requireNonNull(item, "item"), dependency);
+        if (resolved == RemoteAddon.BROKEN || resolved.pageUrl().isBlank()) {
+            return null;
+        }
+        try {
+            URI page = URI.create(resolved.pageUrl().trim());
+            String scheme = page.getScheme();
+            if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                return null;
+            }
+            return page;
+        } catch (IllegalArgumentException invalidPage) {
+            return null;
+        }
+    }
+
+    /// Resolves dependency metadata through its declared source or selected-project fallback source.
+    ///
+    /// @param item selected project providing the fallback provider
+    /// @param dependency provider dependency metadata
+    /// @return resolved project, or 'RemoteAddon.BROKEN' when it no longer exists
+    /// @throws IOException when the provider request fails
+    private RemoteAddon resolveDependency(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Dependency dependency) throws IOException {
+        RemoteAddon.Dependency requested = Objects.requireNonNull(dependency, "dependency");
+        @Nullable String rawId = requested.getId();
+        if (rawId == null || rawId.isBlank()) {
+            return RemoteAddon.BROKEN;
+        }
+        @Nullable RemoteAddon.Source declaredSource = requested.getSource();
+        RemoteAddon.Source source = declaredSource == null
+                ? item.source().coreSource()
+                : declaredSource;
+        return source.getCommonRepo().resolveDependency(downloadProvider, rawId.trim());
     }
 
     /// {@inheritDoc}

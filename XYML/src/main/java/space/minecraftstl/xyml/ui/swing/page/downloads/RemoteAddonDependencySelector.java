@@ -62,17 +62,17 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
     /// Caller-owned worker executor shared with the owning catalog panel.
     private final Executor workerExecutor;
 
-    /// Command opening one dependency identifier through the shared Mod search route.
-    private final BiConsumer<RemoteAddon.Dependency, String> searchAction;
+    /// Command opening the selected dependency mod.
+    private final BiConsumer<RemoteAddon.Dependency, String> viewAction;
 
     /// Fixed-height selector containing downloadable prerequisite options.
     private final JComboBox<DependencyOption> selector = new JComboBox<>();
 
-    /// Opens the selected prerequisite query in the shared Mod result list.
-    private final JButton searchButton = new JButton();
+    /// Opens the selected prerequisite mod through the owning catalog.
+    private final JButton viewButton = new JButton();
 
-    /// Search button listener retained for deterministic cleanup.
-    private final ActionListener searchListener = event -> searchSelectedDependency();
+    /// View button listener retained for deterministic cleanup.
+    private final ActionListener viewListener = event -> viewSelectedDependency();
 
     /// Human-readable names retained for the current selected project version.
     private final Map<DependencyKey, DependencyName> nameCache = new LinkedHashMap<>();
@@ -99,15 +99,15 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
     ///
     /// @param backend provider gateway used for dependency-name resolution
     /// @param workerExecutor caller-owned background executor
-    /// @param searchAction command opening the selected dependency search
+    /// @param viewAction command opening the selected dependency mod
     RemoteAddonDependencySelector(
             RemoteAddonCatalogBackend backend,
             Executor workerExecutor,
-            BiConsumer<RemoteAddon.Dependency, String> searchAction) {
+            BiConsumer<RemoteAddon.Dependency, String> viewAction) {
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
-        this.searchAction = Objects.requireNonNull(searchAction, "searchAction");
+        this.viewAction = Objects.requireNonNull(viewAction, "viewAction");
 
         setName("remoteAddonDependencyControls");
         setOpaque(false);
@@ -120,13 +120,13 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
                 i18n("swing.download.dependency_loading"),
                 i18n("swing.download.dependency_unavailable")));
         selector.setMinimumSize(new Dimension(0, 0));
-        searchButton.setName("remoteAddonDependencySearch");
-        searchButton.setText(i18n("search"));
-        searchButton.setMinimumSize(new Dimension(0, 0));
-        searchButton.addActionListener(searchListener);
+        viewButton.setName("remoteAddonDependencyView");
+        viewButton.setText(i18n("swing.download.dependency_view"));
+        viewButton.setMinimumSize(new Dimension(0, 0));
+        viewButton.addActionListener(viewListener);
 
         add(selector, "growx, wmin 0, h 32!");
-        add(searchButton, "w 96!, h 32!");
+        add(viewButton, "w 96!, h 32!");
     }
 
     /// Shows the downloadable prerequisites for one selected project version.
@@ -179,7 +179,7 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
         setEnabledState(false);
     }
 
-    /// Reports whether a visible prerequisite can currently be searched.
+    /// Reports whether a visible prerequisite can currently be opened.
     ///
     /// @return true when the selector contains visible options
     boolean hasDependencies() {
@@ -198,7 +198,7 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
             return;
         }
         selector.setEnabled(true);
-        searchButton.setEnabled(selector.getSelectedItem() != null);
+        viewButton.setEnabled(selector.getSelectedItem() != null);
     }
 
     /// Removes the selector listener and clears all per-version state.
@@ -213,7 +213,7 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
         contextItem = null;
         contextVersion = null;
         clearState();
-        searchButton.removeActionListener(searchListener);
+        viewButton.removeActionListener(viewListener);
         setEnabledState(false);
     }
 
@@ -222,7 +222,7 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
     /// @param enabled whether the selected prerequisite command may run
     private void setEnabledState(boolean enabled) {
         selector.setEnabled(enabled && selector.getItemCount() > 0);
-        searchButton.setEnabled(enabled && selector.getSelectedItem() != null);
+        viewButton.setEnabled(enabled && selector.getSelectedItem() != null);
     }
 
     /// Clears all current options and name-resolution state.
@@ -372,12 +372,12 @@ final class RemoteAddonDependencySelector extends JPanel implements AutoCloseabl
         setInputsEnabled(inputsEnabled);
     }
 
-    /// Opens the selected prerequisite through the owning panel's shared result list.
-    private void searchSelectedDependency() {
+    /// Opens the selected prerequisite through the owning panel.
+    private void viewSelectedDependency() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable Object selected = selector.getSelectedItem();
         if (selected instanceof DependencyOption option) {
-            searchAction.accept(option.dependency(), option.identifier());
+            viewAction.accept(option.dependency(), option.identifier());
         }
     }
 

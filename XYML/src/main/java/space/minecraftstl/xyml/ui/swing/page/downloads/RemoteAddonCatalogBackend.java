@@ -77,6 +77,24 @@ public interface RemoteAddonCatalogBackend {
         return null;
     }
 
+    /// Resolves a provider dependency identifier to its public mod page.
+    ///
+    /// Implementations may access the network, so callers invoke this method only from a worker.
+    /// A null result means that the dependency is broken, has no usable page, or is not supported
+    /// by the backend.
+    ///
+    /// @param item selected remote project providing the fallback provider
+    /// @param dependency provider dependency metadata
+    /// @return validated HTTP(S) mod page URI, or null when unavailable
+    /// @throws IOException when the provider request fails
+    default @Nullable URI resolveDependencyPage(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Dependency dependency) throws IOException {
+        Objects.requireNonNull(item, "item");
+        Objects.requireNonNull(dependency, "dependency");
+        return null;
+    }
+
     /// Loads one selected version's changelog on demand.
     ///
     /// Test gateways may leave this optional operation at its empty default; production Core

@@ -208,6 +208,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Monotonic selection identity that makes stale selected-project version callbacks harmless.
     private final AtomicLong selectionRequestRevision = new AtomicLong();
 
+    /// Monotonic dependency-page identity that makes stale prerequisite callbacks harmless.
+    private final AtomicLong dependencyPageRevision = new AtomicLong();
+
     /// Monotonic category request identity that rejects stale provider trees after source changes.
     private final AtomicLong categoryRequestRevision = new AtomicLong();
 
@@ -438,7 +441,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         dependencySelector = new RemoteAddonDependencySelector(
                 this.backend,
                 this.workerExecutor,
-                this::openDependencySearch);
+                this::openDependencyMod);
         this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         instanceContext = new RemoteAddonInstanceContextCoordinator(
                 this.kind == RemoteAddonCatalogKind.WORLD ? null : instancesModel, sourceBox, gameVersionField,
@@ -539,6 +542,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         pendingDependencySearch = null;
+        dependencyPageRevision.incrementAndGet();
         categoryControls.clearPending();
         dependencyNavigationInProgress = true;
         try {
@@ -880,6 +884,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private void updateProjectDetails(
             @Nullable RemoteAddonCatalogItem item,
             @Nullable RemoteAddon.Version version) {
+        dependencyPageRevision.incrementAndGet();
         if (item == null) {
             projectSummaryLabel.setText("");
             projectSummaryLabel.setToolTipText(null);
@@ -929,10 +934,53 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         prerequisitesLabel.setVisible(dependencySelector.hasDependencies());
     }
 
-    /// Selects a dependency's provider when available, then opens its Mod search route.
-    ///
-    /// @param dependency provider dependency represented by the command
-    /// @param identifier non-blank provider project identifier
+    /// Resolves a dependency to its provider page, falling back to identifier search.
+    private void openDependencyMod(RemoteAddon.Dependency dependency, String identifier) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || selectedItem == null) return;
+        RemoteAddonCatalogItem item = selectedItem;
+        long revision = dependencyPageRevision.incrementAndGet();
+        dependencyNavigationInProgress = true;
+        setStatus(i18n("swing.download.dependency_resolving"));
+        try {
+            workerExecutor.execute(() -> resolveDependencyMod(item, dependency, identifier, revision));
+        } catch (RuntimeException schedulingFailure) {
+            LOG.warning("Failed to schedule remote add-on dependency page resolution", schedulingFailure);
+            applyDependencyMod(item, dependency, identifier, revision, null);
+        }
+    }
+
+    /// Resolves a dependency page away from the EDT.
+    private void resolveDependencyMod(
+            RemoteAddonCatalogItem item, RemoteAddon.Dependency dependency, String identifier, long revision) {
+        @Nullable URI page = null;
+        try {
+            page = backend.resolveDependencyPage(item, dependency);
+        } catch (IOException | RuntimeException resolutionFailure) {
+            LOG.warning("Failed to resolve remote add-on dependency page", resolutionFailure);
+        }
+        @Nullable URI resolvedPage = page;
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                () -> applyDependencyMod(item, dependency, identifier, revision, resolvedPage));
+    }
+
+    /// Publishes a dependency page or starts the compatibility search fallback.
+    private void applyDependencyMod(
+            RemoteAddonCatalogItem item, RemoteAddon.Dependency dependency, String identifier, long revision,
+            @Nullable URI page) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || dependencyPageRevision.get() != revision || selectedItem != item) return;
+        dependencyNavigationInProgress = false;
+        if (page != null) {
+            openBrowserPage(page, "remote add-on dependency page");
+            setStatus(catalogIdleStatus());
+            return;
+        }
+        setStatus(i18n("swing.download.dependency_search_fallback"));
+        openDependencySearch(dependency, identifier);
+    }
+
+    /// Selects a dependency's provider and opens its Mod search compatibility route.
     private void openDependencySearch(RemoteAddon.Dependency dependency, String identifier) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
@@ -964,13 +1012,21 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (!(property instanceof URI uri) || closed) {
             return;
         }
-        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+        openBrowserPage(uri, "remote add-on upstream page");
+    }
+
+    /// Opens one validated remote page in the platform browser.
+    /// @param page HTTP(S) page; @param description diagnostic description
+    private void openBrowserPage(URI page, String description) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || !Desktop.isDesktopSupported()
+                || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
             return;
         }
         try {
-            Desktop.getDesktop().browse(uri);
+            Desktop.getDesktop().browse(page);
         } catch (IOException | RuntimeException browseFailure) {
-            LOG.warning("Failed to open remote add-on upstream page", browseFailure);
+            LOG.warning("Failed to open " + description, browseFailure);
         }
     }
 

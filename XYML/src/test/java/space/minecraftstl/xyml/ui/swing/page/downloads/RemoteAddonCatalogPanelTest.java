@@ -434,9 +434,9 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
-    /// Shows the upstream project and opens a selected version's provider-specific prerequisite search.
+    /// Shows the upstream project and opens a selected version's provider-specific prerequisite mod.
     @Test
-    void exposesUpstreamAndSearchesSelectedVersionPrerequisite() throws Exception {
+    void exposesUpstreamAndViewsSelectedVersionPrerequisite() throws Exception {
         String dependencyId = "required-project";
         RemoteAddon.Dependency dependency = RemoteAddon.Dependency.ofGeneral(
                 RemoteAddon.DependencyType.REQUIRED,
@@ -478,7 +478,7 @@ final class RemoteAddonCatalogPanelTest {
                         JComboBox.class);
                 JButton prerequisiteSearch = findNamed(
                         panel,
-                        "remoteAddonDependencySearch",
+                        "remoteAddonDependencyView",
                         JButton.class);
                 assertNotNull(upstream);
                 assertTrue(upstream.isVisible());
@@ -490,16 +490,13 @@ final class RemoteAddonCatalogPanelTest {
                 assertTrue(prerequisites.isVisible());
                 assertEquals(1, prerequisites.getItemCount());
                 assertNotNull(prerequisiteSearch);
+                assertEquals(i18n("swing.download.dependency_view"), prerequisiteSearch.getText());
                 assertTrue(prerequisiteSearch.isVisible());
                 prerequisiteSearch.doClick();
             });
             awaitBackgroundWork(executor);
 
-            RemoteAddonCatalogQuery query = backend.lastQuery.get();
-            assertNotNull(query);
-            assertEquals(2, backend.searchRequests.get());
-            assertEquals(dependencyId, query.searchText());
-            assertEquals(RemoteAddonCatalogSource.MODRINTH, query.source());
+            assertEquals(1, backend.searchRequests.get());
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {
@@ -557,7 +554,7 @@ final class RemoteAddonCatalogPanelTest {
                         JComboBox.class);
                 JButton search = findNamed(
                         panel,
-                        "remoteAddonDependencySearch",
+                        "remoteAddonDependencyView",
                         JButton.class);
                 assertNotNull(prerequisites);
                 assertEquals(2, prerequisites.getItemCount());
@@ -578,7 +575,7 @@ final class RemoteAddonCatalogPanelTest {
                         JComboBox.class));
                 JButton search = Objects.requireNonNull(findNamed(
                         panel,
-                        "remoteAddonDependencySearch",
+                        "remoteAddonDependencyView",
                         JButton.class));
                 prerequisites.setSelectedIndex(1);
                 search.doClick();
@@ -592,7 +589,7 @@ final class RemoteAddonCatalogPanelTest {
                         JComboBox.class));
                 JButton search = Objects.requireNonNull(findNamed(
                         panel,
-                        "remoteAddonDependencySearch",
+                        "remoteAddonDependencyView",
                         JButton.class));
                 prerequisites.setSelectedIndex(0);
                 search.doClick();
@@ -1846,6 +1843,21 @@ final class RemoteAddonCatalogPanelTest {
             dependencyNameRequests.incrementAndGet();
             @Nullable String id = Objects.requireNonNull(dependency, "dependency").getId();
             return id == null ? null : "Resolved " + id;
+        }
+
+        /// Resolves one dependency page with a deterministic configured result.
+        ///
+        /// @param item selected fixture project
+        /// @param dependency dependency requested by the panel
+        /// @return configured public page, or null when the fixture forces fallback search
+        @Override
+        public @Nullable URI resolveDependencyPage(
+                RemoteAddonCatalogItem item,
+                RemoteAddon.Dependency dependency) {
+            assertEquals(this.item, item);
+            Objects.requireNonNull(dependency, "dependency");
+            @Nullable String id = dependency.getId();
+            return "required-project".equals(id) ? URI.create(item.addon().pageUrl()) : null;
         }
 
         /// Records and returns a five-page provider result so every pagination command is testable.
