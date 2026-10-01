@@ -293,14 +293,19 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     ///
     /// @param category category whose directory is required
     /// @return a concrete managed directory, or null when no selected instance can supply one
-    private static @Nullable Path resolveCategoryDirectory(DownloadCategory category) {
+    private @Nullable Path resolveCategoryDirectory(DownloadCategory category) {
         try {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             if (!category.requiresSelectedInstance()) {
                 return repository.getGameDirectory().getPath().toPath();
             }
 
-            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            @Nullable GameInstanceID instanceId = switch (category) {
+                case MODS -> modsCatalog.selectedInstanceId();
+                case RESOURCE_PACKS -> resourcePackCatalog.selectedInstanceId();
+                case SHADERS -> shaderPackCatalog.selectedInstanceId();
+                case WORLDS, MODPACK -> repository.getSelectedInstance();
+            };
             if (instanceId == null) {
                 return null;
             }

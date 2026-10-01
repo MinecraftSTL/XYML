@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -411,6 +412,24 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             transition = replaceStateLocked(current.content(), replacement);
         }
         publish(transition);
+    }
+
+    /// Loads one icon through the serialized source boundary without touching the Swing thread.
+    @Override
+    public CompletionStage<@Nullable EncodedImage> loadIcon(Path path) {
+        Path normalizedPath = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        return CompletableFuture.supplyAsync(() -> {
+            synchronized (sourceInvocationLock) {
+                if (closed) {
+                    throw new CancellationException("Resource-pack catalog is closed");
+                }
+                try {
+                    return catalogAccess.loadIcon(normalizedPath);
+                } catch (IOException failure) {
+                    throw new CompletionException(failure);
+                }
+            }
+        }, backgroundExecutor);
     }
 
     /// Imports multiple source packs through one serialized write and one follow-up index scan.

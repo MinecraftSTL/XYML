@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /// Resolves direct-install targets from the launcher-wide currently selected repository and instance.
 ///
@@ -33,6 +34,23 @@ import java.util.Optional;
 /// starts a repository refresh, or contacts a remote source while the catalog is merely displayed.
 @NotNullByDefault
 public final class LauncherRemoteAddonInstallTargetResolver implements RemoteAddonInstallTargetResolver {
+    /// Supplies the instance selected by the owning download tab.
+    private final Supplier<@Nullable GameInstanceID> selectedInstanceSupplier;
+
+    /// Resolves targets from the launcher's global selection for legacy callers.
+    public LauncherRemoteAddonInstallTargetResolver() {
+        this(() -> GameDirectoryManager.getSelectedInstance());
+    }
+
+    /// Resolves targets from an explicit, page-local instance selection.
+    ///
+    /// @param selectedInstanceSupplier page-local selected instance supplier
+    public LauncherRemoteAddonInstallTargetResolver(Supplier<@Nullable GameInstanceID> selectedInstanceSupplier) {
+        this.selectedInstanceSupplier = Objects.requireNonNull(
+                selectedInstanceSupplier,
+                "selectedInstanceSupplier");
+    }
+
     /// Resolves a selected direct-install target, returning empty for unavailable or stale launcher state.
     ///
     /// @param kind requested direct-install category
@@ -42,7 +60,7 @@ public final class LauncherRemoteAddonInstallTargetResolver implements RemoteAdd
         RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
         try {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            @Nullable GameInstanceID instanceId = selectedInstanceSupplier.get();
             if (instanceId == null || !repository.hasInstance(instanceId)) {
                 return Optional.empty();
             }

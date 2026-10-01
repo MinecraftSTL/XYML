@@ -23,7 +23,11 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
@@ -34,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -42,6 +47,7 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -59,8 +65,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.ArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -87,7 +95,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private final RemoteAddonInstallLauncher installLauncher;
 
     /// Resolver that snapshots the destination immediately before acquisition.
-    private final RemoteAddonInstallTargetResolver targetResolver;
+    private RemoteAddonInstallTargetResolver targetResolver;
+
+    /// Whether this production panel owns a page-local instance selector.
+    private final boolean instanceSelectionEnabled;
 
     /// Caller-owned worker executor for searches and selected-project version loading.
     private final Executor workerExecutor;
@@ -110,6 +121,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Provider selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteAddonCatalogSource> sourceBox = new JComboBox<>(
             RemoteAddonCatalogSource.values());
+
+    /// Page-local instance target selector that never mutates launcher-wide selection state.
+    private final JComboBox<DownloadInstanceOption> instanceBox = new JComboBox<>();
 
     /// Optional project keyword editor.
     private final JTextField searchField = new JTextField();
@@ -186,6 +200,18 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Provider whose categories currently populate the selector, or null before a successful load.
     private @Nullable RemoteAddonCatalogSource loadedCategorySource;
 
+    /// Instance selected by this download tab, or null when the tab has no install target.
+    private @Nullable GameInstanceID selectedInstanceId;
+
+    /// Suppresses target changes while repository instance options are republished.
+    private boolean applyingInstanceOptions;
+
+    /// Prevents the first refresh from overwriting the tab's initial global selection.
+    private boolean instanceOptionsInitialized;
+
+    /// Repository identity used to invalidate a local selection after directory switching.
+    private @Nullable XYMLGameRepository instanceRepository;
+
     /// Whether a background provider page request is currently outstanding.
     private boolean catalogLoading;
 
@@ -230,6 +256,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
+        if (kind != RemoteAddonCatalogKind.WORLD) {
+            targetResolver = new LauncherRemoteAddonInstallTargetResolver(() -> selectedInstanceId);
+            updateControls();
+        }
     }
 
     /// Selects the production destination policy without performing filesystem or network work.
@@ -305,6 +335,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver");
+        instanceSelectionEnabled = targetResolver instanceof LauncherRemoteAddonInstallTargetResolver;
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
@@ -331,6 +362,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @return sparse retained-provider result list
     public ViewportChoiceList<RemoteAddonCatalogItem> choiceList() {
         return choiceList;
+    }
+
+    /// Returns this panel's locally selected managed-directory instance.
+    ///
+    /// @return selected instance ID, or null when no local target is selected
+    public @Nullable GameInstanceID selectedInstanceId() {
+        EdtDispatcher.requireEventDispatchThread();
+        return selectedInstanceId;
     }
 
     /// Starts category discovery only when this panel receives a peer while visible.
@@ -487,6 +526,42 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
         pageBand.add(lastPageButton, "grow, h 40!");
         filterBand.add(pageBand, "growx");
+
+        if (kind != RemoteAddonCatalogKind.WORLD && instanceSelectionEnabled) {
+            JPanel instanceBand = new JPanel(new MigLayout(
+                    "insets 0, fill",
+                    "[][grow,fill]",
+                    "[40!]"));
+            instanceBand.setName("remoteAddonInstanceBand");
+            instanceBand.setOpaque(false);
+            JLabel instanceLabel = new JLabel(i18n("instance.switch"));
+            instanceLabel.setLabelFor(instanceBox);
+            instanceBand.add(instanceLabel);
+            instanceBox.setName("remoteAddonInstance");
+            instanceBox.setRenderer(new javax.swing.DefaultListCellRenderer() {
+                @Override
+                public Component getListCellRendererComponent(
+                        JList<?> list,
+                        @Nullable Object value,
+                        int index,
+                        boolean isSelected,
+                        boolean cellHasFocus) {
+                    Component component = super.getListCellRendererComponent(
+                            list,
+                            value,
+                            index,
+                            isSelected,
+                            cellHasFocus);
+                    if (value == null) {
+                        setText(i18n("instance.unselected"));
+                    }
+                    return component;
+                }
+            });
+            instanceBox.addActionListener(event -> instanceSelectionChanged());
+            instanceBand.add(instanceBox, "growx, h 40!");
+            filterBand.add(instanceBand, "growx");
+        }
         add(filterBand, "growx");
 
         choiceList.setName("remoteAddonResults");
@@ -496,6 +571,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         resultList.setName("remoteAddonResultsView");
         resultList.setOpaque(false);
         resultList.setBorder(BorderFactory.createEmptyBorder(0, 0, RESULT_LIST_BOTTOM_PADDING, 0));
+        resultList.setCellRenderer(new RemoteAddonResultRenderer());
         resultList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 selectedRowChanged();
@@ -530,6 +606,57 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteAddonInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Applies one user-selected download target without changing the launcher-wide instance.
+    private void instanceSelectionChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!applyingInstanceOptions) {
+            @Nullable DownloadInstanceOption option =
+                    (DownloadInstanceOption) instanceBox.getSelectedItem();
+            selectedInstanceId = option == null ? null : option.id();
+            updateControls();
+        }
+    }
+
+    /// Refreshes this tab's instance options from the currently selected repository.
+    private void refreshInstanceOptions() {
+        EdtDispatcher.requireEventDispatchThread();
+        XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
+        List<DownloadInstanceOption> options = repository.getDisplayInstanceManifests()
+                .map(GameInstanceManifest::id)
+                .map(id -> new DownloadInstanceOption(id, id.id()))
+                .collect(Collectors.toCollection(ArrayList::new));
+        @Nullable GameInstanceID currentGlobalSelection = repository.getSelectedInstance();
+        boolean repositoryChanged = instanceRepository != repository;
+        boolean selectedStillExists = selectedInstanceId != null
+                && options.stream().anyMatch(option -> option.id().equals(selectedInstanceId));
+        @Nullable GameInstanceID validGlobalSelection = currentGlobalSelection != null
+                && options.stream().anyMatch(option -> option.id().equals(currentGlobalSelection))
+                ? currentGlobalSelection
+                : null;
+        if (!instanceOptionsInitialized || repositoryChanged) {
+            selectedInstanceId = validGlobalSelection;
+            instanceOptionsInitialized = true;
+        } else if (!selectedStillExists) {
+            selectedInstanceId = null;
+        }
+        instanceRepository = repository;
+
+        applyingInstanceOptions = true;
+        try {
+            instanceBox.removeAllItems();
+            instanceBox.addItem(null);
+            for (DownloadInstanceOption option : options) {
+                instanceBox.addItem(option);
+            }
+            instanceBox.setSelectedItem(options.stream()
+                    .filter(option -> option.id().equals(selectedInstanceId))
+                    .findFirst()
+                    .orElse(null));
+        } finally {
+            applyingInstanceOptions = false;
+        }
     }
 
     /// Invalidates source-specific categories, clears stale results, and loads the new tree when visible.
@@ -1145,6 +1272,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Reconciles all command availability from catalog, version, target, task, and lifecycle state.
     private void updateControls() {
         EdtDispatcher.requireEventDispatchThread();
+        if (kind != RemoteAddonCatalogKind.WORLD && instanceSelectionEnabled) {
+            refreshInstanceOptions();
+        }
         boolean inputsEnabled = !closed && activeExecutor == null;
         boolean criteriaEnabled = inputsEnabled && !catalogLoading;
         sourceBox.setEnabled(criteriaEnabled);
@@ -1153,6 +1283,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryBox.setEnabled(criteriaEnabled && !categoryLoading);
         sortBox.setEnabled(criteriaEnabled);
         searchButton.setEnabled(criteriaEnabled);
+        instanceBox.setEnabled(instanceSelectionEnabled && inputsEnabled && instanceBox.getItemCount() > 1);
 
         @Nullable RemoteAddonCatalogPage page = displayedPage;
         boolean pageButtonsEnabled = inputsEnabled && !catalogLoading && page != null;
@@ -1351,6 +1482,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                     index,
                     isSelected,
                     cellHasFocus);
+            setOpaque(false);
             setIcon(null);
             if (value instanceof RemoteAddon.Version version) {
                 String displayName = version.name().isBlank() ? version.version() : version.name();
@@ -1362,6 +1494,47 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                             + RemoteVersionChannelPresentation.label(versionType));
                     setIcon(RemoteVersionChannelPresentation.icon(versionType));
                 }
+            }
+            return component;
+        }
+    }
+
+    /// Renders remote result rows with a lazy provider icon and stable text fallback.
+    @NotNullByDefault
+    private static final class RemoteAddonResultRenderer extends DefaultListCellRenderer {
+        /// Shared icon cache for all sparse result rows in this process.
+        private static final RemoteAddonIconCache ICON_CACHE = RemoteAddonIconCache.shared();
+
+        /// Renders one sparse result row without performing network or image I/O on the EDT.
+        @Override
+        public Component getListCellRendererComponent(
+                JList<?> list,
+                @Nullable Object value,
+                int index,
+                boolean isSelected,
+                boolean cellHasFocus) {
+            Component component = super.getListCellRendererComponent(
+                    list,
+                    value,
+                    index,
+                    isSelected,
+                    cellHasFocus);
+            setOpaque(false);
+            setIcon(null);
+            if (value instanceof ChoiceListEntry<?> entry
+                    && entry.status() == ChoiceLoadStatus.LOADED
+                    && entry.value() instanceof RemoteAddonCatalogItem item) {
+                setText(item.displayText());
+                @Nullable Icon icon = list.isShowing() ? ICON_CACHE.iconFor(item, list) : null;
+                if (icon == null) {
+                    icon = RemoteAddonIconCache.PLACEHOLDER;
+                }
+                setIcon(icon);
+            } else if (value instanceof ChoiceListEntry<?> entry
+                    && entry.status() == ChoiceLoadStatus.ERROR) {
+                setText("!");
+            } else {
+                setText("...");
             }
             return component;
         }

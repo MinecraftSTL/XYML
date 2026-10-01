@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
@@ -37,6 +38,7 @@ import javax.swing.AbstractAction;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
+import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -53,6 +55,7 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.HierarchyEvent;
@@ -131,6 +134,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Search-filtered path source that preserves viewport-only metadata resolution.
     private final FilteredResourcePackCatalogDataSource filteredDataSource;
+
+    /// Lazy local icon cache shared by the visible resource-pack rows.
+    private final ResourcePackIconCache iconCache;
 
     /// Viewport-measured multi-choice list.
     private final ViewportChoiceList<ResourcePackCatalogItem> choiceList;
@@ -331,7 +337,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             searchListener = createSearchListener();
             showingListener = this::showingChanged;
             filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
+            iconCache = new ResourcePackIconCache();
             acquiredChoiceList = new ViewportChoiceList<>(filteredDataSource, ResourcePackCatalogItem::displayText);
+            acquiredChoiceList.getList().setCellRenderer(new ResourcePackListCellRenderer(this.model, iconCache));
             choiceList = acquiredChoiceList;
             catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
             configureComponents();
@@ -830,6 +838,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 || previous.contentRevision() != snapshot.contentRevision()
                 || !previous.itemCount().equals(snapshot.itemCount());
         displayedSnapshot = snapshot;
+        if (contentChanged) {
+            iconCache.clear();
+        }
 
         applyingSnapshot = true;
         try {
@@ -1747,6 +1758,55 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
         if (failure != null) {
             throw new IllegalStateException("Unexpected checked cleanup failure", failure);
+        }
+    }
+
+    /// Renders installed resource-pack rows with lazily loaded local pack.png icons.
+    @NotNullByDefault
+    private static final class ResourcePackListCellRenderer extends javax.swing.DefaultListCellRenderer {
+        /// Model owning bounded resource-pack icon reads.
+        private final ResourcePackCatalogModel model;
+
+        /// Shared row icon cache.
+        private final ResourcePackIconCache iconCache;
+
+        /// Creates a renderer bound to one catalog model and cache.
+        private ResourcePackListCellRenderer(
+                ResourcePackCatalogModel model,
+                ResourcePackIconCache iconCache) {
+            this.model = Objects.requireNonNull(model, "model");
+            this.iconCache = Objects.requireNonNull(iconCache, "iconCache");
+        }
+
+        /// Configures one sparse resource-pack row without reading the filesystem on the EDT.
+        @Override
+        public Component getListCellRendererComponent(
+                JList<?> list,
+                @Nullable Object value,
+                int index,
+                boolean isSelected,
+                boolean cellHasFocus) {
+            Component component = super.getListCellRendererComponent(
+                    list,
+                    value,
+                    index,
+                    isSelected,
+                    cellHasFocus);
+            setOpaque(false);
+            setIcon(null);
+            if (value instanceof ChoiceListEntry<?> entry
+                    && entry.status() == ChoiceLoadStatus.LOADED
+                    && entry.value() instanceof ResourcePackCatalogItem item) {
+                setText(item.displayText());
+                @Nullable Icon icon = list.isShowing() ? iconCache.iconFor(model, item, list) : null;
+                setIcon(icon == null ? ResourcePackIconCache.PLACEHOLDER : icon);
+            } else if (value instanceof ChoiceListEntry<?> entry
+                    && entry.status() == ChoiceLoadStatus.ERROR) {
+                setText("!");
+            } else {
+                setText("...");
+            }
+            return component;
         }
     }
 
