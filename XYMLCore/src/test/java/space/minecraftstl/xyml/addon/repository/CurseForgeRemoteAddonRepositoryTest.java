@@ -42,8 +42,10 @@ public final class CurseForgeRemoteAddonRepositoryTest {
                 RemoteAddonRepository.SortType.POPULARITY));
         assertEquals(4, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.NAME));
-        assertEquals(1, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+        assertEquals(11, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.DATE_CREATED));
+        assertEquals(1, CurseForgeRemoteAddonRepository.toModsSearchSortField(
+                RemoteAddonRepository.SortType.RELEVANCY));
         assertEquals(3, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.LAST_UPDATED));
         assertEquals(5, CurseForgeRemoteAddonRepository.toModsSearchSortField(

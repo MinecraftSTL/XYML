@@ -17,31 +17,33 @@
  */
 package space.minecraftstl.xyml.task;
 
-import org.jetbrains.annotations.NotNullByDefault;
 import org.glavo.url.WebURL;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 
 import static java.util.Objects.requireNonNull;
 
-/// Reports that a resource could not be downloaded from a specific URL.
-@NotNullByDefault
+/// Reports failure to download a candidate URL, retaining the underlying cause.
 public class DownloadException extends IOException {
 
-    /// URL whose download failed.
-    private final WebURL url;
+    /// Candidate URL whose download failed.
+    private final String url;
 
-    /// Creates a download failure with its source URL and underlying cause.
-    ///
-    /// @param url source URL
-    /// @param cause underlying failure
-    public DownloadException(WebURL url, Throwable cause) {
+    /// Creates a failure for the candidate URL and a non-null cause.
+    public DownloadException(WebURL url, @NotNull Throwable cause) {
+        super("Unable to download " + url + ", " + cause.getMessage(), requireNonNull(cause));
+        this.url = url.href();
+    }
+
+    /// Creates a failure for the candidate URL and a non-null cause.
+    public DownloadException(String url, @NotNull Throwable cause) {
         super("Unable to download " + url + ", " + cause.getMessage(), requireNonNull(cause));
         this.url = url;
     }
 
-    /// Returns the URL whose download failed.
-    public WebURL getUrl() {
+    /// Returns the candidate URL before any redirects.
+    public String getUrl() {
         return url;
     }
 }

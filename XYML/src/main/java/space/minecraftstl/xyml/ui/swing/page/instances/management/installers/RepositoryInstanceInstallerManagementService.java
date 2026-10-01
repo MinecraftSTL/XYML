@@ -20,31 +20,29 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.DownloadProviderWrapper;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
@@ -52,7 +50,7 @@ import java.util.concurrent.Executor;
 /// Adapts XYML's established repository and dependency-manager APIs for existing-instance installer management.
 ///
 /// Every repository scan and task-construction side effect runs outside Swing. Remote installation keeps the
-/// exact caller-selected [RemoteVersion] subtypes and caller order, then delegates saving and refresh to the
+/// exact caller-selected [ComponentRemoteVersion] subtypes and caller order, then delegates saving and refresh to the
 /// existing Core APIs instead of parsing or writing version JSON directly.
 @NotNullByDefault
 public final class RepositoryInstanceInstallerManagementService implements InstanceInstallerManagementService {
@@ -96,21 +94,21 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     @Override
     public Task<InstanceInstallerSnapshot> installRemoteVersions(
             GameInstanceID instanceId,
-            Collection<? extends RemoteVersion> remoteVersions) {
+            Collection<? extends ComponentRemoteVersion> remoteVersions) {
         GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
-        @Unmodifiable List<RemoteVersion> capturedVersions = copyRemoteVersions(remoteVersions);
+        @Unmodifiable List<ComponentRemoteVersion> capturedVersions = copyRemoteVersions(remoteVersions);
         @Unmodifiable List<Task.StagesHint> stages = remoteInstallationStages(capturedVersions);
         return Task.composeAsync(ioExecutor, () -> {
             InstanceInstallerSnapshot snapshot = readSnapshot(id);
-            @Unmodifiable List<RemoteVersion> validatedVersions =
+            @Unmodifiable List<ComponentRemoteVersion> validatedVersions =
                     InstanceInstallerCompatibility.validateRemoteInstallation(snapshot, capturedVersions);
             DefaultDependencyManager dependencyManager = repository.getDependency(
-                    unwrapProvider(DownloadProviders.getDownloadProvider()));
+                    DownloadProviders.getDownloadProvider());
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
                     () -> repository.getResolvedInstanceManifest(id).standaloneManifest())
                     .setResources(metadataResource(), instanceResource(id));
-            for (RemoteVersion remoteVersion : validatedVersions) {
+            for (ComponentRemoteVersion remoteVersion : validatedVersions) {
                 mutation = mutation.thenComposeAsync(
                         ioExecutor,
                         manifest -> dependencyManager.installLibraryAsync(manifest, remoteVersion))
@@ -127,14 +125,14 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     /// @param remoteVersions immutable selected remote versions
     /// @return immutable dependency and component stage sequence
     static @Unmodifiable List<Task.StagesHint> remoteInstallationStages(
-            Collection<? extends RemoteVersion> remoteVersions) {
-        @Unmodifiable List<RemoteVersion> versions = copyRemoteVersions(remoteVersions);
+            Collection<? extends ComponentRemoteVersion> remoteVersions) {
+        @Unmodifiable List<ComponentRemoteVersion> versions = copyRemoteVersions(remoteVersions);
         List<Task.StagesHint> stages = new ArrayList<>(versions.size() * 2);
-        for (RemoteVersion remoteVersion : versions) {
+        for (ComponentRemoteVersion remoteVersion : versions) {
             stages.add(new Task.StagesHint("xyml.install.libraries"));
             stages.add(new Task.StagesHint(String.format(
                     "xyml.install.%s:%s",
-                    remoteVersion.getLibraryId(),
+                    remoteVersion.getComponentType().getPatchId(),
                     remoteVersion.getSelfVersion())));
         }
         return List.copyOf(stages);
@@ -153,7 +151,7 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
             InstanceInstallerSnapshot snapshot = readSnapshot(id);
             InstanceInstallerCompatibility.validateRemoval(snapshot, requestedLibraryId);
             DefaultDependencyManager dependencyManager = repository.getDependency(
-                    unwrapProvider(DownloadProviders.getDownloadProvider()));
+                    DownloadProviders.getDownloadProvider());
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
                     () -> repository.getResolvedInstanceManifest(id).standaloneManifest())
@@ -178,7 +176,7 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
         Path installerPath = Objects.requireNonNull(installer, "installer").toAbsolutePath().normalize();
         return Task.composeAsync(ioExecutor, () -> {
             DefaultDependencyManager dependencyManager = repository.getDependency(
-                    unwrapProvider(DownloadProviders.getDownloadProvider()));
+                    DownloadProviders.getDownloadProvider());
             Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
                     () -> {
@@ -253,28 +251,35 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     private InstanceInstallerSnapshot readSnapshot(GameInstanceID instanceId) {
         GameInstanceManifest independent = repository.getResolvedInstanceManifest(instanceId).standaloneManifest();
         Optional<String> gameVersion = repository.getGameVersion(independent);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(independent, gameVersion.orElse(null));
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                independent,
+                GameVersionNumber.asGameVersion(gameVersion));
         List<InstanceInstallerEntry> entries = new ArrayList<>();
         for (GameLoaderKind kind : GameLoaderKind.values()) {
-            @Nullable String version = analyzer.getVersion(kind.versionListId()).orElse(null);
+            @Nullable GameComponentType componentType = GameComponentType.fromPatchId(kind.versionListId());
+            if (componentType == null) {
+                continue;
+            }
+            @Nullable String version = analyzer.getVersion(componentType);
             if (version != null) {
+                @Nullable GameComponentAnalyzer.Mark mark = analyzer.getMark(componentType);
                 entries.add(new InstanceInstallerEntry(
                         kind,
                         version,
-                        analyzer.getLibraryStatus(kind.versionListId())));
+                        mark != null ? InstallerStructureStatus.fromMark(mark) : InstallerStructureStatus.UNSURE));
             }
         }
         List<InstanceOtherLibraryEntry> otherEntries = new ArrayList<>();
-        for (LibraryAnalyzer.LibraryMark mark : analyzer) {
-            String libraryId = mark.getLibraryId();
-            if ("mcbbs".equals(libraryId)
-                    || LibraryAnalyzer.LibraryType.fromPatchId(libraryId) != null) {
+        for (GameInstancePatch patch : independent.getPatches()) {
+            @Nullable String libraryId = patch.id();
+            if (libraryId == null || patch.isHidden() || "mcbbs".equals(libraryId)
+                    || GameComponentType.fromPatchId(libraryId) != null) {
                 continue;
             }
             otherEntries.add(new InstanceOtherLibraryEntry(
                     libraryId,
-                    mark.getLibraryVersion(),
-                    InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(mark.getStatus())));
+                    patch.version(),
+                    InstanceOtherLibraryEntry.StructureState.CLEAR));
         }
         otherEntries.sort(Comparator.comparing(InstanceOtherLibraryEntry::libraryId));
         return new InstanceInstallerSnapshot(instanceId, gameVersion, entries, otherEntries);
@@ -284,31 +289,14 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     ///
     /// @param remoteVersions caller-owned selected remote versions
     /// @return immutable exact-order object snapshot
-    private static @Unmodifiable List<RemoteVersion> copyRemoteVersions(
-            Collection<? extends RemoteVersion> remoteVersions) {
-        Collection<? extends RemoteVersion> supplied = Objects.requireNonNull(remoteVersions, "remoteVersions");
-        List<RemoteVersion> copied = new ArrayList<>(supplied.size());
-        for (RemoteVersion remoteVersion : supplied) {
+    private static @Unmodifiable List<ComponentRemoteVersion> copyRemoteVersions(
+            Collection<? extends ComponentRemoteVersion> remoteVersions) {
+        Collection<? extends ComponentRemoteVersion> supplied = Objects.requireNonNull(remoteVersions, "remoteVersions");
+        List<ComponentRemoteVersion> copied = new ArrayList<>(supplied.size());
+        for (ComponentRemoteVersion remoteVersion : supplied) {
             copied.add(Objects.requireNonNull(remoteVersion, "remoteVersions contains null"));
         }
         return List.copyOf(copied);
-    }
-
-    /// Resolves one stable concrete download provider while rejecting mutable-wrapper cycles.
-    ///
-    /// @param provider configured provider or mutable wrapper
-    /// @return concrete provider retained by one mutation task
-    private static DownloadProvider unwrapProvider(DownloadProvider provider) {
-        DownloadProvider current = Objects.requireNonNull(provider, "provider");
-        Set<DownloadProvider> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current instanceof DownloadProviderWrapper wrapper) {
-            if (!visited.add(current)) {
-                throw new IllegalStateException("Download-provider wrapper cycle detected");
-            }
-            @Nullable DownloadProvider nestedProvider = wrapper.getProvider();
-            current = Objects.requireNonNull(nestedProvider, "download-provider wrapper contains null");
-        }
-        return current;
     }
 
     /// Validates one exact non-blank instance or library identifier without normalizing user input.

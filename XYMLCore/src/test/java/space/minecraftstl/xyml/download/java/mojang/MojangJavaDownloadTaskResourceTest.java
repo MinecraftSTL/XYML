@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.download.java.mojang;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -46,7 +46,7 @@ final class MojangJavaDownloadTaskResourceTest {
         Path staging = temporaryDirectory.resolve("managed").resolve(".staging-runtime");
 
         MojangJavaDownloadTask task = new MojangJavaDownloadTask(
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 target,
                 staging,
                 GameJavaVersion.JAVA_17,

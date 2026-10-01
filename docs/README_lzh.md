@@ -59,9 +59,9 @@ XYML 乃社群共驅之開源項目，迎諸君獻碼或建言。
 
 ## 貢獻者
 
-自乙未年（2015）始，百二十余人參與 XYML，謝其勤勞！
+自乙未年（2015）始，百三十余人參與 XYML，謝其勤勞！
 
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 ## 開源之約
 

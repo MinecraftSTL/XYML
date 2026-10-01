@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile.Processor;
 import space.minecraftstl.xyml.game.Artifact;
@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.lang.reflect.Method;
 import java.nio.file.Path;
@@ -77,7 +78,7 @@ public final class ForgeInstallTaskTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("forge-resource-test"));
         @Unmodifiable Set<TaskResource> expected = Set.of(
@@ -85,7 +86,7 @@ public final class ForgeInstallTaskTest {
                 TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)),
                 TaskResource.gameDirectory(repository.getBaseDirectory().resolve("lib")));
         ForgeRemoteVersion remote = new ForgeRemoteVersion(
-                "1.20.1",
+                GameVersionNumber.asGameVersion("1.20.1"),
                 "47.3.0",
                 Instant.EPOCH,
                 List.of("https://example.invalid/forge-installer.jar"));
@@ -99,6 +100,7 @@ public final class ForgeInstallTaskTest {
         assertEquals(expectedLocal, new ForgeNewInstallTask(
                 dependencyManager,
                 manifest,
+                temporaryDirectory.resolve("minecraft.jar"),
                 "47.3.0",
                 temporaryDirectory.resolve("forge-installer.jar")).getResources());
         assertEquals(expectedLocal, new ForgeOldInstallTask(
@@ -116,12 +118,13 @@ public final class ForgeInstallTaskTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("forge-processor-resource-test"));
         ForgeNewInstallTask installation = new ForgeNewInstallTask(
                 dependencyManager,
                 manifest,
+                temporaryDirectory.resolve("minecraft.jar"),
                 "47.3.0",
                 temporaryDirectory.resolve("forge-installer.jar"));
 
@@ -138,11 +141,12 @@ public final class ForgeInstallTaskTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         ForgeNewInstallTask installation = new ForgeNewInstallTask(
                 dependencyManager,
                 new GameInstanceManifest(new GameInstanceID("forge-mappings-resource-test")),
+                temporaryDirectory.resolve("minecraft.jar"),
                 "47.3.0",
                 temporaryDirectory.resolve("forge-installer.jar"));
 

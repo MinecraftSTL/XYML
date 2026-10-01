@@ -21,8 +21,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.ExportedCrashBundle;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameJavaVersion;
@@ -34,6 +36,7 @@ import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.mcp.SwingMcpMissingDependencySearch;
 import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchAction;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
@@ -176,13 +179,14 @@ final class GameCrashWindowModel {
         details.add(new Detail(i18n("system.architecture"), Architecture.SYSTEM_ARCH.getDisplayName()));
 
         @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
-        for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
-            if (!type.getPatchId().isEmpty()) {
-                analyzer.getVersion(type).ifPresent(loaderVersion -> details.add(new Detail(
-                        i18n("install.installer." + type.getPatchId()),
-                        loaderVersion)));
-            }
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                manifest,
+                GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
+        @Nullable ModLoaderType modLoader = analyzer.getPrimaryModLoader();
+        for (GameComponentType type : GameComponentType.ALL) {
+            Optional.ofNullable(analyzer.getVersion(type)).ifPresent(loaderVersion -> details.add(new Detail(
+                    i18n("install.installer." + type.getPatchId()),
+                    loaderVersion)));
         }
 
         details.add(new Detail(
@@ -208,8 +212,15 @@ final class GameCrashWindowModel {
                 capturedLogs.stream().map(Log::getLog).toList());
         @Nullable SwingMcpMissingDependencySearch missingDependencySearch = null;
         if (openMissingModSearch != null) {
+            @Nullable ModLoaderType dependencyModLoader = modLoader;
+            MissingDependencySearchAction contextualSearch = (dependencyId, analyzedVersion) ->
+                    openMissingModSearch.open(new MissingDependencySearchRequest(
+                            dependencyId,
+                            analyzedVersion,
+                            dependencyModLoader,
+                            manifest.id()));
             missingDependencySearch = SwingMcpMissingDependencySearch.forMissingDependencySearchAction(
-                    openMissingModSearch);
+                    contextualSearch);
             logAnalyzable = logAnalyzable.withMissingDependencySearch(missingDependencySearch);
         }
         if (repository instanceof XYMLGameRepository xymlRepository) {

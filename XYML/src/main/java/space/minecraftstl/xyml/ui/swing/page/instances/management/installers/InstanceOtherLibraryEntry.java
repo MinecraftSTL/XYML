@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 
 import java.util.Objects;
 
@@ -59,8 +58,8 @@ public record InstanceOtherLibraryEntry(
         ///
         /// @param status raw Core analyzer status
         /// @return [CLEAR] only for a clear explicit patch; otherwise [EXTERNALLY_UNCERTAIN]
-        public static StructureState fromAnalyzerStatus(LibraryAnalyzer.LibraryMark.LibraryStatus status) {
-            return Objects.requireNonNull(status, "status") == LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR
+        public static StructureState fromAnalyzerStatus(InstallerStructureStatus status) {
+            return Objects.requireNonNull(status, "status") == InstallerStructureStatus.CLEAR
                     ? CLEAR
                     : EXTERNALLY_UNCERTAIN;
         }

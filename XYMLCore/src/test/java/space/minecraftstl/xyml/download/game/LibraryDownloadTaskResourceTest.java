@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.Artifact;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.Library;
@@ -47,7 +47,7 @@ final class LibraryDownloadTaskResourceTest {
         Path target = temporaryDirectory.resolve("libraries/example/library/1.0/library-1.0.jar");
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 new DefaultGameRepository(temporaryDirectory.resolve("repository")),
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         Library library = new Library(
                 new Artifact("example", "library", "1.0"),
@@ -66,7 +66,7 @@ final class LibraryDownloadTaskResourceTest {
         DefaultCacheRepository cacheRepository = new DefaultCacheRepository(temporaryDirectory.resolve("cache"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 new DefaultGameRepository(temporaryDirectory.resolve("repository")),
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 cacheRepository);
         Library library = new Library(
                 new Artifact("example", "library", "1.0"),

@@ -101,8 +101,15 @@ public final class AccountListCellRenderer extends JPanel
     /// Whether the represented row owns keyboard focus.
     private boolean focused;
 
-    /// Creates one reusable stable renderer hierarchy.
+    /// Creates one reusable stable renderer hierarchy with account reordering enabled.
     public AccountListCellRenderer() {
+        this(true);
+    }
+
+    /// Creates one reusable stable renderer hierarchy.
+    ///
+    /// @param showDragHandle whether loaded rows expose the account-reordering handle
+    public AccountListCellRenderer(boolean showDragHandle) {
         super(new BorderLayout(12, 0));
         setOpaque(false);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
@@ -131,6 +138,7 @@ public final class AccountListCellRenderer extends JPanel
         dragHandleLabel.setHorizontalAlignment(SwingConstants.CENTER);
         dragHandleLabel.setVerticalAlignment(SwingConstants.CENTER);
         dragHandleLabel.setIcon(new DragHandleIcon());
+        dragHandleLabel.setVisible(showDragHandle);
 
         add(avatarLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);

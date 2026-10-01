@@ -19,23 +19,25 @@ package space.minecraftstl.xyml.download.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.download.DownloadCandidates;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameRepository;
-import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
-import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
-import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.game.Library;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileSystem;
@@ -175,8 +177,8 @@ public final class GameLibrariesTask extends Task<Void> {
                     for (FMLLib fmlLib : fmlLibs) {
                         Path file = libDir.resolve(fmlLib.name);
                         if (shouldDownloadFMLLib(fmlLib, file)) {
-                            @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider()
-                                    .injectURLWithCandidates(fmlLib.downloadUrl());
+                            DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
+                            DownloadCandidates urls = downloadProvider.getDownloadCandidates(fmlLib.downloadUrl());
                             dependencies.add(new FileDownloadTask(urls, file)
                                     .withCounter("xyml.install.libraries"));
                         }
@@ -186,10 +188,10 @@ public final class GameLibrariesTask extends Task<Void> {
 
             Path file = gameRepository.getLibraryFile(manifest, library);
             if ("optifine".equals(library.groupId()) && Files.exists(file) && GameVersionNumber.asGameVersion(gameRepository.getGameVersion(manifest).orElse(null)).compareTo("1.20.4") == 0) {
-                String forgeVersion = LibraryAnalyzer.analyze(manifest, "1.20.4")
-                        .getVersion(LibraryAnalyzer.LibraryType.FORGE)
-                        .orElse(null);
-                if (forgeVersion != null && LibraryAnalyzer.FORGE_OPTIFINE_BROKEN_RANGE.contains(VersionNumber.asVersion(forgeVersion))) {
+                @Nullable String forgeVersion = GameComponentAnalyzer
+                        .analyze(manifest, GameVersionNumber.asGameVersion("1.20.4"))
+                        .getVersion(GameComponentType.FORGE);
+                if (forgeVersion != null && GameComponentAnalyzer.FORGE_OPTIFINE_BROKEN_RANGE.contains(VersionNumber.asVersion(forgeVersion))) {
                     try (FileSystem fs2 = CompressingUtils.createWritableZipFileSystem(file)) {
                         Files.deleteIfExists(fs2.getPath("/META-INF/mods.toml"));
                     } catch (IOException e) {

@@ -32,12 +32,4 @@ public abstract class AbstractDependencyManager implements DependencyManager {
     @Override
     public abstract DefaultCacheRepository getCacheRepository();
 
-    /// Returns a registered remote version list by its logical identifier.
-    ///
-    /// @param id logical list identifier such as `game` or `forge`
-    /// @return the matching version list
-    @Override
-    public VersionList<?> getVersionList(String id) {
-        return getDownloadProvider().getVersionListById(id);
-    }
 }

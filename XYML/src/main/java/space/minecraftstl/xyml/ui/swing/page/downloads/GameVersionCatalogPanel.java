@@ -22,8 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -34,6 +33,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -49,6 +49,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -324,7 +325,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private @Nullable String loaderGameVersionId;
 
     /// Exact selected loader objects retained for the currently selected base game version.
-    private @Unmodifiable List<RemoteVersion> selectedRemoteVersions = List.of();
+    private @Unmodifiable List<ComponentRemoteVersion> selectedRemoteVersions = List.of();
 
     /// Last version-derived instance name, or null after the user authored a different value.
     private @Nullable String suggestedInstanceName;
@@ -360,7 +361,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private @Nullable DownloadPageNavigation downloadPageNavigation;
 
     /// Stable callback registered with the shell-owned navigation boundary.
-    private final Consumer<DownloadPageTarget> downloadTargetConsumer = this::selectDownloadTarget;
+    private final Consumer<DownloadPageRequest> downloadTargetConsumer = this::selectDownloadTarget;
 
     /// Creates a production game-version catalog panel on the Swing event dispatch thread.
     ///
@@ -613,17 +614,16 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadCategoryPanel.openModSearch(searchText);
     }
 
-    /// Selects the download-content tab and opens one version-aware missing-dependency search.
-    ///
+    /// Selects the download-content tab for one loader-aware missing-dependency search.
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
-    public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
-            return;
-        }
+        if (closed) return;
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
-        downloadCategoryPanel.openMissingDependencySearch(searchText, gameVersion);
+        downloadCategoryPanel.openMissingDependencySearch(checked);
     }
 
     /// Attaches the shell-owned request channel used by instance-management shortcuts.
@@ -646,12 +646,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         downloadPageNavigation = requested;
     }
 
-    /// Applies one externally requested content category.
+    /// Applies one externally requested content category with its optional instance context.
     ///
-    /// @param target requested download category
-    private void selectDownloadTarget(DownloadPageTarget target) {
+    /// @param request requested download category and optional instance context
+    private void selectDownloadTarget(DownloadPageRequest request) {
         downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
-        downloadCategoryPanel.selectTarget(target);
+        downloadCategoryPanel.selectTarget(request);
     }
 
     /// Starts the lazy source load after this page first becomes displayable.
@@ -1348,12 +1348,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// @return suggested instance name
     static String defaultInstanceName(
             String versionId,
-            @Unmodifiable List<RemoteVersion> loaders) {
+            @Unmodifiable List<ComponentRemoteVersion> loaders) {
         StringBuilder name = new StringBuilder(Objects.requireNonNull(versionId, "versionId"));
-        for (RemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
-            @Nullable LibraryAnalyzer.LibraryType type =
-                    LibraryAnalyzer.LibraryType.fromPatchId(loader.getLibraryId());
-            @Nullable String suffix = type == null ? null : switch (type) {
+        for (ComponentRemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
+            GameComponentType type = loader.getComponentType();
+            @Nullable String suffix = switch (type) {
                 case FORGE -> "Forge";
                 case NEO_FORGE -> "NeoForge";
                 case CLEANROOM -> "Cleanroom";

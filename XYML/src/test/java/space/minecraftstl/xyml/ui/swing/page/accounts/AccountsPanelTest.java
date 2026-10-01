@@ -225,7 +225,7 @@ public final class AccountsPanelTest {
         });
     }
 
-    /// Reordering uses only the right-side handle and reuses read-only recovery confirmation.
+    /// Reordering uses only the right-side handle, reuses overwrite confirmation, and selects the moved account.
     @Test
     public void usesDragHandleWithoutWholeRowDraggingAndConfirmsReadOnlyRecovery() {
         FakeAccountsModel model = FakeAccountsModel.immediate(groupedItems(), snapshot(0, 4, 0L));
@@ -268,6 +268,7 @@ public final class AccountsPanelTest {
             panel.moveAccountToIndex(first, 1);
             assertAll(
                     () -> assertEquals(List.of(), model.movedIds()),
+                    () -> assertEquals(List.of(), model.selectedIds()),
                     () -> assertEquals(1, interaction.overwriteConfirmations.get()));
 
             interaction.allowOverwrite = true;
@@ -276,6 +277,7 @@ public final class AccountsPanelTest {
                     () -> assertEquals(List.of("account-0"), model.movedIds()),
                     () -> assertEquals(List.of(1), model.moveTargets()),
                     () -> assertEquals(List.of(true), model.moveOverwritePermissions()),
+                    () -> assertEquals(List.of(first.accountId()), model.selectedIds()),
                     () -> assertEquals(2, interaction.overwriteConfirmations.get()));
             panel.close();
         });

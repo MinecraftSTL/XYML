@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
+import javax.swing.Icon;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -53,6 +54,7 @@ import javax.swing.event.ListDataListener;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -66,6 +68,7 @@ import java.nio.file.AccessDeniedException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -196,6 +199,60 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// Verifies that refresh and update-check commands use visibly distinct bundled icons.
+    @Test
+    public void usesDistinctRefreshAndCheckUpdatesIcons() throws Exception {
+        RecordingModel model = new RecordingModel(List.of());
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(
+                    model,
+                    STRINGS,
+                    ACTION_STRINGS,
+                    new RecordingInteractions());
+            try {
+                int @Unmodifiable [] refreshPixels =
+                        iconPixels(findButton(panel, "modsRefresh"));
+                int @Unmodifiable [] updatePixels =
+                        iconPixels(findButton(panel, "modsCheckUpdates"));
+                assertTrue(hasVisiblePixel(refreshPixels));
+                assertTrue(hasVisiblePixel(updatePixels));
+                assertFalse(Arrays.equals(refreshPixels, updatePixels));
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Returns whether an ARGB pixel array contains a non-transparent pixel.
+    ///
+    /// @param pixels ARGB pixels
+    /// @return whether at least one pixel is visible
+    private static boolean hasVisiblePixel(int @Unmodifiable [] pixels) {
+        return Arrays.stream(pixels).anyMatch(pixel -> (pixel >>> 24) > 0);
+    }
+
+    /// Renders one button icon into a deterministic ARGB pixel array.
+    ///
+    /// @param button button whose icon should be rendered
+    /// @return row-major ARGB pixels
+    private static int @Unmodifiable [] iconPixels(AbstractButton button) {
+        Icon icon = Objects.requireNonNull(button.getIcon(), "button icon");
+        int width = icon.getIconWidth();
+        int height = icon.getIconHeight();
+        assertTrue(width > 0);
+        assertTrue(height > 0);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            icon.paintIcon(button, graphics, 0, 0);
+        } finally {
+            graphics.dispose();
+        }
+        int @Unmodifiable [] pixels = new int[width * height];
+        image.getRGB(0, 0, width, height, pixels, 0, width);
+        return pixels;
     }
 
     /// Renders an explicitly disabled Mod row with a muted surface and its embedded logo.

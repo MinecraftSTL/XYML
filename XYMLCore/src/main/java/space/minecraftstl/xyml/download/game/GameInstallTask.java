@@ -21,17 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
+import static space.minecraftstl.xyml.game.GameComponentType.GAME;
 
 /// Installs a base game and its shared assets and libraries into one game repository.
 @NotNullByDefault
@@ -58,7 +58,7 @@ public class GameInstallTask extends Task<GameInstancePatch> {
         this.manifest = manifest;
         this.remote = remoteVersion;
         TaskResource instanceResource = TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id()));
-        this.downloadTask = new GameInstanceJsonDownloadTask(remoteVersion.getGameVersion(), dependencyManager);
+        this.downloadTask = new GameInstanceJsonDownloadTask(remoteVersion.getGameVersion().toString(), dependencyManager);
         this.downloadTask.setResources(instanceResource);
         setResources(
                 TaskResource.repositoryOperation(gameRepository.getBaseDirectory()),
@@ -84,8 +84,8 @@ public class GameInstallTask extends Task<GameInstancePatch> {
     public void execute() throws Exception {
         GameInstancePatch patch = GameInstancePatch.fromManifest(
                 JsonUtils.fromNonNullJson(downloadTask.getResult(), GameInstanceManifest.class),
-                MINECRAFT.getPatchId(),
-                remote.getGameVersion(),
+                GAME.getPatchId(),
+                remote.getGameVersion().toString(),
                 GameInstancePatch.PRIORITY_MC).withJar(null);
         setResult(patch);
 
@@ -97,7 +97,7 @@ public class GameInstallTask extends Task<GameInstancePatch> {
             // Asset and library repair is intentionally optional during base-game installation.
         }).asOrchestration()).asOrchestration();
         Task<?> installation = Task.allOf(
-                new GameDownloadTask(dependencyManager, remote.getGameVersion(), version),
+                new GameDownloadTask(dependencyManager, remote.getGameVersion().toString(), version),
                 assetsAndLibraries
         ).asOrchestration();
         dependencies.add(installation.thenComposeAsync(gameRepository.saveAsync(version)));

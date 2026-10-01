@@ -22,6 +22,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -40,8 +41,10 @@ import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSna
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Font;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -237,6 +240,15 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// @return trailing platform placeholder
     JPanel winWindowButtonsPlaceholder() {
         return winWindowButtonsPlaceholder;
+    }
+
+    /// Returns inert title-bar surfaces that may initiate a window drag.
+    ///
+    /// Interactive selectors, the launch command, and native window controls are intentionally excluded.
+    ///
+    /// @return immutable drag surfaces
+    @Unmodifiable List<Component> windowDragSurfaces() {
+        return List.of(this, brandLabel, macWindowButtonsPlaceholder, winWindowButtonsPlaceholder);
     }
 
     /// Releases subscriptions and selector popups on the EDT.

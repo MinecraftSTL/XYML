@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.download.liteloader;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -75,15 +74,15 @@ public final class LiteLoaderInstallTask extends Task<GameInstancePatch> {
     public void execute() {
         Library library = new Library(
                 new Artifact("com.mumfrey", "liteloader", remote.getSelfVersion()),
-                "http://dl.liteloader.com/versions/",
+                "https://dl.liteloader.com/versions/",
                 new LibrariesDownloadInfo(new LibraryDownloadInfo(null, remote.getUrls().get(0)))
         );
 
-        setResult(new GameInstancePatch(LibraryAnalyzer.LibraryType.LITELOADER.getPatchId(),
+        setResult(new GameInstancePatch(GameComponentType.LITELOADER.getPatchId(),
                 remote.getSelfVersion(),
                 60000,
                 new Arguments().addGameArguments("--tweakClass", "com.mumfrey.liteloader.launch.LiteLoaderTweaker"),
-                LibraryAnalyzer.LAUNCH_WRAPPER_MAIN,
+                GameComponentAnalyzer.LAUNCH_WRAPPER_MAIN,
                 Lang.merge(remote.getLibraries(), Collections.singleton(library)))
                 .withLogging(Collections.emptyMap()) // Mods may log in malformed format, causing XML parser to crash. So we suppress using official log4j configuration
         );

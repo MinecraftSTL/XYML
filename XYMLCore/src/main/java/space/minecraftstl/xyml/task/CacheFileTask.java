@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.task;
 
 import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.DownloadCandidate;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
@@ -51,7 +53,7 @@ public final class CacheFileTask extends FetchTask<Path> {
     ///
     /// @param url HTTP source URL
     public CacheFileTask(WebURL url) {
-        super(List.of(url));
+        super(DownloadCandidates.of(url));
         setName(url.toString());
         useCacheOperationResource();
 
@@ -63,7 +65,7 @@ public final class CacheFileTask extends FetchTask<Path> {
     ///
     /// @param urls candidate HTTP URLs
     public CacheFileTask(List<WebURL> urls) {
-        super(urls);
+        super(DownloadCandidates.ofUrls(urls));
         setName(urls.get(0).toString());
         useCacheOperationResource();
 
@@ -71,10 +73,29 @@ public final class CacheFileTask extends FetchTask<Path> {
             throw new IllegalArgumentException(urls.toString());
     }
 
+    /// Creates a cache fetch from ordered download candidates.
+    ///
+    /// @param candidates nonempty ordered download candidates
+    public CacheFileTask(DownloadCandidates candidates) {
+        super(candidates);
+        setName(candidates.getPrimaryCandidate().displayUrl());
+        useCacheOperationResource();
+
+        for (DownloadCandidate candidate : candidates.getCandidates()) {
+            WebURL url = candidate.url();
+            if (url == null || !NetworkUtils.isHttpUri(url)) {
+                throw new IllegalArgumentException("Invalid URL: " + candidate.displayUrl());
+            }
+        }
+    }
+
     @Override
     protected EnumCheckETag shouldCheckETag() {
         // Check cache
-        for (WebURL url : urls) {
+        for (DownloadCandidate candidate : candidates.getCandidates()) {
+            WebURL url = candidate.url();
+            if (url == null) continue;
+
             try {
                 setResult(repository.getCachedRemoteFile(url, true));
                 LOG.info("Using cached file for " + NetworkUtils.dropQuery(url));

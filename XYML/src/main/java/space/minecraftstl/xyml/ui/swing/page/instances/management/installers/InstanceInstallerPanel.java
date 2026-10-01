@@ -22,8 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -458,8 +457,8 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
             return listRenderer(list, entry.libraryId() + " " + localizedInstallerVersion(
                     version == null ? i18n("message.unknown") : version,
                     entry.structureState() == InstanceOtherLibraryEntry.StructureState.CLEAR
-                            ? LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR
-                            : LibraryAnalyzer.LibraryMark.LibraryStatus.UNSURE), selected);
+                            ? InstallerStructureStatus.CLEAR
+                            : InstallerStructureStatus.UNSURE), selected);
         });
         otherLibraryList.addListSelectionListener(otherLibrarySelectionListener);
     }
@@ -505,10 +504,10 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// @return localized version and structure state without exposing internal enum names
     private static String localizedInstallerVersion(
             String version,
-            LibraryAnalyzer.LibraryMark.LibraryStatus status) {
+            InstallerStructureStatus status) {
         String visibleVersion = Objects.requireNonNull(version, "version");
-        LibraryAnalyzer.LibraryMark.LibraryStatus structureStatus = Objects.requireNonNull(status, "status");
-        return structureStatus == LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR
+        InstallerStructureStatus structureStatus = Objects.requireNonNull(status, "status");
+        return structureStatus == InstallerStructureStatus.CLEAR
                 ? i18n("install.installer.version", visibleVersion)
                 : i18n("install.installer.external_version", visibleVersion);
     }
@@ -645,7 +644,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         if (!isReadyForMutation()) {
             return;
         }
-        List<RemoteVersion> selectedVersions = loaderWizard.selectedRemoteVersions();
+        List<ComponentRemoteVersion> selectedVersions = loaderWizard.selectedRemoteVersions();
         if (selectedVersions.isEmpty()) {
             updateControls();
             return;
@@ -678,7 +677,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
             return;
         }
         @Nullable InstanceInstallerEntry selected = installedLoaderList.getSelectedValue();
-        if (selected == null || selected.status() != LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR) {
+        if (selected == null || selected.status() != InstallerStructureStatus.CLEAR) {
             updateControls();
             return;
         }
@@ -859,7 +858,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         @Nullable InstanceInstallerEntry selectedInstalledLoader = installedLoaderList.getSelectedValue();
         removeInstalledLoaderButton.setEnabled(ready
                 && selectedInstalledLoader != null
-                && selectedInstalledLoader.status() == LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR);
+                && selectedInstalledLoader.status() == InstallerStructureStatus.CLEAR);
         removeOtherLibraryButton.setEnabled(ready
                 && selectedOtherLibrary != null
                 && selectedOtherLibrary.structureState() == InstanceOtherLibraryEntry.StructureState.CLEAR);

@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -141,9 +142,9 @@ final class LoaderSelectionWizardPanelTest {
     /// safe ordering, and clearing.
     @Test
     void selectsExactVersionsOnlyAfterExplicitRefreshAndEnforcesInstallRules() throws Exception {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
-        RemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
-        RemoteVersion forge = remoteVersion("forge", "1.20.1", "47.2.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
+        ComponentRemoteVersion forge = remoteVersion("forge", "1.20.1", "47.2.0");
         RecordingSource source = new RecordingSource();
         source.put(GameLoaderKind.FABRIC, fabric);
         source.put(GameLoaderKind.FABRIC_API, fabricApi);
@@ -232,8 +233,8 @@ final class LoaderSelectionWizardPanelTest {
     /// Verifies existing instance loaders participate in compatibility checks without becoming task rows.
     @Test
     void retainedInstanceLoadersBlockConflictsAndSatisfyApiParents() throws Exception {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
-        RemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
         RecordingSource source = new RecordingSource();
         source.put(GameLoaderKind.FABRIC, fabric);
         source.put(GameLoaderKind.FABRIC_API, fabricApi);
@@ -296,7 +297,7 @@ final class LoaderSelectionWizardPanelTest {
     /// Retries a failed explicit loader-version request when the localized status text is clicked.
     @Test
     void retriesFailedLoaderLoadFromStatusLabel() throws Exception {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
         RecordingSource source = new RecordingSource();
         source.put(GameLoaderKind.FABRIC, fabric);
         source.failNextRequest();
@@ -449,11 +450,11 @@ final class LoaderSelectionWizardPanelTest {
     /// @param gameVersion matching Minecraft version
     /// @param selfVersion selected loader self version
     /// @return non-null exact Core remote version
-    private static RemoteVersion remoteVersion(
+    private static ComponentRemoteVersion remoteVersion(
             String libraryId,
             String gameVersion,
             String selfVersion) {
-        return new RemoteVersion(
+        return new TestComponentRemoteVersion(
                 libraryId,
                 gameVersion,
                 selfVersion,
@@ -483,7 +484,7 @@ final class LoaderSelectionWizardPanelTest {
         ///
         /// @param kind selected loader catalog kind
         /// @param remoteVersion exact Core remote version to return
-        private void put(GameLoaderKind kind, RemoteVersion remoteVersion) {
+        private void put(GameLoaderKind kind, ComponentRemoteVersion remoteVersion) {
             GameLoaderKind nonNullKind = Objects.requireNonNull(kind, "kind");
             itemsByKind.put(nonNullKind, List.of(new GameLoaderCatalogItem(
                     nonNullKind,

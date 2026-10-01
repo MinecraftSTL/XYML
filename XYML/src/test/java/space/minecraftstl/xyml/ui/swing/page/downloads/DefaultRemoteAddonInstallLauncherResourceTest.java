@@ -23,8 +23,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
@@ -71,7 +71,7 @@ final class DefaultRemoteAddonInstallLauncherResourceTest {
                         new GameInstanceID("fixture"),
                         directory));
 
-        Task<?> task = new DefaultRemoteAddonInstallLauncher(new MojangDownloadProvider())
+        Task<?> task = new DefaultRemoteAddonInstallLauncher(new DownloadProvider())
                 .createInstallTask(request);
 
         assertEquals(Set.of(TaskResource.gameDirectory(directory)), task.getResources());

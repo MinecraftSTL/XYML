@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.runtime;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationCommands;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountRefreshCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
@@ -95,7 +97,7 @@ final class SwingApplicationRuntimeTest {
         runtime.close();
     }
 
-    /// Preserves the analyzed version through the deferred visibility-action relay.
+    /// Preserves analyzed version and loader through the deferred visibility-action relay.
     @Test
     void relaysVersionAwareMissingDependencySearch() {
         List<String> events = new ArrayList<>();
@@ -110,12 +112,15 @@ final class SwingApplicationRuntimeTest {
                 (applicationCommands, closeCommand) -> composition,
                 () -> events.add("exit"));
 
+        GameInstanceID targetInstanceId = new GameInstanceID("crash-instance");
         Objects.requireNonNull(actionsReference.get())
                 .openMissingDependencySearch()
-                .open("fabric-api", "1.20.1");
+                .open(new MissingDependencySearchRequest("fabric-api", "1.20.1", ModLoaderType.FABRIC, targetInstanceId));
 
         assertEquals("fabric-api", composition.missingDependencyId());
         assertEquals("1.20.1", composition.missingDependencyGameVersion());
+        assertEquals(ModLoaderType.FABRIC, composition.missingDependencyModLoader());
+        assertEquals(targetInstanceId, composition.missingDependencyTargetInstanceId());
         runtime.close();
     }
 
@@ -432,6 +437,12 @@ final class SwingApplicationRuntimeTest {
         /// Last analyzed version carried beside the missing-dependency search, or null when unknown or absent.
         private @Nullable String missingDependencyGameVersion;
 
+        /// Last current-instance loader carried beside the missing-dependency search, or null when unavailable.
+        private @Nullable ModLoaderType missingDependencyModLoader;
+
+        /// Last target instance carried beside the missing-dependency search, or null when unavailable.
+        private @Nullable GameInstanceID missingDependencyTargetInstanceId;
+
         /// Creates a recording application lifecycle.
         ///
         /// @param events shared ordered event sink
@@ -485,6 +496,44 @@ final class SwingApplicationRuntimeTest {
         public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
             missingDependencyId = Objects.requireNonNull(dependencyId, "dependencyId");
             missingDependencyGameVersion = gameVersion;
+        }
+
+        /// Records one loader-aware missing-dependency search.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        /// @param modLoader current instance mod loader, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(
+                String dependencyId,
+                @Nullable String gameVersion,
+                @Nullable ModLoaderType modLoader) {
+            openMissingDependencySearch(dependencyId, gameVersion);
+            missingDependencyModLoader = modLoader;
+        }
+
+        /// Records one target-aware missing-dependency search.
+        ///
+        /// @param request validated missing-dependency search request
+        @Override
+        public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+            MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+            openMissingDependencySearch(checked.dependencyId(), checked.gameVersion(), checked.modLoader());
+            missingDependencyTargetInstanceId = checked.targetInstanceId();
+        }
+
+        /// Returns the last recorded current-instance loader.
+        ///
+        /// @return recorded loader, or null when unavailable or absent
+        private @Nullable ModLoaderType missingDependencyModLoader() {
+            return missingDependencyModLoader;
+        }
+
+        /// Returns the last recorded target instance.
+        ///
+        /// @return recorded target instance, or null when unavailable or absent
+        private @Nullable GameInstanceID missingDependencyTargetInstanceId() {
+            return missingDependencyTargetInstanceId;
         }
 
         /// Records one delegated close call, notifies the relay, and reports configured failure.

@@ -19,33 +19,26 @@ package space.minecraftstl.xyml.download.quilt;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
-import space.minecraftstl.xyml.game.Arguments;
-import space.minecraftstl.xyml.game.Artifact;
-import space.minecraftstl.xyml.game.DefaultGameRepository;
-import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
-import space.minecraftstl.xyml.game.Library;
+import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
 import static space.minecraftstl.xyml.download.UnsupportedInstallationException.FABRIC_NOT_COMPATIBLE_WITH_FORGE;
 
-/// Installs Quilt metadata and its shared libraries for one game instance.
-///
-/// Quilt must be installed before the API add-on. Repository metadata is serialized only while launch metadata and
-/// destination identity are resolved; the generated library task acquires its own shared-directory resources after
-/// this task hands off.
-@NotNullByDefault
+/**
+ * <b>Note</b>: Quilt should be installed first.
+ *
+ * @author huangyuhui
+ */
 public final class QuiltInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -54,23 +47,15 @@ public final class QuiltInstallTask extends Task<GameInstancePatch> {
     private final GetTask launchMetaTask;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    /// Creates a repository-metadata-scoped Quilt installation task.
-    ///
-    /// @param dependencyManager repository and download services
-    /// @param manifest destination game instance manifest
-    /// @param remoteVersion selected Quilt version
-    public QuiltInstallTask(
-            DefaultDependencyManager dependencyManager,
-            GameInstanceManifest manifest,
-            QuiltRemoteVersion remoteVersion) {
+    public QuiltInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, QuiltRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
 
-        launchMetaTask = new GetTask(dependencyManager.getDownloadProvider().injectURLsWithCandidates(remoteVersion.getUrls()));
+        DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
+        launchMetaTask = new GetTask(downloadProvider.getDownloadCandidates(remoteVersion));
         launchMetaTask.setCacheRepository(dependencyManager.getCacheRepository());
-        DefaultGameRepository gameRepository = dependencyManager.getGameRepository();
-        setResources(TaskResource.repositoryMetadata(gameRepository.getBaseDirectory()));
+        setResources(TaskResource.repositoryMetadata(dependencyManager.getGameRepository().getBaseDirectory()));
         releaseResourcesBeforeDependencies();
     }
 
@@ -81,7 +66,7 @@ public final class QuiltInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void preExecute() throws Exception {
-        if (!Objects.equals("net.minecraft.client.main.Main", manifest.resolve(dependencyManager.getGameRepository()).mainClass()))
+        if (!Objects.equals(GameComponentAnalyzer.VANILLA_MAIN, manifest.mainClass()))
             throw new UnsupportedInstallationException(FABRIC_NOT_COMPATIBLE_WITH_FORGE);
     }
 
@@ -141,7 +126,7 @@ public final class QuiltInstallTask extends Task<GameInstancePatch> {
         }
         libraries.add(new Library(Artifact.fromDescriptor(quiltInfo.loader.maven), getMavenRepositoryByGroup(quiltInfo.loader.maven), null));
 
-        return new GameInstancePatch(LibraryAnalyzer.LibraryType.QUILT.getPatchId(), loaderVersion, GameInstancePatch.PRIORITY_LOADER, arguments, mainClass, libraries);
+        return new GameInstancePatch(GameComponentType.QUILT.getPatchId(), loaderVersion, GameInstancePatch.PRIORITY_LOADER, arguments, mainClass, libraries);
     }
 
     private static String getMavenRepositoryByGroup(String maven) {

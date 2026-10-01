@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
@@ -30,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -218,25 +220,62 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// @param searchText non-blank dependency identifier
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     public void openMissingDependencySearch(String searchText, @Nullable String gameVersion) {
+        openMissingDependencySearch(searchText, gameVersion, null);
+    }
+
+    /// Selects the Mods category and starts one loader-aware missing-dependency search.
+    ///
+    /// @param searchText non-blank dependency identifier
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(
+            String searchText,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
             return;
         }
         categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
-        modsCatalog.openMissingDependencySearch(searchText, gameVersion);
+        modsCatalog.openMissingDependencySearch(new MissingDependencySearchRequest(searchText, gameVersion, modLoader, null));
+    }
+
+    /// Selects the Mods category and starts one target-aware missing-dependency search.
+    ///
+    /// @param request validated missing-dependency search request
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+        EdtDispatcher.requireEventDispatchThread();
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openMissingDependencySearch(checked);
     }
 
     /// Selects one content category and activates its lazy workflow.
     ///
     /// @param target requested download category
     public void selectTarget(DownloadPageTarget target) {
+        selectTarget(DownloadPageRequest.of(target));
+    }
+
+    /// Selects one content category and applies its optional instance context.
+    ///
+    /// A request carrying an instance ID prefills the Mods catalog from that instance without starting a query.
+    ///
+    /// @param request requested download category and optional instance context
+    public void selectTarget(DownloadPageRequest request) {
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(target, "target");
+        DownloadPageRequest checked = Objects.requireNonNull(request, "request");
         if (closed) {
             return;
         }
-        categoryTabs.setSelectedIndex(target.ordinal());
+        categoryTabs.setSelectedIndex(checked.target().ordinal());
         activateSelectedCategory();
+        if (checked.target() == DownloadPageTarget.MODS && checked.targetInstanceId() != null) {
+            modsCatalog.instanceContext().applyNavigation(checked.targetInstanceId());
+        }
     }
 
     /// Selects the local-modpack category and displays a dropped archive.
@@ -394,14 +433,19 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     ///
     /// @param category category whose directory is required
     /// @return a concrete managed directory, or null when no selected instance can supply one
-    private static @Nullable Path resolveCategoryDirectory(DownloadCategory category) {
+    private @Nullable Path resolveCategoryDirectory(DownloadCategory category) {
         try {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             if (!category.requiresSelectedInstance()) {
                 return repository.getGameDirectory().getPath().toPath();
             }
 
-            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            @Nullable GameInstanceID instanceId = switch (category) {
+                case MODS -> modsCatalog.selectedInstanceId();
+                case RESOURCE_PACKS -> resourcePackCatalog.selectedInstanceId();
+                case SHADERS -> shaderPackCatalog.selectedInstanceId();
+                case WORLDS, MODPACK -> repository.getSelectedInstance();
+            };
             if (instanceId == null) {
                 return null;
             }

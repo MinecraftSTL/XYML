@@ -45,6 +45,8 @@ public interface RemoteAddonRepository {
 
     /// Provider-neutral result orderings exposed by the remote catalog filter.
     enum SortType {
+        /// Provider relevance ordering.
+        RELEVANCY,
         /// Provider popularity or follower ranking.
         POPULARITY,
         /// Project name ordering.

@@ -378,7 +378,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     modDependencies.strings(),
                     modDependencies.actionStrings(),
                     modDependencies.interactions(),
-                    () -> contentNavigation.openDownloads(DownloadPageTarget.MODS),
+                    () -> contentNavigation.openInstanceDownloads(DownloadPageTarget.MODS, instanceId),
                     () -> pageSelector.accept(InstanceManagementPageId.FILE_UPDATE_CHECK));
             return InstanceManagementPage.passive(panel, panel::close);
         });

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -118,6 +119,38 @@ public final class SelectedRepositoryInstancesModelTest {
         EdtDispatcher.executeAndWait(modelReference.get()::close);
     }
 
+    /// Resolves analyzed add-on contexts through whichever repository is currently selected.
+    @Test
+    public void resolvesAddOnContextThroughCurrentRepository() {
+        FakeInstancesModel first = new FakeInstancesModel("First", instanceId("first-instance"));
+        FakeInstancesModel second = new FakeInstancesModel("Second", instanceId("second-instance"));
+        MutableModelSource source = new MutableModelSource(first);
+        AtomicReference<SelectedRepositoryInstancesModel> modelReference = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            SelectedRepositoryInstancesModel model = new SelectedRepositoryInstancesModel(source);
+            modelReference.set(model);
+
+            InstanceAddonContext firstContext = model.resolveAddonContext(instanceId("first-instance"))
+                    .toCompletableFuture()
+                    .join();
+            assertEquals("First", firstContext.gameVersion());
+
+            source.switchTo(second);
+
+            InstanceAddonContext secondContext = model.resolveAddonContext(instanceId("second-instance"))
+                    .toCompletableFuture()
+                    .join();
+            assertEquals("Second", secondContext.gameVersion());
+        });
+
+        SelectedRepositoryInstancesModel model = modelReference.get();
+        assertAll(
+                () -> assertEquals(List.of(instanceId("first-instance")), first.resolvedContextIds),
+                () -> assertEquals(List.of(instanceId("second-instance")), second.resolvedContextIds));
+        EdtDispatcher.executeAndWait(model::close);
+    }
+
     /// Creates one stable game-instance identifier from a fixture literal.
     ///
     /// @param value serialized fixture identifier
@@ -184,6 +217,12 @@ public final class SelectedRepositoryInstancesModelTest {
         /// Stable repository snapshot.
         private final InstancesSnapshot snapshot;
 
+        /// Repository status text identifying this delegate in resolved contexts.
+        private final String status;
+
+        /// Identifiers whose analyzed add-on contexts were requested.
+        private final List<GameInstanceID> resolvedContextIds = new java.util.ArrayList<>();
+
         /// Selected identifiers received by this model.
         private final List<GameInstanceID> selectedIds = new java.util.ArrayList<>();
 
@@ -207,6 +246,7 @@ public final class SelectedRepositoryInstancesModelTest {
         /// @param status stable status text
         /// @param itemId stable item identifier
         private FakeInstancesModel(String status, GameInstanceID itemId) {
+            this.status = status;
             item = new InstanceListItem(itemId, itemId.id(), "Minecraft test", TEST_ICON);
             snapshot = new InstancesSnapshot(
                     OptionalInt.of(0), 1, 0L, status,
@@ -260,6 +300,17 @@ public final class SelectedRepositoryInstancesModelTest {
                 return pendingLoad;
             }
             return CompletableFuture.completedFuture(page());
+        }
+
+        /// Returns one analyzed context identified by this repository's status text.
+        ///
+        /// @param instanceId stable instance identifier
+        /// @return completed repository-specific analyzed context
+        @Override
+        public CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
+            resolvedContextIds.add(instanceId);
+            return CompletableFuture.completedFuture(
+                    new InstanceAddonContext(instanceId, status, ModLoaderType.FABRIC));
         }
 
         /// Records one selected identifier.

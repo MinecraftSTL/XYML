@@ -446,7 +446,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         configureIconButton(
                 checkUpdatesButton,
                 "modsCheckUpdates",
-                "assets/swing/icons/refresh.svg",
+                "assets/swing/icons/update.svg",
                 i18n("addon.check_update.button"),
                 i18n("addon.check_update.button"),
                 () -> checkUpdatesCommand.run());

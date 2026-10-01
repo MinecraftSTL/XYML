@@ -184,6 +184,7 @@ public final class AppShellFrameTest {
                     || !FlatLaf.supportsNativeWindowDecorations());
             assertAll(
                     () -> assertEquals(clientDecorated, frame.isUndecorated()),
+                    () -> assertEquals(frame.isUndecorated(), frame.windowDragSupportInstalled()),
                     () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
                             FlatClientProperties.USE_WINDOW_DECORATIONS)),
                     () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(

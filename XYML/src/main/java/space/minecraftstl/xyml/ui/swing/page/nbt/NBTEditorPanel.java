@@ -451,7 +451,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         heading.add(titleLabel);
         pathLabel.setName("nbtEditorPath");
         pathLabel.setHorizontalAlignment(SwingConstants.LEADING);
-        heading.add(pathLabel, "growx");
+        heading.add(pathLabel, "growx, wmin 0");
         configureIconButton(
                 undoButton,
                 "nbtEditorUndo",

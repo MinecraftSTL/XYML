@@ -17,11 +17,10 @@
  */
 package space.minecraftstl.xyml.download.game;
 
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
-import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
+import space.minecraftstl.xyml.download.DownloadCandidates;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.DownloadException;
 import space.minecraftstl.xyml.task.FileDownloadTask.IntegrityCheck;
@@ -30,7 +29,6 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
-import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -44,29 +42,18 @@ import java.util.jar.JarInputStream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Downloads one library to its exact target while using the cache repository's short internal coordination.
-///
-/// The target-file declaration protects both cache-hit copies and remote download publication. Cache-index and
-/// content-addressed cache writes are coordinated inside the repository for only the publication operation, so the
-/// network lifetime of unrelated library targets remains concurrent.
-@NotNullByDefault
 public class LibraryDownloadTask extends Task<Void> {
-    private @Nullable FileDownloadTask task;
+    private FileDownloadTask task;
     protected final Path jar;
     protected final DefaultCacheRepository cacheRepository;
     protected final AbstractDependencyManager dependencyManager;
     protected final Library library;
     protected final String url;
     private final Library originalLibrary;
-    /// Cache directory captured when the task's resource declaration was created.
+    /// Cache directory captured when the task resource declaration was created.
     private final Path cacheDirectorySnapshot;
     private boolean cached = false;
 
-    /// Creates a download task for one immutable library descriptor and target path.
-    ///
-    /// @param dependencyManager repository and candidate-source provider
-    /// @param file exact library target
-    /// @param library library descriptor to resolve
     public LibraryDownloadTask(AbstractDependencyManager dependencyManager, Path file, Library library) {
         this.dependencyManager = dependencyManager;
         this.originalLibrary = library;
@@ -89,9 +76,8 @@ public class LibraryDownloadTask extends Task<Void> {
 
     @Override
     public Collection<Task<?>> getDependents() {
-        @Nullable FileDownloadTask downloadTask = task;
-        if (cached || downloadTask == null) return Collections.emptyList();
-        else return Collections.singleton(downloadTask);
+        if (cached) return Collections.emptyList();
+        else return Collections.singleton(task);
     }
 
     @Override
@@ -106,7 +92,7 @@ public class LibraryDownloadTask extends Task<Void> {
         if (!isDependentsSucceeded()) {
             // Since FileDownloadTask wraps the actual exception with DownloadException.
             // We should extract it letting the error message clearer.
-            Exception t = Objects.requireNonNull(task, "download task").getException();
+            Exception t = task.getException();
             if (t instanceof DownloadException)
                 throw new LibraryDownloadException(library, t.getCause());
             else if (t instanceof CancellationException)
@@ -121,9 +107,6 @@ public class LibraryDownloadTask extends Task<Void> {
         return true;
     }
 
-    /// Validates the cache repository identity before reading or writing shared cache state.
-    ///
-    /// @throws IllegalStateException when the cache directory changed after resource declaration
     @Override
     public void preExecute() {
         Path currentCacheDirectory = Objects.requireNonNull(
@@ -147,7 +130,8 @@ public class LibraryDownloadTask extends Task<Void> {
         }
 
 
-        @Unmodifiable List<WebURL> urls = dependencyManager.getDownloadProvider().injectURLWithCandidates(url);
+        DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
+        DownloadCandidates urls = downloadProvider.getDownloadCandidates(url);
         task = new FileDownloadTask(urls, jar,
                 library.getDownload().getSha1() != null ? new IntegrityCheck("SHA-1", library.getDownload().getSha1()) : null);
         task.setCacheRepository(cacheRepository);

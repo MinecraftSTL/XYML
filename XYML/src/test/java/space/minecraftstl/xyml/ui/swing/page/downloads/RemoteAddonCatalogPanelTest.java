@@ -28,9 +28,13 @@ import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceAddonContext;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -38,6 +42,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -68,6 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies explicit direct-install remote catalog search, viewport sizing, cache reuse, and task handoff.
 @NotNullByDefault
@@ -192,9 +198,245 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
-    /// Shows the upstream project and opens a selected version's provider-specific prerequisite search.
+    /// Uses the current instance loader as the missing-dependency category filter.
     @Test
-    void exposesUpstreamAndSearchesSelectedVersionPrerequisite() throws Exception {
+    void missingDependencySearchUsesCurrentInstanceLoaderFilter() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                assertNotNull(category);
+                assertEquals(4, category.getItemCount());
+                panel.openMissingDependencySearch(new MissingDependencySearchRequest("fabric-api", "1.20.1", ModLoaderType.FABRIC, null));
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> category = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonCategory",
+                        JComboBox.class);
+                assertNotNull(category);
+                assertTrue(category.getSelectedItem() instanceof RemoteCatalogCategoryOption);
+                RemoteCatalogCategoryOption selected = (RemoteCatalogCategoryOption) category.getSelectedItem();
+                assertNotNull(selected.category());
+                assertEquals("fabric", Objects.requireNonNull(selected.category()).id());
+            });
+
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertAll(
+                    () -> assertEquals("fabric-api", query.searchText()),
+                    () -> assertEquals("1.20.1", query.gameVersion()),
+                    () -> assertNotNull(query.category()),
+                    () -> assertEquals("fabric", Objects.requireNonNull(query.category()).id()));
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Prefills the Mods catalog from one instance context without starting a project query.
+    @Test
+    void appliesInstanceContextWithoutStartingSearch() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        GameInstanceID targetInstanceId = new GameInstanceID("context-target");
+        try {
+            ContextInstancesModel instances = new ContextInstancesModel(
+                    List.of(
+                            ContextInstancesModel.entry(new GameInstanceID("context-other"), "Other"),
+                            ContextInstancesModel.entry(targetInstanceId, "Target")),
+                    0,
+                    Map.of(
+                            targetInstanceId,
+                            new InstanceAddonContext(targetInstanceId, "1.20.1", ModLoaderType.FABRIC)));
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO,
+                        instances);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(panelReference.get())
+                    .instanceContext()
+                    .applyNavigation(targetInstanceId));
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> target = findNamed(panel, "remoteAddonTargetInstance", JComboBox.class);
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                JTextField search = findNamed(panel, "remoteAddonSearch", JTextField.class);
+                assertNotNull(target);
+                assertNotNull(category);
+                assertNotNull(version);
+                assertNotNull(search);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertTrue(target.getSelectedItem() instanceof InstanceSearchEntry),
+                        () -> assertEquals(
+                                targetInstanceId,
+                                ((InstanceSearchEntry) Objects.requireNonNull(target.getSelectedItem())).stableId()),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()),
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertEquals("", search.getText()));
+            });
+            assertNull(backend.lastQuery.get());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Follows every changed target instance with its analyzed criteria.
+    @Test
+    void followsChangedTargetInstanceContext() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        GameInstanceID fabricInstance = new GameInstanceID("context-fabric");
+        GameInstanceID neoforgeInstance = new GameInstanceID("context-neoforge");
+        try {
+            ContextInstancesModel instances = new ContextInstancesModel(
+                    List.of(
+                            ContextInstancesModel.entry(fabricInstance, "Fabric"),
+                            ContextInstancesModel.entry(neoforgeInstance, "NeoForge")),
+                    0,
+                    Map.of(
+                            fabricInstance,
+                            new InstanceAddonContext(fabricInstance, "1.20.1", ModLoaderType.FABRIC),
+                            neoforgeInstance,
+                            new InstanceAddonContext(neoforgeInstance, "1.21.1", ModLoaderType.NEO_FORGE)));
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO,
+                        instances);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()));
+            });
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> target = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonTargetInstance",
+                        JComboBox.class);
+                assertNotNull(target);
+                target.setSelectedIndex(1);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                assertAll(
+                        () -> assertEquals("1.21.1", SwingTextFields.comboText(version)),
+                        () -> assertNull(selectedCategory(category)));
+            });
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> target = findNamed(
+                        Objects.requireNonNull(panelReference.get()),
+                        "remoteAddonTargetInstance",
+                        JComboBox.class);
+                assertNotNull(target);
+                target.setSelectedIndex(0);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> category = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> version = findNamed(panel, "remoteAddonGameVersion", JComboBox.class);
+                assertNotNull(category);
+                assertNotNull(version);
+                @Nullable RemoteAddonRepository.Category selected = selectedCategory(category);
+                assertAll(
+                        () -> assertEquals("1.20.1", SwingTextFields.comboText(version)),
+                        () -> assertNotNull(selected),
+                        () -> assertEquals("fabric", Objects.requireNonNull(selected).id()));
+            });
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Shows the upstream project and opens a selected version's provider-specific prerequisite mod.
+    @Test
+    void exposesUpstreamAndViewsSelectedVersionPrerequisite() throws Exception {
         String dependencyId = "required-project";
         RemoteAddon.Dependency dependency = RemoteAddon.Dependency.ofGeneral(
                 RemoteAddon.DependencyType.REQUIRED,
@@ -230,9 +472,13 @@ final class RemoteAddonCatalogPanelTest {
 
             EdtDispatcher.executeAndWait(() -> {
                 JButton upstream = findNamed(panel, "remoteAddonUpstream", JButton.class);
-                JButton prerequisite = findNamed(
+                JComboBox<?> prerequisites = findNamed(
                         panel,
-                        "remoteAddonDependency_" + dependencyId,
+                        "remoteAddonDependencies",
+                        JComboBox.class);
+                JButton prerequisiteSearch = findNamed(
+                        panel,
+                        "remoteAddonDependencyView",
                         JButton.class);
                 assertNotNull(upstream);
                 assertTrue(upstream.isVisible());
@@ -240,17 +486,17 @@ final class RemoteAddonCatalogPanelTest {
                 assertEquals(
                         URI.create("https://example.invalid/fixture-mod"),
                         upstream.getClientProperty("remoteAddonUpstreamUri"));
-                assertNotNull(prerequisite);
-                assertTrue(prerequisite.isVisible());
-                prerequisite.doClick();
+                assertNotNull(prerequisites);
+                assertTrue(prerequisites.isVisible());
+                assertEquals(1, prerequisites.getItemCount());
+                assertNotNull(prerequisiteSearch);
+                assertEquals(i18n("swing.download.dependency_view"), prerequisiteSearch.getText());
+                assertTrue(prerequisiteSearch.isVisible());
+                prerequisiteSearch.doClick();
             });
             awaitBackgroundWork(executor);
 
-            RemoteAddonCatalogQuery query = backend.lastQuery.get();
-            assertNotNull(query);
-            assertEquals(2, backend.searchRequests.get());
-            assertEquals(dependencyId, query.searchText());
-            assertEquals(RemoteAddonCatalogSource.MODRINTH, query.source());
+            assertEquals(1, backend.searchRequests.get());
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {
@@ -259,6 +505,126 @@ final class RemoteAddonCatalogPanelTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    /// Keeps multiple prerequisites in one compact selector and reuses their page cache.
+    @Test
+    void keepsPrerequisitesCompactAndReusesTheirPageCache() throws Exception {
+        RemoteAddon.Dependency first = RemoteAddon.Dependency.ofGeneral(
+                RemoteAddon.DependencyType.REQUIRED,
+                RemoteAddon.Source.MODRINTH,
+                "first-required");
+        RemoteAddon.Dependency second = RemoteAddon.Dependency.ofGeneral(
+                RemoteAddon.DependencyType.OPTIONAL,
+                RemoteAddon.Source.MODRINTH,
+                "second-required");
+        RecordingBackend backend = new RecordingBackend(
+                fixtureAddon(),
+                fixtureVersion(List.of(first, second)));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD,
+                    backend,
+                    request -> Task.completed(null),
+                    kind -> Optional.of(fixtureTarget()),
+                    executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> panel.choiceList().getList().setSelectedIndex(0));
+            awaitBackgroundWork(executor);
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> prerequisites = findNamed(
+                        panel,
+                        "remoteAddonDependencies",
+                        JComboBox.class);
+                JButton search = findNamed(
+                        panel,
+                        "remoteAddonDependencyView",
+                        JButton.class);
+                assertNotNull(prerequisites);
+                assertEquals(2, prerequisites.getItemCount());
+                assertNull(findNamed(panel, "remoteAddonDependency_first-required", JButton.class));
+                assertEquals("Resolved first-required", renderedComboText(prerequisites, 0));
+                assertEquals("Resolved second-required", renderedComboText(prerequisites, 1));
+                assertEquals(2, backend.dependencyNameRequests.get());
+
+                prerequisites.setSelectedIndex(0);
+                Objects.requireNonNull(search).doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> prerequisites = Objects.requireNonNull(findNamed(
+                        panel,
+                        "remoteAddonDependencies",
+                        JComboBox.class));
+                JButton search = Objects.requireNonNull(findNamed(
+                        panel,
+                        "remoteAddonDependencyView",
+                        JButton.class));
+                prerequisites.setSelectedIndex(1);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> prerequisites = Objects.requireNonNull(findNamed(
+                        panel,
+                        "remoteAddonDependencies",
+                        JComboBox.class));
+                JButton search = Objects.requireNonNull(findNamed(
+                        panel,
+                        "remoteAddonDependencyView",
+                        JButton.class));
+                prerequisites.setSelectedIndex(0);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            assertEquals(3, backend.searchRequests.get());
+            assertEquals(2, backend.dependencyNameRequests.get());
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertEquals("second-required", query.searchText());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Selects the effective top-level task title for remote acquisition.
+    @Test
+    void usesDownloadTitleForModTaskAndKeepsOtherKinds() {
+        RemoteAddonCatalogStrings strings = RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD);
+        RemoteAddonCatalogItem mod = new RemoteAddonCatalogItem(
+                fixtureAddon(),
+                RemoteAddonCatalogKind.MOD,
+                RemoteAddonCatalogSource.MODRINTH);
+        RemoteAddonCatalogItem resourcePack = new RemoteAddonCatalogItem(
+                fixtureAddon(),
+                RemoteAddonCatalogKind.RESOURCE_PACK,
+                RemoteAddonCatalogSource.MODRINTH);
+        assertEquals(i18n("mods.download"), RemoteAddonCatalogStrings.installTaskTitle(mod, strings));
+        assertEquals(strings.installingStatus(), RemoteAddonCatalogStrings.installTaskTitle(resourcePack, strings));
     }
 
     /// Retains a programmatic dependency query until the first layout establishes a measurable result viewport.
@@ -382,7 +748,6 @@ final class RemoteAddonCatalogPanelTest {
             });
             drainEdt();
 
-            awaitInstallCompletion(panel);
             EdtDispatcher.executeAndWait(() -> {
                 JComponent progressHost = findNamed(panel, "remoteAddonInstallProgress", JComponent.class);
                 JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
@@ -410,6 +775,74 @@ final class RemoteAddonCatalogPanelTest {
             if (panel != null) {
                 panel.close();
             }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Keeps the catalog usable and leaves a running installation submitted after the page closes.
+    @Test
+    void permitsSearchAndSecondInstallationWhileInstallationRunsAndCloseKeepsTask() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        CancelTrackingInstallFixture installLauncher = new CancelTrackingInstallFixture();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD, backend, installLauncher,
+                    kind -> Optional.of(fixtureTarget()), executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(), null, Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                findNamed(panel, "remoteAddonSearchAction", JButton.class).doClick();
+            });
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> panel.choiceList().getList().setSelectedIndex(0));
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
+                JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(install);
+                assertNotNull(searchField);
+                assertNotNull(search);
+                install.doClick();
+                assertAll(
+                        () -> assertTrue(install.isEnabled()),
+                        () -> assertTrue(searchField.isEnabled()),
+                        () -> assertTrue(search.isEnabled()));
+            });
+            assertTrue(installLauncher.awaitStarted(5, TimeUnit.SECONDS));
+            EdtDispatcher.executeAndWait(() -> {
+                JButton install = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonInstall", JButton.class), "install");
+                JTextField searchField = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonSearch", JTextField.class), "searchField");
+                JButton search = Objects.requireNonNull(
+                        findNamed(panel, "remoteAddonSearchAction", JButton.class), "search");
+                install.doClick();
+                searchField.setText("running-installation-query");
+                search.doClick();
+            });
+            assertTrue(installLauncher.awaitStarted(5, TimeUnit.SECONDS));
+            drainEdt();
+            assertEquals(2, installLauncher.submitted());
+            awaitBackgroundWork(executor);
+            assertEquals(2, backend.searchRequests.get());
+
+            EdtDispatcher.executeAndWait(panel::close);
+            installLauncher.release();
+            assertTrue(installLauncher.awaitFinished(5, TimeUnit.SECONDS));
+            assertFalse(installLauncher.cancellationObserved());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            installLauncher.release();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
@@ -864,8 +1297,8 @@ final class RemoteAddonCatalogPanelTest {
                 assertNotNull(versionSortBox);
                 assertNotNull(gameVersionBox);
                 assertNotNull(search);
-                assertEquals(3, categoryBox.getItemCount());
-                assertEquals(6, sortBox.getItemCount());
+                assertEquals(4, categoryBox.getItemCount());
+                assertEquals(7, sortBox.getItemCount());
                 assertEquals(RemoteAddonRepository.SortType.POPULARITY, sortBox.getSelectedItem());
                 assertEquals(3, versionSortBox.getItemCount());
                 assertTrue(gameVersionBox.isEditable());
@@ -942,7 +1375,7 @@ final class RemoteAddonCatalogPanelTest {
                 JLabel status = findNamed(panel, "remoteAddonStatus", JLabel.class);
                 assertNotNull(categoryBox);
                 assertNotNull(status);
-                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(4, categoryBox.getItemCount());
                 assertEquals(RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD).initialStatus(),
                         status.getText());
             });
@@ -1176,25 +1609,6 @@ final class RemoteAddonCatalogPanelTest {
         drainEdt();
     }
 
-    /// Waits until the completed installation callback has re-enabled catalog controls.
-    ///
-    /// @param panel catalog panel whose installation must reach a terminal callback
-    /// @throws InterruptedException when the test thread is interrupted while polling
-    private static void awaitInstallCompletion(RemoteAddonCatalogPanel panel) throws InterruptedException {
-        for (int attempt = 0; attempt < 500; attempt++) {
-            AtomicBoolean enabled = new AtomicBoolean();
-            EdtDispatcher.executeAndWait(() -> {
-                @Nullable JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
-                enabled.set(install != null && install.isEnabled());
-            });
-            if (enabled.get()) {
-                return;
-            }
-            Thread.sleep(10L);
-        }
-        throw new AssertionError("Timed out waiting for remote add-on installation completion");
-    }
-
     /// Flushes callbacks already queued onto the Swing event dispatch thread.
     private static void drainEdt() {
         EdtDispatcher.executeAndWait(() -> { });
@@ -1300,6 +1714,24 @@ final class RemoteAddonCatalogPanelTest {
                 Path.of("build", "fixture-mods"));
     }
 
+    /// Renders one combo-box item through its configured renderer.
+    ///
+    /// @param combo target selector
+    /// @param index item index
+    /// @return rendered item text
+    @SuppressWarnings("unchecked")
+    private static String renderedComboText(JComboBox<?> combo, int index) {
+        ListCellRenderer<Object> renderer = (ListCellRenderer<Object>) combo.getRenderer();
+        Component component = renderer.getListCellRendererComponent(
+                new JList<>(),
+                combo.getItemAt(index),
+                index,
+                false,
+                false);
+        assertTrue(component instanceof JLabel);
+        return ((JLabel) component).getText();
+    }
+
     /// Recording explicit source gateway returning a deterministic item for each user-requested page.
     @NotNullByDefault
     private static final class RecordingBackend implements RemoteAddonCatalogBackend {
@@ -1326,6 +1758,9 @@ final class RemoteAddonCatalogPanelTest {
 
         /// Count of display-triggered provider category requests.
         private final AtomicInteger categoryRequests = new AtomicInteger();
+
+        /// Count of human-readable dependency-name requests.
+        private final AtomicInteger dependencyNameRequests = new AtomicInteger();
 
         /// Causes exactly one subsequent provider category request to fail.
         private final AtomicBoolean failNextCategory = new AtomicBoolean();
@@ -1384,10 +1819,45 @@ final class RemoteAddonCatalogPanelTest {
                     new Object(),
                     "technology-child",
                     List.of());
-            return List.of(new RemoteAddonRepository.Category(
-                    new Object(),
-                    "technology",
-                    List.of(child)));
+            return List.of(
+                    new RemoteAddonRepository.Category(
+                            new Object(),
+                            "technology",
+                            List.of(child)),
+                    new RemoteAddonRepository.Category(
+                            new Object(),
+                            "fabric",
+                            List.of()));
+        }
+
+        /// Resolves one dependency name with deterministic fixture text.
+        ///
+        /// @param item selected fixture project
+        /// @param dependency dependency requested by the panel
+        /// @return deterministic display name, or null when the fixture has no identifier
+        @Override
+        public @Nullable String resolveDependencyDisplayName(
+                RemoteAddonCatalogItem item,
+                RemoteAddon.Dependency dependency) {
+            Objects.requireNonNull(item, "item");
+            dependencyNameRequests.incrementAndGet();
+            @Nullable String id = Objects.requireNonNull(dependency, "dependency").getId();
+            return id == null ? null : "Resolved " + id;
+        }
+
+        /// Resolves one dependency page with a deterministic configured result.
+        ///
+        /// @param item selected fixture project
+        /// @param dependency dependency requested by the panel
+        /// @return configured public page, or null when the fixture forces fallback search
+        @Override
+        public @Nullable URI resolveDependencyPage(
+                RemoteAddonCatalogItem item,
+                RemoteAddon.Dependency dependency) {
+            assertEquals(this.item, item);
+            Objects.requireNonNull(dependency, "dependency");
+            @Nullable String id = dependency.getId();
+            return "required-project".equals(id) ? URI.create(item.addon().pageUrl()) : null;
         }
 
         /// Records and returns a five-page provider result so every pagination command is testable.
@@ -1517,5 +1987,13 @@ final class RemoteAddonCatalogPanelTest {
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture versions are supplied by the recording backend");
         }
+    }
+
+    /// Returns the provider category currently selected by one category combo box.
+    ///
+    /// @param category provider category selector
+    /// @return selected provider category, or null for the all-categories option
+    private static @Nullable RemoteAddonRepository.Category selectedCategory(JComboBox<?> category) {
+        return category.getSelectedItem() instanceof RemoteCatalogCategoryOption option ? option.category() : null;
     }
 }

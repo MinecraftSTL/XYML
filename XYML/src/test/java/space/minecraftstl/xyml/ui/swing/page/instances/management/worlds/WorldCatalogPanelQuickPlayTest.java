@@ -30,6 +30,8 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
+import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import javax.imageio.ImageIO;
@@ -61,6 +63,7 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
@@ -78,6 +81,20 @@ import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.file
 /// Verifies native world quick-play controls, immutable folder capture, and asynchronous completion handling.
 @NotNullByDefault
 final class WorldCatalogPanelQuickPlayTest {
+    /// Renders the nested data-pack return action from the localized catalog instead of its key.
+    @Test
+    void localizesDataPackBackButton() {
+        SupportedLocale previousLocale = I18n.getLocale();
+        try {
+            I18n.setLocale(SupportedLocale.getLocale(Locale.SIMPLIFIED_CHINESE));
+            EdtDispatcher.executeAndWait(() -> assertEquals(
+                    "上一级",
+                    WorldCatalogPanel.createDataPackBackButton().getText()));
+        } finally {
+            I18n.setLocale(previousLocale);
+        }
+    }
+
     /// A ready world page opens the existing import flow for one dropped ZIP and detaches on close.
     @Test
     void importsSupportedDroppedWorldArchiveOnlyOnThisPage() {

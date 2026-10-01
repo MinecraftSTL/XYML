@@ -20,10 +20,12 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.image.InstanceIconLoader;
@@ -37,7 +39,9 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -208,6 +212,25 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             entries.add(new InstanceSearchEntry(entry.id(), entry.id().id()));
         }
         return List.copyOf(entries);
+    }
+
+    /// Resolves one instance's analyzed version and primary loader on the background executor.
+    @Override
+    public CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
+        GameInstanceID checked = Objects.requireNonNull(instanceId, "instanceId");
+        synchronized (stateLock) {
+            if (closed) {
+                return CompletableFuture.completedFuture(new InstanceAddonContext(checked, null, null));
+            }
+        }
+        try {
+            return CompletableFuture.supplyAsync(
+                    () -> repository.resolveAddonContext(checked),
+                    backgroundExecutor);
+        } catch (RuntimeException failure) {
+            LOG.warning("Failed to schedule add-on context resolution for " + checked, failure);
+            return CompletableFuture.completedFuture(new InstanceAddonContext(checked, null, null));
+        }
     }
 
     /// Resolves one requested instance row away from the event dispatch thread.
@@ -920,6 +943,16 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// @param instanceId stable instance ID
         void setSelectedInstanceId(GameInstanceID instanceId);
 
+        /// Resolves one instance's analyzed version and primary loader on a background thread.
+        ///
+        /// Implementations that model no add-on metadata retain the unresolved default.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return analyzed add-on context, or one with unresolved values
+        default InstanceAddonContext resolveAddonContext(GameInstanceID instanceId) {
+            return new InstanceAddonContext(Objects.requireNonNull(instanceId, "instanceId"), null, null);
+        }
+
         /// Performs a blocking repository refresh on a background thread.
         void refresh();
     }
@@ -1018,6 +1051,25 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         @Override
         public void setSelectedInstanceId(GameInstanceID instanceId) {
             LauncherStateDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
+        }
+
+        /// Analyzes one real instance manifest without reporting recoverable metadata failures.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return analyzed add-on context, or one with unresolved values when metadata is unavailable
+        @Override
+        public InstanceAddonContext resolveAddonContext(GameInstanceID instanceId) {
+            try {
+                GameInstanceManifest manifest = repository.getInstanceManifest(instanceId);
+                @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
+                GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                        repository.resolve(manifest),
+                        GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
+                return new InstanceAddonContext(instanceId, gameVersion, analyzer.getPrimaryModLoader());
+            } catch (RuntimeException failure) {
+                LOG.warning("Failed to resolve add-on context for instance " + instanceId, failure);
+                return new InstanceAddonContext(instanceId, null, null);
+            }
         }
 
         /// Performs one blocking repository refresh.

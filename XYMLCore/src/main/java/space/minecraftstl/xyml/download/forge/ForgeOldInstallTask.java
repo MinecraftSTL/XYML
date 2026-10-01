@@ -19,13 +19,13 @@ package space.minecraftstl.xyml.download.forge;
 
 import space.minecraftstl.xyml.download.ArtifactMalformedException;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
-import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.Library;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -92,7 +92,7 @@ public class ForgeOldInstallTask extends Task<GameInstancePatch> {
 
             setResult(GameInstancePatch.fromManifest(
                     installProfile.getVersionInfo(),
-                    LibraryAnalyzer.LibraryType.FORGE.getPatchId(),
+                    GameComponentType.FORGE.getPatchId(),
                     selfVersion,
                     GameInstancePatch.PRIORITY_LOADER));
             dependencies.add(dependencyManager.checkLibraryCompletionAsync(installProfile.getVersionInfo(), true));

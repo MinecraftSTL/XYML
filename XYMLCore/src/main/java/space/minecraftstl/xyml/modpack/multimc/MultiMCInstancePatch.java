@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.modpack.multimc;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.util.Immutable;
 import space.minecraftstl.xyml.util.Lang;
@@ -28,8 +27,8 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
-import java.util.*;
 import java.util.stream.Collectors;
+import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -413,7 +412,7 @@ public final class MultiMCInstancePatch {
 
         String gameVersion = null;
         for (MultiMCInstancePatch patch : patches) {
-            if (MultiMCComponents.getComponent(patch.getID()) == LibraryAnalyzer.LibraryType.MINECRAFT) {
+            if (MultiMCComponents.getComponent(patch.getID()) == GameComponentType.GAME) {
                 gameVersion = patch.getVersion();
                 break;
             }

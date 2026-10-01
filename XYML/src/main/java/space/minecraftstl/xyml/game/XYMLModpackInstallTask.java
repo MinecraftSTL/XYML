@@ -21,7 +21,6 @@ import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.modpack.MinecraftInstanceTask;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
@@ -124,18 +123,18 @@ public final class XYMLModpackInstallTask extends Task<Void> {
         GameInstanceManifest parsedManifest = Objects.requireNonNull(
                 JsonUtils.GSON.fromJson(json, GameInstanceManifest.class), "Missing minecraft/pack.json manifest");
         GameInstanceManifest originalManifest = parsedManifest.withId(instanceId).withJar(null);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(originalManifest, null);
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(originalManifest, null);
         // The seed and each continuation only assemble immutable manifest data.  Keep these graph nodes out of the
         // conservative fallback so the explicitly declared installer children can retain the instance boundary.
         Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest).asOrchestration();
         // reinstall libraries
         // libraries of Forge and OptiFine should be obtained by installation.
-        for (LibraryAnalyzer.LibraryMark mark : analyzer) {
-            if (LibraryAnalyzer.LibraryType.MINECRAFT.getPatchId().equals(mark.getLibraryId()))
+        for (GameComponentAnalyzer.Mark mark : analyzer) {
+            if (GameComponentType.GAME == mark.componentType())
                 continue;
             libraryTask = libraryTask.thenComposeAsync(
                     version -> dependency.installLibraryAsync(
-                            modpack.getGameVersion(), version, mark.getLibraryId(), mark.getLibraryVersion()))
+                            modpack.getGameVersion(), version, mark.componentType().getPatchId(), mark.version()))
                     .asOrchestration();
         }
 

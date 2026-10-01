@@ -17,14 +17,16 @@
  */
 package space.minecraftstl.xyml.task;
 
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.ChecksumMismatchException;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -39,45 +41,33 @@ import java.util.*;
 import static java.util.Objects.requireNonNull;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Downloads one file from ordered remote candidates into an exact target path.
+/// A task that can download a file online.
 ///
-/// The target is declared as a semantic task resource when the task is constructed, so independent executor chains
-/// writing the same destination serialize while downloads to different files remain concurrent.
-@NotNullByDefault
+/// @author huangyuhui
 public class FileDownloadTask extends FetchTask<Void> {
 
-    /// Immutable digest algorithm and expected checksum pair.
-    @NotNullByDefault
     public record IntegrityCheck(String algorithm, String checksum) {
-        /// Validates and stores one integrity-check pair.
         public IntegrityCheck(String algorithm, String checksum) {
             this.algorithm = requireNonNull(algorithm);
             this.checksum = requireNonNull(checksum);
         }
 
-        /// Creates an integrity check when an expected checksum is available.
-        ///
-        /// @param algorithm digest algorithm
-        /// @param checksum expected checksum, or null to disable integrity checking
-        /// @return integrity check, or null when `checksum` is null
-        public static @Nullable IntegrityCheck of(String algorithm, @Nullable String checksum) {
+        public static IntegrityCheck of(String algorithm, String checksum) {
             if (checksum == null) return null;
             else return new IntegrityCheck(algorithm, checksum);
         }
 
-        /// Returns a diagnostic representation of this integrity check.
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return String.format("IntegrityCheck[algorithm='%s', checksum='%s']", algorithm, checksum);
         }
     }
 
     private final Path file;
-    /// Optional digest validation applied before publishing the downloaded target.
+    /// Optional expected checksum for downloaded and cached content.
     private final @Nullable IntegrityCheck integrityCheck;
     private boolean caching;
-    /// Optional candidate file used to seed a content-addressed cache lookup.
-    private @Nullable Path candidate;
+    private Path candidate;
     private final ArrayList<IntegrityCheckHandler> integrityCheckHandlers = new ArrayList<>();
 
     /// Creates a download task for an absolute URL string.
@@ -88,30 +78,13 @@ public class FileDownloadTask extends FetchTask<Void> {
         this(List.of(WebURL.parse(url)), path, null);
     }
 
-    /// Creates a download task from one textual URL and an optional integrity check.
+    /// Creates a download task with an optional integrity check for an absolute URL string.
     ///
-    /// @param url remote URL
-    /// @param path download destination
-    /// @param integrityCheck integrity check, or null to disable digest comparison
+    /// @param url            the URL of remote file.
+    /// @param path           the location that download to.
+    /// @param integrityCheck the integrity check to perform, null if no integrity check is to be performed
     public FileDownloadTask(String url, Path path, @Nullable IntegrityCheck integrityCheck) {
         this(List.of(WebURL.parse(url)), path, integrityCheck);
-    }
-
-    /// Creates a download task for one URL.
-    ///
-    /// @param url  the URL of remote file.
-    /// @param path the location that download to.
-    public FileDownloadTask(WebURL url, Path path) {
-        this(url, path, null);
-    }
-
-    /// Creates a download task from one URL and an optional integrity check.
-    ///
-    /// @param url remote URL
-    /// @param path download destination
-    /// @param integrityCheck integrity check, or null to disable digest comparison
-    public FileDownloadTask(WebURL url, Path path, @Nullable IntegrityCheck integrityCheck) {
-        this(List.of(url), path, integrityCheck);
     }
 
     /// Creates a download task with a snapshot of nonempty candidate URLs.
@@ -122,13 +95,26 @@ public class FileDownloadTask extends FetchTask<Void> {
         this(urls, file, null);
     }
 
-    /// Creates a download task and snapshots its exact destination as a semantic resource.
+    /// Creates a download task with a snapshot of nonempty candidates and an optional integrity check.
     ///
-    /// @param urls remote candidates attempted in order
-    /// @param path download destination
-    /// @param integrityCheck integrity check, or null to accept the response without a digest comparison
+    /// @param urls           candidate URLs of the remote file, attempted in order
+    /// @param path           the location that download to.
+    /// @param integrityCheck the integrity check to perform, null if no integrity check is to be performed
     public FileDownloadTask(List<WebURL> urls, Path path, @Nullable IntegrityCheck integrityCheck) {
-        super(urls);
+        super(DownloadCandidates.ofUrls(urls));
+        this.file = path;
+        this.integrityCheck = integrityCheck;
+
+        setName(path.getFileName().toString());
+        setResources(TaskResource.downloadTarget(path));
+    }
+
+    public FileDownloadTask(DownloadCandidates candidates, Path file) {
+        this(candidates, file, null);
+    }
+
+    public FileDownloadTask(DownloadCandidates candidates, Path path, @Nullable IntegrityCheck integrityCheck) {
+        super(candidates);
         this.file = path;
         this.integrityCheck = integrityCheck;
 
@@ -140,12 +126,6 @@ public class FileDownloadTask extends FetchTask<Void> {
         return file;
     }
 
-    /// Enables or disables content-addressed cache writes for this destination download.
-    ///
-    /// CacheRepository serializes its own shared cache transaction; this task therefore keeps only the exact target
-    /// resource so downloads to different targets can proceed concurrently.
-    ///
-    /// @param caching whether successful downloads should be written to the content-addressed cache
     public void setCaching(boolean caching) {
         this.caching = caching;
     }
@@ -167,7 +147,7 @@ public class FileDownloadTask extends FetchTask<Void> {
             if (cache.isPresent()) {
                 try {
                     FileUtils.copyFile(cache.get(), file);
-                    LOG.trace("Successfully verified file " + file + " from " + urls.get(0));
+                    LOG.trace("Successfully verified file " + file + " from " + candidates.getPrimaryCandidate().url());
                     return EnumCheckETag.CACHED;
                 } catch (IOException e) {
                     LOG.warning("Failed to copy cache files", e);
@@ -193,8 +173,8 @@ public class FileDownloadTask extends FetchTask<Void> {
     protected Context getContext(@Nullable UrlResponseInfo response, boolean checkETag, @Nullable String bmclapiHash) throws IOException {
         Path temp = Files.createTempFile(null, null);
 
-        @Nullable String algorithm;
-        @Nullable String checksum;
+        String algorithm;
+        String checksum;
         if (integrityCheck != null) {
             algorithm = integrityCheck.algorithm();
             checksum = integrityCheck.checksum();
@@ -206,7 +186,7 @@ public class FileDownloadTask extends FetchTask<Void> {
             checksum = null;
         }
 
-        @Nullable MessageDigest digest = algorithm != null ? DigestUtils.getDigest(algorithm) : null;
+        MessageDigest digest = algorithm != null ? DigestUtils.getDigest(algorithm) : null;
 
         FileChannel fileOutput = FileChannel.open(temp,
                 StandardOpenOption.WRITE,
@@ -301,18 +281,15 @@ public class FileDownloadTask extends FetchTask<Void> {
         };
     }
 
-    /// Validates a downloaded temporary file against destination-specific format requirements.
-    @NotNullByDefault
     public interface IntegrityCheckHandler {
-        /// Checks whether a downloaded file is structurally valid.
+        /// Check whether the file is corrupted or not.
         ///
-        /// @param filePath downloaded file, usually in a temporary directory
-        /// @param destinationPath final destination used to infer the expected format
-        /// @throws IOException if the downloaded file is corrupted
+        /// @param filePath        the file locates in (maybe in temp directory)
+        /// @param destinationPath for real file name
+        /// @throws IOException if the file is corrupted
         void checkIntegrity(Path filePath, Path destinationPath) throws IOException;
     }
 
-    /// Integrity handler that verifies ZIP and JAR targets can be opened as read-only ZIP filesystems.
     public static final IntegrityCheckHandler ZIP_INTEGRITY_CHECK_HANDLER = (filePath, destinationPath) -> {
         String ext = FileUtils.getExtension(destinationPath).toLowerCase(Locale.ROOT);
         if (ext.equals("zip") || ext.equals("jar")) {

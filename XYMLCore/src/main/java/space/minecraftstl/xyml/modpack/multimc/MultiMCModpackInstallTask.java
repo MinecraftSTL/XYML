@@ -22,7 +22,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
 import space.minecraftstl.xyml.download.game.GameDownloadTask;
@@ -154,7 +153,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
 
             @Nullable String mcVersion = null;
             for (MultiMCManifest.MultiMCManifestComponent component : components) {
-                if (MultiMCComponents.getComponent(component.getUid()) == LibraryAnalyzer.LibraryType.MINECRAFT) {
+                if (MultiMCComponents.getComponent(component.getUid()) == GameComponentType.GAME) {
                     mcVersion = component.getVersion();
                     break;
                 }

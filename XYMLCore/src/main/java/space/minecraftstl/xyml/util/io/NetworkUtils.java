@@ -42,7 +42,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
  * @author huangyuhui
  */
 public final class NetworkUtils {
-    public static final String USER_AGENT = System.getProperty("http.agent", "XYML");
+    public static final String USER_AGENT = System.getProperty("http.agent", "HMCL");
 
     public static final String PARAMETER_SEPARATOR = "&";
     public static final String NAME_VALUE_SEPARATOR = "=";
@@ -114,7 +114,7 @@ public final class NetworkUtils {
         return sb.toString();
     }
 
-    public static String withQuery(String baseUrl, List<Pair<String, String>> params) {
+    public static WebURL withQuery(String baseUrl, List<Pair<String, String>> params) {
         StringBuilder sb = new StringBuilder(baseUrl);
         boolean first = true;
         for (Pair<String, String> param : params) {
@@ -132,7 +132,7 @@ public final class NetworkUtils {
             sb.append(NAME_VALUE_SEPARATOR);
             sb.append(encodeURL(param.getValue()));
         }
-        return sb.toString();
+        return WebURL.parse(sb.toString());
     }
 
     /// Returns URLs with their queries replaced by the form-encoded non-null parameters.

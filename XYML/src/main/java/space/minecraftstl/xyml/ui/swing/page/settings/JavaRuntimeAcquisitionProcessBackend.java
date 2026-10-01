@@ -26,6 +26,7 @@ import kala.compress.archivers.zip.ZipArchiveOutputStream;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaManager;
@@ -50,7 +51,6 @@ import space.minecraftstl.xyml.util.tree.ArchiveFileTree;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import org.glavo.url.WebURL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -242,18 +242,18 @@ final class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisiti
 
     /// Creates a stopped checksummed download into a bounded random temporary archive.
     ///
-    /// @param urls immutable ordered download candidates
+    /// @param candidates ordered provider download candidates
     /// @param archiveSuffix parser-significant `.zip` or `.tar.gz` suffix
     /// @param checksumAlgorithm normalized JCA checksum algorithm
     /// @param checksum expected lowercase hexadecimal checksum
     /// @return stopped managed archive download task
     Task<Path> downloadManagedTemporaryArchive(
-            @Unmodifiable List<WebURL> urls,
+            DownloadCandidates candidates,
             String archiveSuffix,
             String checksumAlgorithm,
             String checksum) {
         return new ManagedJavaArchiveDownloadTask(
-                urls,
+                candidates,
                 archiveSuffix,
                 checksumAlgorithm,
                 checksum,

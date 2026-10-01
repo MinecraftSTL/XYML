@@ -23,7 +23,6 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.auth.AuthInfo;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.ServerAddress;
@@ -53,7 +52,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class DefaultLauncher extends Launcher {
 
     /// Describes the loader and library capabilities of the selected game version.
-    private final LibraryAnalyzer analyzer;
+    private final GameComponentAnalyzer analyzer;
 
     public DefaultLauncher(GameRepository repository, GameInstanceManifest manifest, AuthInfo authInfo, LaunchOptions options) {
         this(repository, manifest, authInfo, options, null);
@@ -66,7 +65,7 @@ public class DefaultLauncher extends Launcher {
     public DefaultLauncher(GameRepository repository, GameInstanceManifest manifest, AuthInfo authInfo, LaunchOptions options, ProcessListener listener, boolean daemon) {
         super(repository, manifest, authInfo, options, listener, daemon);
 
-        this.analyzer = LibraryAnalyzer.analyze(manifest, repository.getGameVersion(manifest).orElse(null));
+        this.analyzer = GameComponentAnalyzer.analyze(manifest, GameVersionNumber.asGameVersion(repository.getGameVersion(manifest)));
     }
 
     /// Removes the legacy monolithic ASM artifact when Legacy Fabric already supplies modular ASM libraries.
@@ -318,10 +317,10 @@ public class DefaultLauncher extends Launcher {
 
         GameInstanceManifest classpathManifest = repairLegacyFabricAsmConflict(
                 manifest,
-                analyzer.has(LibraryAnalyzer.LibraryType.LEGACY_FABRIC));
+                analyzer.has(GameComponentType.LEGACY_FABRIC));
         Set<String> classpath = repository.getClasspath(classpathManifest);
 
-        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
+        if (analyzer.has(GameComponentType.CLEANROOM)) {
             classpath.removeIf(c -> c.contains("2.9.4-nightly-20150209"));
             classpath.removeIf(c -> c.contains("platform-3.4.0"));
             classpath.removeIf(c -> c.contains("icu4j-core-mojang"));
@@ -772,7 +771,7 @@ public class DefaultLauncher extends Launcher {
             }
         }
 
-        if (analyzer.has(LibraryAnalyzer.LibraryType.OPTIFINE)) {
+        if (analyzer.has(GameComponentType.OPTIFINE)) {
             env.put("INST_OPTIFINE", "1");
         }
 

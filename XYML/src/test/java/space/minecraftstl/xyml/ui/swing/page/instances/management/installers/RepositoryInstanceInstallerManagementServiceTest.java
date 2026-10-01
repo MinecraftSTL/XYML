@@ -19,7 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.task.Task;
 
 import java.time.Instant;
@@ -33,8 +34,8 @@ final class RepositoryInstanceInstallerManagementServiceTest {
     /// Every component stage follows its dependency-download category, including non-game loaders.
     @Test
     void groupsDependencyDownloadsForEverySelectedLoader() {
-        RemoteVersion fabric = remoteVersion("fabric", "0.16.0");
-        RemoteVersion optifine = remoteVersion("optifine", "HD_U_I6");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "0.16.0");
+        ComponentRemoteVersion optifine = remoteVersion("optifine", "HD_U_I6");
 
         List<String> stages = RepositoryInstanceInstallerManagementService
                 .remoteInstallationStages(List.of(fabric, optifine))
@@ -54,7 +55,7 @@ final class RepositoryInstanceInstallerManagementServiceTest {
     /// @param libraryId component library identifier
     /// @param version component version
     /// @return immutable remote-version fixture
-    private static RemoteVersion remoteVersion(String libraryId, String version) {
-        return new RemoteVersion(libraryId, "1.20.1", version, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String version) {
+        return new TestComponentRemoteVersion(libraryId, "1.20.1", version, Instant.EPOCH, List.of());
     }
 }

@@ -164,6 +164,33 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
         return currentDelegate().searchEntries();
     }
 
+    /// Resolves one instance's analyzed add-on context through the current selected repository.
+    ///
+    /// A completion from a repository that the toolbar has already replaced resolves to an unresolved context instead
+    /// of describing the previous directory.
+    ///
+    /// @param instanceId stable instance identifier
+    /// @return asynchronous analyzed add-on context of the current repository
+    @Override
+    public CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        final InstancesModel requestDelegate;
+        final long requestGeneration;
+        synchronized (stateLock) {
+            requireOpen();
+            requestDelegate = delegate;
+            requestGeneration = delegateGeneration;
+        }
+        return requestDelegate.resolveAddonContext(instanceId).thenApply(context -> {
+            synchronized (stateLock) {
+                if (closed || requestGeneration != delegateGeneration || requestDelegate != delegate) {
+                    return new InstanceAddonContext(instanceId, null, null);
+                }
+            }
+            return Objects.requireNonNull(context, "delegate returned null add-on context");
+        });
+    }
+
     /// Loads one identified row while rejecting a completion from a replaced repository.
     @Override
     public CompletionStage<InstanceListItem> loadItem(

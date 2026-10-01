@@ -19,11 +19,12 @@ package space.minecraftstl.xyml.download.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
@@ -69,9 +70,9 @@ public final class GameVerificationFixTask extends Task<Void> {
     @Override
     public void execute() throws IOException {
         Path jar = dependencyManager.getGameRepository().getInstanceJar(manifest);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(manifest, GameVersionNumber.asGameVersion(gameVersion));
 
-        if (Files.exists(jar) && GameVersionNumber.compare(gameVersion, "1.6") < 0 && analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
+        if (Files.exists(jar) && GameVersionNumber.compare(gameVersion, "1.6") < 0 && analyzer.has(GameComponentType.FORGE)) {
             try (FileSystem fs = CompressingUtils.createWritableZipFileSystem(jar, StandardCharsets.UTF_8)) {
                 Files.deleteIfExists(fs.getPath("META-INF/MOJANG_C.DSA"));
                 Files.deleteIfExists(fs.getPath("META-INF/MOJANG_C.SF"));

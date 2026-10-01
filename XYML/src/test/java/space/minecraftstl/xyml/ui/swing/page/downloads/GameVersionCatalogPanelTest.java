@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -637,7 +638,7 @@ public final class GameVersionCatalogPanelTest {
     /// Carries the exact embedded loader selection into installation and clears it for another base version.
     @Test
     public void installsEmbeddedLoaderSelectionAndClearsItWhenBaseVersionChanges() throws Exception {
-        RemoteVersion fabric = new RemoteVersion(
+        ComponentRemoteVersion fabric = new TestComponentRemoteVersion(
                 "fabric",
                 "1.20.1",
                 "0.16.0",
@@ -904,8 +905,8 @@ public final class GameVersionCatalogPanelTest {
     /// @param libraryId loader patch identifier
     /// @param version loader self version
     /// @return remote loader version
-    private static RemoteVersion remoteVersion(String libraryId, String version) {
-        return new RemoteVersion(
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String version) {
+        return new TestComponentRemoteVersion(
                 libraryId,
                 "1.21.1",
                 version,
@@ -1184,7 +1185,7 @@ public final class GameVersionCatalogPanelTest {
     @NotNullByDefault
     private static final class FixtureLoaderCatalogSource implements GameLoaderCatalogSource {
         /// Original Core remote version whose identity must reach the install request.
-        private final RemoteVersion remoteVersion;
+        private final ComponentRemoteVersion remoteVersion;
 
         /// Number of explicit catalog refreshes.
         private final AtomicInteger requests = new AtomicInteger();
@@ -1192,7 +1193,7 @@ public final class GameVersionCatalogPanelTest {
         /// Creates a deterministic source for one Fabric catalog row.
         ///
         /// @param remoteVersion exact remote version returned by the source
-        private FixtureLoaderCatalogSource(RemoteVersion remoteVersion) {
+        private FixtureLoaderCatalogSource(ComponentRemoteVersion remoteVersion) {
             this.remoteVersion = Objects.requireNonNull(remoteVersion, "remoteVersion");
         }
 

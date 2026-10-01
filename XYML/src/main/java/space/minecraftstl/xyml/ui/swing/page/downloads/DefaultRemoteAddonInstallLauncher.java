@@ -82,7 +82,7 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
 
         Path temporary = Files.createTempFile(directory, ".xyml-addon-", temporarySuffix(destination));
         FileDownloadTask download = new FileDownloadTask(
-                downloadProvider.injectURLWithCandidates(request.version().file().url()),
+                downloadProvider.getDownloadCandidates(request.version().file().url()),
                 temporary,
                 request.version().file().getIntegrityCheck());
         download.setName(request.version().name().isBlank()

@@ -17,14 +17,13 @@
  */
 package space.minecraftstl.xyml.download.cleanroom;
 
+import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.download.VersionMismatchException;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile;
 import space.minecraftstl.xyml.download.forge.ForgeNewInstallTask;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -32,7 +31,12 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -41,7 +45,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /// Installs a selected Cleanroom loader patch into an existing game manifest.
 @NotNullByDefault
@@ -117,7 +120,7 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
                     .normalize();
 
             dependent = new FileDownloadTask(
-                    dependencyManager.getDownloadProvider().injectURLsWithCandidates(remote.getUrls()),
+                    dependencyManager.getDownloadProvider().getDownloadCandidates(remote.getUrls()),
                     installer, null);
             dependent.setCacheRepository(dependencyManager.getCacheRepository());
             dependent.setCaching(true);
@@ -152,12 +155,24 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
     public void execute() throws IOException, VersionMismatchException, UnsupportedInstallationException {
         Task<GameInstancePatch> installationTask;
         if (selfVersion == null) {
-            installationTask = new ForgeNewInstallTask(dependencyManager, manifest, remote.getSelfVersion(), installer)
-                    .thenApplyAsync(version -> version.withId(LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId()))
+            installationTask = new GameDownloadTask(dependencyManager, null, manifest)
+                    .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                            dependencyManager,
+                            manifest,
+                            minecraftJar,
+                            remote.getSelfVersion(),
+                            installer))
+                    .thenApplyAsync(version -> version.withId(GameComponentType.CLEANROOM.getPatchId()))
                     .asOrchestration();
         } else {
-            installationTask = new ForgeNewInstallTask(dependencyManager, manifest, selfVersion, installer)
-                    .thenApplyAsync(version -> version.withId(LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId()))
+            installationTask = new GameDownloadTask(dependencyManager, null, manifest)
+                    .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                            dependencyManager,
+                            manifest,
+                            minecraftJar,
+                            selfVersion,
+                            installer))
+                    .thenApplyAsync(version -> version.withId(GameComponentType.CLEANROOM.getPatchId()))
                     .asOrchestration();
         }
         task = installationTask;
@@ -191,7 +206,7 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
         try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installer)) {
             String installProfileText = Files.readString(fs.getPath("install_profile.json"));
             Map<?, ?> installProfile = JsonUtils.fromNonNullJson(installProfileText, Map.class);
-            if (LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId().equals(installProfile.get("profile"))) {
+            if (GameComponentType.CLEANROOM.getPatchId().equals(installProfile.get("profile"))) {
                 checkForgeCompatibility(
                         dependencyManager.getGameRepository().resolve(manifest),
                         gameVersion.get());
@@ -214,8 +229,8 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
     static void checkForgeCompatibility(
             GameInstanceManifest.Resolved resolved,
             String gameVersion) throws UnsupportedInstallationException {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolved, gameVersion);
-        if (analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(resolved, GameVersionNumber.asGameVersion(gameVersion));
+        if (analyzer.has(GameComponentType.FORGE)) {
             throw new UnsupportedInstallationException(
                     UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE);
         }

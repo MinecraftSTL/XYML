@@ -107,7 +107,7 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
     @Override
     public Task<String> fetchText(String uri, long maximumBytes) {
         return new BoundedTextFetchTask(
-                downloadProvider.injectURLWithCandidates(uri),
+                downloadProvider.getDownloadCandidates(uri),
                 maximumBytes);
     }
 
@@ -125,7 +125,7 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
             String checksumAlgorithm,
             String checksum) {
         return archiveBackend.downloadManagedTemporaryArchive(
-                downloadProvider.injectURLWithCandidates(uri),
+                downloadProvider.getDownloadCandidates(uri),
                 archiveSuffix,
                 checksumAlgorithm,
                 checksum);

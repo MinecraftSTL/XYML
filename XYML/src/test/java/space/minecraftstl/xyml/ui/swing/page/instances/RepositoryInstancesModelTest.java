@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
@@ -39,6 +40,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletionException;
@@ -49,6 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,6 +108,40 @@ public final class RepositoryInstancesModelTest {
                 () -> assertEquals(1, additions.get()),
                 () -> assertEquals(List.of(instanceId("alpha")), managedIds));
         model.close();
+    }
+
+    /// Resolves analyzed instance contexts on the background executor and stops after close.
+    @Test
+    public void resolvesAnalyzedContextOnBackgroundExecutor() {
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
+        QueuedExecutor executor = new QueuedExecutor();
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha")),
+                instanceId("alpha"));
+        repository.setContext(new InstanceAddonContext(instanceId("alpha"), "1.21.1", ModLoaderType.NEO_FORGE));
+        RepositoryInstancesModel model = new RepositoryInstancesModel(
+                repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
+
+        CompletionStage<InstanceAddonContext> stage = model.resolveAddonContext(instanceId("alpha"));
+        assertFalse(stage.toCompletableFuture().isDone());
+
+        executor.runNext();
+        InstanceAddonContext context = stage.toCompletableFuture().join();
+        assertAll(
+                () -> assertEquals(instanceId("alpha"), context.instanceId()),
+                () -> assertEquals("1.21.1", context.gameVersion()),
+                () -> assertEquals(ModLoaderType.NEO_FORGE, context.modLoader()),
+                () -> assertEquals(List.of(instanceId("alpha")), repository.resolvedContextIds()));
+
+        model.close();
+        InstanceAddonContext closedContext = model.resolveAddonContext(instanceId("alpha"))
+                .toCompletableFuture()
+                .join();
+        assertAll(
+                () -> assertEquals(instanceId("alpha"), closedContext.instanceId()),
+                () -> assertNull(closedContext.gameVersion()),
+                () -> assertNull(closedContext.modLoader()));
     }
 
     /// An icon event invalidates sparse rows without eagerly resolving icons outside a requested range.
@@ -453,6 +490,12 @@ public final class RepositoryInstancesModelTest {
         /// IDs whose normalized icons were requested.
         private final List<GameInstanceID> resolvedIconIds = new ArrayList<>();
 
+        /// IDs whose analyzed add-on contexts were requested.
+        private final List<GameInstanceID> resolvedContextIds = new ArrayList<>();
+
+        /// Analyzed context returned by later context requests, or null for an unresolved context.
+        private @Nullable InstanceAddonContext configuredContext;
+
         /// IDs installed by the next successful refresh.
         private @Unmodifiable List<GameInstanceID> nextDisplayedIds = List.of();
 
@@ -533,6 +576,31 @@ public final class RepositoryInstancesModelTest {
         @Override
         public Subscription subscribeIconChanges(Runnable listener) {
             return iconEvents.subscribe(listener);
+        }
+
+        /// Records and returns one configured analyzed context.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return configured analyzed context, or an unresolved one by default
+        @Override
+        public synchronized InstanceAddonContext resolveAddonContext(GameInstanceID instanceId) {
+            resolvedContextIds.add(instanceId);
+            @Nullable InstanceAddonContext context = configuredContext;
+            return context == null ? new InstanceAddonContext(instanceId, null, null) : context;
+        }
+
+        /// Returns IDs whose analyzed contexts were requested.
+        ///
+        /// @return immutable requested-context IDs
+        private synchronized @Unmodifiable List<GameInstanceID> resolvedContextIds() {
+            return List.copyOf(resolvedContextIds);
+        }
+
+        /// Configures the analyzed context returned by later requests.
+        ///
+        /// @param context analyzed context to return
+        private synchronized void setContext(InstanceAddonContext context) {
+            configuredContext = Objects.requireNonNull(context, "context");
         }
 
         /// Records and returns deterministic non-transparent pixels for one demanded row.

@@ -178,7 +178,7 @@ public class ModrinthInstallTask extends Task<Void> {
             if (Modpack.SUPPORTED_ICON_EXTS.contains(ext)) {
                 iconExt = ext;
 
-                dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().injectURLWithCandidates(iconUrl)));
+                dependents.add(downloadIconTask = new CacheFileTask(dependencyManager.getDownloadProvider().getDownloadCandidates(iconUrl)));
             }
         }
         dependencies.add(new ModrinthCompletionTask(dependencyManager, instanceId, manifest, excludedFiles));

@@ -18,10 +18,8 @@
 package space.minecraftstl.xyml.modpack.mcbbs;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
-import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
@@ -34,7 +32,11 @@ import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.Library;
 
+import java.util.Optional;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -47,7 +49,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as an MCBBS-compatible modpack archive.
@@ -129,26 +131,26 @@ public class McbbsModpackExportTask extends Task<Void> {
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
 
             // Mcbbs manifest
             List<McbbsModpackManifest.Addon> addons = new ArrayList<>();
-            addons.add(new McbbsModpackManifest.Addon(MINECRAFT.getPatchId(), gameVersion));
-            analyzer.getVersion(FORGE).ifPresent(forgeVersion ->
+            addons.add(new McbbsModpackManifest.Addon(GAME.getPatchId(), gameVersion));
+            Optional.ofNullable(analyzer.getVersion(FORGE)).ifPresent(forgeVersion ->
                     addons.add(new McbbsModpackManifest.Addon(FORGE.getPatchId(), forgeVersion)));
-            analyzer.getVersion(CLEANROOM).ifPresent(cleanroomVersion ->
+            Optional.ofNullable(analyzer.getVersion(CLEANROOM)).ifPresent(cleanroomVersion ->
                     addons.add(new McbbsModpackManifest.Addon(CLEANROOM.getPatchId(), cleanroomVersion)));
-            analyzer.getVersion(NEO_FORGE).ifPresent(neoForgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(NEO_FORGE)).ifPresent(neoForgeVersion ->
                     addons.add(new McbbsModpackManifest.Addon(NEO_FORGE.getPatchId(), neoForgeVersion)));
-            analyzer.getVersion(LITELOADER).ifPresent(liteLoaderVersion ->
+            Optional.ofNullable(analyzer.getVersion(LITELOADER)).ifPresent(liteLoaderVersion ->
                     addons.add(new McbbsModpackManifest.Addon(LITELOADER.getPatchId(), liteLoaderVersion)));
-            analyzer.getVersion(OPTIFINE).ifPresent(optifineVersion ->
+            Optional.ofNullable(analyzer.getVersion(OPTIFINE)).ifPresent(optifineVersion ->
                     addons.add(new McbbsModpackManifest.Addon(OPTIFINE.getPatchId(), optifineVersion)));
-            analyzer.getVersion(FABRIC).ifPresent(fabricVersion ->
+            Optional.ofNullable(analyzer.getVersion(FABRIC)).ifPresent(fabricVersion ->
                     addons.add(new McbbsModpackManifest.Addon(FABRIC.getPatchId(), fabricVersion)));
-            analyzer.getVersion(QUILT).ifPresent(quiltVersion ->
+            Optional.ofNullable(analyzer.getVersion(QUILT)).ifPresent(quiltVersion ->
                     addons.add(new McbbsModpackManifest.Addon(QUILT.getPatchId(), quiltVersion)));
-            analyzer.getVersion(LEGACY_FABRIC).ifPresent(legacyfabricVersion ->
+            Optional.ofNullable(analyzer.getVersion(LEGACY_FABRIC)).ifPresent(legacyfabricVersion ->
                     addons.add(new McbbsModpackManifest.Addon(LEGACY_FABRIC.getPatchId(), legacyfabricVersion)));
 
             List<Library> libraries = new ArrayList<>();
@@ -167,9 +169,9 @@ public class McbbsModpackExportTask extends Task<Void> {
 
             // CurseForge manifest
             List<CurseManifestModLoader> modLoaders = new ArrayList<>();
-            analyzer.getVersion(FORGE).ifPresent(forgeVersion -> modLoaders.add(new CurseManifestModLoader("forge-" + forgeVersion, true)));
-            analyzer.getVersion(NEO_FORGE).ifPresent(forgeVersion -> modLoaders.add(new CurseManifestModLoader("neoforge-" + forgeVersion, true)));
-            analyzer.getVersion(FABRIC).ifPresent(fabricVersion -> modLoaders.add(new CurseManifestModLoader("fabric-" + fabricVersion, true)));
+            Optional.ofNullable(analyzer.getVersion(FORGE)).ifPresent(forgeVersion -> modLoaders.add(new CurseManifestModLoader("forge-" + forgeVersion, true)));
+            Optional.ofNullable(analyzer.getVersion(NEO_FORGE)).ifPresent(forgeVersion -> modLoaders.add(new CurseManifestModLoader("neoforge-" + forgeVersion, true)));
+            Optional.ofNullable(analyzer.getVersion(FABRIC)).ifPresent(fabricVersion -> modLoaders.add(new CurseManifestModLoader("fabric-" + fabricVersion, true)));
             // OptiFine and LiteLoader are not supported by CurseForge modpack.
             CurseManifest curseManifest = new CurseManifest(CurseManifest.MINECRAFT_MODPACK, 1, info.getName(), info.getVersion(), info.getAuthor(), "overrides", new CurseManifestMinecraft(gameVersion, modLoaders), Collections.emptyList());
             zip.putTextFile(JsonUtils.GSON.toJson(curseManifest), "manifest.json");

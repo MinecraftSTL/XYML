@@ -22,13 +22,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -71,7 +72,7 @@ public final class CleanroomInstallTaskTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("cleanroom-resource-test"));
         Path installer = temporaryDirectory.resolve("cleanroom-installer.jar");
@@ -85,7 +86,7 @@ public final class CleanroomInstallTaskTest {
                 TaskResource.gameDirectory(repository.getBaseDirectory().resolve("lib")),
                 TaskResource.archive(installer));
         CleanroomRemoteVersion remote = new CleanroomRemoteVersion(
-                "1.20.1",
+                GameVersionNumber.asGameVersion("1.20.1"),
                 "0.16.0",
                 Instant.EPOCH,
                 List.of("https://example.invalid/cleanroom-installer.jar"));

@@ -24,11 +24,12 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.MojangDownloadProvider;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -51,7 +52,7 @@ final class QuiltInstallTaskResourceTest {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory);
         DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
                 repository,
-                new MojangDownloadProvider(),
+                new DownloadProvider(),
                 new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("quilt-example"));
         @Unmodifiable Set<TaskResource> expectedInstallResources = Set.of(
@@ -64,7 +65,7 @@ final class QuiltInstallTaskResourceTest {
                 new QuiltInstallTask(
                         dependencyManager,
                         manifest,
-                        new QuiltRemoteVersion("1.20.1", "0.26.3", List.of("https://example.invalid/quilt.json")))
+                        new QuiltRemoteVersion(GameVersionNumber.asGameVersion("1.20.1"), "0.26.3", List.of("https://example.invalid/quilt.json")))
                         .getResources());
         assertEquals(expectedApiResources, new QuiltAPIInstallTask(dependencyManager, manifest, apiVersion()).getResources());
     }
@@ -86,7 +87,7 @@ final class QuiltInstallTaskResourceTest {
                 List.of("1.20.1"),
                 List.of());
         return new QuiltAPIRemoteVersion(
-                "1.20.1",
+                GameVersionNumber.asGameVersion("1.20.1"),
                 "11.0.0",
                 "11.0.0+1.20.1",
                 Instant.EPOCH,

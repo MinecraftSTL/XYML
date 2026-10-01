@@ -17,30 +17,76 @@
  */
 package space.minecraftstl.xyml.download.game;
 
-import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.*;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.ReleaseType;
+import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.Immutable;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.TreeSet;
 
-/**
- *
- * @author huangyuhui
- */
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
+/// @author huangyuhui
 @Immutable
-public final class GameRemoteVersion extends RemoteVersion {
+@NotNullByDefault
+public final class GameRemoteVersion extends ComponentRemoteVersion {
+
+    public static final WebURL VERSION_MANIFEST_URL = WebURL.parse("https://piston-meta.mojang.com/mc/game/version_manifest.json");
+
+    public static Task<ComponentRemoteVersionList<GameRemoteVersion>> fetchAsync(DownloadProvider provider) {
+        return new GetTask(provider.getGameVersionListCandidates())
+                .thenApplyAsync(json -> {
+                    GameRemoteVersions root = JsonUtils.fromNonNullJson(json, GameRemoteVersions.class);
+
+                    GameRemoteVersions unlistedVersions = null;
+
+                    //noinspection DataFlowIssue
+                    try (Reader input = new InputStreamReader(
+                            GameRemoteVersion.class.getResourceAsStream("/assets/game/unlisted-versions.json"))) {
+                        unlistedVersions = JsonUtils.GSON.fromJson(input, GameRemoteVersions.class);
+                    } catch (Throwable e) {
+                        LOG.warning("Failed to load unlisted versions", e);
+                    }
+
+                    var versions = new TreeSet<GameRemoteVersion>();
+
+                    if (unlistedVersions != null) {
+                        for (GameRemoteVersionInfo unlistedVersion : unlistedVersions.versions()) {
+                            versions.add(new GameRemoteVersion(
+                                    GameVersionNumber.asGameVersion(unlistedVersion.gameVersion()),
+                                    List.of(unlistedVersion.url()),
+                                    unlistedVersion.type(), unlistedVersion.releaseTime()));
+                        }
+                    }
+
+                    for (GameRemoteVersionInfo remoteVersion : root.versions()) {
+                        versions.add(new GameRemoteVersion(
+                                GameVersionNumber.asGameVersion(remoteVersion.gameVersion()),
+                                List.of(remoteVersion.url()),
+                                remoteVersion.type(), remoteVersion.releaseTime()));
+                    }
+
+                    return ComponentRemoteVersionList.of(GameComponentType.GAME, versions);
+                });
+    }
 
     private final ReleaseType type;
 
-    public GameRemoteVersion(String gameVersion, String selfVersion, List<String> url, ReleaseType type, Instant releaseDate) {
-        super(LibraryAnalyzer.LibraryType.MINECRAFT.getPatchId(), gameVersion, selfVersion, releaseDate, getReleaseType(type), url);
+    public GameRemoteVersion(GameVersionNumber gameVersion, List<String> url, ReleaseType type, Instant releaseDate) {
+        super(GameComponentType.GAME, gameVersion, gameVersion.toString(), releaseDate, getReleaseType(type), url);
         this.type = type;
     }
 
@@ -49,14 +95,14 @@ public final class GameRemoteVersion extends RemoteVersion {
     }
 
     @Override
-    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
-        return new GameInstallTask(dependencyManager, baseVersion, this);
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseManifest, Path modsDirectory) {
+        return new GameInstallTask(dependencyManager, baseManifest, this);
     }
 
     @Override
-    public int compareTo(RemoteVersion o) {
+    public int compareTo(ComponentRemoteVersion o) {
         if (!(o instanceof GameRemoteVersion)) {
-            return 0;
+            return this.getComponentType().compareTo(o.getComponentType());
         }
 
         int dateCompare = o.getReleaseDate().compareTo(getReleaseDate());
@@ -64,7 +110,7 @@ public final class GameRemoteVersion extends RemoteVersion {
             return dateCompare;
         }
 
-        return GameVersionNumber.compare(o.getSelfVersion(), getSelfVersion());
+        return o.getGameVersion().compareTo(getGameVersion());
     }
 
     private static Type getReleaseType(ReleaseType type) {

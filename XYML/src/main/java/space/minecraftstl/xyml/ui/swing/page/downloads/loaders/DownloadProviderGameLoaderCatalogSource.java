@@ -20,29 +20,27 @@ package space.minecraftstl.xyml.ui.swing.page.downloads.loaders;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersionList;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.DownloadProviderWrapper;
-import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.download.VersionList;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-/// Bridges an explicit loader selection to exactly one Core [VersionList] refresh.
+/// Bridges an explicit loader selection to exactly one Core [ComponentRemoteVersionList] fetch.
 ///
 /// Construction only retains the configured provider. A source request resolves the current concrete
-/// provider, calls the selected kind's [VersionList#refreshAsync(String)] once, then snapshots the
-/// same list instance while retaining every concrete [RemoteVersion] object.
+/// provider, starts the selected kind fetch once, then snapshots the
+/// same list instance while retaining every concrete [ComponentRemoteVersion] object.
 @NotNullByDefault
 public final class DownloadProviderGameLoaderCatalogSource implements GameLoaderCatalogSource {
     /// Configured provider or mutable wrapper resolved only for explicit refresh requests.
@@ -72,21 +70,22 @@ public final class DownloadProviderGameLoaderCatalogSource implements GameLoader
     /// Refreshes the exact requested VersionList and maps its concrete post-refresh versions.
     ///
     /// @param request explicit game-version and loader-kind selection
-    /// @return immutable items retaining exact Core RemoteVersion instances
+    /// @return immutable items retaining exact Core ComponentRemoteVersion instances
     @Override
     public CompletionStage<@Unmodifiable List<GameLoaderCatalogItem>> refreshAsync(
             GameLoaderCatalogRequest request) {
         GameLoaderCatalogRequest nonNullRequest = Objects.requireNonNull(request, "request");
-        final VersionList<?> versionList;
-        final Task<?> refreshTask;
+        final Task<ComponentRemoteVersionList<?>> refreshTask;
         try {
-            DownloadProvider provider = unwrapProvider(configuredProvider);
-            versionList = Objects.requireNonNull(
-                    provider.getVersionListById(nonNullRequest.kind().versionListId()),
-                    "download provider returned null version list");
+            GameComponentType componentType = Objects.requireNonNull(
+                    GameComponentType.fromPatchId(nonNullRequest.kind().versionListId()),
+                    "unknown loader catalog kind: " + nonNullRequest.kind());
             refreshTask = Objects.requireNonNull(
-                    versionList.refreshAsync(nonNullRequest.gameVersion()),
-                    "version list returned null refresh task");
+                    configuredProvider.getVersionsAsync(
+                            componentType,
+                            GameVersionNumber.asGameVersion(nonNullRequest.gameVersion()),
+                            true),
+                    "download provider returned null refresh task");
         } catch (RuntimeException failure) {
             return failedStage(failure);
         }
@@ -99,7 +98,7 @@ public final class DownloadProviderGameLoaderCatalogSource implements GameLoader
         } catch (RuntimeException failure) {
             return failedStage(failure);
         }
-        return terminalStage.thenApply(ignored -> mapVersions(versionList, nonNullRequest));
+        return terminalStage.thenApply(ignored -> mapVersions(refreshTask, nonNullRequest));
     }
 
     /// Starts one Core task and turns its terminal listener event into a completion stage.
@@ -136,38 +135,24 @@ public final class DownloadProviderGameLoaderCatalogSource implements GameLoader
         return completion.minimalCompletionStage();
     }
 
-    /// Snapshots one exact refreshed VersionList without converting concrete RemoteVersion subtypes.
+    /// Snapshots the completed refresh result without converting concrete ComponentRemoteVersion subtypes.
     ///
-    /// @param versionList exact list used to create the refresh task
-    /// @param request exact selected loader request
+    /// @param refreshTask completed refresh task whose result is the fetched list
+    /// @param request     exact selected loader request
     /// @return immutable mapped items in provider order
     private static @Unmodifiable List<GameLoaderCatalogItem> mapVersions(
-            VersionList<?> versionList,
+            Task<ComponentRemoteVersionList<?>> refreshTask,
             GameLoaderCatalogRequest request) {
+        ComponentRemoteVersionList<?> versionList = Objects.requireNonNull(
+                refreshTask.getResult(), "loader version list result");
         List<GameLoaderCatalogItem> items = new ArrayList<>();
-        for (@Nullable RemoteVersion remoteVersion : versionList.getVersions(request.gameVersion())) {
+        for (@Nullable ComponentRemoteVersion remoteVersion : versionList) {
             if (remoteVersion == null) {
                 throw new IllegalStateException("Loader version list returned a null remote version");
             }
             items.add(new GameLoaderCatalogItem(request.kind(), remoteVersion));
         }
         return List.copyOf(items);
-    }
-
-    /// Resolves nested mutable provider wrappers to one concrete provider for this refresh request.
-    ///
-    /// @param provider configured provider or wrapper
-    /// @return concrete provider snapshot
-    private static DownloadProvider unwrapProvider(DownloadProvider provider) {
-        DownloadProvider current = Objects.requireNonNull(provider, "provider");
-        Set<DownloadProvider> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current instanceof DownloadProviderWrapper wrapper) {
-            if (!visited.add(current)) {
-                throw new IllegalStateException("Download-provider wrapper cycle detected");
-            }
-            current = Objects.requireNonNull(wrapper.getProvider(), "download-provider wrapper provider");
-        }
-        return current;
     }
 
     /// Produces one failed immutable item stage without starting a task.

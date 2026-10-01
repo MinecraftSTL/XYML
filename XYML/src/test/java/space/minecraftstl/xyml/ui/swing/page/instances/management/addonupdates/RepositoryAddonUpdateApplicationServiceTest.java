@@ -26,8 +26,9 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.download.DownloadCandidate;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
@@ -40,6 +41,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -879,59 +881,20 @@ final class RepositoryAddonUpdateApplicationServiceTest {
 
     /// Deterministic provider that preserves mirror-first and origin-second candidates.
     @NotNullByDefault
-    private static final class FakeDownloadProvider implements DownloadProvider {
-        /// Returns no game version list endpoints because the service does not query metadata.
+    private static final class FakeDownloadProvider extends DownloadProvider {
+        /// Returns mirror-first and origin-second candidates for every requested artifact URL.
         ///
-        /// @return empty endpoint list
-        @Override
-        public @Unmodifiable List<WebURL> getVersionListURLs() {
-            return List.of();
-        }
-
-        /// Returns no asset candidates because the service downloads only selected add-ons.
-        ///
-        /// @param assetObjectLocation ignored asset location
-        /// @return empty candidate list
-        @Override
-        public @Unmodifiable List<WebURL> getAssetObjectCandidates(String assetObjectLocation) {
-            return List.of();
-        }
-
-        /// Rewrites the origin host to the deterministic mirror host.
-        ///
-        /// @param baseURL original URL
-        /// @return mirror URL
-        @Override
-        public String injectURL(String baseURL) {
-            return Objects.requireNonNull(baseURL, "baseURL")
-                    .replace("origin.invalid", "mirror.invalid");
-        }
-
-        /// Returns mirror-first and origin-second candidates.
-        ///
-        /// @param baseURL original remote artifact URL
+        /// @param urls original remote artifact URLs
         /// @return immutable candidate list
         @Override
-        public @Unmodifiable List<WebURL> injectURLWithCandidates(String baseURL) {
-            return List.of(WebURL.parse(injectURL(baseURL)), WebURL.parse(baseURL));
-        }
-
-        /// Rejects metadata version-list access outside this service's scope.
-        ///
-        /// @param id requested version list identifier
-        /// @return never returns normally
-        /// @throws IllegalArgumentException always
-        @Override
-        public VersionList<?> getVersionListById(String id) {
-            throw new IllegalArgumentException("Unsupported test version list: " + id);
-        }
-
-        /// Returns a small deterministic download concurrency.
-        ///
-        /// @return two concurrent downloads
-        @Override
-        public int getConcurrency() {
-            return 2;
+        public DownloadCandidates getDownloadCandidates(List<String> urls) {
+            List<DownloadCandidate> candidates = new ArrayList<>(urls.size() * 2);
+            for (String url : urls) {
+                String baseURL = Objects.requireNonNull(url, "url");
+                candidates.add(DownloadCandidate.of(baseURL.replace("origin.invalid", "mirror.invalid")));
+                candidates.add(DownloadCandidate.of(baseURL));
+            }
+            return DownloadCandidates.of(List.copyOf(candidates));
         }
     }
 

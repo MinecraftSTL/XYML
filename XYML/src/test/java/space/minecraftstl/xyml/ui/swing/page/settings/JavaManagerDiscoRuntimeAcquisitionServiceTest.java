@@ -26,6 +26,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.download.java.JavaPackageType;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
@@ -377,7 +378,7 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         Files.write(source, "bounded-download".getBytes(StandardCharsets.UTF_8));
         String checksum = DigestUtils.digestToString("SHA-256", source);
         ManagedJavaArchiveDownloadTask task = new ManagedJavaArchiveDownloadTask(
-                List.of(WebURL.of(source.toUri())),
+                DownloadCandidates.ofUrls(List.of(WebURL.of(source.toUri()))),
                 ".zip",
                 "SHA-256",
                 checksum,
@@ -395,9 +396,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         String contents = "bounded-text-response";
         Files.writeString(source, contents, StandardCharsets.UTF_8);
         long exactBytes = Files.size(source);
-        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(List.of(WebURL.of(source.toUri())), exactBytes);
+        BoundedTextFetchTask exactTask = new BoundedTextFetchTask(DownloadCandidates.ofUrls(List.of(WebURL.of(source.toUri()))), exactBytes);
         BoundedTextFetchTask oversizedTask = new BoundedTextFetchTask(
-                List.of(WebURL.of(source.toUri())),
+                DownloadCandidates.ofUrls(List.of(WebURL.of(source.toUri()))),
                 exactBytes - 1L);
 
         assertTrue(exactTask.test(), () -> "Exact bounded text fetch failed: " + exactTask.getException());

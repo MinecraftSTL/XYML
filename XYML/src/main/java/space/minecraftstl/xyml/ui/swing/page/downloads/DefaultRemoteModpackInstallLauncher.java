@@ -78,7 +78,7 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
 
         Path archive = Files.createTempFile("xyml-remote-modpack-", ".zip");
         FileDownloadTask download = new FileDownloadTask(
-                downloadProvider.injectURLWithCandidates(installRequest.version().file().url()),
+                downloadProvider.getDownloadCandidates(installRequest.version().file().url()),
                 archive,
                 installRequest.version().file().getIntegrityCheck());
         download.setName(installRequest.version().name().isBlank()

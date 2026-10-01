@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.modrinth;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -161,8 +162,9 @@ public class ModrinthCompletionTask extends Task<Void> {
             if (modsDirectory.equals(filePath.getParent()) && this.modManager.hasSimpleMod(FileUtils.getName(filePath)))
                 continue;
 
+            DownloadProvider downloadProvider = dependency.getDownloadProvider();
             var task = new FileDownloadTask(
-                    dependency.getDownloadProvider().injectURLsWithCandidates(file.getDownloads()),
+                    downloadProvider.getDownloadCandidates(file.downloads()),
                     filePath);
             task.setCacheRepository(dependency.getCacheRepository());
             task.setCaching(true);

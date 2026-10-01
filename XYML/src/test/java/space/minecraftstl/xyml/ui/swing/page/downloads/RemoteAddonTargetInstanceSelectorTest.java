@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -61,6 +62,38 @@ public final class RemoteAddonTargetInstanceSelectorTest {
                 selector.start();
                 assertEquals(SECOND_ID, selector.selectedInstanceId());
                 assertEquals(SECOND_ID, selectedEntry(selector).stableId());
+            }
+        });
+    }
+
+    /// Selects one explicit target independently from the model-selected index.
+    @Test
+    public void explicitSelectionOverridesModelSelection() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 1);
+            try (RemoteAddonTargetInstanceSelector selector = new RemoteAddonTargetInstanceSelector(model)) {
+                selector.start();
+                selector.selectInstance(FIRST_ID);
+
+                assertEquals(FIRST_ID, selector.selectedInstanceId());
+                assertEquals(FIRST_ID, selectedEntry(selector).stableId());
+                assertEquals(0, model.selectCalls());
+            }
+        });
+    }
+
+    /// Applies an explicit target requested before the model has been started.
+    @Test
+    public void explicitSelectionWaitsForModelStart() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 0);
+            try (RemoteAddonTargetInstanceSelector selector = new RemoteAddonTargetInstanceSelector(model)) {
+                selector.selectInstance(SECOND_ID);
+                selector.start();
+
+                assertEquals(SECOND_ID, selector.selectedInstanceId());
+                assertEquals(SECOND_ID, selectedEntry(selector).stableId());
+                assertEquals(0, model.selectCalls());
             }
         });
     }
@@ -152,6 +185,42 @@ public final class RemoteAddonTargetInstanceSelectorTest {
             assertEquals(SECOND_ID, selectedEntry(selector).stableId());
             assertEquals(2, selector.component().getItemCount());
             assertFalse(model.isSubscribed());
+        });
+    }
+
+    /// Reports each changed non-null target instance exactly once.
+    @Test
+    public void reportsChangedTargetInstances() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 1);
+            List<GameInstanceID> reported = new ArrayList<>();
+            try (RemoteAddonTargetInstanceSelector selector =
+                         new RemoteAddonTargetInstanceSelector(model, reported::add)) {
+                selector.start();
+                assertEquals(List.of(SECOND_ID), reported);
+
+                selector.component().setSelectedIndex(0);
+                assertEquals(List.of(SECOND_ID, FIRST_ID), reported);
+
+                selector.selectInstance(FIRST_ID);
+                assertEquals(List.of(SECOND_ID, FIRST_ID), reported);
+            }
+        });
+    }
+
+    /// Reports a target that becomes effective only after the borrowed model starts.
+    @Test
+    public void reportsDeferredTargetSelection() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 1);
+            List<GameInstanceID> reported = new ArrayList<>();
+            try (RemoteAddonTargetInstanceSelector selector =
+                         new RemoteAddonTargetInstanceSelector(model, reported::add)) {
+                selector.selectInstance(FIRST_ID);
+                selector.start();
+
+                assertEquals(List.of(FIRST_ID), reported);
+            }
         });
     }
 

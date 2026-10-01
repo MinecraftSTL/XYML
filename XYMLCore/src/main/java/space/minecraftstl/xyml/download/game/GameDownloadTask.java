@@ -33,7 +33,7 @@ import java.util.List;
 
 /// Downloads the primary game JAR for one instance.
 @NotNullByDefault
-public final class GameDownloadTask extends Task<Void> {
+public final class GameDownloadTask extends Task<Path> {
     private final DefaultDependencyManager dependencyManager;
     /// Optional canonical game version used to locate a reusable cached JAR.
     private final @Nullable String gameVersion;
@@ -68,7 +68,7 @@ public final class GameDownloadTask extends Task<Void> {
         Path jar = dependencyManager.getGameRepository().getInstanceJar(manifest);
 
         var task = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLWithCandidates(manifest.getDownloadInfo().getUrl()),
+                dependencyManager.getDownloadProvider().getDownloadCandidates(manifest.getDownloadInfo().getUrl()),
                 jar,
                 FileDownloadTask.IntegrityCheck.of(CacheRepository.SHA1, manifest.getDownloadInfo().getSha1()));
         task.setCaching(true);
@@ -78,6 +78,7 @@ public final class GameDownloadTask extends Task<Void> {
             task.setCandidate(dependencyManager.getCacheRepository().getCommonDirectory().resolve("jars").resolve(gameVersion + ".jar"));
 
         dependencies.add(task);
+        setResult(jar);
     }
     
 }

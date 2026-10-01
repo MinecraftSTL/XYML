@@ -79,6 +79,9 @@ public final class AppShellFrame extends JFrame {
     /// Background decoder and theme-window appearance subscription.
     private final SwingWindowBackgroundController backgroundController;
 
+    /// Java-side title-bar dragging used when the native border is unavailable for an undecorated frame.
+    private final @Nullable SwingWindowDragSupport windowDragSupport;
+
     /// Java edge resizer required when an undecorated transparent frame cannot use FlatLaf's native border.
     private @Nullable FlatWindowResizer undecoratedWindowResizer;
 
@@ -131,6 +134,9 @@ public final class AppShellFrame extends JFrame {
                 pageTransitionDuration,
                 progressAnimationDuration);
         setContentPane(shellPanel);
+        windowDragSupport = isUndecorated()
+                ? new SwingWindowDragSupport(this, shellPanel.toolbar().windowDragSurfaces())
+                : null;
         backgroundController = new SwingWindowBackgroundController(
                 themeManager,
                 this,
@@ -246,7 +252,8 @@ public final class AppShellFrame extends JFrame {
         systemThemeRefreshTimer.stop();
         WindowsNativeUtils.clearAppUserModelRelaunchProperties(this);
         disposeInOrder(
-                () -> disposeInOrder(backgroundController::close, shellPanel::close),
+                () -> disposeInOrder(backgroundController::close,
+                        () -> disposeInOrder(this::closeWindowDragSupport, shellPanel::close)),
                 () -> disposeInOrder(this::uninstallUndecoratedWindowResizer, super::dispose));
     }
 
@@ -288,6 +295,13 @@ public final class AppShellFrame extends JFrame {
     /// @return whether a fallback edge resizer is active
     boolean undecoratedWindowResizerInstalled() {
         return undecoratedWindowResizer != null;
+    }
+
+    /// Returns whether Java-side title-bar dragging was installed for an undecorated frame.
+    ///
+    /// @return whether inert title-bar surfaces can move this window
+    boolean windowDragSupportInstalled() {
+        return windowDragSupport != null;
     }
 
     /// Mutates root-pane opacity and native background as one EDT-confined operation.
@@ -342,6 +356,14 @@ public final class AppShellFrame extends JFrame {
             return null;
         }
         return new FlatWindowResizer.WindowResizer(getRootPane());
+    }
+
+    /// Releases Java-side title-bar dragging before the native peer is disposed.
+    private void closeWindowDragSupport() {
+        @Nullable SwingWindowDragSupport support = windowDragSupport;
+        if (support != null) {
+            support.close();
+        }
     }
 
     /// Releases an explicitly installed Java edge resizer before the native peer is disposed.

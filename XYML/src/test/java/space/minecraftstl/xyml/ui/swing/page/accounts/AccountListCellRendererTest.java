@@ -174,6 +174,19 @@ public final class AccountListCellRendererTest {
         });
     }
 
+    /// A renderer used for selection-only surfaces omits the reordering affordance.
+    @Test
+    public void hidesDragHandleWhenReorderingIsUnavailable() {
+        AccountListCellRenderer renderer = onEdt(() -> new AccountListCellRenderer(false));
+        JList<ChoiceListEntry<AccountListItem>> list = onEdt(JList::new);
+
+        runOnEdt(() -> {
+            renderer.getListCellRendererComponent(
+                    list, ChoiceListEntry.loading(0), 0, false, false);
+            assertFalse(findLabel(renderer, "accountListDragHandle").isVisible());
+        });
+    }
+
     /// Selection and keyboard focus share a rounded full-row outline without a traditional radio marker.
     @Test
     public void highlightsSelectedAccountWithoutRadioMarker() {

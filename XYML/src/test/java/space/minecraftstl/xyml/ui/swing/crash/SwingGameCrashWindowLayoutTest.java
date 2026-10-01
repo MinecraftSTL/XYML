@@ -111,7 +111,7 @@ class SwingGameCrashWindowLayoutTest {
         }
     }
 
-    /// Keeps every action inside the toolbar when the status text is much wider than the window.
+    /// Keeps every action inside the toolbar and places reveal before export with long status text.
     @Test
     void anchorsActionButtonsToRightWithLongStatus() throws Exception {
         CompletableFuture<GameCrashAnalysis> analysis = new CompletableFuture<>();
@@ -153,6 +153,10 @@ class SwingGameCrashWindowLayoutTest {
                     assertTrue(bounds.x >= toolbar.getInsets().left);
                     assertTrue(bounds.x + bounds.width <= rightEdge);
                 }
+
+                JButton reveal = findComponent(content, "gameCrashReveal", JButton.class);
+                JButton export = findComponent(content, "gameCrashExport", JButton.class);
+                assertTrue(reveal.getX() < export.getX());
             });
         } finally {
             window.close();
