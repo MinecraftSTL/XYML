@@ -22,7 +22,6 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
@@ -50,6 +49,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -1351,9 +1351,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             @Unmodifiable List<ComponentRemoteVersion> loaders) {
         StringBuilder name = new StringBuilder(Objects.requireNonNull(versionId, "versionId"));
         for (ComponentRemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
-            @Nullable LibraryAnalyzer.LibraryType type =
-                    LibraryAnalyzer.LibraryType.fromPatchId(loader.getComponentType().getPatchId());
-            @Nullable String suffix = type == null ? null : switch (type) {
+            GameComponentType type = loader.getComponentType();
+            @Nullable String suffix = switch (type) {
                 case FORGE -> "Forge";
                 case NEO_FORGE -> "NeoForge";
                 case CLEANROOM -> "Cleanroom";

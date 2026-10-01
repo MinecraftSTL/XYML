@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
@@ -39,7 +39,9 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -1060,7 +1062,9 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             try {
                 GameInstanceManifest manifest = repository.getInstanceManifest(instanceId);
                 @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
-                LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.resolve(manifest), gameVersion);
+                GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                        repository.resolve(manifest),
+                        GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
                 return new InstanceAddonContext(instanceId, gameVersion, analyzer.getPrimaryModLoader());
             } catch (RuntimeException failure) {
                 LOG.warning("Failed to resolve add-on context for instance " + instanceId, failure);

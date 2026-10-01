@@ -23,7 +23,6 @@ import com.google.gson.reflect.TypeToken;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -1129,7 +1128,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         boolean isolated = switch (type) {
             case NEVER -> false;
             case ALWAYS -> true;
-            case MODDED -> LibraryAnalyzer.isModded(getResolvedInstanceManifest(instanceId));
+            case MODDED -> GameComponentAnalyzer.isModded(getResolvedInstanceManifest(instanceId));
         };
 
         if (isolated) {

@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.download.neoforge.NeoForgeInstallTask;
 import space.minecraftstl.xyml.download.optifine.OptiFineInstallTask;
 import space.minecraftstl.xyml.game.Artifact;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
@@ -42,9 +43,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /// Creates repository-aware installation and repair task graphs.
 ///
@@ -148,13 +151,13 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 GameInstanceManifest original = repository.getInstanceManifest(manifest.id());
                 GameInstanceManifest.Resolved resolvedInstanceManifest = repository.getResolvedInstanceManifest(manifest.id());
 
-                LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolvedInstanceManifest, gameVersion);
-                for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
+                GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(resolvedInstanceManifest, GameVersionNumber.asGameVersion(gameVersion));
+                for (GameComponentType type : GameComponentType.values()) {
                     if (!analyzer.has(type))
                         continue;
 
-                    if (type == LibraryAnalyzer.LibraryType.OPTIFINE) {
-                        @Nullable String optifinePatchVersion = analyzer.getVersion(type)
+                    if (type == GameComponentType.OPTIFINE) {
+                        @Nullable String optifinePatchVersion = Optional.ofNullable(analyzer.getVersion(type))
                                 .map(optifineVersion -> {
                                     Matcher matcher = Pattern.compile("^([0-9.]+)_(?<optifine>HD_.+)$").matcher(optifineVersion);
                                     return matcher.find() ? matcher.group("optifine") : optifineVersion;
@@ -328,13 +331,79 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         // MaintainTask requires version that does not inherits from any version.
         // If we want to remove a library in dependent version, we should keep the dependents not changed
         // So resolving this game version to preserve all information in this version.json is necessary.
-        return Task.supplyAsync(() -> {
-            GameInstanceManifest independentVersion = repository.resolve(manifest).standaloneManifest();
-            @Nullable String gameVersion = repository.getGameVersion(independentVersion).orElse(null);
-            return LibraryAnalyzer.analyze(independentVersion, gameVersion).removeLibrary(libraryId).build();
-        }).setResources(
-                TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
-                TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)));
+        return Task.supplyAsync(() -> removeComponent(
+                        repository.resolve(manifest).standaloneManifest(),
+                        libraryId))
+                .setResources(
+                        TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
+                        TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)));
+    }
+
+    /// Removes every library and patch belonging to one component identifier.
+    ///
+    /// @param manifest  independent instance manifest to rewrite
+    /// @param libraryId component patch identifier
+    /// @return manifest without the component, or the original manifest when the component is absent
+    private static GameInstanceManifest removeComponent(GameInstanceManifest manifest, String libraryId) {
+        @Nullable GameComponentType type = GameComponentType.fromPatchId(libraryId);
+        if (type == null) {
+            return manifest;
+        }
+        if (!manifest.hasPatch(libraryId) && !containsMatchedLibrary(manifest.getLibraries(), type)) {
+            return manifest;
+        }
+
+        GameInstanceManifest withoutLibraries = removingMatchedLibrary(manifest, type);
+        return withoutLibraries.withPatches(withoutLibraries.getPatches().stream()
+                .filter(patch -> !libraryId.equals(patch.id()))
+                .map(patch -> removingMatchedLibrary(patch, type))
+                .collect(Collectors.toList()));
+    }
+
+    /// Returns whether one library list contains a library of the given component type.
+    ///
+    /// @param libraries libraries to inspect
+    /// @param type      requested component type
+    /// @return whether a matching library exists
+    private static boolean containsMatchedLibrary(List<Library> libraries, GameComponentType type) {
+        for (Library library : libraries) {
+            if (type.matches(library, libraries)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Removes every library of one component type from a manifest copy.
+    ///
+    /// @param manifest manifest to rewrite
+    /// @param type     component type to remove
+    /// @return manifest without the matching libraries
+    private static GameInstanceManifest removingMatchedLibrary(GameInstanceManifest manifest, GameComponentType type) {
+        List<Library> libraries = new ArrayList<>();
+        List<Library> rawLibraries = manifest.getLibraries();
+        for (Library library : rawLibraries) {
+            if (!type.matches(library, rawLibraries)) {
+                libraries.add(library);
+            }
+        }
+        return manifest.withLibraries(libraries);
+    }
+
+    /// Removes every library of one component type from a patch copy.
+    ///
+    /// @param patch patch to rewrite
+    /// @param type  component type to remove
+    /// @return patch without the matching libraries
+    private static GameInstancePatch removingMatchedLibrary(GameInstancePatch patch, GameComponentType type) {
+        List<Library> libraries = new ArrayList<>();
+        List<Library> rawLibraries = patch.getLibraries();
+        for (Library library : rawLibraries) {
+            if (!type.matches(library, rawLibraries)) {
+                libraries.add(library);
+            }
+        }
+        return patch.withLibraries(libraries);
     }
 
 }

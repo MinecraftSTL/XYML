@@ -268,6 +268,15 @@ public enum GameComponentType {
         return PATCH_ID_MAP.get(patchId);
     }
 
+    /// Returns whether this component type owns the supplied library in the given library list.
+    ///
+    /// @param library   library to test
+    /// @param libraries complete library list the library belongs to
+    /// @return whether the library belongs to this component type
+    public boolean matches(Library library, List<Library> libraries) {
+        return matchLibrary(library, libraries);
+    }
+
     protected abstract boolean matchLibrary(Library library, List<Library> libraries);
 
     protected @Nullable String getComponentVersion(GameInstanceManifest manifest, String libraryVersion) {

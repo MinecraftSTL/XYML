@@ -20,16 +20,16 @@ package space.minecraftstl.xyml.download.neoforge;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.VersionMismatchException;
 import space.minecraftstl.xyml.download.forge.*;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -130,7 +130,7 @@ public final class NeoForgeInstallTask extends Task<GameInstancePatch> {
         try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installer)) {
             String installProfileText = Files.readString(fs.getPath("install_profile.json"));
             Map<?, ?> installProfile = JsonUtils.fromNonNullJson(installProfileText, Map.class);
-            if (LibraryAnalyzer.LibraryType.FORGE.getPatchId().equals(installProfile.get("profile")) && (Files.exists(fs.getPath("META-INF/NEOFORGE.RSA")) || installProfileText.contains("neoforge"))) {
+            if (GameComponentType.FORGE.getPatchId().equals(installProfile.get("profile")) && (Files.exists(fs.getPath("META-INF/NEOFORGE.RSA")) || installProfileText.contains("neoforge"))) {
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
@@ -142,15 +142,15 @@ public final class NeoForgeInstallTask extends Task<GameInstancePatch> {
                                 modifyNeoForgeOldVersion(gameVersion.get(), profile.getVersion()),
                                 installer))
                         .thenApplyAsync(neoForgeVersion -> {
-                    if (!neoForgeVersion.id().equals(LibraryAnalyzer.LibraryType.FORGE.getPatchId()) || neoForgeVersion.version() == null) {
+                    if (!neoForgeVersion.id().equals(GameComponentType.FORGE.getPatchId()) || neoForgeVersion.version() == null) {
                         throw new IOException("Invalid neoforge version.");
                     }
-                    return neoForgeVersion.withId(LibraryAnalyzer.LibraryType.NEO_FORGE.getPatchId())
+                    return neoForgeVersion.withId(GameComponentType.NEO_FORGE.getPatchId())
                             .withVersion(
-                                    removePrefix(neoForgeVersion.version().replace(LibraryAnalyzer.LibraryType.FORGE.getPatchId(), ""), "-")
+                                    removePrefix(neoForgeVersion.version().replace(GameComponentType.FORGE.getPatchId(), ""), "-")
                             );
                 }), dependencyManager, version, installer);
-            } else if (LibraryAnalyzer.LibraryType.NEO_FORGE.getPatchId().equals(installProfile.get("profile")) || "NeoForge".equals(installProfile.get("profile"))) {
+            } else if (GameComponentType.NEO_FORGE.getPatchId().equals(installProfile.get("profile")) || "NeoForge".equals(installProfile.get("profile"))) {
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());

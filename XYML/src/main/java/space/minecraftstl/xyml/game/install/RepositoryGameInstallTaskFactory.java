@@ -21,13 +21,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.GameBuilder;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -161,7 +161,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
 
     /// Determines whether the selected remote installers contain a real mod loader.
     ///
-    /// The repository isolation rule considers only [LibraryAnalyzer.LibraryType#isModLoader()] as
+    /// The repository isolation rule considers only [GameComponentType#isModLoader()] as
     /// considered modded, so auxiliary components such as OptiFine alone do not change the default
     /// running-directory policy.
     ///
@@ -170,7 +170,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     static boolean isModded(GameInstallRequest request) {
         Objects.requireNonNull(request, "request");
         for (ComponentRemoteVersion remoteVersion : request.selectedRemoteVersions()) {
-            @Nullable LibraryAnalyzer.LibraryType type = LibraryAnalyzer.LibraryType.fromPatchId(
+            @Nullable GameComponentType type = GameComponentType.fromPatchId(
                     remoteVersion.getComponentType().getPatchId());
             if (type != null && type.isModLoader()) {
                 return true;

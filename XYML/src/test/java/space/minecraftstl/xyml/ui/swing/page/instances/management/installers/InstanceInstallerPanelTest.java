@@ -21,7 +21,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -96,7 +95,7 @@ final class InstanceInstallerPanelTest {
                 List.of(new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC,
                         "0.16.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR)),
+                        InstallerStructureStatus.CLEAR)),
                 List.of());
 
         InstanceInstallerPanel panel = createPanel(service, wizard, interactions);
@@ -170,11 +169,11 @@ final class InstanceInstallerPanelTest {
         InstanceInstallerEntry uncertain = new InstanceInstallerEntry(
                 GameLoaderKind.FORGE,
                 "47.2.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.UNSURE);
+                InstallerStructureStatus.UNSURE);
         InstanceInstallerEntry clear = new InstanceInstallerEntry(
                 GameLoaderKind.FABRIC,
                 "0.16.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR);
+                InstallerStructureStatus.CLEAR);
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
         activateWithSnapshot(panel, service, snapshot(List.of(uncertain, clear), List.of()));
         EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {

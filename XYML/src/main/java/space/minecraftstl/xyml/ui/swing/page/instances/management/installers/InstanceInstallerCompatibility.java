@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCompatibilityMatrix;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
@@ -156,7 +155,7 @@ public final class InstanceInstallerCompatibility {
         if (installedEntry == null) {
             throw removalNotAllowed(requestedLibraryId, "no installed loader entry");
         }
-        if (installedEntry.status() != LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR) {
+        if (installedEntry.status() != InstallerStructureStatus.CLEAR) {
             throw removalNotAllowed(requestedLibraryId, "an externally uncertain loader structure");
         }
         for (InstanceInstallerEntry entry : current.installedLoaders()) {

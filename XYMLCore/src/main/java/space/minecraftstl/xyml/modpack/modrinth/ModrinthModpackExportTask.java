@@ -20,16 +20,10 @@ package space.minecraftstl.xyml.modpack.modrinth;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
-
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
@@ -44,7 +38,13 @@ import space.minecraftstl.xyml.util.io.Zipper;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as a Modrinth-compatible modpack archive.
@@ -217,18 +217,18 @@ public class ModrinthModpackExportTask extends Task<Void> {
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
 
             Map<String, String> dependencies = new HashMap<>();
             dependencies.put("minecraft", gameVersion);
 
-            analyzer.getVersion(FORGE).ifPresent(forgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(FORGE)).ifPresent(forgeVersion ->
                     dependencies.put("forge", forgeVersion));
-            analyzer.getVersion(NEO_FORGE).ifPresent(neoForgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(NEO_FORGE)).ifPresent(neoForgeVersion ->
                     dependencies.put("neoforge", neoForgeVersion));
-            analyzer.getVersion(FABRIC).ifPresent(fabricVersion ->
+            Optional.ofNullable(analyzer.getVersion(FABRIC)).ifPresent(fabricVersion ->
                     dependencies.put("fabric-loader", fabricVersion));
-            analyzer.getVersion(QUILT).ifPresent(quiltVersion ->
+            Optional.ofNullable(analyzer.getVersion(QUILT)).ifPresent(quiltVersion ->
                     dependencies.put("quilt-loader", quiltVersion));
 
             ModrinthManifest manifest = new ModrinthManifest(

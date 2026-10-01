@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -99,16 +98,16 @@ final class InstanceInstallerCompatibilityTest {
         InstanceInstallerSnapshot fabricInstance = snapshot(new InstanceInstallerEntry(
                 GameLoaderKind.FABRIC,
                 "0.16.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                InstallerStructureStatus.CLEAR));
         InstanceInstallerSnapshot fabricWithApi = snapshot(
                 new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC,
                         "0.16.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR),
+                        InstallerStructureStatus.CLEAR),
                 new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC_API,
                         "0.104.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                        InstallerStructureStatus.CLEAR));
 
         @Unmodifiable List<ComponentRemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
                 fabricInstance,
@@ -146,12 +145,12 @@ final class InstanceInstallerCompatibilityTest {
                 "third-party-clear",
                 "1.0.0",
                 InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                        InstallerStructureStatus.CLEAR));
         InstanceOtherLibraryEntry uncertain = new InstanceOtherLibraryEntry(
                 "third-party-external",
                 null,
                 InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED));
+                        InstallerStructureStatus.JUST_EXISTED));
         List<InstanceOtherLibraryEntry> mutableEntries = new ArrayList<>(List.of(clear, uncertain));
         InstanceInstallerSnapshot snapshot = new InstanceInstallerSnapshot(
                 new GameInstanceID("existing-instance"),
@@ -169,7 +168,7 @@ final class InstanceInstallerCompatibilityTest {
                 () -> assertEquals(
                         InstanceOtherLibraryEntry.StructureState.EXTERNALLY_UNCERTAIN,
                         InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                                LibraryAnalyzer.LibraryMark.LibraryStatus.UNSURE)),
+                                InstallerStructureStatus.UNSURE)),
                 () -> assertEquals(List.of(clear, uncertain), snapshot.otherRemovableLibraries()));
 
         assertAll(
@@ -190,7 +189,7 @@ final class InstanceInstallerCompatibilityTest {
                 List.of(new InstanceInstallerEntry(
                         GameLoaderKind.FORGE,
                         "47.2.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED)),
+                        InstallerStructureStatus.JUST_EXISTED)),
                 List.of(
                         new InstanceOtherLibraryEntry(
                                 "clear-third-party",

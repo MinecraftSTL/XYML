@@ -22,24 +22,24 @@ import com.google.gson.annotations.SerializedName;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.LaunchOptions;
-import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackManifest;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.gson.*;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.Library;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
+import static space.minecraftstl.xyml.game.GameComponentType.GAME;
 
 public class McbbsModpackManifest implements ModpackManifest, Validation {
     public static final String MANIFEST_TYPE = "minecraftModpack";
@@ -422,7 +422,7 @@ public class McbbsModpackManifest implements ModpackManifest, Validation {
     }
 
     public Modpack toModpack(Charset encoding) throws IOException {
-        String gameVersion = addons.stream().filter(x -> MINECRAFT.getPatchId().equals(x.id)).findAny()
+        String gameVersion = addons.stream().filter(x -> GAME.getPatchId().equals(x.id)).findAny()
                 .orElseThrow(() -> new IOException("Cannot find game version")).getVersion();
         return new Modpack(name, author, version, gameVersion, description, encoding, this) {
             @Override

@@ -21,16 +21,19 @@ import space.minecraftstl.xyml.download.*;
 import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
-import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -39,7 +42,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 import static space.minecraftstl.xyml.download.UnsupportedInstallationException.UNSUPPORTED_LAUNCH_WRAPPER;
 import static space.minecraftstl.xyml.util.StringUtils.removePrefix;
@@ -123,7 +125,7 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
         String originalMainClass = manifest.resolve(dependencyManager.getGameRepository()).mainClass();
         if (GameVersionNumber.asGameVersion("1.13").compareTo(remote.getGameVersion()) <= 0) {
             // Forge 1.13 is not compatible with fabric.
-            if (!LibraryAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
+            if (!GameComponentAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
                 throw new UnsupportedInstallationException(UNSUPPORTED_LAUNCH_WRAPPER);
         }
 
@@ -245,8 +247,8 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
     static void checkCleanroomCompatibility(
             GameInstanceManifest.Resolved resolved,
             String gameVersion) throws UnsupportedInstallationException {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolved, gameVersion);
-        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(resolved, GameVersionNumber.asGameVersion(gameVersion));
+        if (analyzer.has(GameComponentType.CLEANROOM)) {
             throw new UnsupportedInstallationException(
                     UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE);
         }

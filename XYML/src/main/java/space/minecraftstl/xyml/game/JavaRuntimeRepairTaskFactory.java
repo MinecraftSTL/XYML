@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.game;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.java.JavaManager;
@@ -591,10 +590,9 @@ public final class JavaRuntimeRepairTaskFactory {
         if (gameVersion.compareTo("1.12.2") < 0 || gameVersion.compareTo("1.12.999") > 0) {
             return null;
         }
-        String cleanroomVersion = LibraryAnalyzer.analyze(manifest, gameVersion.toString())
-                .getVersion(LibraryAnalyzer.LibraryType.CLEANROOM)
-                .orElse("");
-        return cleanroomVersion.isEmpty()
+        @Nullable String cleanroomVersion = GameComponentAnalyzer.analyze(manifest, gameVersion)
+                .getVersion(GameComponentType.CLEANROOM);
+        return cleanroomVersion == null || cleanroomVersion.isEmpty()
                 ? null
                 : GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion);
     }

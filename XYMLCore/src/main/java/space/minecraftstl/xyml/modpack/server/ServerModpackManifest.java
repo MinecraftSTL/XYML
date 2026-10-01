@@ -36,7 +36,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
+import static space.minecraftstl.xyml.game.GameComponentType.GAME;
 
 public class ServerModpackManifest implements ModpackManifest, Validation {
     private final String name;
@@ -125,7 +125,7 @@ public class ServerModpackManifest implements ModpackManifest, Validation {
     }
 
     public Modpack toModpack(Charset encoding) throws IOException {
-        String gameVersion = addons.stream().filter(x -> MINECRAFT.getPatchId().equals(x.id)).findAny()
+        String gameVersion = addons.stream().filter(x -> GAME.getPatchId().equals(x.id)).findAny()
                 .orElseThrow(() -> new IOException("Cannot find game version")).getVersion();
         return new Modpack(name, author, version, gameVersion, description, encoding, this) {
             @Override

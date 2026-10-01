@@ -27,7 +27,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.JavaVersionConstraint;
@@ -414,8 +414,8 @@ public final class JavaManager {
             Collection<JavaRuntime> javaRuntimes,
             @Nullable GameVersionNumber gameVersion,
             @Nullable GameInstanceManifest manifest) {
-        @Nullable LibraryAnalyzer analyzer = manifest != null
-                ? LibraryAnalyzer.analyze(manifest, gameVersion != null ? gameVersion.toString() : null)
+        @Nullable GameComponentAnalyzer analyzer = manifest != null
+                ? GameComponentAnalyzer.analyze(manifest, gameVersion)
                 : null;
 
         boolean forceX86 = Architecture.SYSTEM_ARCH == Architecture.ARM64

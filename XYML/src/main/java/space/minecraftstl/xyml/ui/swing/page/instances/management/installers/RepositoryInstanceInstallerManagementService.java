@@ -20,17 +20,20 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.game.GameInstanceID;
-import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -248,28 +251,35 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     private InstanceInstallerSnapshot readSnapshot(GameInstanceID instanceId) {
         GameInstanceManifest independent = repository.getResolvedInstanceManifest(instanceId).standaloneManifest();
         Optional<String> gameVersion = repository.getGameVersion(independent);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(independent, gameVersion.orElse(null));
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                independent,
+                GameVersionNumber.asGameVersion(gameVersion));
         List<InstanceInstallerEntry> entries = new ArrayList<>();
         for (GameLoaderKind kind : GameLoaderKind.values()) {
-            @Nullable String version = analyzer.getVersion(kind.versionListId()).orElse(null);
+            @Nullable GameComponentType componentType = GameComponentType.fromPatchId(kind.versionListId());
+            if (componentType == null) {
+                continue;
+            }
+            @Nullable String version = analyzer.getVersion(componentType);
             if (version != null) {
+                @Nullable GameComponentAnalyzer.Mark mark = analyzer.getMark(componentType);
                 entries.add(new InstanceInstallerEntry(
                         kind,
                         version,
-                        analyzer.getLibraryStatus(kind.versionListId())));
+                        mark != null ? InstallerStructureStatus.fromMark(mark) : InstallerStructureStatus.UNSURE));
             }
         }
         List<InstanceOtherLibraryEntry> otherEntries = new ArrayList<>();
-        for (LibraryAnalyzer.LibraryMark mark : analyzer) {
-            String libraryId = mark.getLibraryId();
-            if ("mcbbs".equals(libraryId)
-                    || LibraryAnalyzer.LibraryType.fromPatchId(libraryId) != null) {
+        for (GameInstancePatch patch : independent.getPatches()) {
+            @Nullable String libraryId = patch.id();
+            if (libraryId == null || patch.isHidden() || "mcbbs".equals(libraryId)
+                    || GameComponentType.fromPatchId(libraryId) != null) {
                 continue;
             }
             otherEntries.add(new InstanceOtherLibraryEntry(
                     libraryId,
-                    mark.getLibraryVersion(),
-                    InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(mark.getStatus())));
+                    patch.version(),
+                    InstanceOtherLibraryEntry.StructureState.CLEAR));
         }
         otherEntries.sort(Comparator.comparing(InstanceOtherLibraryEntry::libraryId));
         return new InstanceInstallerSnapshot(instanceId, gameVersion, entries, otherEntries);

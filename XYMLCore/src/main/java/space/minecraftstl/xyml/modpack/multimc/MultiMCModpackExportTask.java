@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.modpack.multimc;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
@@ -29,7 +28,11 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -39,7 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as a MultiMC-compatible modpack archive.
@@ -115,13 +118,13 @@ public class MultiMCModpackExportTask extends Task<Void> {
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
             List<MultiMCManifest.MultiMCManifestComponent> components = new ArrayList<>();
-            components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(MINECRAFT), gameVersion));
+            components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(GAME), gameVersion));
 
-            for (Map.Entry<String, LibraryAnalyzer.LibraryType> pair : MultiMCComponents.getPairs()) {
+            for (Map.Entry<String, GameComponentType> pair : MultiMCComponents.getPairs()) {
                 if (pair.getValue().isModLoader()) {
-                    analyzer.getVersion(pair.getValue()).ifPresent(
+                    Optional.ofNullable(analyzer.getVersion(pair.getValue())).ifPresent(
                             v -> components.add(new MultiMCManifest.MultiMCManifestComponent(false, false, pair.getKey(), v))
                     );
                 }

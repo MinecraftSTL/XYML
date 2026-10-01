@@ -25,7 +25,6 @@ import space.minecraftstl.xyml.auth.*;
 import space.minecraftstl.xyml.auth.offline.OfflineAccount;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.download.game.*;
 import space.minecraftstl.xyml.java.JavaManager;
@@ -992,10 +991,10 @@ public final class LauncherHelper {
             XYMLGameRepository repository,
             GameSettings.Effective setting,
             GameInstanceManifest manifest) {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
                 manifest,
-                repository.getGameVersion(manifest).orElse(null));
-        GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(analyzer.getVersion(LibraryAnalyzer.LibraryType.MINECRAFT));
+                GameVersionNumber.asGameVersion(repository.getGameVersion(manifest)));
+        GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(analyzer.getVersion(GameComponentType.GAME));
 
         Task<@Nullable JavaRuntime> getJavaTask = Task.supplyAsync(() -> {
             try {
@@ -1024,7 +1023,7 @@ public final class LauncherHelper {
                         int targetJavaVersionMajor = Integer.parseInt(setting.getInheritable(GameSettings::customJavaVersionProperty));
                         @Nullable GameJavaVersion minimumJavaVersion = null;
                         if (gameVersion.compareTo("1.12.2") == 0) {
-                            Optional<String> cleanroomVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.CLEANROOM);
+                            Optional<String> cleanroomVersion = Optional.ofNullable(analyzer.getVersion(GameComponentType.CLEANROOM));
                             if (cleanroomVersion.isPresent()) {
                                 minimumJavaVersion = GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion.get());
                             }
@@ -1044,7 +1043,7 @@ public final class LauncherHelper {
                     }
                 } else {
                     if (gameVersion.compareTo("1.12.2") == 0) {
-                        Optional<String> cleanroomVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.CLEANROOM);
+                        Optional<String> cleanroomVersion = Optional.ofNullable(analyzer.getVersion(GameComponentType.CLEANROOM));
                         if (cleanroomVersion.isPresent()) {
                             targetJavaVersion = GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion.get());
                         }
@@ -1090,10 +1089,9 @@ public final class LauncherHelper {
                     } else {
                         @Nullable GameJavaVersion gameJavaVersion;
                         if (violatedMandatoryConstraints.contains(JavaVersionConstraint.CLEANROOM)) {
-                            String cleanroomVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.CLEANROOM)
-                                    .orElse("");
+                            @Nullable String cleanroomVersion = analyzer.getVersion(GameComponentType.CLEANROOM);
 
-                            gameJavaVersion = !cleanroomVersion.isEmpty()
+                            gameJavaVersion = cleanroomVersion != null && !cleanroomVersion.isEmpty()
                                     ? GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion)
                                     : GameJavaVersion.JAVA_21;
                         } else if (violatedMandatoryConstraints.contains(JavaVersionConstraint.GAME_JSON))
@@ -1174,7 +1172,7 @@ public final class LauncherHelper {
                             break;
                         case MODDED_JAVA_16:
                             // Minecraft<=1.17.1+Forge[37.0.0,37.0.60) not compatible with Java 17
-                            @Nullable String forgePatchVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.FORGE).orElse(null);
+                            @Nullable String forgePatchVersion = analyzer.getVersion(GameComponentType.FORGE);
                             if (forgePatchVersion != null && VersionNumber.compare(forgePatchVersion, "37.0.60") < 0)
                                 suggestions.add(i18n("launch.advice.forge37_0_60"));
                             else
@@ -1187,8 +1185,8 @@ public final class LauncherHelper {
                             suggestions.add(i18n("launch.advice.modded_java", 21, gameVersion));
                             break;
                         case CLEANROOM: {
-                            String cleanroomVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.CLEANROOM).orElse("");
-                            if (!cleanroomVersion.isEmpty())
+                            @Nullable String cleanroomVersion = analyzer.getVersion(GameComponentType.CLEANROOM);
+                            if (cleanroomVersion != null && !cleanroomVersion.isEmpty())
                                 suggestions.add(i18n("launch.advice.cleanroom", GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion).majorVersion(), cleanroomVersion));
                             else
                                 suggestions.add(i18n("launch.advice.cleanroom", 21, ""));
@@ -1217,9 +1215,10 @@ public final class LauncherHelper {
                     suggestions.add(i18n("launch.advice.not_enough_space", totalMemorySizeMB));
                 }
 
-                @Nullable VersionNumber forgeVersion = analyzer.getVersion(LibraryAnalyzer.LibraryType.FORGE)
-                        .map(VersionNumber::asVersion)
-                        .orElse(null);
+                @Nullable String forgePatchVersionText = analyzer.getVersion(GameComponentType.FORGE);
+                @Nullable VersionNumber forgeVersion = forgePatchVersionText != null
+                        ? VersionNumber.asVersion(forgePatchVersionText)
+                        : null;
 
                 // Forge 2760~2773 will crash game with LiteLoader.
                 boolean hasForge2760 = forgeVersion != null && (forgeVersion.compareTo("1.12.2-14.23.5.2760") >= 0) && (forgeVersion.compareTo("1.12.2-14.23.5.2773") < 0);

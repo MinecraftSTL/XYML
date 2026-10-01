@@ -21,7 +21,8 @@ import com.google.gson.JsonParseException;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.meta.*;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.NoSuchGameInstanceException;
@@ -79,7 +80,7 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
     /// Captured mods directory, or `null` when the manager follows repository settings dynamically.
     private final @Nullable Path directorySnapshot;
 
-    private @Nullable LibraryAnalyzer analyzer;
+    private @Nullable GameComponentAnalyzer analyzer;
 
     private boolean loaded = false;
 
@@ -114,7 +115,7 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         return directorySnapshot != null ? directorySnapshot : repository.getModsDirectory(instanceId);
     }
 
-    public @Nullable LibraryAnalyzer getLibraryAnalyzer() {
+    public @Nullable GameComponentAnalyzer getComponentAnalyzer() {
         return analyzer;
     }
 
@@ -216,16 +217,16 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
             localMods.clear();
 
             try {
-                analyzer = LibraryAnalyzer.analyze(getRepository().getResolvedInstanceManifest(instanceId), null);
+                analyzer = GameComponentAnalyzer.analyze(getRepository().getResolvedInstanceManifest(instanceId), null);
             } catch (NoSuchGameInstanceException e) {
                 throw new IOException(e);
             }
 
-            LibraryAnalyzer currentAnalyzer = Objects.requireNonNull(analyzer, "analyzer");
-            boolean supportSubfolders = currentAnalyzer.has(LibraryAnalyzer.LibraryType.FORGE)
-                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.QUILT)
-                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)
-                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.LITELOADER);
+            GameComponentAnalyzer currentAnalyzer = Objects.requireNonNull(analyzer, "analyzer");
+            boolean supportSubfolders = currentAnalyzer.has(GameComponentType.FORGE)
+                    || currentAnalyzer.has(GameComponentType.QUILT)
+                    || currentAnalyzer.has(GameComponentType.CLEANROOM)
+                    || currentAnalyzer.has(GameComponentType.LITELOADER);
 
             if (Files.isDirectory(getDirectory())) {
                 try (DirectoryStream<Path> modsDirectoryStream = Files.newDirectoryStream(getDirectory())) {

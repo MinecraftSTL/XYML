@@ -18,15 +18,14 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
 import java.util.Objects;
 
 /// Immutable description of one recognized loader or loader-adjacent component installed by an instance.
 ///
-/// The status comes directly from [LibraryAnalyzer] and lets a future Swing surface distinguish an
-/// explicit XYML patch from a library discovered in third-party metadata before offering destructive actions.
+/// The structure status lets the Swing installer surface distinguish an explicit XYML patch from a loader
+/// discovered in third-party metadata before offering destructive actions.
 ///
 /// @param kind recognized loader catalog kind
 /// @param version detected installed version text
@@ -35,7 +34,7 @@ import java.util.Objects;
 public record InstanceInstallerEntry(
         GameLoaderKind kind,
         String version,
-        LibraryAnalyzer.LibraryMark.LibraryStatus status) {
+        InstallerStructureStatus status) {
     /// Validates one immutable recognized installer entry.
     public InstanceInstallerEntry {
         kind = Objects.requireNonNull(kind, "kind");

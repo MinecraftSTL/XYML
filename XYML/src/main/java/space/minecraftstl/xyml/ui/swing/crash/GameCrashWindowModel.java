@@ -22,8 +22,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.ExportedCrashBundle;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameJavaVersion;
@@ -178,14 +179,14 @@ final class GameCrashWindowModel {
         details.add(new Detail(i18n("system.architecture"), Architecture.SYSTEM_ARCH.getDisplayName()));
 
         @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
+                manifest,
+                GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
         @Nullable ModLoaderType modLoader = analyzer.getPrimaryModLoader();
-        for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
-            if (!type.getPatchId().isEmpty()) {
-                analyzer.getVersion(type).ifPresent(loaderVersion -> details.add(new Detail(
-                        i18n("install.installer." + type.getPatchId()),
-                        loaderVersion)));
-            }
+        for (GameComponentType type : GameComponentType.ALL) {
+            Optional.ofNullable(analyzer.getVersion(type)).ifPresent(loaderVersion -> details.add(new Detail(
+                    i18n("install.installer." + type.getPatchId()),
+                    loaderVersion)));
         }
 
         details.add(new Detail(

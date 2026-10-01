@@ -19,11 +19,13 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentType;
 
+import java.util.Optional;
 import java.util.Objects;
 
 /// Resolves the automatic bundled icon shared by instance-list and management presentations.
@@ -41,9 +43,9 @@ public final class InstanceAutomaticIconResolver {
     public static GameInstanceIconType resolve(
             GameInstanceManifest.Resolved resolved,
             @Nullable String gameVersion) {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
                 Objects.requireNonNull(resolved, "resolved"),
-                gameVersion);
+                GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
         return resolve(analyzer, gameVersion);
     }
 
@@ -53,31 +55,31 @@ public final class InstanceAutomaticIconResolver {
     /// @param gameVersion detected Minecraft version, or null when unavailable
     /// @return automatically selected bundled icon type
     static GameInstanceIconType resolve(
-            LibraryAnalyzer analyzer,
+            GameComponentAnalyzer analyzer,
             @Nullable String gameVersion) {
-        LibraryAnalyzer validatedAnalyzer = Objects.requireNonNull(analyzer, "analyzer");
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.FABRIC)) {
+        GameComponentAnalyzer validatedAnalyzer = Objects.requireNonNull(analyzer, "analyzer");
+        if (validatedAnalyzer.has(GameComponentType.FABRIC)) {
             return GameInstanceIconType.FABRIC;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.QUILT)) {
+        if (validatedAnalyzer.has(GameComponentType.QUILT)) {
             return GameInstanceIconType.QUILT;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.LEGACY_FABRIC)) {
+        if (validatedAnalyzer.has(GameComponentType.LEGACY_FABRIC)) {
             return GameInstanceIconType.LEGACY_FABRIC;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.NEO_FORGE)) {
+        if (validatedAnalyzer.has(GameComponentType.NEO_FORGE)) {
             return GameInstanceIconType.NEO_FORGE;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
+        if (validatedAnalyzer.has(GameComponentType.FORGE)) {
             return GameInstanceIconType.FORGE;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
+        if (validatedAnalyzer.has(GameComponentType.CLEANROOM)) {
             return GameInstanceIconType.CLEANROOM;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.LITELOADER)) {
+        if (validatedAnalyzer.has(GameComponentType.LITELOADER)) {
             return GameInstanceIconType.CHICKEN;
         }
-        if (validatedAnalyzer.has(LibraryAnalyzer.LibraryType.OPTIFINE)) {
+        if (validatedAnalyzer.has(GameComponentType.OPTIFINE)) {
             return GameInstanceIconType.OPTIFINE;
         }
         if (gameVersion == null || gameVersion.isBlank()) {

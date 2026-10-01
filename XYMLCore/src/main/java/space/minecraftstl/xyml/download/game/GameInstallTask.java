@@ -21,17 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
+import static space.minecraftstl.xyml.game.GameComponentType.GAME;
 
 /// Installs a base game and its shared assets and libraries into one game repository.
 @NotNullByDefault
@@ -84,7 +84,7 @@ public class GameInstallTask extends Task<GameInstancePatch> {
     public void execute() throws Exception {
         GameInstancePatch patch = GameInstancePatch.fromManifest(
                 JsonUtils.fromNonNullJson(downloadTask.getResult(), GameInstanceManifest.class),
-                MINECRAFT.getPatchId(),
+                GAME.getPatchId(),
                 remote.getGameVersion().toString(),
                 GameInstancePatch.PRIORITY_MC).withJar(null);
         setResult(patch);

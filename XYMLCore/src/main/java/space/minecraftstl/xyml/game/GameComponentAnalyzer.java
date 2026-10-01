@@ -18,12 +18,12 @@
 package space.minecraftstl.xyml.game;
 
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
-import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionRange;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.util.*;
 import java.util.regex.Pattern;
@@ -77,6 +77,37 @@ public final class GameComponentAnalyzer implements Iterable<GameComponentAnalyz
         return analyze(manifest, manifest, gameVersion);
     }
 
+    /// Analyzes a resolved instance view using its launch-time libraries and standalone patches.
+    ///
+    /// @param resolved    resolved instance views sharing one instance identifier
+    /// @param gameVersion detected Minecraft version, or null when the version is unknown
+    /// @return component analysis
+    public static GameComponentAnalyzer analyze(GameInstanceManifest.Resolved resolved, @Nullable GameVersionNumber gameVersion) {
+        return analyze(resolved.standaloneManifest(), resolved.launchManifest(), gameVersion);
+    }
+
+    /// Returns whether the resolved instance launches through a mod loader or the legacy LaunchWrapper.
+    ///
+    /// The legacy LaunchWrapper entry point counts as modded because loader patches attach their tweakers to it.
+    ///
+    /// @param resolved resolved instance views sharing one instance identifier
+    /// @return whether the instance should be treated as modded
+    public static boolean isModded(GameInstanceManifest.Resolved resolved) {
+        String mainClass = resolved.launchManifest().mainClass();
+        if (mainClass == null) {
+            return false;
+        }
+        if (LAUNCH_WRAPPER_MAIN.equals(mainClass)) {
+            return true;
+        }
+        for (String packageName : MOD_LOADER_MAIN_CLASSES_PACKAGES) {
+            if (mainClass.startsWith(packageName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private final GameInstanceManifest manifest;
     private final @Unmodifiable Map<GameComponentType, Mark> components;
     private final @Nullable String bootstrapVersion;
@@ -117,6 +148,36 @@ public final class GameComponentAnalyzer implements Iterable<GameComponentAnalyz
 
     public @Nullable String getBootstrapVersion() {
         return bootstrapVersion;
+    }
+
+    /// Returns the mod loader types present in the analyzed components.
+    ///
+    /// @return immutable mod loader types
+    public @Unmodifiable Set<ModLoaderType> getModLoaders() {
+        Set<ModLoaderType> result = new HashSet<>();
+        for (GameComponentType type : GameComponentType.MOD_LOADERS) {
+            @Nullable ModLoaderType modLoader = type.getModLoaderType();
+            if (modLoader != null && has(type)) {
+                result.add(modLoader);
+            }
+        }
+        return Set.copyOf(result);
+    }
+
+    /// Returns the deterministic primary supported mod loader declared by this analysis.
+    ///
+    /// The component declaration order selects the first supported loader, which keeps multi-loader
+    /// instances deterministic while unmodded instances return null.
+    ///
+    /// @return primary supported mod loader, or null when the instance has none
+    public @Nullable ModLoaderType getPrimaryModLoader() {
+        for (GameComponentType type : GameComponentType.ALL) {
+            @Nullable ModLoaderType modLoader = type.getModLoaderType();
+            if (modLoader != null && has(type)) {
+                return modLoader;
+            }
+        }
+        return null;
     }
 
     public boolean isModded() {
