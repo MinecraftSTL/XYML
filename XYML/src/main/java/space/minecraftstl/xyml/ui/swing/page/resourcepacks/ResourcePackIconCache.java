@@ -22,6 +22,9 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.image.EncodedImage;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JList;
@@ -31,7 +34,9 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,7 +49,10 @@ final class ResourcePackIconCache {
     static final int ICON_SIZE = 32;
 
     /// Maximum decoded source edge accepted before scaling.
-    private static final int MAX_SOURCE_EDGE = 4096;
+    private static final int MAX_SOURCE_EDGE = 8_192;
+
+    /// Maximum decoded source pixel count accepted before scaling.
+    private static final long MAX_SOURCE_PIXELS = 16L * 1024L * 1024L;
 
     /// Placeholder for a pack without pack.png.
     static final Icon PLACEHOLDER = createPlaceholder(new Color(128, 128, 128, 80));
@@ -86,28 +94,62 @@ final class ResourcePackIconCache {
         if (encodedImage == null) {
             return PLACEHOLDER;
         }
-        try {
-            BufferedImage source = ImageIO.read(encodedImage.openStream());
-            if (source == null
-                    || source.getWidth() > MAX_SOURCE_EDGE
-                    || source.getHeight() > MAX_SOURCE_EDGE) {
+        try (InputStream input = encodedImage.openStream();
+             ImageInputStream imageInput = new MemoryCacheImageInputStream(input)) {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+            if (!readers.hasNext()) {
                 return FAILURE;
             }
-            BufferedImage target = new BufferedImage(
-                    ICON_SIZE,
-                    ICON_SIZE,
-                    BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = target.createGraphics();
+
+            ImageReader reader = readers.next();
             try {
-                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                graphics.drawImage(source, 0, 0, ICON_SIZE, ICON_SIZE, null);
+                reader.setInput(imageInput, true, true);
+                validateSourceDimensions(reader.getWidth(0), reader.getHeight(0));
+                BufferedImage source = reader.read(0);
+                if (source == null) {
+                    return FAILURE;
+                }
+                try {
+                    validateSourceDimensions(source.getWidth(), source.getHeight());
+                    BufferedImage target = new BufferedImage(
+                            ICON_SIZE,
+                            ICON_SIZE,
+                            BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D graphics = target.createGraphics();
+                    try {
+                        graphics.setRenderingHint(
+                                RenderingHints.KEY_INTERPOLATION,
+                                RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                        graphics.drawImage(source, 0, 0, ICON_SIZE, ICON_SIZE, null);
+                    } finally {
+                        graphics.dispose();
+                    }
+                    return new ImageIcon(target);
+                } finally {
+                    source.flush();
+                }
             } finally {
-                graphics.dispose();
-                source.flush();
+                reader.dispose();
             }
-            return new ImageIcon(target);
         } catch (IOException | RuntimeException failure) {
             return FAILURE;
+        }
+    }
+
+    /// Rejects invalid or excessively large dimensions before pixel allocation.
+    ///
+    /// @param width source width reported by ImageIO
+    /// @param height source height reported by ImageIO
+    /// @throws IOException when dimensions violate the source safety bounds
+    private static void validateSourceDimensions(int width, int height) throws IOException {
+        if (width <= 0 || height <= 0) {
+            throw new IOException("Resource-pack icon has invalid dimensions");
+        }
+        if (width > MAX_SOURCE_EDGE || height > MAX_SOURCE_EDGE) {
+            throw new IOException("Resource-pack icon exceeds its dimension limit");
+        }
+        if ((long) width * height > MAX_SOURCE_PIXELS) {
+            throw new IOException("Resource-pack icon exceeds its pixel limit");
         }
     }
 
