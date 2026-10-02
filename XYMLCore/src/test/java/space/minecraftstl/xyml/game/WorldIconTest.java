@@ -26,11 +26,15 @@ import org.junit.jupiter.api.io.TempDir;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.zip.CRC32;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -99,6 +103,63 @@ final class WorldIconTest {
         assertEquals(64, icon.getWidth());
         assertEquals(64, icon.getHeight());
         assertEquals(0xFF12AB34, icon.getRGB(12, 34));
+    }
+
+    /// Rejects an icon whose single edge exceeds the pre-decode safety limit.
+    @Test
+    void rejectsWorldIconWithExcessiveEdgeBeforePixelDecode() throws IOException {
+        Path worldDirectory = createWorldDirectory("oversized-edge-world");
+        writePngMetadata(worldDirectory.resolve("icon.png"), 8_193, 1);
+
+        World world = new World(worldDirectory);
+
+        assertNull(world.getIcon());
+    }
+
+    /// Rejects an icon whose pixel count exceeds the pre-decode safety limit.
+    @Test
+    void rejectsWorldIconWithExcessivePixelCountBeforePixelDecode() throws IOException {
+        Path worldDirectory = createWorldDirectory("oversized-pixel-world");
+        writePngMetadata(worldDirectory.resolve("icon.png"), 4_096, 4_097);
+
+        World world = new World(worldDirectory);
+
+        assertNull(world.getIcon());
+    }
+
+    /// Writes a minimal PNG header so ImageIO can expose dimensions without a pixel payload.
+    ///
+    /// @param target target PNG path
+    /// @param width declared image width
+    /// @param height declared image height
+    private static void writePngMetadata(Path target, int width, int height) throws IOException {
+        byte[] headerType = "IHDR".getBytes(StandardCharsets.US_ASCII);
+        byte[] headerData = ByteBuffer.allocate(13)
+                .putInt(width)
+                .putInt(height)
+                .put((byte) 8)
+                .put((byte) 6)
+                .put((byte) 0)
+                .put((byte) 0)
+                .put((byte) 0)
+                .array();
+        CRC32 headerCrc = new CRC32();
+        headerCrc.update(headerType);
+        headerCrc.update(headerData);
+        byte[] endType = "IEND".getBytes(StandardCharsets.US_ASCII);
+        CRC32 endCrc = new CRC32();
+        endCrc.update(endType);
+
+        try (DataOutputStream output = new DataOutputStream(Files.newOutputStream(target))) {
+            output.write(new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
+            output.writeInt(headerData.length);
+            output.write(headerType);
+            output.write(headerData);
+            output.writeInt((int) headerCrc.getValue());
+            output.writeInt(0);
+            output.write(endType);
+            output.writeInt((int) endCrc.getValue());
+        }
     }
 
     /// Creates a directory with the minimum valid level-data fields.
