@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
@@ -264,6 +265,37 @@ public final class OfflineSkinPreviewPanelTest {
                     () -> assertEquals(SkinPreviewMotion.WALKING, panel.motion()),
                     () -> assertEquals(SkinPreviewPosture.SWIMMING, panel.posture()));
         });
+    }
+
+    /// Verifies the vanilla model axes map signed head faces to the expected camera directions.
+    @Test
+    public void keepsSignedHeadFacesOnVanillaAxes() {
+        BufferedImage skin = new BufferedImage(64, 32, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = skin.createGraphics();
+        try {
+            graphics.setColor(new Color(220, 40, 40));
+            graphics.fillRect(8, 8, 8, 8);
+            graphics.setColor(new Color(64, 128, 255));
+            graphics.fillRect(24, 8, 8, 8);
+            graphics.setColor(new Color(40, 180, 80));
+            graphics.fillRect(0, 8, 8, 8);
+            graphics.setColor(new Color(220, 180, 40));
+            graphics.fillRect(16, 8, 8, 8);
+        } finally {
+            graphics.dispose();
+        }
+        BufferedImage front = renderFrame(skin, SkinPreviewMotion.IDLE, SkinPreviewPosture.STANDING, 0.0, 0.0, 0.0);
+        BufferedImage back = renderFrame(skin, SkinPreviewMotion.IDLE, SkinPreviewPosture.STANDING, 0.0, 180.0, 0.0);
+        BufferedImage right = renderFrame(skin, SkinPreviewMotion.IDLE, SkinPreviewPosture.STANDING, 0.0, 90.0, 0.0);
+        BufferedImage left = renderFrame(skin, SkinPreviewMotion.IDLE, SkinPreviewPosture.STANDING, 0.0, -90.0, 0.0);
+
+        assertAll(
+                () -> assertTrue(countColor(front, new Color(220, 40, 40).getRGB()) > 0),
+                () -> assertEquals(0, countColor(front, new Color(50, 100, 199).getRGB())),
+                () -> assertTrue(countColor(back, new Color(50, 100, 199).getRGB()) > 0),
+                () -> assertEquals(0, countColor(back, new Color(220, 40, 40).getRGB())),
+                () -> assertTrue(countColor(right, new Color(35, 158, 70).getRGB()) > 0),
+                () -> assertTrue(countColor(left, new Color(194, 158, 35).getRGB()) > 0));
     }
 
     /// Renders one deterministic software frame with the default posture.
