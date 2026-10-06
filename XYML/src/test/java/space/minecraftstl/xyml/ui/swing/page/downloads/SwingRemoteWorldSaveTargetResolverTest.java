@@ -61,7 +61,7 @@ final class SwingRemoteWorldSaveTargetResolverTest {
         assertTrue(RemoteAddonCatalogSource.CURSEFORGE.supports(RemoteAddonCatalogKind.WORLD));
         assertFalse(RemoteAddonCatalogSource.MODRINTH.supports(RemoteAddonCatalogKind.WORLD));
         assertSame(
-                CurseForgeRemoteAddonRepository.WORLDS,
+                CurseForgeRemoteAddonRepository.getInstance(),
                 RemoteAddonCatalogSource.CURSEFORGE.repository(RemoteAddonCatalogKind.WORLD));
     }
 
