@@ -190,6 +190,7 @@ final class DefaultInstanceManagementViewTest {
                         InstanceManagementPageId.MODS,
                         InstanceManagementPageId.RESOURCE_PACKS,
                         InstanceManagementPageId.WORLDS,
+                        InstanceManagementPageId.SERVERS,
                         InstanceManagementPageId.SHADERS,
                         InstanceManagementPageId.SCHEMATICS,
                         InstanceManagementPageId.BACKUPS,
