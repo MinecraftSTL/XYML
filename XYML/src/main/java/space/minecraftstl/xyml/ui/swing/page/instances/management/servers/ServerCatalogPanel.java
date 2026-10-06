@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -111,7 +110,7 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
 
         JPanel heading = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[40!]"));
         heading.setOpaque(false);
-        JLabel title = new JLabel(i18n("server.manage"));
+        JLabel title = new JLabel(i18n("server.management.title"));
         title.setName("serverCatalogTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 28.0F));
         heading.add(title, "growx");
