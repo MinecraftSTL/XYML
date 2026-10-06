@@ -28,6 +28,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -122,6 +124,57 @@ final class FileSystemShaderPackCatalogAccessTest {
         assertTrue(Files.readString(optifine).contains("ofShaders:false"));
     }
 
+    /// Requires a valid shader-pack payload when an API caller enables a pack directly.
+    @Test
+    void rejectsDirectActivationOfInvalidPack(@TempDir Path root) throws IOException {
+        Path invalid = root.resolve("shaderpacks/invalid");
+        Files.createDirectories(invalid);
+        FileSystemShaderPackCatalogAccess access = new FileSystemShaderPackCatalogAccess(
+                root,
+                root.resolve("mods"),
+                () -> false);
+
+        assertThrows(IllegalArgumentException.class, () -> access.setEnabled(
+                invalid, Set.of(ShaderPackBackend.IRIS_OCULUS), true));
+    }
+
+    /// Rejects ZIP entries that escape the shader-pack archive's logical root.
+    @Test
+    void rejectsUnsafeZipShaderPack(@TempDir Path root) throws IOException {
+        Path archive = root.resolve("shaderpacks/unsafe.zip");
+        Files.createDirectories(archive.getParent());
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
+            output.putNextEntry(new ZipEntry("../outside.txt"));
+            output.write("escape".getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
+        FileSystemShaderPackCatalogAccess access = new FileSystemShaderPackCatalogAccess(
+                root,
+                root.resolve("mods"),
+                () -> false);
+
+        assertThrows(IllegalArgumentException.class, () -> access.setEnabled(
+                archive, Set.of(ShaderPackBackend.IRIS_OCULUS), true));
+    }
+
+    /// Uses supported metadata rather than a misleading archive file name for Iris detection.
+    @Test
+    void detectsSupportedModMetadataAndIgnoresUnknownJarNames(@TempDir Path root) throws IOException {
+        Path mods = root.resolve("mods");
+        Files.createDirectories(mods);
+        writeModJar(mods.resolve("random-name.jar"), "{\"id\":\"iris\"}");
+        FileSystemShaderPackCatalogAccess access = new FileSystemShaderPackCatalogAccess(
+                root,
+                mods,
+                () -> false);
+
+        assertEquals(Set.of(ShaderPackBackend.IRIS_OCULUS), access.detectAvailableBackends());
+
+        Files.delete(mods.resolve("random-name.jar"));
+        writeModJar(mods.resolve("iris-looking.jar"), "{\"name\":\"iris\"}");
+        assertEquals(Set.of(), access.detectAvailableBackends());
+    }
+
     /// Creates a valid directory-style shader pack.
     ///
     /// @param path target directory
@@ -129,6 +182,20 @@ final class FileSystemShaderPackCatalogAccessTest {
     private static void createPack(Path path) throws IOException {
         Files.createDirectories(path.resolve("shaders"));
         write(path.resolve("shaders/shader.fsh"), "void main() { }\n");
+    }
+
+    /// Writes a minimal mod archive with one metadata entry.
+    ///
+    /// @param path archive path
+    /// @param metadata JSON metadata text
+    /// @throws IOException when the archive cannot be written
+    private static void writeModJar(Path path, String metadata) throws IOException {
+        Files.createDirectories(path.getParent());
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(path))) {
+            output.putNextEntry(new ZipEntry("fabric.mod.json"));
+            output.write(metadata.getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
     }
 
     /// Writes one UTF-8 fixture file.

@@ -17,6 +17,9 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -26,6 +29,8 @@ import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -44,6 +49,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.zip.ZipEntry;
+import java.util.stream.Stream;
 import java.util.zip.ZipFile;
 
 /// Filesystem and game-configuration access for locally installed shader packs.
@@ -54,6 +61,12 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
 
     /// OptiFine options file name relative to the instance run directory.
     private static final Path OPTIFINE_OPTIONS_PATH = Path.of("optionsof.txt");
+
+    /// Maximum ZIP entry count accepted during shader-pack validation.
+    private static final int MAX_ZIP_ENTRIES = 4096;
+
+    /// Maximum normalized ZIP entry-name length accepted during validation.
+    private static final int MAX_ZIP_ENTRY_NAME_LENGTH = 1024;
 
     /// Deterministic direct-child path ordering.
     private static final Comparator<Path> PATH_ORDER = Comparator.comparing(FileSystemShaderPackCatalogAccess::fileName);
@@ -118,7 +131,7 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
     /// Enumerates direct-child ZIP files and directories in stable file-name order.
     @Override
     public @Unmodifiable List<Path> loadIndex() throws IOException {
-        if (!Files.isDirectory(shaderPackDirectory)) {
+        if (!Files.isDirectory(shaderPackDirectory, LinkOption.NOFOLLOW_LINKS)) {
             return List.of();
         }
         List<Path> paths = new ArrayList<>();
@@ -168,10 +181,10 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
     @Override
     public @Unmodifiable Set<ShaderPackBackend> detectAvailableBackends() throws IOException {
         EnumSet<ShaderPackBackend> backends = EnumSet.noneOf(ShaderPackBackend.class);
-        if (Files.isRegularFile(irisConfig) || hasIrisOculusMod()) {
+        if (isConfigurationFile(irisConfig) || hasIrisOculusMod()) {
             backends.add(ShaderPackBackend.IRIS_OCULUS);
         }
-        if (Files.isRegularFile(optifineOptions) || optifineInstalled.getAsBoolean()) {
+        if (isConfigurationFile(optifineOptions) || optifineInstalled.getAsBoolean()) {
             backends.add(ShaderPackBackend.OPTIFINE);
         }
         return Set.copyOf(backends);
@@ -184,13 +197,18 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
         if (checkedSources.isEmpty()) {
             throw new IllegalArgumentException("At least one shader-pack source is required");
         }
-        if (Files.exists(shaderPackDirectory, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isDirectory(shaderPackDirectory)) {
+        if (Files.isSymbolicLink(shaderPackDirectory)
+                || (Files.exists(shaderPackDirectory, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isDirectory(shaderPackDirectory, LinkOption.NOFOLLOW_LINKS))) {
             throw new IOException("Managed shaderpacks path is not a directory: " + shaderPackDirectory);
         }
         Map<Path, Path> targets = new LinkedHashMap<>();
         for (Path source : checkedSources) {
             Path normalizedSource = source.toAbsolutePath().normalize();
+            if (Files.isSymbolicLink(normalizedSource)) {
+                throw new IllegalArgumentException(
+                        "Shader-pack source must not be a symbolic link: " + normalizedSource);
+            }
             if (!isValidShaderPack(normalizedSource)) {
                 throw new IllegalArgumentException("File is not a valid shader pack: " + normalizedSource);
             }
@@ -261,8 +279,12 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
             @Unmodifiable Set<ShaderPackBackend> backends,
             boolean enabled) throws IOException {
         Path normalized = requireDirectChild(path);
-        if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("Shader pack no longer exists: " + normalized);
+        if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(normalized)) {
+            throw new IOException("Shader pack no longer exists or is a symbolic link: " + normalized);
+        }
+        if (enabled && !isValidShaderPack(normalized)) {
+            throw new IllegalArgumentException("Cannot enable an invalid shader pack: " + normalized);
         }
         Set<ShaderPackBackend> checkedBackends = Set.copyOf(
                 Objects.requireNonNull(backends, "backends"));
@@ -386,6 +408,7 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
         List<ConfigChange> applied = new ArrayList<>();
         try {
             for (ConfigChange change : changes.values()) {
+                verifyUnchanged(change);
                 FileUtils.saveSafely(change.path(), change.replacement());
                 applied.add(change);
             }
@@ -410,12 +433,22 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
         }
     }
 
+    /// Rejects writes when a configuration file changed after it was read.
+    private static void verifyUnchanged(ConfigChange change) throws IOException {
+        @Nullable String current = readOptionalText(change.path());
+        if (!Objects.equals(current, change.original())) {
+            throw new IOException("Shader-pack configuration changed externally: " + change.path());
+        }
+    }
+
     /// Tests whether one path is a supported direct-child candidate.
     ///
     /// @param path candidate path
     /// @return whether the path is a ZIP file or directory
     private static boolean isCandidate(Path path) {
-        return Files.isDirectory(path) || (Files.isRegularFile(path)
+        return Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                || (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isSymbolicLink(path)
                 && fileName(path).toLowerCase(Locale.ROOT).endsWith(".zip"));
     }
 
@@ -425,21 +458,67 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
     /// @return whether the source is a non-empty shader-pack payload
     private static boolean isValidShaderPack(Path path) {
         try {
-            if (Files.isDirectory(path)) {
-                return Files.isDirectory(path.resolve("shaders"));
+            if (Files.isSymbolicLink(path)) {
+                return false;
             }
-            if (!Files.isRegularFile(path) || !fileName(path).toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                if (containsSymbolicLink(path)) {
+                    return false;
+                }
+                Path shaders = path.resolve("shaders");
+                return Files.isDirectory(shaders, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isSymbolicLink(shaders);
+            }
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                    || !fileName(path).toLowerCase(Locale.ROOT).endsWith(".zip")) {
                 return false;
             }
             try (ZipFile zip = new ZipFile(path.toFile())) {
-                return zip.stream().anyMatch(entry -> {
+                int entryCount = 0;
+                boolean hasShaderFile = false;
+                for (var entries = zip.entries(); entries.hasMoreElements();) {
+                    java.util.zip.ZipEntry entry = entries.nextElement();
+                    if (++entryCount > MAX_ZIP_ENTRIES) {
+                        return false;
+                    }
                     String name = entry.getName().replace('\\', '/');
-                    return name.startsWith("shaders/") && !entry.isDirectory();
-                });
+                    if (name.length() > MAX_ZIP_ENTRY_NAME_LENGTH || !isSafeZipEntryName(name)) {
+                        return false;
+                    }
+                    if (name.startsWith("shaders/") && !entry.isDirectory()) {
+                        hasShaderFile = true;
+                    }
+                }
+                return hasShaderFile;
             }
         } catch (IOException | RuntimeException ignored) {
             return false;
         }
+    }
+
+    /// Tests whether a directory tree contains any symbolic link.
+    ///
+    /// @param root directory tree to inspect
+    /// @return whether a symbolic link is present
+    /// @throws IOException when the tree cannot be walked
+    private static boolean containsSymbolicLink(Path root) throws IOException {
+        try (Stream<Path> paths = Files.walk(root)) {
+            return paths.anyMatch(Files::isSymbolicLink);
+        }
+    }
+
+    /// Rejects absolute and parent-traversing ZIP entry names.
+    private static boolean isSafeZipEntryName(String name) {
+        if (name.isBlank() || name.startsWith("/") || name.startsWith("\\")
+                || (name.length() >= 2 && Character.isLetter(name.charAt(0)) && name.charAt(1) == ':')) {
+            return false;
+        }
+        for (String segment : name.split("/", -1)) {
+            if (segment.equals("..")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// Tests whether a source would recursively contain the managed directory.
@@ -654,6 +733,18 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
                 && trimmed.equals(exactName);
     }
 
+    /// Checks one backend configuration path without following symbolic links.
+    ///
+    /// @param path configuration path
+    /// @return whether a regular configuration file exists
+    /// @throws IOException when a symbolic link or non-file configuration path is found
+    private static boolean isConfigurationFile(Path path) throws IOException {
+        if (Files.isSymbolicLink(path)) {
+            throw new IOException("Shader-pack configuration must not be a symbolic link: " + path);
+        }
+        return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
     /// Reads optional UTF-8 text without failing for an absent file.
     ///
     /// @param path source path
@@ -684,14 +775,14 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
     /// Tests for Iris or Oculus mod files.
     ///
     /// @return whether a direct mod JAR appears to be Iris/Oculus
+    /// @throws IOException when one mod archive cannot be inspected
     private boolean hasIrisOculusMod() throws IOException {
         if (!Files.isDirectory(modsDirectory)) {
             return false;
         }
         try (DirectoryStream<Path> children = Files.newDirectoryStream(modsDirectory, "*.jar")) {
             for (Path child : children) {
-                String name = fileName(child).toLowerCase(Locale.ROOT);
-                if (name.startsWith("iris") || name.startsWith("oculus")) {
+                if (containsShaderModMetadata(child)) {
                     return true;
                 }
             }
@@ -708,9 +799,65 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
         try {
             return repository.getInstanceManifest(instanceId).getLibraries().stream()
                     .anyMatch(library -> library.is("optifine", "OptiFine"));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException("Unable to inspect the OptiFine installation manifest", failure);
+        }
+    }
+
+    /// Detects Iris/Oculus IDs from supported mod metadata inside one JAR.
+    ///
+    /// @param jar mod archive to inspect
+    /// @return whether supported metadata declares Iris or Oculus
+    /// @throws IOException when the archive or metadata cannot be inspected
+    private static boolean containsShaderModMetadata(Path jar) throws IOException {
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            for (String metadata : List.of("fabric.mod.json", "quilt.mod.json")) {
+                @Nullable ZipEntry entry = zip.getEntry(metadata);
+                if (entry == null || entry.isDirectory()) {
+                    continue;
+                }
+                try (InputStreamReader reader = new InputStreamReader(
+                        zip.getInputStream(entry), StandardCharsets.UTF_8)) {
+                    JsonElement root = JsonParser.parseReader(reader);
+                    if (declaresShaderModId(root)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException failure) {
+            throw new IOException("Unable to inspect shader backend metadata: " + jar, failure);
+        }
+        return false;
+    }
+
+    /// Checks only the metadata fields that identify a Fabric or Quilt mod.
+    ///
+    /// @param root parsed mod metadata
+    /// @return whether the root declares Iris or Oculus
+    private static boolean declaresShaderModId(JsonElement root) {
+        if (!(root instanceof JsonObject object)) {
             return false;
         }
+        @Nullable JsonElement id = object.get("id");
+        if (isShaderModId(id)) {
+            return true;
+        }
+        @Nullable JsonElement quiltLoader = object.get("quilt_loader");
+        if (!(quiltLoader instanceof JsonObject loader)) {
+            return false;
+        }
+        return isShaderModId(loader.get("id"));
+    }
+
+    /// Checks one metadata string against the supported backend IDs.
+    ///
+    /// @param value candidate metadata value
+    /// @return whether the value is Iris or Oculus
+    private static boolean isShaderModId(@Nullable JsonElement value) {
+        return value != null
+                && value.isJsonPrimitive()
+                && value.getAsJsonPrimitive().isString()
+                && (value.getAsString().equals("iris") || value.getAsString().equals("oculus"));
     }
 
     /// Returns one path's exact final component.
