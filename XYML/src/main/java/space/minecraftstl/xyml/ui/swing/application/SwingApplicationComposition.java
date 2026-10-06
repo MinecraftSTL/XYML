@@ -82,6 +82,8 @@ import space.minecraftstl.xyml.ui.swing.crash.SwingCrashReportDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingShellNBTDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -615,6 +617,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 new DefaultResourcePackCatalogInteractions(
                         presentation.resourcePacksActions(),
                         Schedulers.io());
+        ShaderPackCatalogInteractions shaderPackInteractions =
+                new DefaultShaderPackCatalogInteractions(
+                        presentation.shaderPacksActions(),
+                        Schedulers.io());
         ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
                 presentation.modsActions(),
                 Schedulers.io());
@@ -684,6 +690,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 presentation.resourcePacksStatus(),
                                 presentation.resourcePacksActions(),
                                 resourcePackInteractions,
+                                presentation.shaderPacks(),
+                                presentation.shaderPacksStatus(),
+                                presentation.shaderPacksActions(),
+                                shaderPackInteractions,
                                 () -> navigateCommand.accept(ShellPageId.INSTANCES),
                                 presentation.taskProgress(),
                                 taskLaunchController,

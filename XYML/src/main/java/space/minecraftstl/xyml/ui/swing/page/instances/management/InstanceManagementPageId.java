@@ -51,6 +51,12 @@ public enum InstanceManagementPageId {
             "world.manage",
             "assets/swing/icons/folder-open.svg"),
 
+    /// Installed shader-pack management.
+    SHADERS(
+            InstanceManagementPageGroup.CONTENT,
+            "shaderpack.manage",
+            "assets/swing/icons/image.svg"),
+
     /// Local schematic browsing and management.
     SCHEMATICS(
             InstanceManagementPageGroup.CONTENT,

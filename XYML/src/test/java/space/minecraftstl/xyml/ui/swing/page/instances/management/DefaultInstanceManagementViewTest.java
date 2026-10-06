@@ -53,6 +53,7 @@ import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatus;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.PortablePath;
@@ -151,6 +152,12 @@ final class DefaultInstanceManagementViewTest {
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
                             executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
+                            executor),
                     () -> returned.set(true),
                     presentation.taskProgress(),
                     new TaskLaunchController(() -> { }),
@@ -183,6 +190,7 @@ final class DefaultInstanceManagementViewTest {
                         InstanceManagementPageId.MODS,
                         InstanceManagementPageId.RESOURCE_PACKS,
                         InstanceManagementPageId.WORLDS,
+                        InstanceManagementPageId.SHADERS,
                         InstanceManagementPageId.SCHEMATICS,
                         InstanceManagementPageId.BACKUPS,
                         InstanceManagementPageId.FILE_UPDATE_CHECK), navigation.availablePages());
@@ -276,6 +284,12 @@ final class DefaultInstanceManagementViewTest {
                     presentation.resourcePacksActions(),
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
+                            executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
                             executor),
                     () -> { },
                     presentation.taskProgress(),
@@ -391,6 +405,12 @@ final class DefaultInstanceManagementViewTest {
                     presentation.resourcePacksActions(),
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
+                            executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
                             executor),
                     () -> { },
                     presentation.taskProgress(),
