@@ -36,6 +36,7 @@ import java.util.OptionalInt;
 /// @param writeStatusText localized write progress or failure detail, empty while idle
 /// @param listEnabled whether visible rows may be selected
 /// @param refreshEnabled whether a fresh disk scan may be requested
+/// @param enabledItemCount number of leading enabled paths in display order
 @NotNullByDefault
 public record ResourcePackCatalogSnapshot(
         OptionalInt selectedIndex,
@@ -46,7 +47,23 @@ public record ResourcePackCatalogSnapshot(
         ResourcePackCatalogWriteStatus writeStatus,
         String writeStatusText,
         boolean listEnabled,
-        boolean refreshEnabled) {
+        boolean refreshEnabled,
+        int enabledItemCount) {
+    /// Creates one snapshot with no known enabled prefix.
+    public ResourcePackCatalogSnapshot(
+            OptionalInt selectedIndex,
+            OptionalInt itemCount,
+            long contentRevision,
+            ResourcePackCatalogStatus status,
+            String statusText,
+            ResourcePackCatalogWriteStatus writeStatus,
+            String writeStatusText,
+            boolean listEnabled,
+            boolean refreshEnabled) {
+        this(selectedIndex, itemCount, contentRevision, status, statusText, writeStatus,
+                writeStatusText, listEnabled, refreshEnabled, 0);
+    }
+
     /// Validates one atomically published catalog snapshot.
     public ResourcePackCatalogSnapshot {
         Objects.requireNonNull(selectedIndex, "selectedIndex");
@@ -57,6 +74,16 @@ public record ResourcePackCatalogSnapshot(
         Objects.requireNonNull(writeStatusText, "writeStatusText");
         if (contentRevision < 0L) {
             throw new IllegalArgumentException("contentRevision must not be negative");
+        }
+        if (enabledItemCount < 0) {
+            throw new IllegalArgumentException("enabledItemCount must not be negative");
+        }
+        if (itemCount.isPresent()) {
+            if (enabledItemCount > itemCount.getAsInt()) {
+                throw new IllegalArgumentException("enabledItemCount must not exceed itemCount");
+            }
+        } else if (enabledItemCount != 0) {
+            throw new IllegalArgumentException("Unknown itemCount requires zero enabledItemCount");
         }
         if (selectedIndex.isPresent()) {
             if (itemCount.isEmpty()

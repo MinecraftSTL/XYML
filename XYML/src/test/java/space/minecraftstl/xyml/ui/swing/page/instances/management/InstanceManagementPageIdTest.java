@@ -32,12 +32,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 final class InstanceManagementPageIdTest {
     /// Every management function retains one stable declaration-order destination after data packs move under worlds.
     @Test
-    void preservesAllTwelveDestinationsInGroupedOrder() {
+    void preservesAllFourteenDestinationsInGroupedOrder() {
         @Unmodifiable List<InstanceManagementPageId> expectedPages = List.of(
                 InstanceManagementPageId.OVERVIEW,
                 InstanceManagementPageId.MODS,
                 InstanceManagementPageId.RESOURCE_PACKS,
                 InstanceManagementPageId.WORLDS,
+                InstanceManagementPageId.SERVERS,
+                InstanceManagementPageId.SHADERS,
                 InstanceManagementPageId.SCHEMATICS,
                 InstanceManagementPageId.GAME_SETTINGS,
                 InstanceManagementPageId.AUTOMATIC_INSTALL,
@@ -50,16 +52,16 @@ final class InstanceManagementPageIdTest {
         assertEquals(expectedPages, InstanceManagementPageId.orderedValues());
         assertEquals(List.of(InstanceManagementPageId.OVERVIEW), InstanceManagementPageGroup.OVERVIEW.pages());
         assertEquals(
-                expectedPages.subList(1, 5),
+                expectedPages.subList(1, 7),
                 InstanceManagementPageGroup.CONTENT.pages());
         assertEquals(
-                expectedPages.subList(5, 7),
+                expectedPages.subList(7, 9),
                 InstanceManagementPageGroup.CONFIGURATION.pages());
         assertEquals(
-                expectedPages.subList(7, 11),
+                expectedPages.subList(9, 13),
                 InstanceManagementPageGroup.MAINTENANCE.pages());
         assertEquals(
-                expectedPages.subList(11, 12),
+                expectedPages.subList(13, 14),
                 InstanceManagementPageGroup.INSTANCE.pages());
         assertThrows(
                 UnsupportedOperationException.class,

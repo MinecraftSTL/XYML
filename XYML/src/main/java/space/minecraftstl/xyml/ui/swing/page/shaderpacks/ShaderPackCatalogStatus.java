@@ -15,12 +15,22 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+/// Lifecycle of one lazily loaded local shader-pack catalog.
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+public enum ShaderPackCatalogStatus {
+    /// No disk scan has been requested.
+    IDLE,
+
+    /// The latest disk scan is active.
+    LOADING,
+
+    /// The latest disk scan completed and its catalog is current.
+    READY,
+
+    /// The latest disk scan failed and may be retried.
+    FAILED
 }

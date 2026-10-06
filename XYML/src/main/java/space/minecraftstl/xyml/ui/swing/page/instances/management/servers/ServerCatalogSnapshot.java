@@ -15,12 +15,24 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+import java.util.List;
+import java.util.Objects;
+
+/// Immutable state published by the server-list model.
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+public record ServerCatalogSnapshot(
+        ServerCatalogStatus status,
+        @Unmodifiable List<ServerCatalogItem> servers,
+        String message) {
+    /// Validates and defensively copies one snapshot.
+    public ServerCatalogSnapshot {
+        Objects.requireNonNull(status, "status");
+        servers = List.copyOf(servers);
+        Objects.requireNonNull(message, "message");
+    }
 }

@@ -15,12 +15,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+/// Lifecycle state of one server-list operation.
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+public enum ServerCatalogStatus {
+    /// Background load or write is active.
+    LOADING,
+    /// The list is available.
+    READY,
+    /// The last operation failed.
+    FAILURE
 }

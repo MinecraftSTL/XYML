@@ -25,17 +25,33 @@ import java.util.List;
 
 /// Shallow source result containing no parsed pack metadata.
 ///
+/// Enabled installed packs occupy the leading paths in descending priority order. The remaining
+/// paths are disabled packs in deterministic file-name order.
+///
 /// @param supported whether the Minecraft instance supports resource packs
-/// @param paths candidate direct children, empty when unsupported
+/// @param paths candidate direct children in display order, empty when unsupported
+/// @param enabledPathCount number of leading paths whose identifiers are enabled
 @NotNullByDefault
 record ResourcePackCatalogIndex(
         boolean supported,
-        @Unmodifiable List<Path> paths) {
-    /// Stores a defensive path-list copy and validates unsupported results.
+        @Unmodifiable List<Path> paths,
+        int enabledPathCount) {
+    /// Stores a defensive path-list copy and validates supported counts.
     ResourcePackCatalogIndex {
         paths = List.copyOf(paths);
-        if (!supported && !paths.isEmpty()) {
-            throw new IllegalArgumentException("Unsupported index must not contain paths");
+        if (enabledPathCount < 0 || enabledPathCount > paths.size()) {
+            throw new IllegalArgumentException("enabledPathCount must be inside paths");
         }
+        if (!supported && (!paths.isEmpty() || enabledPathCount != 0)) {
+            throw new IllegalArgumentException("Unsupported index must not contain paths or enabled entries");
+        }
+    }
+
+    /// Creates one index with no known enabled prefix.
+    ///
+    /// @param supported whether the instance supports resource packs
+    /// @param paths deterministic candidate paths
+    ResourcePackCatalogIndex(boolean supported, @Unmodifiable List<Path> paths) {
+        this(supported, paths, 0);
     }
 }

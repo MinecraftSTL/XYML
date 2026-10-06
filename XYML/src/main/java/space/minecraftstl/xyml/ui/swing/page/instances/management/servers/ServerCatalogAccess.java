@@ -15,12 +15,25 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import java.io.IOException;
+import java.util.List;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+/// Filesystem boundary for one instance's Minecraft server list.
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+public interface ServerCatalogAccess {
+    /// Reads the current ordered server list.
+    ///
+    /// @return immutable ordered entries
+    /// @throws IOException if the source cannot be read or is malformed
+    List<ServerCatalogItem> read() throws IOException;
+
+    /// Publishes one complete ordered server list.
+    ///
+    /// @param servers ordered entries to publish
+    /// @throws IOException if staging or publication fails
+    void write(List<ServerCatalogItem> servers) throws IOException;
+
 }

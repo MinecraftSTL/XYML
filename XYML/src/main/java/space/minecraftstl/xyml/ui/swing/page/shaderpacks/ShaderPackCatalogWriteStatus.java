@@ -15,12 +15,19 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
+package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+/// Lifecycle of one serialized shader-pack catalog mutation.
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+public enum ShaderPackCatalogWriteStatus {
+    /// No mutation is active.
+    IDLE,
+
+    /// A mutation is active.
+    BUSY,
+
+    /// The latest mutation failed.
+    FAILED
 }

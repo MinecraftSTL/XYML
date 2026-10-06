@@ -76,7 +76,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
 
     /// Transparent layout surface hosted by the vertical scroll pane.
     private final JPanel navigationContent = new JPanel(new MigLayout(
-            "insets 6 8, fillx, wrap 1, gapy 2",
+            "insets 6 8, fillx, wrap 1, gapy 1",
             "[grow,fill]",
             "[]"));
 
@@ -192,7 +192,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
             }
             buttonGroup.add(button);
             buttons.put(page, button);
-            navigationContent.add(button, "growx, h 30!");
+            navigationContent.add(button, "growx, h 28!");
         }
     }
 

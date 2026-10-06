@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.In
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenancePanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.servers.ServerCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
@@ -47,6 +48,13 @@ import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogIn
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.FileSystemShaderPackCatalogAccess;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -104,6 +112,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackStatusStrings localized resource-pack lifecycle text
     /// @param resourcePackActionStrings localized resource-pack action text
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
+    /// @param shaderPackStrings localized shader-pack content text
+    /// @param shaderPackStatusStrings localized shader-pack lifecycle text
+    /// @param shaderPackActionStrings localized shader-pack action text
+    /// @param shaderPackInteractions shader-pack dialog and desktop interactions
     /// @param returnCommand shell command opening the instance-list side page
     /// @param taskProgressStrings localized task-progress labels for long-running instance operations
     /// @param taskLaunchController shared confirmed-task submission controller
@@ -128,6 +140,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogStatusStrings resourcePackStatusStrings,
             ResourcePackCatalogActionStrings resourcePackActionStrings,
             ResourcePackCatalogInteractions resourcePackInteractions,
+            ShaderPackCatalogStrings shaderPackStrings,
+            ShaderPackCatalogStatusStrings shaderPackStatusStrings,
+            ShaderPackCatalogActionStrings shaderPackActionStrings,
+            ShaderPackCatalogInteractions shaderPackInteractions,
             Runnable returnCommand,
             TaskProgressStrings taskProgressStrings,
             TaskLaunchController taskLaunchController,
@@ -168,6 +184,14 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 Objects.requireNonNull(resourcePackActionStrings, "resourcePackActionStrings");
         ResourcePackCatalogInteractions requiredResourcePackInteractions =
                 Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
+        ShaderPackCatalogStrings requiredShaderPackStrings =
+                Objects.requireNonNull(shaderPackStrings, "shaderPackStrings");
+        ShaderPackCatalogStatusStrings requiredShaderPackStatusStrings =
+                Objects.requireNonNull(shaderPackStatusStrings, "shaderPackStatusStrings");
+        ShaderPackCatalogActionStrings requiredShaderPackActionStrings =
+                Objects.requireNonNull(shaderPackActionStrings, "shaderPackActionStrings");
+        ShaderPackCatalogInteractions requiredShaderPackInteractions =
+                Objects.requireNonNull(shaderPackInteractions, "shaderPackInteractions");
         Runnable requiredReturnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
         TaskProgressStrings requiredTaskProgressStrings =
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
@@ -223,6 +247,11 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             requiredResourcePackStatusStrings,
                             requiredResourcePackActionStrings,
                             requiredResourcePackInteractions),
+                    new ShaderPackPageDependencies(
+                            requiredShaderPackStrings,
+                            requiredShaderPackStatusStrings,
+                            requiredShaderPackActionStrings,
+                            requiredShaderPackInteractions),
                     new OperationPageDependencies(
                             requiredReturnCommand,
                             requiredTaskProgressStrings,
@@ -358,6 +387,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             SchematicPageDependencies schematicDependencies,
             ModPageDependencies modDependencies,
             ResourcePackPageDependencies resourcePackDependencies,
+            ShaderPackPageDependencies shaderPackDependencies,
             OperationPageDependencies operationDependencies,
             InstanceContentNavigation contentNavigation,
             java.util.function.Consumer<InstanceManagementPageId> pageSelector,
@@ -407,6 +437,31 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             panel.setOpenDownloadsCommand(
                     () -> contentNavigation.openDownloads(DownloadPageTarget.WORLDS));
             return new InstanceManagementPage(panel, panel::activate, panel::close);
+        });
+        factories.put(InstanceManagementPageId.SERVERS, () -> {
+            ServerCatalogPanel panel = new ServerCatalogPanel(repository,
+                    instanceId, executor);
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+        factories.put(InstanceManagementPageId.SHADERS, () -> {
+            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
+                    new DefaultShaderPackCatalogModel(
+                            new FileSystemShaderPackCatalogAccess(repository, instanceId),
+                            executor,
+                            shaderPackDependencies.statusStrings().idleText(),
+                            shaderPackDependencies.statusStrings().loadingText(),
+                            shaderPackDependencies.statusStrings().readyText(),
+                            shaderPackDependencies.statusStrings().emptyText(),
+                            shaderPackDependencies.statusStrings().failureText(),
+                            shaderPackDependencies.statusStrings().writingText(),
+                            shaderPackDependencies.statusStrings().writeFailedText()),
+                    shaderPackDependencies.strings(),
+                    shaderPackDependencies.statusStrings(),
+                    shaderPackDependencies.actionStrings(),
+                    shaderPackDependencies.interactions(),
+                    repository.getRunDirectory(instanceId).resolve("shaderpacks"));
+            panel.setContentCommands(() -> contentNavigation.openDownloads(DownloadPageTarget.SHADERS));
+            return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.SCHEMATICS, () -> {
             SchematicInstanceManagementView panel = new SchematicInstanceManagementView(
@@ -569,6 +624,27 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogInteractions interactions) {
         /// Validates resource-pack page dependencies.
         private ResourcePackPageDependencies {
+            Objects.requireNonNull(strings, "strings");
+            Objects.requireNonNull(statusStrings, "statusStrings");
+            Objects.requireNonNull(actionStrings, "actionStrings");
+            Objects.requireNonNull(interactions, "interactions");
+        }
+    }
+
+    /// Immutable shader-pack page construction dependencies.
+    ///
+    /// @param strings localized content text
+    /// @param statusStrings localized lifecycle text
+    /// @param actionStrings localized action text
+    /// @param interactions shader-pack dialogs and desktop interactions
+    @NotNullByDefault
+    private record ShaderPackPageDependencies(
+            ShaderPackCatalogStrings strings,
+            ShaderPackCatalogStatusStrings statusStrings,
+            ShaderPackCatalogActionStrings actionStrings,
+            ShaderPackCatalogInteractions interactions) {
+        /// Validates shader-pack page dependencies.
+        private ShaderPackPageDependencies {
             Objects.requireNonNull(strings, "strings");
             Objects.requireNonNull(statusStrings, "statusStrings");
             Objects.requireNonNull(actionStrings, "actionStrings");

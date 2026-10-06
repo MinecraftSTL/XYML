@@ -19,8 +19,22 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Immutable internal write request understood by resource-pack catalog access implementations.
+import java.nio.file.Path;
+import java.util.Objects;
+
+/// Reorders one enabled resource pack within the persisted Minecraft priority list.
+///
+/// @param path normalized stable current-index path
+/// @param targetIndex final zero-based index in display order, where the first entry has highest priority
 @NotNullByDefault
-sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
+record ResourcePackReorderMutation(
+        Path path,
+        int targetIndex) implements ResourcePackCatalogMutationRequest {
+    /// Validates one stable target path and non-negative display index.
+    ResourcePackReorderMutation {
+        Objects.requireNonNull(path, "path");
+        if (targetIndex < 0) {
+            throw new IllegalArgumentException("targetIndex must not be negative");
+        }
+    }
 }
