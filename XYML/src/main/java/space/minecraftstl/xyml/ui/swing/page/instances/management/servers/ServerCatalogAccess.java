@@ -35,4 +35,17 @@ public interface ServerCatalogAccess {
     /// @param servers ordered entries to publish
     /// @throws IOException if staging or publication fails
     void write(List<ServerCatalogItem> servers) throws IOException;
+
+    /// Publishes one complete ordered server list only when the source still matches the preceding read.
+    ///
+    /// Implementations without revision tracking retain the original write behavior. Filesystem implementations should
+    /// reject a stale write instead of replacing externally changed data.
+    ///
+    /// @param expectedServers entries observed by the mutation before applying its change
+    /// @param servers ordered entries to publish
+    /// @throws IOException if the source changed, or if staging or publication fails
+    default void writeIfUnchanged(List<ServerCatalogItem> expectedServers, List<ServerCatalogItem> servers)
+            throws IOException {
+        write(servers);
+    }
 }
