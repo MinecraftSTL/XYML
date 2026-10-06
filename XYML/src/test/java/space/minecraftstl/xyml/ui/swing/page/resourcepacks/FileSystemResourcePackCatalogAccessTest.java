@@ -311,6 +311,82 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 () -> assertTrue(persisted.endsWith(expectedIncompatible)));
     }
 
+    /// Treats a drag to the current enabled index as a no-op without writing options.
+    @Test
+    public void noOpReorderDoesNotWriteOrCommit() throws IOException {
+        Fixture fixture = fixture("reorder-no-op");
+        Path alpha = createPackDirectory(
+                fixture.packDirectory().resolve("alpha"),
+                15,
+                "Alpha");
+        Path beta = createPackDirectory(
+                fixture.packDirectory().resolve("beta"),
+                15,
+                "Beta");
+        Files.createDirectories(fixture.runDirectory());
+        String original = optionLine("resourcePacks", "alpha", "file/beta")
+                + optionLine("incompatibleResourcePacks");
+        Files.writeString(fixture.optionsFile(), original, StandardCharsets.UTF_8);
+        AtomicInteger commits = new AtomicInteger();
+
+        ResourcePackCatalogMutationAccessResult result = fixture.access().mutateAndLoadIndex(
+                new ResourcePackReorderMutation(alpha, 1),
+                new LoadCancellation(),
+                commits::incrementAndGet);
+
+        assertAll(
+                () -> assertEquals(null, result.mutationFailure()),
+                () -> assertEquals(0, commits.get()),
+                () -> assertEquals(original, Files.readString(fixture.optionsFile(), StandardCharsets.UTF_8)),
+                () -> assertEquals(List.of(beta, alpha), result.refreshedIndex().paths()));
+    }
+
+    /// Rejects an options-file change observed after the scan and before sorting persistence.
+    @Test
+    public void rejectsReorderWhenOptionsChangeAfterRead() throws IOException {
+        Fixture fixture = fixture("reorder-external-change");
+        Path alpha = createPackDirectory(
+                fixture.packDirectory().resolve("alpha"),
+                15,
+                "Alpha");
+        Path beta = createPackDirectory(
+                fixture.packDirectory().resolve("beta"),
+                15,
+                "Beta");
+        Files.createDirectories(fixture.runDirectory());
+        Files.writeString(
+                fixture.optionsFile(),
+                optionLine("resourcePacks", "alpha", "file/beta")
+                        + optionLine("incompatibleResourcePacks"),
+                StandardCharsets.UTF_8);
+        AtomicInteger commits = new AtomicInteger();
+
+        ResourcePackCatalogMutationAccessResult result = fixture.access().mutateAndLoadIndex(
+                new ResourcePackReorderMutation(alpha, 0),
+                new LoadCancellation(),
+                () -> {
+                    commits.incrementAndGet();
+                    try {
+                        Files.writeString(
+                                fixture.optionsFile(),
+                                optionLine("resourcePacks", "file/beta", "alpha")
+                                        + optionLine("incompatibleResourcePacks"),
+                                StandardCharsets.UTF_8);
+                    } catch (IOException failure) {
+                        throw new AssertionError(failure);
+                    }
+                });
+
+        assertAll(
+                () -> assertInstanceOf(IOException.class, result.mutationFailure()),
+                () -> assertEquals(1, commits.get()),
+                () -> assertEquals(
+                        optionLine("resourcePacks", "file/beta", "alpha")
+                                + optionLine("incompatibleResourcePacks"),
+                        Files.readString(fixture.optionsFile(), StandardCharsets.UTF_8)),
+                () -> assertEquals(List.of(alpha, beta), result.refreshedIndex().paths()));
+    }
+
     /// Rejects duplicate identifiers for one installed pack before the commit point.
     @Test
     public void rejectsDuplicateEnabledIdentifiersWithoutWriting() throws IOException {
@@ -351,12 +427,18 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 fixture.optionsFile(),
                 "resourcePacks:[broken\nincompatibleResourcePacks:[]\n",
                 StandardCharsets.UTF_8);
-        ResourcePackCatalogIndex index = fixture.access().loadIndex(new LoadCancellation());
         assertThrows(
                 IOException.class,
-                () -> fixture.access().loadItems(index.paths(), new LoadCancellation()));
+                () -> fixture.access().loadIndex(new LoadCancellation()));
+        ResourcePackCatalogIndex index;
+        Files.writeString(
+                fixture.optionsFile(),
+                "resourcePacks:[]\nincompatibleResourcePacks:[]\n",
+                StandardCharsets.UTF_8);
+        index = fixture.access().loadIndex(new LoadCancellation());
 
         List<String> nonStringValues = List.of(
+                "",
                 "[null]",
                 "[1]",
                 "[true]",

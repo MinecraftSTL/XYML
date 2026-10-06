@@ -175,13 +175,8 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         }
         cancellation.throwIfCancelled();
         paths.sort(PATH_ORDER);
-        try {
-            EnabledPathOrder order = orderEnabledPaths(paths, readOptionsState().resourcePacks());
-            return new ResourcePackCatalogIndex(true, order.paths(), order.enabledPathCount());
-        } catch (IOException ignored) {
-            // Viewport and mutation access still report malformed or unreadable options strictly.
-            return new ResourcePackCatalogIndex(true, paths, 0);
-        }
+        EnabledPathOrder order = orderEnabledPaths(paths, readOptionsState().resourcePacks());
+        return new ResourcePackCatalogIndex(true, order.paths(), order.enabledPathCount());
     }
 
     /// Orders installed paths by the persisted high-priority-first resource-pack list.
@@ -200,7 +195,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         Set<Path> included = new HashSet<>();
         for (int index = resourcePacks.size() - 1; index >= 0; index--) {
             String identifier = resourcePacks.get(index);
-            String name = identifier.startsWith("file/") ? identifier.substring("file/".length()) : identifier;
+            String name = identifierFileName(identifier);
             @Nullable Path path = pathsByName.get(name);
             if (path != null && included.add(path)) {
                 ordered.add(path);
@@ -616,10 +611,21 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
                 options.document(),
                 resourcePacks,
                 options.incompatibleResourcePacks(),
-                options.encoding());
+                options.encoding(),
+                options.originalBytes());
         cancellation.throwIfCancelled();
         commitPoint.run();
         saveOptionsState(replacement);
+    }
+
+    /// Resolves one Minecraft resource-pack identifier to its raw file name.
+    ///
+    /// @param identifier persisted resource-pack identifier
+    /// @return raw file name without the current or legacy prefix
+    private static String identifierFileName(String identifier) {
+        return identifier.startsWith("file/")
+                ? identifier.substring("file/".length())
+                : identifier;
     }
 
     /// Resolves one option identifier to an installed direct-child resource pack.
@@ -627,7 +633,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// @param identifier raw Minecraft option identifier
     /// @return installed path, or null for unknown or indirect entries
     private @Nullable Path installedPathForIdentifier(String identifier) {
-        String name = identifier.startsWith("file/") ? identifier.substring("file/".length()) : identifier;
+        String name = identifierFileName(identifier);
         Path candidate = directory.resolve(name).toAbsolutePath().normalize();
         if (!candidate.getParent().equals(directory)) {
             return null;
@@ -663,7 +669,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             FileUtils.deleteWithMode(target, mutation.mode(), trashOperations);
         } catch (TrashMoveException failure) {
             if (optionsChanged) {
-                saveOptionsState(options);
+                restoreOptionsState(options);
             }
             throw failure;
         }
@@ -728,9 +734,11 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     private OptionsState readOptionsState() throws IOException {
         OptionsDocument document;
         Charset encoding;
+        @Nullable String originalBytes;
         if (!Files.exists(optionsFile)) {
             document = OptionsDocument.empty();
             encoding = StandardCharsets.UTF_8;
+            originalBytes = null;
         } else {
             if (!Files.isRegularFile(optionsFile)) {
                 throw new IOException("Instance options path is not a regular file: " + optionsFile);
@@ -738,6 +746,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             byte[] bytes = Files.readAllBytes(optionsFile);
             encoding = detectOptionsEncoding(bytes);
             document = OptionsDocument.parse(new String(bytes, encoding));
+            originalBytes = new String(bytes, StandardCharsets.ISO_8859_1);
         }
         return new OptionsState(
                 document,
@@ -745,7 +754,8 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
                 parsePackList(
                         document.value("incompatibleResourcePacks"),
                         "incompatibleResourcePacks"),
-                encoding);
+                encoding,
+                originalBytes);
     }
 
     /// Selects a writable Java charset from the detector while treating pure ASCII as UTF-8.
@@ -769,8 +779,11 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     private static @Unmodifiable List<String> parsePackList(
             @Nullable String json,
             String key) throws IOException {
-        if (json == null || json.isBlank()) {
+        if (json == null) {
             return List.of();
+        }
+        if (json.isBlank()) {
+            throw new IOException("Invalid " + key + " value in options.txt: blank JSON value");
         }
         try {
             JsonElement root = JsonParser.parseString(json);
@@ -821,7 +834,8 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             removePack(resourcePacks, name);
             removePack(incompatiblePacks, name);
         }
-        return new OptionsState(source.document(), resourcePacks, incompatiblePacks, source.encoding());
+        return new OptionsState(
+                source.document(), resourcePacks, incompatiblePacks, source.encoding(), source.originalBytes());
     }
 
     /// Returns a copy with both option identifiers removed without parsing pack metadata.
@@ -834,7 +848,8 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         List<String> incompatiblePacks = new ArrayList<>(source.incompatibleResourcePacks());
         removePack(resourcePacks, fileName);
         removePack(incompatiblePacks, fileName);
-        return new OptionsState(source.document(), resourcePacks, incompatiblePacks, source.encoding());
+        return new OptionsState(
+                source.document(), resourcePacks, incompatiblePacks, source.encoding(), source.originalBytes());
     }
 
     /// Returns whether one pack is semantically enabled by both strict option lists.
@@ -879,6 +894,36 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// @param state immutable replacement options state
     /// @throws IOException when safe encoding-preserving persistence fails
     private void saveOptionsState(OptionsState state) throws IOException {
+        verifyOptionsUnchanged(state);
+        writeOptionsState(state);
+    }
+
+    /// Restores one previously read options state after a later delete failure.
+    ///
+    /// @param state original options state
+    /// @throws IOException when restoring the options file fails
+    private void restoreOptionsState(OptionsState state) throws IOException {
+        writeOptionsState(state);
+    }
+
+    /// Verifies that the options bytes still match the read snapshot.
+    ///
+    /// @param state state whose original bytes must still be present
+    /// @throws IOException when the file was changed externally
+    private void verifyOptionsUnchanged(OptionsState state) throws IOException {
+        @Nullable String currentBytes = Files.exists(optionsFile, LinkOption.NOFOLLOW_LINKS)
+                ? new String(Files.readAllBytes(optionsFile), StandardCharsets.ISO_8859_1)
+                : null;
+        if (!Objects.equals(currentBytes, state.originalBytes())) {
+            throw new IOException("Minecraft options changed externally: " + optionsFile);
+        }
+    }
+
+    /// Writes one replacement options document without rereading or normalizing it.
+    ///
+    /// @param state replacement options state
+    /// @throws IOException when safe persistence fails
+    private void writeOptionsState(OptionsState state) throws IOException {
         OptionsDocument replacement = state.document()
                 .withValue("resourcePacks", StringUtils.serializeStringList(state.resourcePacks()))
                 .withValue(
@@ -1048,12 +1093,14 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// @param resourcePacks enabled pack identifiers
     /// @param incompatibleResourcePacks acknowledged incompatible identifiers
     /// @param encoding detected source encoding retained for persistence
+    /// @param originalBytes original raw option bytes encoded one byte per character, or null when absent
     @NotNullByDefault
     private record OptionsState(
             OptionsDocument document,
             @Unmodifiable List<String> resourcePacks,
             @Unmodifiable List<String> incompatibleResourcePacks,
-            Charset encoding) {
+            Charset encoding,
+            @Nullable String originalBytes) {
         /// Freezes semantic option lists.
         private OptionsState {
             Objects.requireNonNull(document, "document");
