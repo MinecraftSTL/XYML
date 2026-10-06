@@ -39,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -50,7 +51,7 @@ final class ShaderPackCatalogPanelTest {
     void exposesSingleEnableAndBatchDeleteWithoutSorting() {
         EdtDispatcher.executeAndWait(() -> {
             ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
-                    new FakeModel(),
+                    new FakeModel(true),
                     new ShaderPackCatalogStrings(
                             "Shader Packs",
                             "Refresh",
@@ -114,6 +115,38 @@ final class ShaderPackCatalogPanelTest {
         });
     }
 
+    /// Verifies invalid packs cannot be activated from the panel.
+    @Test
+    void disablesEnableForInvalidPack() {
+        EdtDispatcher.executeAndWait(() -> {
+            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
+                    new FakeModel(false),
+                    new ShaderPackCatalogStrings(
+                            "Shader Packs", "Refresh", "Refreshing", "Refresh", "Retry", "Retry",
+                            "Details", "No selection", "File", "Path", "Enabled", "Enabled", "Disabled",
+                            "Invalid", "Backends", "No backend"),
+                    new ShaderPackCatalogStatusStrings(
+                            "Idle", "Loading", "Ready", "Empty", "Failed", "Writing", "Write failed"),
+                    new ShaderPackCatalogActionStrings(
+                            "Import", "Import", "Import", "ZIP", "Enable", "Enable", "Disable", "Disable",
+                            "Delete", "Delete", "Delete %s?", "Delete %s items?", "Reveal", "Reveal",
+                            "Open", "Open", "Operation failed", "Reveal failed", "Open failed",
+                            "Backend", "Choose backends"),
+                    new FakeInteractions(),
+                    Path.of("shaderpacks"));
+            try {
+                JList<?> list = findNamed(panel, "shaderPacksList", JList.class);
+                assertNotNull(list);
+                list.setSelectedIndex(0);
+                JCheckBox toggle = findNamed(panel, "shaderPacksEnabledToggle", JCheckBox.class);
+                assertNotNull(toggle);
+                assertFalse(toggle.isEnabled());
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
     /// Finds one named descendant.
     ///
     /// @param root component root
@@ -142,22 +175,33 @@ final class ShaderPackCatalogPanelTest {
     /// Minimal ready model for panel construction tests.
     @NotNullByDefault
     private static final class FakeModel implements ShaderPackCatalogModel {
+        /// Whether the fixture pack is valid.
+        private final boolean valid;
+
         /// Snapshot returned by the fixture.
-        private final ShaderPackCatalogSnapshot snapshot = new ShaderPackCatalogSnapshot(
-                OptionalInt.empty(),
-                1,
-                1L,
-                ShaderPackCatalogStatus.READY,
-                "Ready",
-                ShaderPackCatalogWriteStatus.IDLE,
-                "",
-                List.of(new ShaderPackCatalogItem(
-                        Path.of("A").toAbsolutePath().normalize(),
-                        "A",
-                        "A",
-                        true,
-                        Set.of(ShaderPackBackend.IRIS_OCULUS))),
-                Set.of(ShaderPackBackend.IRIS_OCULUS));
+        private final ShaderPackCatalogSnapshot snapshot;
+
+        /// Creates one fixture with the requested validity.
+        ///
+        /// @param valid requested validity
+        private FakeModel(boolean valid) {
+            this.valid = valid;
+            snapshot = new ShaderPackCatalogSnapshot(
+                    OptionalInt.empty(),
+                    1,
+                    1L,
+                    ShaderPackCatalogStatus.READY,
+                    "Ready",
+                    ShaderPackCatalogWriteStatus.IDLE,
+                    "",
+                    List.of(new ShaderPackCatalogItem(
+                            Path.of("A").toAbsolutePath().normalize(),
+                            "A",
+                            "A",
+                            valid,
+                            Set.of(ShaderPackBackend.IRIS_OCULUS))),
+                    Set.of(ShaderPackBackend.IRIS_OCULUS));
+        }
 
         /// Returns the fixture snapshot.
         @Override

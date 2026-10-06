@@ -611,10 +611,12 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
         boolean writable = !closed && !writePending && snapshot.writeStatus() != ShaderPackCatalogWriteStatus.BUSY;
         int selectedCount = list.getSelectedIndices().length;
         boolean one = selectedCount == 1;
+        @Nullable ShaderPackCatalogItem selected = singleSelectedItem();
+        boolean oneValid = one && selected != null && selected.valid();
         boolean hasBackends = !snapshot.availableBackends().isEmpty();
         selectAllButton.setEnabled(writable && listModel.size() > 0 && selectedCount < listModel.size());
         deleteSelectedButton.setEnabled(writable && selectedCount > 0);
-        enabledToggle.setEnabled(writable && one && hasBackends);
+        enabledToggle.setEnabled(writable && oneValid && hasBackends);
         if (!hasBackends) {
             enabledToggle.setToolTipText(strings.noBackendText());
         }
@@ -678,7 +680,7 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
     /// @param event action event
     private void toggleSelected(ActionEvent event) {
         ShaderPackCatalogItem selected = singleSelectedItem();
-        if (selected == null) {
+        if (selected == null || !selected.valid()) {
             return;
         }
         Set<ShaderPackBackend> backends = snapshot.availableBackends().size() == 1
