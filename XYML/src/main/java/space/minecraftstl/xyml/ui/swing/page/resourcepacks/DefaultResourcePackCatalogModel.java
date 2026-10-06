@@ -738,11 +738,16 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 String writeStatusText = mutationFailure == null
                         ? ""
                         : writeFailedStatus(mutationFailure);
+                boolean contentChanged = !paths.equals(current.content().paths())
+                        || loadedIndex.enabledPathCount() != current.content().enabledPathCount();
+                long contentRevision = contentChanged
+                        ? Math.addExact(current.snapshot().contentRevision(), 1L)
+                        : current.snapshot().contentRevision();
                 ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                         current.snapshot(),
                         selectedIndex(paths),
                         OptionalInt.of(paths.size()),
-                        Math.addExact(current.snapshot().contentRevision(), 1L),
+                        contentRevision,
                         catalogStatus,
                         catalogStatusText,
                         writeStatus,
