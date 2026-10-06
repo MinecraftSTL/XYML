@@ -38,7 +38,6 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
-import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
@@ -46,14 +45,12 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.ListCellRenderer;
+import javax.swing.JTabbedPane;
 import javax.swing.ListSelectionModel;
-import javax.swing.SwingUtilities;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Component;
-import java.awt.Dialog;
 import java.awt.Font;
-import java.awt.Window;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -103,10 +100,6 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
 
     /// Commits all currently visible supported editor fields.
     private final JButton saveButton = new JButton(i18n("button.save"));
-
-    /// Opens the launcher-wide instance configuration migration policy dialog.
-    private final JButton migrationPolicyButton =
-            new JButton(i18n("settings.instance_config_migration.open"));
 
     /// Displays validation and asynchronous command feedback.
     private final JLabel statusLabel = new JLabel();
@@ -221,7 +214,13 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         content.add(createHeader(), "growx");
         content.add(createContentSplit(), "grow, push");
         content.add(statusLabel, "growx");
-        add(content, BorderLayout.CENTER);
+        JTabbedPane pages = new JTabbedPane();
+        pages.setName("globalGameSettingsPages");
+        pages.addTab(i18n("settings.type.global.preset.manage_all"), content);
+        pages.addTab(
+                i18n("settings.instance_config_migration.title"),
+                new InstanceConfigMigrationPolicyPanel());
+        add(pages, BorderLayout.CENTER);
 
         presetList.setName("gameSettingsPresetList");
         presetList.setOpaque(false);
@@ -243,8 +242,6 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         defaultButton.addActionListener(event -> assignDefaultPreset());
         saveButton.setName("gameSettingsPresetSave");
         saveButton.addActionListener(event -> saveSelectedPreset());
-        migrationPolicyButton.setName("instanceConfigMigrationPolicyOpen");
-        migrationPolicyButton.addActionListener(event -> showMigrationPolicyDialog());
 
         selectedNameLabel.setName("gameSettingsPresetName");
         selectedNameLabel.setFont(selectedNameLabel.getFont().deriveFont(Font.BOLD, 18.0F));
@@ -265,23 +262,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         header.add(renameButton);
         header.add(deleteButton);
         header.add(defaultButton);
-        header.add(migrationPolicyButton);
         return header;
-    }
-
-    /// Opens the launcher-wide migration policy in a dedicated non-blocking dialog.
-    private void showMigrationPolicyDialog() {
-        EdtDispatcher.requireEventDispatchThread();
-        Window owner = SwingUtilities.getWindowAncestor(this);
-        JDialog dialog = new JDialog(
-                owner,
-                i18n("settings.instance_config_migration.title"),
-                Dialog.ModalityType.MODELESS);
-        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-        dialog.setContentPane(new InstanceConfigMigrationPolicyPanel());
-        dialog.pack();
-        dialog.setLocationRelativeTo(this);
-        dialog.setVisible(true);
     }
 
     /// Creates the responsive list-and-editor split surface.
