@@ -104,9 +104,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Tabbed grouping for the complete settings surface.
     private final JTabbedPane settingsTabs = new AnimatedTabbedPane();
 
-    /// Opens manual configuration migration for the current real instance.
-    private final javax.swing.JButton manualMigrationButton = new javax.swing.JButton(
-            i18n("settings.instance_config_migration.manual.open"));
     /// Inherited, automatic, and manual memory-allocation choices.
     private final InstanceMemoryModeSelector memoryModeSelector;
 
@@ -376,8 +373,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
                 workingDirectoryChanged);
-        manualMigrationButton.addActionListener(event ->
-                InstanceConfigManualMigrationDialog.show(this, repository, instanceId, executor));
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
@@ -594,8 +589,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         heading.setName("instanceGameSettingsTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 22.0F));
         header.add(heading, BorderLayout.WEST);
-        manualMigrationButton.setName("instanceConfigManualMigrationOpen");
-        header.add(manualMigrationButton, BorderLayout.EAST);
         return header;
     }
 

@@ -32,7 +32,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Opens the manual instance-configuration migration controls in a separate Swing dialog.
 @NotNullByDefault
-final class InstanceConfigManualMigrationDialog {
+public final class InstanceConfigManualMigrationDialog {
     private InstanceConfigManualMigrationDialog() {
     }
 
@@ -42,7 +42,7 @@ final class InstanceConfigManualMigrationDialog {
     /// @param repository repository containing the target instance
     /// @param instanceId target instance identifier
     /// @param executor executor used for migration I/O
-    static void show(
+    public static void show(
             Component parent,
             XYMLGameRepository repository,
             GameInstanceID instanceId,

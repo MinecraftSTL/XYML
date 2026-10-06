@@ -45,7 +45,6 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.ListCellRenderer;
-import javax.swing.JTabbedPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
@@ -214,13 +213,8 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         content.add(createHeader(), "growx");
         content.add(createContentSplit(), "grow, push");
         content.add(statusLabel, "growx");
-        JTabbedPane pages = new JTabbedPane();
-        pages.setName("globalGameSettingsPages");
-        pages.addTab(i18n("settings.type.global.preset.manage_all"), content);
-        pages.addTab(
-                i18n("settings.instance_config_migration.title"),
-                new InstanceConfigMigrationPolicyPanel());
-        add(pages, BorderLayout.CENTER);
+        content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
+        add(content, BorderLayout.CENTER);
 
         presetList.setName("gameSettingsPresetList");
         presetList.setOpaque(false);
