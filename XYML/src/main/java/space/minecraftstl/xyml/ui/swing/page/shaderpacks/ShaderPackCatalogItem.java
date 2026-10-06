@@ -18,7 +18,9 @@
 package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.image.EncodedImage;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -29,24 +31,39 @@ import java.util.Set;
 /// @param path normalized absolute shader-pack path
 /// @param fileName exact direct-child file or directory name
 /// @param displayName user-facing name without a ZIP extension
-/// @param valid whether the pack contains a recognizable `shaders` payload
+/// @param valid whether the pack contains a recognizable shaders payload
 /// @param enabledBackends backends currently selecting this exact pack
+/// @param description local package description, or an empty string when unavailable
+/// @param icon bounded local package icon, or null when unavailable
 @NotNullByDefault
 public record ShaderPackCatalogItem(
         Path path,
         String fileName,
         String displayName,
         boolean valid,
-        @Unmodifiable Set<ShaderPackBackend> enabledBackends) {
-    /// Normalizes the path and freezes the enabled backend set.
+        @Unmodifiable Set<ShaderPackBackend> enabledBackends,
+        String description,
+        @Nullable EncodedImage icon) {
+    /// Normalizes the path and freezes all presentation values.
     public ShaderPackCatalogItem {
         path = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
         fileName = Objects.requireNonNull(fileName, "fileName");
         displayName = Objects.requireNonNull(displayName, "displayName");
         enabledBackends = Set.copyOf(Objects.requireNonNull(enabledBackends, "enabledBackends"));
+        description = Objects.requireNonNull(description, "description").trim();
         if (fileName.isBlank()) {
             throw new IllegalArgumentException("fileName must not be blank");
         }
+    }
+
+    /// Creates a row without optional package presentation metadata.
+    public ShaderPackCatalogItem(
+            Path path,
+            String fileName,
+            String displayName,
+            boolean valid,
+            @Unmodifiable Set<ShaderPackBackend> enabledBackends) {
+        this(path, fileName, displayName, valid, enabledBackends, "", null);
     }
 
     /// Returns whether at least one backend selects this pack.
