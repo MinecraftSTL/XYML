@@ -1011,6 +1011,16 @@ public final class ResourcePackCatalogPanelTest {
             return CompletableFuture.completedFuture(current.get());
         }
 
+        /// Rejects unsupported reorder commands in this focused fake.
+        ///
+        /// @param path requested stable path
+        /// @param targetIndex requested final index
+        /// @return never
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
         /// Closes this test-owned model once.
         @Override
         public void close() {
