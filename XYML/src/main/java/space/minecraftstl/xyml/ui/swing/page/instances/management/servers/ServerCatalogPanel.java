@@ -393,9 +393,10 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
                     }
                     String name = server.getStringOrEmpty("name");
                     String address = server.getStringOrEmpty("ip");
-                    if (!name.isBlank() && !address.isBlank()) {
-                        result.add(new ServerCatalogItem(name, address, server));
+                    if (name.isBlank() || address.isBlank()) {
+                        throw new IOException("servers.dat contains a blank server field");
                     }
+                    result.add(new ServerCatalogItem(name, address, server));
                 }
                 return List.copyOf(result);
             }
