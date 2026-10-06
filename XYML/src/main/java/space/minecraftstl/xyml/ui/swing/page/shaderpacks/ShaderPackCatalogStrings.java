@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Localized content and detail labels for installed shader packs.
 @NotNullByDefault
 public record ShaderPackCatalogStrings(
@@ -58,6 +60,16 @@ public record ShaderPackCatalogStrings(
         requireText(invalidText, "invalidText");
         requireText(backendsLabel, "backendsLabel");
         requireText(noBackendText, "noBackendText");
+    }
+
+    /// Returns the localized description field label.
+    public String descriptionLabel() {
+        return i18n("shaderpack.description");
+    }
+
+    /// Returns the localized fallback used when package metadata is absent.
+    public String descriptionUnavailableText() {
+        return i18n("shaderpack.description.unavailable");
     }
 
     /// Returns the enabled-state text.
