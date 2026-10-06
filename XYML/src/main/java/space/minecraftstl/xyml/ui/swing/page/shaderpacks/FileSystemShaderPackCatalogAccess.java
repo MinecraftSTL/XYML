@@ -24,11 +24,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -67,6 +69,12 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
 
     /// Maximum normalized ZIP entry-name length accepted during validation.
     private static final int MAX_ZIP_ENTRY_NAME_LENGTH = 1024;
+
+    /// Maximum metadata document size read from a package.
+    private static final int MAX_METADATA_BYTES = 65_536;
+
+    /// Maximum encoded package icon size.
+    private static final int MAX_ICON_BYTES = 1_048_576;
 
     /// Deterministic direct-child path ordering.
     private static final Comparator<Path> PATH_ORDER = Comparator.comparing(FileSystemShaderPackCatalogAccess::fileName);
@@ -167,12 +175,15 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
             if (optifineEnabled && sameSelection(optifineSelection, exactName)) {
                 enabled.add(ShaderPackBackend.OPTIFINE);
             }
+            PresentationMetadata metadata = readPresentationMetadata(normalized);
             items.add(new ShaderPackCatalogItem(
                     normalized,
                     exactName,
                     displayName(exactName),
                     valid,
-                    enabled));
+                    enabled,
+                    metadata.description(),
+                    metadata.icon()));
         }
         return List.copyOf(items);
     }
@@ -441,6 +452,117 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
         }
     }
 
+    /// Reads bounded local metadata without making package metadata a catalog-fatal error.
+    ///
+    /// @param path package ZIP or directory
+    /// @return best-effort package presentation metadata
+    private static PresentationMetadata readPresentationMetadata(Path path) {
+        try {
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                return readDirectoryPresentationMetadata(path);
+            }
+            try (ZipFile zip = new ZipFile(path.toFile())) {
+                return readZipPresentationMetadata(zip);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            return PresentationMetadata.empty();
+        }
+    }
+
+    /// Reads metadata files from a shader-pack directory.
+    private static PresentationMetadata readDirectoryPresentationMetadata(Path directory) throws IOException {
+        String description = readDescription(directory.resolve("pack.mcmeta"));
+        if (description.isEmpty()) {
+            description = readDescription(directory.resolve("metadata.json"));
+        }
+        @Nullable EncodedImage icon = readImage(directory.resolve("icon.png"));
+        if (icon == null) {
+            icon = readImage(directory.resolve("pack.png"));
+        }
+        return new PresentationMetadata(description, icon);
+    }
+
+    /// Reads metadata entries from a shader-pack ZIP.
+    private static PresentationMetadata readZipPresentationMetadata(ZipFile zip) throws IOException {
+        String description = readDescription(zip, "pack.mcmeta");
+        if (description.isEmpty()) {
+            description = readDescription(zip, "metadata.json");
+        }
+        @Nullable EncodedImage icon = readImage(zip, "icon.png");
+        if (icon == null) {
+            icon = readImage(zip, "pack.png");
+        }
+        return new PresentationMetadata(description, icon);
+    }
+
+    /// Reads one bounded JSON description from a filesystem path.
+    private static String readDescription(Path file) throws IOException {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return "";
+        }
+        try (InputStream input = Files.newInputStream(file)) {
+            return descriptionFromJson(new String(input.readNBytes(MAX_METADATA_BYTES + 1), StandardCharsets.UTF_8));
+        }
+    }
+
+    /// Reads one bounded JSON description from a ZIP entry.
+    private static String readDescription(ZipFile zip, String name) throws IOException {
+        @Nullable ZipEntry entry = zip.getEntry(name);
+        if (entry == null || entry.isDirectory() || entry.getSize() > MAX_METADATA_BYTES) {
+            return "";
+        }
+        try (InputStream input = zip.getInputStream(entry)) {
+            return descriptionFromJson(new String(input.readNBytes(MAX_METADATA_BYTES + 1), StandardCharsets.UTF_8));
+        }
+    }
+
+    /// Extracts the standard pack.description field without exposing arbitrary JSON as UI text.
+    private static String descriptionFromJson(String content) {
+        if (content.length() > MAX_METADATA_BYTES) {
+            return "";
+        }
+        try {
+            JsonElement root = JsonParser.parseString(content);
+            if (!(root instanceof JsonObject object) || !(object.get("pack") instanceof JsonObject pack)) {
+                return "";
+            }
+            @Nullable JsonElement description = pack.get("description");
+            if (description == null || !description.isJsonPrimitive()
+                    || !description.getAsJsonPrimitive().isString()) {
+                return "";
+            }
+            String value = description.getAsString().trim();
+            return value.length() > 512 ? value.substring(0, 512) : value;
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    /// Reads one bounded image from a filesystem path.
+    private static @Nullable EncodedImage readImage(Path file) throws IOException {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        try (InputStream input = Files.newInputStream(file)) {
+            return EncodedImage.read(input, MAX_ICON_BYTES);
+        } catch (IOException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /// Reads one bounded image from a ZIP entry.
+    private static @Nullable EncodedImage readImage(ZipFile zip, String name) throws IOException {
+        @Nullable ZipEntry entry = zip.getEntry(name);
+        if (entry == null || entry.isDirectory() || entry.getSize() > MAX_ICON_BYTES) {
+            return null;
+        }
+        try (InputStream input = zip.getInputStream(entry)) {
+            return EncodedImage.read(input, MAX_ICON_BYTES);
+        } catch (IOException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
     /// Tests whether one path is a supported direct-child candidate.
     ///
     /// @param path candidate path
@@ -519,6 +641,18 @@ public final class FileSystemShaderPackCatalogAccess implements ShaderPackCatalo
             }
         }
         return true;
+    }
+
+    /// Immutable best-effort package presentation metadata.
+    @NotNullByDefault
+    private record PresentationMetadata(String description, @Nullable EncodedImage icon) {
+        private PresentationMetadata {
+            Objects.requireNonNull(description, "description");
+        }
+
+        private static PresentationMetadata empty() {
+            return new PresentationMetadata("", null);
+        }
     }
 
     /// Tests whether a source would recursively contain the managed directory.

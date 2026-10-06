@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
+import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
@@ -26,21 +27,27 @@ import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogIconSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.util.ServerAddress;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableModel;
-import java.awt.BorderLayout;
-import java.awt.FlowLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GridLayout;
 import java.io.IOException;
 import java.io.InputStream;
@@ -63,13 +70,20 @@ import java.util.function.UnaryOperator;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Edits one instance's ordered Minecraft `servers.dat` list.
+/// Edits one instance's ordered Minecraft servers.dat list with a rich list and details surface.
 @NotNullByDefault
 public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
+    private static final javax.swing.Icon FALLBACK_ICON = CatalogIconSupport.placeholder(new Color(92, 126, 164, 100));
+
     private final ServerCatalogModel model;
+    private final DefaultListModel<ServerCatalogItem> listModel = new DefaultListModel<>();
+    private final JList<ServerCatalogItem> list = new JList<>(listModel);
     private final DefaultTableModel tableModel;
     private final JTable table;
     private final JLabel statusLabel;
+    private final JLabel iconLabel = new JLabel();
+    private final JTextArea addressValue = detailValue("serverCatalogAddress");
+    private final JTextArea descriptionValue = detailValue("serverCatalogDescription");
     private final JButton editButton;
     private final JButton removeButton;
     private final JButton upButton;
@@ -83,7 +97,7 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Creates a server-list panel with an injectable storage boundary.
     ServerCatalogPanel(ServerCatalogAccess access, Executor executor) {
-        super(new BorderLayout(0, 8));
+        super(new MigLayout("insets 0, fill", "[grow,fill]", "[][grow,fill]8[]"));
         model = new ServerCatalogModel(access, executor);
         tableModel = new DefaultTableModel(new Object[] {i18n("server.name"), i18n("server.address")}, 0) {
             @Override
@@ -93,23 +107,49 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         };
         table = new JTable(tableModel);
         table.setName("serverCatalogTable");
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setFillsViewportHeight(true);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getSelectionModel().addListSelectionListener(event -> updateButtonState());
-        table.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent event) {
-                if (event.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(event)) {
-                    editSelected();
-                }
+
+        JPanel heading = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[40!]"));
+        heading.setOpaque(false);
+        JLabel title = new JLabel(i18n("server.management.title"));
+        title.setName("serverCatalogTitle");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 28.0F));
+        heading.add(title, "growx");
+        add(heading, "growx");
+
+        list.setName("serverCatalogList");
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setOpaque(false);
+        list.addListSelectionListener(event -> {
+            if (!event.getValueIsAdjusting()) {
+                showSelectedDetails();
+                updateButtonState();
             }
         });
-        add(new JScrollPane(table), BorderLayout.CENTER);
-        statusLabel = new JLabel(i18n("server.loading"));
-        statusLabel.setName("serverCatalogStatus");
-        statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
-        add(statusLabel, BorderLayout.NORTH);
+        list.setCellRenderer(new RichValueListCellRenderer<>(
+                ServerCatalogItem::name,
+                item -> item.description().isBlank() ? item.address() : item.description(),
+                item -> "",
+                item -> CatalogIconSupport.decode(item.icon(), FALLBACK_ICON),
+                item -> item.name() + " — " + item.address()));
+        JScrollPane listScroll = new JScrollPane(list);
+        listScroll.setName("serverCatalogListScroll");
+        listScroll.setBorder(BorderFactory.createEmptyBorder());
+        listScroll.setMinimumSize(new Dimension(0, 0));
+
+        JPanel details = new JPanel(new MigLayout("insets 12, fillx, wrap 1", "[grow,fill]", "[]8[]6[][]6[][][grow]"));
+        details.setName("serverCatalogDetails");
+        details.setOpaque(false);
+        iconLabel.setName("serverCatalogIcon");
+        iconLabel.setPreferredSize(new Dimension(CatalogIconSupport.ICON_SIZE, CatalogIconSupport.ICON_SIZE));
+        details.add(iconLabel, "w 40!, h 40!");
+        JLabel detailsTitle = new JLabel(i18n("server.details"));
+        detailsTitle.setFont(detailsTitle.getFont().deriveFont(Font.BOLD));
+        details.add(detailsTitle, "growx");
+        details.add(new JLabel(i18n("server.address")), "growx");
+        details.add(addressValue, "growx, wmin 0");
+        details.add(new JLabel(i18n("server.description")), "growx");
+        details.add(descriptionValue, "growx, wmin 0");
+
         JButton addButton = new JButton(i18n("server.add"));
         addButton.setName("serverCatalogAdd");
         addButton.addActionListener(event -> addServer());
@@ -125,17 +165,31 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         downButton = new JButton(i18n("server.move_down"));
         downButton.setName("serverCatalogMoveDown");
         downButton.addActionListener(event -> moveSelected(1));
-        JPanel commands = new JPanel(new FlowLayout(FlowLayout.LEADING, 6, 0));
-        commands.add(addButton);
-        commands.add(editButton);
-        commands.add(removeButton);
-        commands.add(upButton);
-        commands.add(downButton);
-        add(commands, BorderLayout.SOUTH);
+        JPanel commands = new JPanel(new MigLayout("insets 0, fillx, wrap 2", "[grow,fill][grow,fill]", "[40!]"));
+        commands.setOpaque(false);
+        commands.add(addButton, "growx");
+        commands.add(editButton, "growx");
+        commands.add(removeButton, "growx");
+        commands.add(upButton, "growx");
+        commands.add(downButton, "growx");
+        details.add(commands, "growx");
+
+        JPanel center = new JPanel(new MigLayout("insets 0, fill", "[grow,fill]12[280!,fill]", "[grow,fill]"));
+        center.setOpaque(false);
+        center.add(listScroll, "grow, wmin 0, hmin 0");
+        center.add(details, "grow, wmin 0, hmin 0");
+        add(center, "grow, wmin 0, hmin 0");
+
+        statusLabel = new JLabel(i18n("server.loading"));
+        statusLabel.setName("serverCatalogStatus");
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
+        add(statusLabel, "growx");
+        showNoSelection();
         updateButtonState();
         model.load().thenAccept(this::publishSnapshot);
     }
 
+    /// Publishes one model snapshot on the Swing event thread.
     private void publishSnapshot(ServerCatalogSnapshot snapshot) {
         if (closed) {
             return;
@@ -144,15 +198,24 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
             if (closed) {
                 return;
             }
+            int previousIndex = list.getSelectedIndex();
+            listModel.clear();
             tableModel.setRowCount(0);
             for (ServerCatalogItem server : snapshot.servers()) {
+                listModel.addElement(server);
                 tableModel.addRow(new Object[] {server.name(), server.address()});
+            }
+            if (previousIndex >= 0 && previousIndex < listModel.size()) {
+                list.setSelectedIndex(previousIndex);
+            } else if (!listModel.isEmpty()) {
+                list.setSelectedIndex(0);
             }
             if (snapshot.status() == ServerCatalogStatus.READY) {
                 statusLabel.setText(snapshot.servers().isEmpty() ? i18n("server.empty") : " ");
             } else if (snapshot.status() == ServerCatalogStatus.FAILURE) {
                 statusLabel.setText(i18n("server.failure", snapshot.message()));
             }
+            showSelectedDetails();
             updateButtonState();
         };
         if (SwingUtilities.isEventDispatchThread()) {
@@ -168,23 +231,17 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     }
 
     private void editSelected() {
-        int index = table.getSelectedRow();
-        if (index < 0) {
+        int index = list.getSelectedIndex();
+        if (index < 0 || index >= listModel.size()) {
             return;
         }
-        List<ServerCatalogItem> servers = model.snapshot().servers();
-        if (index >= servers.size()) {
-            table.clearSelection();
-            updateButtonState();
-            return;
-        }
-        ServerCatalogItem selected = servers.get(index);
+        ServerCatalogItem selected = listModel.get(index);
         showEditor(selected).ifPresent(values -> model.edit(index, values.name(), values.address())
                 .thenAccept(this::publishSnapshot).exceptionally(this::showFailure));
     }
 
     private void removeSelected() {
-        int index = table.getSelectedRow();
+        int index = list.getSelectedIndex();
         if (index < 0) {
             return;
         }
@@ -196,19 +253,18 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     }
 
     private void moveSelected(int delta) {
-        int index = table.getSelectedRow();
+        int index = list.getSelectedIndex();
         if (index < 0) {
             return;
         }
         model.move(index, index + delta).thenAccept(snapshot -> {
             publishSnapshot(snapshot);
             SwingUtilities.invokeLater(() -> {
-                if (closed) {
-                    return;
-                }
-                int target = index + delta;
-                if (target >= 0 && target < tableModel.getRowCount()) {
-                    table.setRowSelectionInterval(target, target);
+                if (!closed) {
+                    int target = index + delta;
+                    if (target >= 0 && target < listModel.getSize()) {
+                        list.setSelectedIndex(target);
+                    }
                 }
             });
         }).exceptionally(this::showFailure);
@@ -247,9 +303,27 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         JOptionPane.showMessageDialog(this, i18n("server.invalid"), i18n("server.edit"), JOptionPane.ERROR_MESSAGE);
     }
 
+    private void showSelectedDetails() {
+        int index = list.getSelectedIndex();
+        if (index < 0 || index >= listModel.size()) {
+            showNoSelection();
+            return;
+        }
+        ServerCatalogItem selected = listModel.get(index);
+        addressValue.setText(selected.address());
+        descriptionValue.setText(selected.description().isBlank() ? i18n("server.description.unavailable") : selected.description());
+        iconLabel.setIcon(CatalogIconSupport.decode(selected.icon(), FALLBACK_ICON));
+    }
+
+    private void showNoSelection() {
+        addressValue.setText("");
+        descriptionValue.setText(i18n("server.no_selection"));
+        iconLabel.setIcon(FALLBACK_ICON);
+    }
+
     private void updateButtonState() {
-        int index = table.getSelectedRow();
-        int size = tableModel.getRowCount();
+        int index = list.getSelectedIndex();
+        int size = listModel.getSize();
         boolean selected = index >= 0 && index < size;
         editButton.setEnabled(selected);
         removeButton.setEnabled(selected);
@@ -270,9 +344,20 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         return null;
     }
 
-    /// Returns the table used to render the current server order.
+    /// Returns the compatibility table used by existing model/UI tests.
     JTable table() {
         return table;
+    }
+
+    private static JTextArea detailValue(String name) {
+        JTextArea value = new JTextArea();
+        value.setName(name);
+        value.setEditable(false);
+        value.setLineWrap(true);
+        value.setWrapStyleWord(true);
+        value.setOpaque(false);
+        value.setBorder(BorderFactory.createEmptyBorder());
+        return value;
     }
 
     @Override
