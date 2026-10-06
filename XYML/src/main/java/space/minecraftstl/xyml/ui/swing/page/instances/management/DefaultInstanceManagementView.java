@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.In
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenancePanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.servers.ServerCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
@@ -436,6 +437,11 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             panel.setOpenDownloadsCommand(
                     () -> contentNavigation.openDownloads(DownloadPageTarget.WORLDS));
             return new InstanceManagementPage(panel, panel::activate, panel::close);
+        });
+        factories.put(InstanceManagementPageId.SERVERS, () -> {
+            ServerCatalogPanel panel = new ServerCatalogPanel(repository,
+                    instanceId, executor);
+            return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.SHADERS, () -> {
             ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
