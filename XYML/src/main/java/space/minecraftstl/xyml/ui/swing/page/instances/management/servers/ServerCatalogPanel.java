@@ -284,6 +284,18 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     private record EditorValues(String name, String address) {
     }
 
+    /// Internal compare-and-write extension used by revision-aware storage implementations.
+    @NotNullByDefault
+    interface RevisionAwareServerCatalogAccess extends ServerCatalogAccess {
+        /// Publishes one complete list only when the source still matches the preceding read.
+        ///
+        /// @param expectedServers entries observed before applying the mutation
+        /// @param servers ordered entries to publish
+        /// @throws IOException if the source changed, or publication fails
+        void writeIfUnchanged(List<ServerCatalogItem> expectedServers, List<ServerCatalogItem> servers)
+                throws IOException;
+    }
+
     /// Serial asynchronous state owner for one server catalog.
     @NotNullByDefault
     static final class ServerCatalogModel implements AutoCloseable {
@@ -410,7 +422,11 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
                     current = access.read();
                 }
                 List<ServerCatalogItem> next = List.copyOf(operation.apply(current));
-                access.writeIfUnchanged(current, next);
+                if (access instanceof RevisionAwareServerCatalogAccess revisionAwareAccess) {
+                    revisionAwareAccess.writeIfUnchanged(current, next);
+                } else {
+                    access.write(next);
+                }
                 synchronized (lock) {
                     if (closed) {
                         return snapshot;
@@ -467,7 +483,7 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    private static final class FileSystemServerCatalogAccess implements ServerCatalogAccess {
+    private static final class FileSystemServerCatalogAccess implements RevisionAwareServerCatalogAccess {
         private final Path file;
         private @Nullable FileRevision expectedRevision;
 

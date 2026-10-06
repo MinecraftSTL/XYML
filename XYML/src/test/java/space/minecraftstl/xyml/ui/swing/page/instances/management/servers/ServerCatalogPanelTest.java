@@ -169,7 +169,7 @@ final class ServerCatalogPanelTest {
 
     /// Access fixture that compares every write with the revision established by its latest read.
     @NotNullByDefault
-    private static final class RevisionCheckingAccess implements ServerCatalogAccess {
+    private static final class RevisionCheckingAccess implements ServerCatalogPanel.RevisionAwareServerCatalogAccess {
         /// Current immutable storage rows.
         private List<ServerCatalogItem> current;
 
