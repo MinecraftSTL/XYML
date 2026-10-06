@@ -104,6 +104,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Tabbed grouping for the complete settings surface.
     private final JTabbedPane settingsTabs = new AnimatedTabbedPane();
 
+    /// Opens manual configuration migration for the current real instance.
+    private final javax.swing.JButton manualMigrationButton = new javax.swing.JButton(
+            i18n("settings.instance_config_migration.manual.open"));
     /// Inherited, automatic, and manual memory-allocation choices.
     private final InstanceMemoryModeSelector memoryModeSelector;
 
@@ -373,8 +376,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
                 workingDirectoryChanged);
-        settingsTabs.addTab(i18n("settings.instance_config_migration.manual.title"), createScrollableTab(
-                new InstanceConfigManualMigrationPanel(repository, instanceId, executor)));
+        manualMigrationButton.addActionListener(event ->
+                InstanceConfigManualMigrationDialog.show(this, repository, instanceId, executor));
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
@@ -583,7 +586,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Creates the page heading.
     /// @return unframed heading panel
-    private static JPanel createHeader() {
+    private JPanel createHeader() {
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
         header.setBorder(BorderFactory.createEmptyBorder(18, 20, 8, 20));
@@ -591,6 +594,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         heading.setName("instanceGameSettingsTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 22.0F));
         header.add(heading, BorderLayout.WEST);
+        manualMigrationButton.setName("instanceConfigManualMigrationOpen");
+        header.add(manualMigrationButton, BorderLayout.EAST);
         return header;
     }
 
@@ -909,7 +914,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             throw new IllegalStateException("Game settings editor is closed");
         }
         InstanceGameSettingsSnapshot current = displayedSnapshot();
-
         boolean memoryModeOverridden = !memoryModeSelector.isInherited();
         boolean automaticMemory = memoryModeOverridden
                 ? memoryModeSelector.isAutomatic()
@@ -945,7 +949,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     javaPathField.getText(),
                     "custom Java path");
         }
-
         double windowWidth = editedRequiredDouble(
                 windowWidthControl,
                 current.window().width(),
@@ -975,7 +978,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 quickPlay.multiplayer(),
                 quickPlay.singleplayerOverridden(),
                 quickPlay.singleplayer());
-
         @Nullable Integer minimumMemory = editedOptionalInteger(
                 minimumMemoryControl,
                 current.jvm().minimumMemoryMiB(),
@@ -991,7 +993,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 && !normalizedPermanentGeneration.chars().allMatch(Character::isDigit)) {
             throw new IllegalArgumentException("Permanent generation size must be a whole number of MiB");
         }
-
         return new InstanceGameSettingsSnapshot(
                 current.writable(),
                 parentPresetControls.edited(current.parentPreset()),
@@ -1297,7 +1298,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             javaVersionField.setText(snapshot.javaRuntime().customVersion());
             javaPathField.setText(snapshot.javaRuntime().customPath());
             applyDetectedJavaSnapshotValue(snapshot.javaRuntime().detectedJava());
-
             applyChoice(windowTypeControl, snapshot.window().typeOverridden(), snapshot.window().type());
             applyText(
                     windowWidthControl,
