@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
@@ -67,8 +68,8 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
     /// Guards snapshot, listener, lifecycle, and generation state.
     private final Object lock = new Object();
 
-    /// Serializes every disk mutation while allowing scans to observe completed writes.
-    private final Object mutationLock = new Object();
+    /// Serializes every disk scan and mutation against the shared catalog files.
+    private final Object storageLock = new Object();
 
     /// Registered transition listeners.
     private final List<ValueChangeListener<ShaderPackCatalogSnapshot>> listeners = new ArrayList<>();
@@ -172,23 +173,28 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
     @Override
     public void selectShaderPack(Path path) {
         Path selected = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        @Nullable Publication publication;
         synchronized (lock) {
             if (closed) {
                 return;
             }
             int index = indexOf(snapshot.items(), selected);
-            publishLocked(withSelection(snapshot, index < 0 ? OptionalInt.empty() : OptionalInt.of(index)));
+            publication = preparePublicationLocked(
+                    withSelection(snapshot, index < 0 ? OptionalInt.empty() : OptionalInt.of(index)));
         }
+        publish(publication);
     }
 
     /// Clears the current row selection.
     @Override
     public void clearSelection() {
+        @Nullable Publication publication = null;
         synchronized (lock) {
             if (!closed) {
-                publishLocked(withSelection(snapshot, OptionalInt.empty()));
+                publication = preparePublicationLocked(withSelection(snapshot, OptionalInt.empty()));
             }
         }
+        publish(publication);
     }
 
     /// Imports one or more sources and rescans the catalog.
@@ -281,24 +287,29 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
     /// Starts one background scan.
     private void startScan() {
         long requestedGeneration;
+        @Nullable Publication loadingPublication;
         synchronized (lock) {
             if (closed) {
                 return;
             }
             requestedGeneration = ++generation;
-            publishLocked(withStatus(snapshot, ShaderPackCatalogStatus.LOADING, loadingText));
+            loadingPublication = preparePublicationLocked(
+                    withStatus(snapshot, ShaderPackCatalogStatus.LOADING, loadingText));
         }
+        publish(loadingPublication);
         try {
             executor.execute(() -> finishScan(requestedGeneration));
         } catch (RuntimeException failure) {
+            @Nullable Publication failurePublication = null;
             synchronized (lock) {
                 if (!closed && generation == requestedGeneration) {
-                    publishLocked(withStatus(
+                    failurePublication = preparePublicationLocked(withStatus(
                             snapshot,
                             ShaderPackCatalogStatus.FAILED,
                             failureText + ": " + detail(failure)));
                 }
             }
+            publish(failurePublication);
         }
     }
 
@@ -307,21 +318,28 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
     /// @param requestedGeneration generation being completed
     private void finishScan(long requestedGeneration) {
         try {
-            ShaderPackCatalogSnapshot next = scan();
+            ShaderPackCatalogSnapshot next;
+            synchronized (storageLock) {
+                next = scan();
+            }
+            @Nullable Publication publication = null;
             synchronized (lock) {
                 if (!closed && generation == requestedGeneration) {
-                    publishLocked(next);
+                    publication = preparePublicationLocked(next);
                 }
             }
+            publish(publication);
         } catch (RuntimeException | Error | java.io.IOException failure) {
+            @Nullable Publication publication = null;
             synchronized (lock) {
                 if (!closed && generation == requestedGeneration) {
-                    publishLocked(withStatus(
+                    publication = preparePublicationLocked(withStatus(
                             snapshot,
                             ShaderPackCatalogStatus.FAILED,
                             failureText + ": " + detail(failure)));
                 }
             }
+            publish(publication);
         }
     }
 
@@ -357,34 +375,42 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
         CompletableFuture<ShaderPackCatalogSnapshot> result = new CompletableFuture<>();
         try {
             executor.execute(() -> {
-                synchronized (mutationLock) {
+                synchronized (storageLock) {
+                    @Nullable Publication busyPublication;
                     synchronized (lock) {
                         if (closed) {
                             result.completeExceptionally(
                                     new IllegalStateException("Shader-pack catalog is closed"));
                             return;
                         }
-                        publishLocked(withWriteStatus(snapshot, ShaderPackCatalogWriteStatus.BUSY, writingText));
+                        generation++;
+                        busyPublication = preparePublicationLocked(
+                                withWriteStatus(snapshot, ShaderPackCatalogWriteStatus.BUSY, writingText));
                     }
+                    publish(busyPublication);
                     try {
                         ShaderPackCatalogSnapshot next = Objects.requireNonNull(
                                 mutation.run(),
                                 "mutation returned null");
+                        @Nullable Publication successPublication = null;
                         synchronized (lock) {
                             if (!closed && !next.equals(snapshot)) {
-                                publishLocked(next);
+                                successPublication = preparePublicationLocked(next);
                             }
                         }
+                        publish(successPublication);
                         result.complete(next);
                     } catch (RuntimeException | Error | java.io.IOException failure) {
+                        @Nullable Publication failurePublication = null;
                         synchronized (lock) {
                             if (!closed) {
-                                publishLocked(withWriteStatus(
+                                failurePublication = preparePublicationLocked(withWriteStatus(
                                         snapshot,
                                         ShaderPackCatalogWriteStatus.FAILED,
                                         writeFailedText + ": " + detail(failure)));
                             }
                         }
+                        publish(failurePublication);
                         result.completeExceptionally(failure);
                     }
                 }
@@ -395,23 +421,56 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
         return result;
     }
 
-    /// Publishes one snapshot while holding the state lock.
+    /// Commits one snapshot and captures its listeners while holding the state lock.
     ///
     /// @param next next snapshot
-    private void publishLocked(ShaderPackCatalogSnapshot next) {
+    /// @return immutable publication to deliver after releasing the state lock
+    private Publication preparePublicationLocked(ShaderPackCatalogSnapshot next) {
         ShaderPackCatalogSnapshot previous = snapshot;
         snapshot = Objects.requireNonNull(next, "next");
-        for (ValueChangeListener<ShaderPackCatalogSnapshot> listener : List.copyOf(listeners)) {
-            listener.onChange(new ValueChange<>(this, previous, snapshot));
-        }
+        return new Publication(
+                new ValueChange<>(this, previous, snapshot),
+                List.copyOf(listeners));
     }
 
-    /// Publishes one snapshot without requiring the caller to hold the state lock.
+    /// Commits and publishes one snapshot without invoking listeners under the state lock.
     ///
     /// @param next next snapshot
     private void publish(ShaderPackCatalogSnapshot next) {
+        @Nullable Publication publication;
         synchronized (lock) {
-            publishLocked(next);
+            if (closed) {
+                return;
+            }
+            publication = preparePublicationLocked(next);
+        }
+        publish(publication);
+    }
+
+    /// Delivers one committed transition while isolating every external listener failure.
+    ///
+    /// @param publication committed publication, or null when the guarded transition became stale
+    private static void publish(@Nullable Publication publication) {
+        if (publication == null) {
+            return;
+        }
+        for (ValueChangeListener<ShaderPackCatalogSnapshot> listener : publication.listeners()) {
+            try {
+                listener.onChange(publication.change());
+            } catch (RuntimeException | Error listenerFailure) {
+                reportListenerFailure(listenerFailure);
+            }
+        }
+    }
+
+    /// Reports an isolated listener failure without stopping state progression or Future completion.
+    ///
+    /// @param listenerFailure listener failure to report
+    private static void reportListenerFailure(Throwable listenerFailure) {
+        try {
+            Lang.handleUncaughtException(listenerFailure);
+        } catch (RuntimeException | Error ignored) {
+            // Listener diagnostics cannot corrupt already committed catalog state.
         }
     }
 
@@ -526,6 +585,18 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
     private static String detail(Throwable failure) {
         @Nullable String message = failure.getMessage();
         return message == null || message.isBlank() ? failure.getClass().getSimpleName() : message;
+    }
+
+    /// One committed state transition and the listeners eligible at commit time.
+    @NotNullByDefault
+    private record Publication(
+            ValueChange<ShaderPackCatalogSnapshot> change,
+            List<ValueChangeListener<ShaderPackCatalogSnapshot>> listeners) {
+        /// Validates and defensively copies one publication.
+        private Publication {
+            Objects.requireNonNull(change, "change");
+            listeners = List.copyOf(listeners);
+        }
     }
 
     /// Blocking mutation runnable.
