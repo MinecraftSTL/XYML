@@ -45,7 +45,7 @@ public interface ResourcePackCatalogModel
     /// @return current catalog snapshot
     ResourcePackCatalogSnapshot snapshot();
 
-    /// Returns the current immutable shallow path index in source order.
+    /// Returns the current immutable shallow path index in enabled-priority display order.
     ///
     /// The list contains no parsed resource-pack metadata and is empty before a successful index.
     /// Callers may use it to derive filtered viewport indexes without widening metadata loads.
@@ -108,6 +108,16 @@ public interface ResourcePackCatalogModel
     /// @param path direct-child path belonging to the current complete catalog
     /// @return asynchronous completion after options persistence and shallow reindexing
     CompletionStage<ResourcePackCatalogSnapshot> disableResourcePack(Path path);
+
+    /// Persistently reorders one enabled pack to a final display index.
+    ///
+    /// The first enabled entry has highest Minecraft priority. The target index addresses the
+    /// current enabled prefix and may be the final position after the move.
+    ///
+    /// @param path direct-child path belonging to the current complete enabled catalog
+    /// @param targetIndex zero-based final index in the current enabled display order
+    /// @return asynchronous completion after options persistence and shallow reindexing
+    CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex);
 
     /// Persistently disables and then deletes one current pack by stable path.
     ///

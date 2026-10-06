@@ -32,6 +32,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
@@ -265,6 +266,76 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 () -> assertTrue(persisted.startsWith(marker + "\r\n")),
                 () -> assertTrue(persisted.contains("resourcePacks:[\"file/legacy-pack\"]\r\n")),
                 () -> assertTrue(persisted.endsWith("incompatibleResourcePacks:[]\r\n")));
+    }
+
+    /// Reorders enabled identifiers while retaining unknown entries and unrelated option state.
+    @Test
+    public void reordersEnabledPacksByPriorityAndPreservesUnknownIdentifiers() throws IOException {
+        Fixture fixture = fixture("reorder-options");
+        Path alpha = createPackDirectory(
+                fixture.packDirectory().resolve("alpha"),
+                15,
+                "Alpha");
+        Path beta = createPackDirectory(
+                fixture.packDirectory().resolve("beta"),
+                15,
+                "Beta");
+        Path disabled = createPackDirectory(
+                fixture.packDirectory().resolve("disabled"),
+                15,
+                "Disabled");
+        Files.createDirectories(fixture.runDirectory());
+        String original = optionLine("resourcePacks", "alpha", "unknown-pack", "file/beta")
+                + optionLine("incompatibleResourcePacks", "file/beta");
+        Files.writeString(fixture.optionsFile(), original, StandardCharsets.UTF_8);
+
+        ResourcePackCatalogIndex before = fixture.access().loadIndex(new LoadCancellation());
+        AtomicInteger commits = new AtomicInteger();
+        ResourcePackCatalogMutationAccessResult result = fixture.access().mutateAndLoadIndex(
+                new ResourcePackReorderMutation(alpha, 0),
+                new LoadCancellation(),
+                commits::incrementAndGet);
+        String persisted = Files.readString(fixture.optionsFile(), StandardCharsets.UTF_8);
+        String expectedResourcePacks = optionLine(
+                "resourcePacks", "file/beta", "unknown-pack", "alpha");
+        String expectedIncompatible = optionLine("incompatibleResourcePacks", "file/beta");
+
+        assertAll(
+                () -> assertEquals(List.of(beta, alpha, disabled), before.paths()),
+                () -> assertEquals(2, before.enabledPathCount()),
+                () -> assertEquals(null, result.mutationFailure()),
+                () -> assertEquals(1, commits.get()),
+                () -> assertEquals(List.of(alpha, beta, disabled), result.refreshedIndex().paths()),
+                () -> assertEquals(2, result.refreshedIndex().enabledPathCount()),
+                () -> assertTrue(persisted.startsWith(expectedResourcePacks)),
+                () -> assertTrue(persisted.endsWith(expectedIncompatible)));
+    }
+
+    /// Rejects duplicate identifiers for one installed pack before the commit point.
+    @Test
+    public void rejectsDuplicateEnabledIdentifiersWithoutWriting() throws IOException {
+        Fixture fixture = fixture("reorder-duplicates");
+        Path alpha = createPackDirectory(
+                fixture.packDirectory().resolve("alpha"),
+                15,
+                "Alpha");
+        Files.createDirectories(fixture.runDirectory());
+        String original = optionLine("resourcePacks", "alpha", "file/alpha")
+                + optionLine("incompatibleResourcePacks");
+        Files.writeString(fixture.optionsFile(), original, StandardCharsets.UTF_8);
+        AtomicInteger commits = new AtomicInteger();
+
+        ResourcePackCatalogMutationAccessResult result = fixture.access().mutateAndLoadIndex(
+                new ResourcePackReorderMutation(alpha, 0),
+                new LoadCancellation(),
+                commits::incrementAndGet);
+
+        assertAll(
+                () -> assertInstanceOf(IllegalArgumentException.class, result.mutationFailure()),
+                () -> assertEquals(0, commits.get()),
+                () -> assertEquals(original, Files.readString(fixture.optionsFile(), StandardCharsets.UTF_8)),
+                () -> assertEquals(List.of(alpha), result.refreshedIndex().paths()),
+                () -> assertEquals(1, result.refreshedIndex().enabledPathCount()));
     }
 
     /// Propagates malformed JSON and safe-save failures instead of silently discarding them.
@@ -620,6 +691,18 @@ public final class FileSystemResourcePackCatalogAccessTest {
         try (var children = Files.list(parent)) {
             return children.anyMatch(path -> requireFileName(path).startsWith(prefix));
         }
+    }
+
+    /// Creates one UTF-8 options line with a JSON-quoted string list.
+    ///
+    /// @param key option key
+    /// @param values raw string values
+    /// @return complete line with LF terminator
+    private static String optionLine(String key, String... values) {
+        String quote = String.valueOf((char) 34);
+        return key + ":[" + String.join(",", Arrays.stream(values)
+                .map(value -> quote + value + quote)
+                .toList()) + "]" + String.valueOf((char) 10);
     }
 
     /// Waits for one latch with the shared finite timeout.
