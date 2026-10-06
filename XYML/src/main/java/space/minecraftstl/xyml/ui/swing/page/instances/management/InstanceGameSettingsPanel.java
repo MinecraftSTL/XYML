@@ -373,10 +373,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
                 workingDirectoryChanged);
+        settingsTabs.addTab(i18n("settings.instance_config_migration.manual.title"), createScrollableTab(
+                new InstanceConfigManualMigrationPanel(repository, instanceId, executor)));
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
-    ///
     /// Global-preset callers own persistence and therefore use [#editedSnapshot()] with a store whose snapshot can
     /// be replaced before [#reloadFromStore()] is invoked.
     ///
