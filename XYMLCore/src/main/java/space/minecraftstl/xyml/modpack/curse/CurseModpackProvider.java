@@ -136,7 +136,7 @@ public final class CurseModpackProvider implements ModpackProvider {
                                     result = result.withFileName(remoteFile.filename()).withURL(remoteFile.url());
                                 }
                                 if (!file.addonQueried()) {
-                                    RemoteAddon addon = CurseForgeRemoteAddonRepository.MODS.getAddonById(
+                                    RemoteAddon addon = CurseForgeRemoteAddonRepository.getInstance().getAddonById(
                                             downloadProvider, Integer.toString(file.projectID()));
                                     result = result.withAddon(addon);
                                 }
