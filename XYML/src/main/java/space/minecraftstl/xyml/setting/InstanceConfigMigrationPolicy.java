@@ -67,6 +67,27 @@ public record InstanceConfigMigrationPolicy(
                 EnumSet.allOf(InstanceConfigMigrationContent.class));
     }
 
+    /// Returns a policy whose exact instance source follows a successful rename in the identified repository.
+    ///
+    /// @param gameDirectory renamed instance repository
+    /// @param from previous instance identifier
+    /// @param to replacement instance identifier
+    /// @return this policy when it does not reference the renamed source, otherwise an updated immutable policy
+    public InstanceConfigMigrationPolicy renameSource(
+            GameDirectoryID gameDirectory,
+            GameInstanceID from,
+            GameInstanceID to) {
+        Objects.requireNonNull(gameDirectory, "gameDirectory");
+        Objects.requireNonNull(from, "from");
+        Objects.requireNonNull(to, "to");
+        if (sourceType != InstanceConfigMigrationSourceType.INSTANCE
+                || !gameDirectory.equals(sourceGameDirectory)
+                || !from.equals(sourceInstance)) {
+            return this;
+        }
+        return new InstanceConfigMigrationPolicy(enabled, sourceType, gameDirectory, to, contents);
+    }
+
     /// Returns whether this policy performs any automatic file operation.
     ///
     /// @return true when enabled with at least one selected content kind

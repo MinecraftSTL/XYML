@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,26 @@ class InstanceConfigMigrationPolicyTest {
                 new GameDirectoryID(UUID.randomUUID()),
                 null,
                 EnumSet.allOf(InstanceConfigMigrationContent.class)));
+    }
+
+    /// Exact cross-directory source identity follows a successful instance rename without changing other values.
+    @Test
+    void followsExactSourceRename() {
+        GameDirectoryID directoryId = new GameDirectoryID(UUID.randomUUID());
+        GameInstanceID previous = new GameInstanceID("previous");
+        GameInstanceID renamed = new GameInstanceID("renamed");
+        InstanceConfigMigrationPolicy policy = new InstanceConfigMigrationPolicy(
+                true,
+                InstanceConfigMigrationSourceType.INSTANCE,
+                directoryId,
+                previous,
+                EnumSet.of(InstanceConfigMigrationContent.OPTIONS));
+
+        InstanceConfigMigrationPolicy updated = policy.renameSource(directoryId, previous, renamed);
+
+        assertEquals(renamed, updated.sourceInstance());
+        assertEquals(policy.contents(), updated.contents());
+        assertSame(policy, policy.renameSource(new GameDirectoryID(UUID.randomUUID()), previous, renamed));
     }
 
     /// Verifies launcher settings preserve a cross-directory source and selected content.

@@ -365,7 +365,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             Executor executor,
             Runnable workingDirectoryChanged) {
         this(
-                new RepositoryInstanceGameSettingsStore(repository, instanceId),
+                new RepositoryInstanceGameSettingsStore(
+                        repository,
+                        instanceId,
+                        new LauncherAutomaticInstanceConfigMigrationTaskFactory(executor)),
                 new JavaManagerRuntimeManagementService(),
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
