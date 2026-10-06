@@ -20,13 +20,17 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.image.EncodedImage;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 
 import javax.imageio.ImageIO;
 import javax.swing.Icon;
-import javax.swing.ImageIcon;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -35,15 +39,17 @@ import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.CRC32;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,7 +74,7 @@ final class ResourcePackIconCacheTest {
 
         Icon icon = cache.iconFor(model(CompletableFuture.completedFuture(null)), item(), new JList<>());
 
-        assertSame(ResourcePackIconCache.PLACEHOLDER, icon);
+        assertEquals(centerColor(ResourcePackIconCache.PLACEHOLDER), centerColor(icon));
     }
 
     /// Rejects malformed encoded data with the existing failure icon.
@@ -82,7 +88,7 @@ final class ResourcePackIconCacheTest {
                 item(),
                 new JList<>());
 
-        assertSame(ResourcePackIconCache.FAILURE, icon);
+        assertEquals(centerColor(ResourcePackIconCache.FAILURE), centerColor(icon));
     }
 
     /// Decodes a normal image and preserves the existing 32-by-32 row icon contract.
@@ -90,16 +96,20 @@ final class ResourcePackIconCacheTest {
     void normalIconDecodesToRowSize() throws IOException {
         ResourcePackIconCache cache = new ResourcePackIconCache();
         BufferedImage source = new BufferedImage(4, 2, BufferedImage.TYPE_INT_ARGB);
-        source.setRGB(0, 0, Color.RED.getRGB());
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                source.setRGB(x, y, Color.RED.getRGB());
+            }
+        }
 
         Icon icon = cache.iconFor(
                 model(CompletableFuture.completedFuture(new EncodedImage(encodePng(source)))),
                 item(),
                 new JList<>());
 
-        assertTrue(icon instanceof ImageIcon);
         assertEquals(ResourcePackIconCache.ICON_SIZE, icon.getIconWidth());
         assertEquals(ResourcePackIconCache.ICON_SIZE, icon.getIconHeight());
+        assertEquals(Color.RED, centerColor(icon));
     }
 
     /// Rejects an image whose declared edge exceeds the pre-decode limit.
@@ -113,7 +123,7 @@ final class ResourcePackIconCacheTest {
                 item(),
                 new JList<>());
 
-        assertSame(ResourcePackIconCache.FAILURE, icon);
+        assertEquals(centerColor(ResourcePackIconCache.FAILURE), centerColor(icon));
     }
 
     /// Rejects an image whose declared pixel count exceeds the pre-decode limit.
@@ -127,26 +137,88 @@ final class ResourcePackIconCacheTest {
                 item(),
                 new JList<>());
 
-        assertSame(ResourcePackIconCache.FAILURE, icon);
+        assertEquals(centerColor(ResourcePackIconCache.FAILURE), centerColor(icon));
     }
 
-    /// Repaints the list after asynchronous icon data completes and exposes the decoded icon afterward.
+    /// Keeps one stable icon object current after asynchronous data completes.
     @Test
-    void asynchronousCompletionRepaintsList() throws Exception {
+    void asynchronousCompletionUpdatesStableIconAndRepaintsList() throws Exception {
+        ResourcePackIconCache cache = new ResourcePackIconCache();
+        CompletableFuture<EncodedImage> pending = new CompletableFuture<>();
+        RecordingList list = new RecordingList();
+        BufferedImage source = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                source.setRGB(x, y, Color.RED.getRGB());
+            }
+        }
+
+        Icon loadingIcon = cache.iconFor(model(pending), item(), list);
+        int repaintCountBeforeCompletion = list.repaintCount();
+        assertEquals(centerColor(ResourcePackIconCache.PLACEHOLDER), centerColor(loadingIcon));
+
+        pending.complete(new EncodedImage(encodePng(source)));
+        SwingUtilities.invokeAndWait(() -> { });
+        Icon completedIcon = cache.iconFor(model(pending), item(), list);
+
+        assertSame(loadingIcon, completedIcon);
+        assertEquals(Color.RED, centerColor(completedIcon));
+        assertTrue(list.repaintCount() > repaintCountBeforeCompletion);
+    }
+
+    /// Publishes the existing failure marker through the same stable icon object after an async failure.
+    @Test
+    void asynchronousFailureUpdatesStableIcon() throws Exception {
         ResourcePackIconCache cache = new ResourcePackIconCache();
         CompletableFuture<EncodedImage> pending = new CompletableFuture<>();
         RecordingList list = new RecordingList();
 
         Icon loadingIcon = cache.iconFor(model(pending), item(), list);
-        int repaintCountBeforeCompletion = list.repaintCount();
-
-        pending.complete(new EncodedImage(encodePng(new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB))));
+        pending.completeExceptionally(new IOException("broken icon"));
         SwingUtilities.invokeAndWait(() -> { });
-        Icon completedIcon = cache.iconFor(model(pending), item(), list);
+        Icon failedIcon = cache.iconFor(model(pending), item(), list);
 
-        assertSame(ResourcePackIconCache.PLACEHOLDER, loadingIcon);
-        assertNotSame(ResourcePackIconCache.PLACEHOLDER, completedIcon);
-        assertTrue(list.repaintCount() > repaintCountBeforeCompletion);
+        assertSame(loadingIcon, failedIcon);
+        assertEquals(centerColor(ResourcePackIconCache.FAILURE), centerColor(failedIcon));
+    }
+
+    /// Keeps a renderer-owned stable icon current after the asynchronous future completes.
+    @Test
+    void rendererCacheDoesNotFreezeLoadingPlaceholder() throws Exception {
+        ResourcePackIconCache cache = new ResourcePackIconCache();
+        CompletableFuture<EncodedImage> pending = new CompletableFuture<>();
+        ResourcePackCatalogItem item = item();
+        RecordingList list = new RecordingList();
+        RichChoiceListCellRenderer<ResourcePackCatalogItem> renderer = new RichChoiceListCellRenderer<>(
+                ResourcePackCatalogItem::displayText,
+                value -> "",
+                value -> "",
+                value -> cache.iconFor(model(pending), value, list),
+                value -> "");
+        BufferedImage source = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                source.setRGB(x, y, Color.RED.getRGB());
+            }
+        }
+        AtomicReference<Color> loadingColor = new AtomicReference<>();
+        AtomicReference<Color> completedColor = new AtomicReference<>();
+        list.setSize(320, RichChoiceListCellRenderer.ROW_HEIGHT);
+
+        SwingUtilities.invokeAndWait(() -> {
+            renderer.getListCellRendererComponent(list, ChoiceListEntry.loaded(0, item), 0, false, false);
+            loadingColor.set(centerColor(rendererIcon(renderer)));
+        });
+        pending.complete(new EncodedImage(encodePng(source)));
+        SwingUtilities.invokeAndWait(() -> { });
+        SwingUtilities.invokeAndWait(() -> {
+            renderer.getListCellRendererComponent(list, ChoiceListEntry.loaded(0, item), 0, false, false);
+            completedColor.set(centerColor(rendererIcon(renderer)));
+        });
+
+        assertEquals(centerColor(ResourcePackIconCache.PLACEHOLDER), loadingColor.get());
+        assertEquals(Color.RED, completedColor.get());
+        assertNotEquals(loadingColor.get(), completedColor.get());
     }
 
     /// Creates a model proxy exposing only the icon-loading boundary needed by this cache test.
@@ -169,6 +241,33 @@ final class ResourcePackIconCacheTest {
                     }
                     return null;
                 });
+    }
+
+    /// Renders an icon into a transparent image and returns its center color.
+    private static Color centerColor(Icon icon) {
+        BufferedImage image = new BufferedImage(
+                icon.getIconWidth(),
+                icon.getIconHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            icon.paintIcon(new JList<>(), graphics, 0, 0);
+        } finally {
+            graphics.dispose();
+        }
+        return new Color(
+                image.getRGB(icon.getIconWidth() / 2, icon.getIconHeight() / 2),
+                true);
+    }
+
+    /// Finds the icon currently assigned to the renderer's fixed leading slot.
+    private static Icon rendererIcon(RichChoiceListCellRenderer<?> renderer) {
+        for (Component component : renderer.getComponents()) {
+            if (component instanceof JLabel label && "richChoiceListIcon".equals(label.getName())) {
+                return Objects.requireNonNull(label.getIcon(), "renderer icon");
+            }
+        }
+        throw new AssertionError("Renderer icon label is missing");
     }
 
     /// Encodes an in-memory source image using the normal PNG writer.
@@ -212,7 +311,7 @@ final class ResourcePackIconCacheTest {
     }
 
     /// Counts repaint requests while retaining normal JList behavior.
-    private static final class RecordingList extends JList<Object> {
+    private static final class RecordingList extends JList<ChoiceListEntry<ResourcePackCatalogItem>> {
         private final AtomicInteger repaintCount = new AtomicInteger();
 
         /// Returns the number of repaint requests observed after construction.
