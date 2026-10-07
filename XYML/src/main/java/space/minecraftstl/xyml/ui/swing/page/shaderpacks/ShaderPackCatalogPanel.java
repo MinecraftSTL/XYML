@@ -26,7 +26,6 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
-import space.minecraftstl.xyml.ui.swing.choice.CatalogIconSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -67,8 +66,6 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Swing management page for locally installed shader packs.
 @NotNullByDefault
 public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseable {
-    private static final javax.swing.Icon FALLBACK_ICON =
-            CatalogIconSupport.placeholder(new java.awt.Color(112, 96, 150, 100));
     /// Owned catalog model.
     private final ShaderPackCatalogModel model;
 
@@ -146,9 +143,6 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
 
     /// Status band text.
     private final JTextArea statusText = stateText("shaderPacksStatus");
-
-    /// File-name detail.
-    private final JLabel iconLabel = new JLabel();
 
     /// Description detail.
     private final JTextArea descriptionValue = wrappingValue("shaderPacksDescription");
@@ -325,11 +319,10 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
         list.setName("shaderPacksList");
         list.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         list.setOpaque(false);
-        list.setCellRenderer(new RichValueListCellRenderer<>(
+        list.setCellRenderer(RichValueListCellRenderer.withoutIcon(
                 ShaderPackCatalogItem::displayText,
                 item -> item.description().isBlank() ? item.fileName() : item.description(),
                 item -> item.enabled() ? strings.enabledText(true) : strings.disabledText(),
-                item -> CatalogIconSupport.decode(item.icon(), FALLBACK_ICON),
                 item -> item.path().toString(),
                 item -> !item.valid()));
         list.addListSelectionListener(selectionListener);
@@ -356,12 +349,9 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
         JPanel details = new JPanel(new MigLayout("insets 8 16 8 12, fillx, wrap 2", "[90!][grow,fill]"));
         details.setName("shaderPacksDetails");
         details.setOpaque(false);
-        iconLabel.setName("shaderPacksIcon");
-        iconLabel.setPreferredSize(new Dimension(CatalogIconSupport.ICON_SIZE, CatalogIconSupport.ICON_SIZE));
-        details.add(iconLabel, "w 40!, h 40!");
         JLabel title = new JLabel(strings.detailsTitle());
         title.setFont(title.getFont().deriveFont(Font.BOLD));
-        details.add(title, "growx, wmin 0");
+        details.add(title, "span 2, growx, wmin 0");
         details.add(new JLabel(strings.descriptionLabel()), "aligny top");
         details.add(descriptionValue, "growx, wmin 0");
         details.add(new JLabel(strings.fileNameLabel()), "aligny top");
@@ -597,7 +587,6 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
     ///
     /// @param item selected item
     private void showDetails(ShaderPackCatalogItem item) {
-        iconLabel.setIcon(CatalogIconSupport.decode(item.icon(), FALLBACK_ICON));
         descriptionValue.setText(item.description().isBlank() ? strings.descriptionUnavailableText() : item.description());
         fileNameValue.setText(item.fileName());
         pathValue.setText(item.path().toString());
@@ -616,7 +605,6 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
 
     /// Clears the details selection.
     private void showNoSelection() {
-        iconLabel.setIcon(FALLBACK_ICON);
         descriptionValue.setText("");
         fileNameValue.setText("");
         pathValue.setText("");

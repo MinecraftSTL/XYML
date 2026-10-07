@@ -122,7 +122,16 @@ final class ShaderPackCatalogPanelTest {
                         panel, "shaderPacksPageTitle", JLabel.class).getText());
                 assertEquals("Local shader description", CatalogLayoutAssertions.requireNamed(
                         panel, "shaderPacksDescription", JTextArea.class).getText());
-                assertNotNull(CatalogLayoutAssertions.requireNamed(panel, "shaderPacksIcon", JLabel.class).getIcon());
+                assertNull(findNamed(panel, "shaderPacksIcon", JLabel.class));
+                @SuppressWarnings("unchecked")
+                JList<ShaderPackCatalogItem> rows = (JList<ShaderPackCatalogItem>) list;
+                Component row = rows.getCellRenderer().getListCellRendererComponent(
+                        rows, rows.getModel().getElementAt(0), 0, false, false);
+                assertNull(findNamed((Container) row, "richChoiceListIcon", JLabel.class));
+                JComponent labels = CatalogLayoutAssertions.requireNamed((Container) row,
+                        "richChoiceListLabels", JComponent.class);
+                org.junit.jupiter.api.Assertions.assertTrue(labels.getX() < 40,
+                        "An icon-free shader row must not reserve the old icon square");
                 for (int width : new int[] {1000, 720, 520}) {
                     CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "shaderPacks", width, 460);
                 }
@@ -223,8 +232,7 @@ final class ShaderPackCatalogPanelTest {
                             "A",
                             valid,
                             Set.of(ShaderPackBackend.IRIS_OCULUS),
-                            "Local shader description",
-                            null)),
+                            "Local shader description")),
                     Set.of(ShaderPackBackend.IRIS_OCULUS));
         }
 
