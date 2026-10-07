@@ -26,7 +26,9 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceConfigManualMigrationDialog;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
@@ -61,6 +63,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Presents test launch, script export, dependency repair, and destructive cleanup for one instance.
 ///
 /// Construction performs no repository or network work. [#activate()] loads the initial snapshot lazily, Core
@@ -84,6 +88,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Opens the repository catalog fixed to this existing instance.
     private final Consumer<Component> repositoryUpdateCommand;
+
+    /// Opens manual configuration migration for this existing instance.
+    private final Consumer<Component> manualMigrationCommand;
 
     /// Immutable visible text.
     private final InstanceMaintenanceStrings strings;
@@ -120,6 +127,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Removes generated logs and crash reports after confirmation.
     private final JButton cleanGeneratedFilesButton = new JButton();
+
+    /// Opens manual configuration migration for this instance.
+    private final JButton migrateConfigurationButton = new JButton();
 
     /// Retains the latest concise lifecycle result.
     private final JLabel statusLabel = new JLabel();
@@ -190,6 +200,11 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         animator,
                         progressAnimationDuration,
                         new TaskLaunchController(() -> { })),
+                owner -> InstanceConfigManualMigrationDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        Schedulers.io()),
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
@@ -253,6 +268,11 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         animator,
                         progressAnimationDuration,
                         taskLaunchController),
+                owner -> InstanceConfigManualMigrationDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        Schedulers.io()),
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
@@ -288,6 +308,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 strings,
                 interactions,
                 owner -> { },
+                owner -> { },
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration,
@@ -303,6 +324,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param strings immutable visible text
     /// @param interactions native interaction boundary
     /// @param repositoryUpdateCommand repository-catalog command bound to the fixed instance
+    /// @param manualMigrationCommand manual configuration migration command bound to the fixed instance
     /// @param taskProgressStrings localized task progress text
     /// @param animator optional shared animator
     /// @param progressAnimationDuration non-negative progress animation duration
@@ -315,6 +337,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             InstanceMaintenanceStrings strings,
             InstanceMaintenanceInteractions interactions,
             Consumer<Component> repositoryUpdateCommand,
+            Consumer<Component> manualMigrationCommand,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
@@ -330,6 +353,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         this.repositoryUpdateCommand = Objects.requireNonNull(
                 repositoryUpdateCommand,
                 "repositoryUpdateCommand");
+        this.manualMigrationCommand = Objects.requireNonNull(
+                manualMigrationCommand,
+                "manualMigrationCommand");
         this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         Duration animationDuration = Objects.requireNonNull(
                 progressAnimationDuration,
@@ -463,6 +489,16 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         "assets/swing/icons/refresh.svg",
                         strings.redownloadAssetsAction(),
                         () -> startTask(service::redownloadAssets, strings.redownloadAssetsAction()))),
+                "growx");
+
+        content.add(createSection(
+                i18n("settings.instance_config_migration.manual.title"),
+                configureAction(
+                        migrateConfigurationButton,
+                        "instanceMaintenanceMigrateConfiguration",
+                        "assets/swing/icons/content-copy.svg",
+                        i18n("settings.instance_config_migration.manual.open"),
+                        () -> manualMigrationCommand.accept(this))),
                 "growx");
 
         content.add(createSection(
@@ -996,6 +1032,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateModpackUrlButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         updateModpackRepositoryButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         redownloadAssetsButton.setEnabled(ready);
+        migrateConfigurationButton.setEnabled(ready);
         removeAssetsButton.setEnabled(ready && snapshot != null && snapshot.assetsPresent());
         removeLibrariesButton.setEnabled(ready && snapshot != null && snapshot.librariesPresent());
         cleanGeneratedFilesButton.setEnabled(ready && snapshot != null && snapshot.generatedFilesPresent());

@@ -233,6 +233,16 @@ public sealed abstract class GameSettings extends ObservableSetting {
             return defaultIsolationType;
         }
 
+        /// Automatic instance-configuration migration policy for this preset.
+        @SerializedName("instanceConfigMigration")
+        private final SettingProperty<InstanceConfigMigrationPolicy> instanceConfigMigration =
+                newSettingProperty("instanceConfigMigration", InstanceConfigMigrationPolicy.defaults());
+
+        /// Returns the automatic instance-configuration migration policy property.
+        public SettingProperty<InstanceConfigMigrationPolicy> instanceConfigMigrationPolicyProperty() {
+            return instanceConfigMigration;
+        }
+
         /// JSON adapter for presets.
         @NotNullByDefault
         public static final class Adapter extends ObservableSetting.Adapter<@Nullable Preset> {

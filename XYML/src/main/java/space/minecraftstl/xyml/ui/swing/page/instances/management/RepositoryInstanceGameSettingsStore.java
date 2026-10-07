@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.migration.AutomaticInstanceConfigMigrationTaskFactory;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
@@ -45,13 +46,29 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     /// Stable non-blank instance identifier represented by this store.
     private final GameInstanceID instanceId;
 
+    /// Creates non-replacing migration tasks for the first isolation transition.
+    private final AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory;
+
     /// Creates an adapter for one instance in the given repository.
     ///
     /// @param repository repository containing the managed instance
     /// @param instanceId stable non-blank instance identifier
     public RepositoryInstanceGameSettingsStore(XYMLGameRepository repository, GameInstanceID instanceId) {
+        this(repository, instanceId, AutomaticInstanceConfigMigrationTaskFactory.disabled());
+    }
+
+    /// Creates an adapter with automatic migration for the first isolation transition.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param migrationTaskFactory automatic migration task factory
+    public RepositoryInstanceGameSettingsStore(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.migrationTaskFactory = Objects.requireNonNull(migrationTaskFactory, "migrationTaskFactory");
     }
 
     /// Returns the instance root when an installed modpack requires an isolated working directory.
@@ -120,8 +137,30 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     public Task<@Nullable Void> saveTask(InstanceGameSettingsSnapshot snapshot, Executor executor) {
         InstanceGameSettingsSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
         Executor checkedExecutor = Objects.requireNonNull(executor, "executor");
-        return Task.runAsync("Save instance game settings", checkedExecutor, () -> {
-            applySnapshot(checkedSnapshot);
+        boolean enablingIsolation = !snapshot().launchOptions().runningDirectoryOverridden()
+                && checkedSnapshot.launchOptions().runningDirectoryOverridden();
+        Task<@Nullable Void> saveTask = createSaveTask(checkedSnapshot, checkedExecutor);
+        if (!enablingIsolation) {
+            return saveTask;
+        }
+
+        GameSettings.Instance candidate = new GameSettings.Instance();
+        InstanceGameSettingsMapper.apply(candidate, checkedSnapshot);
+        return migrationTaskFactory.createBeforeIsolation(
+                        repository,
+                        instanceId,
+                        repository.resolveRunDirectory(instanceId, candidate),
+                        candidate.parentProperty().getValue())
+                .thenComposeAsync(checkedExecutor, () -> saveTask)
+                .asOrchestration();
+    }
+
+    /// Creates the resource-scoped durable save performed after any required migration succeeds.
+    private Task<@Nullable Void> createSaveTask(
+            InstanceGameSettingsSnapshot snapshot,
+            Executor executor) {
+        return Task.runAsync("Save instance game settings", executor, () -> {
+            applySnapshot(snapshot);
             repository.saveGameSettingsSync(instanceId);
             FileSaver.waitForAllSaves();
         }).setResources(

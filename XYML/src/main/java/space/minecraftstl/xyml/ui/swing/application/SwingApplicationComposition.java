@@ -73,6 +73,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.importing.SwingInstanceJs
 import space.minecraftstl.xyml.ui.swing.page.instances.management.DefaultInstanceManagementView;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceContentNavigation;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.LauncherAutomaticInstanceConfigMigrationTaskFactory;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.CommandInstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
@@ -715,7 +716,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                         bindings.repository(),
                                         DownloadProviders.getDownloadProvider(),
                                         Schedulers.io(),
-                                        LauncherStateDispatcher::execute)
+                                        LauncherStateDispatcher::execute,
+                                        new LauncherAutomaticInstanceConfigMigrationTaskFactory(Schedulers.io()))
                                 .create(request),
                         Schedulers.io(),
                         presentation.gameInstall().taskTitle(),
