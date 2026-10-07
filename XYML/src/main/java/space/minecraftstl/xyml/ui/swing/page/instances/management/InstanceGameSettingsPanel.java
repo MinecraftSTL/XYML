@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.settings.InstanceConfigMigrationPolicyPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
@@ -67,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSection.sectionPanel;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.enumKey;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.installRenderer;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -365,7 +367,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             Executor executor,
             Runnable workingDirectoryChanged) {
         this(
-                new RepositoryInstanceGameSettingsStore(repository, instanceId),
+                new RepositoryInstanceGameSettingsStore(
+                        repository,
+                        instanceId,
+                        new LauncherAutomaticInstanceConfigMigrationTaskFactory(executor)),
                 new JavaManagerRuntimeManagementService(),
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
@@ -373,7 +378,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
-    ///
     /// Global-preset callers own persistence and therefore use [#editedSnapshot()] with a store whose snapshot can
     /// be replaced before [#reloadFromStore()] is invoked.
     ///
@@ -525,6 +529,22 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         reloadSnapshot();
     }
 
+    /// Adds the selected preset's migration policy to the existing launcher settings tab.
+    ///
+    /// @param policyPanel policy controls bound to the selected preset
+    public void addGlobalMigrationPolicyPanel(InstanceConfigMigrationPolicyPanel policyPanel) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (presentation != GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            throw new IllegalStateException("Migration policy belongs only to global presets");
+        }
+        JScrollPane launcherScroll = (JScrollPane) settingsTabs.getComponentAt(1);
+        JPanel launcherContent = (JPanel) launcherScroll.getViewport().getView();
+        launcherContent.add(new JSeparator(), "growx");
+        launcherContent.add(Objects.requireNonNull(policyPanel, "policyPanel"), "growx");
+        launcherContent.revalidate();
+        launcherContent.repaint();
+    }
+
     /// Enables or freezes every editor control while preserving draft values.
     public void setInteractionEnabled(boolean enabled) {
         EdtDispatcher.requireEventDispatchThread();
@@ -579,7 +599,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Creates the page heading.
     /// @return unframed heading panel
-    private static JPanel createHeader() {
+    private JPanel createHeader() {
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
         header.setBorder(BorderFactory.createEmptyBorder(18, 20, 8, 20));
@@ -662,7 +682,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return content;
     }
 
-    /// Creates launcher behavior and diagnostics controls.
+    /// Creates launcher behavior, diagnostics, and global-preset migration policy controls.
     /// @return launcher settings content
     private JPanel createLauncherSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsLauncherTab");
@@ -905,7 +925,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             throw new IllegalStateException("Game settings editor is closed");
         }
         InstanceGameSettingsSnapshot current = displayedSnapshot();
-
         boolean memoryModeOverridden = !memoryModeSelector.isInherited();
         boolean automaticMemory = memoryModeOverridden
                 ? memoryModeSelector.isAutomatic()
@@ -941,7 +960,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     javaPathField.getText(),
                     "custom Java path");
         }
-
         double windowWidth = editedRequiredDouble(
                 windowWidthControl,
                 current.window().width(),
@@ -971,7 +989,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 quickPlay.multiplayer(),
                 quickPlay.singleplayerOverridden(),
                 quickPlay.singleplayer());
-
         @Nullable Integer minimumMemory = editedOptionalInteger(
                 minimumMemoryControl,
                 current.jvm().minimumMemoryMiB(),
@@ -987,7 +1004,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 && !normalizedPermanentGeneration.chars().allMatch(Character::isDigit)) {
             throw new IllegalArgumentException("Permanent generation size must be a whole number of MiB");
         }
-
         return new InstanceGameSettingsSnapshot(
                 current.writable(),
                 parentPresetControls.edited(current.parentPreset()),
@@ -1293,7 +1309,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             javaVersionField.setText(snapshot.javaRuntime().customVersion());
             javaPathField.setText(snapshot.javaRuntime().customPath());
             applyDetectedJavaSnapshotValue(snapshot.javaRuntime().detectedJava());
-
             applyChoice(windowTypeControl, snapshot.window().typeOverridden(), snapshot.window().type());
             applyText(
                     windowWidthControl,
@@ -1809,22 +1824,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         scrollPane.getVerticalScrollBar().setUnitIncrement(18);
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
-    }
-
-    /// Creates one unframed three-column section.
-    ///
-    /// @param name stable component name
-    /// @param title localized section title
-    /// @return configured section panel
-    private static JPanel sectionPanel(String name, String title) {
-        JPanel section = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3", "[26!,center]8[280!,fill]16[grow,fill]", "[]10[]"));
-        section.setName(Objects.requireNonNull(name, "name"));
-        section.setOpaque(false);
-        JLabel heading = new JLabel(Objects.requireNonNull(title, "title"));
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 15.0F));
-        section.add(heading, "span 3, growx");
-        return section;
     }
 
     /// Creates one transparent inherited-control row that can be version-gated as a unit.

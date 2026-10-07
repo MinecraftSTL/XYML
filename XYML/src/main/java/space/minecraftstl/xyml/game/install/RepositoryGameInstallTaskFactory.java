@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.migration.AutomaticInstanceConfigMigrationTaskFactory;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -51,6 +52,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     /// Caller-owned dispatcher used only to publish the selected instance after success.
     private final Executor instanceSelectionExecutor;
 
+    /// Creates automatic non-replacing migration tasks for isolated installations.
+    private final AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory;
+
     /// Creates a repository-backed game-installation factory.
     ///
     /// @param repository selected target repository
@@ -62,6 +66,27 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
             DownloadProvider downloadProvider,
             Executor repositoryRefreshExecutor,
             Executor instanceSelectionExecutor) {
+        this(
+                repository,
+                downloadProvider,
+                repositoryRefreshExecutor,
+                instanceSelectionExecutor,
+                AutomaticInstanceConfigMigrationTaskFactory.disabled());
+    }
+
+    /// Creates a repository-backed installation factory with automatic isolated-instance migration.
+    ///
+    /// @param repository selected target repository
+    /// @param downloadProvider provider used for this installation
+    /// @param repositoryRefreshExecutor caller-owned background executor for repository refresh
+    /// @param instanceSelectionExecutor caller-owned dispatcher for selected-instance publication
+    /// @param migrationTaskFactory automatic migration task factory
+    public RepositoryGameInstallTaskFactory(
+            XYMLGameRepository repository,
+            DownloadProvider downloadProvider,
+            Executor repositoryRefreshExecutor,
+            Executor instanceSelectionExecutor,
+            AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
         this.repositoryRefreshExecutor = Objects.requireNonNull(
@@ -70,6 +95,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         this.instanceSelectionExecutor = Objects.requireNonNull(
                 instanceSelectionExecutor,
                 "instanceSelectionExecutor");
+        this.migrationTaskFactory = Objects.requireNonNull(migrationTaskFactory, "migrationTaskFactory");
     }
 
     /// Validates the destination and creates the complete install and repository-update chain.
@@ -129,7 +155,11 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
                 },
                 TaskResource.gameDirectory(repository.getBaseDirectory()))
                 .asOrchestration();
-        return refreshed.thenComposeAsync(instanceSelectionExecutor, () -> Task.runAsync(
+        Task<?> migrated = refreshed.thenComposeAsync(
+                        repositoryRefreshExecutor,
+                        () -> migrationTaskFactory.createAfterInstall(repository, instanceId))
+                .asOrchestration();
+        return migrated.thenComposeAsync(instanceSelectionExecutor, () -> Task.runAsync(
                         "Select installed instance",
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(instanceId))

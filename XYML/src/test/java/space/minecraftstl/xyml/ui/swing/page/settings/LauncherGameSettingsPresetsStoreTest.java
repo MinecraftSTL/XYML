@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.property.ObjectProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
+import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameSettingsPresets;
@@ -161,7 +162,10 @@ public final class LauncherGameSettingsPresetsStoreTest {
                         true,
                         true,
                         true,
-                        true),
+                        true,
+                        new InstanceConfigMigrationPolicy(false,
+                                space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType.GLOBAL, null, null,
+                                java.util.Set.of(space.minecraftstl.xyml.setting.InstanceConfigMigrationContent.SERVERS))),
                 new GameSettingsPresetEditor.QuickPlaySettings(
                         QuickPlayType.REALMS,
                         "play.example.org:25565",
@@ -220,6 +224,8 @@ public final class LauncherGameSettingsPresetsStoreTest {
         GameSettings.Preset actual = Objects.requireNonNull(preset, "preset");
         GameSettingsPresetEditor expected = Objects.requireNonNull(editor, "editor");
         assertAll(
+                () -> assertEquals(editor.launcher().migrationPolicy(),
+                        preset.instanceConfigMigrationPolicyProperty().getValue()),
                 () -> assertEquals(expected.memory().automatic(), actual.autoMemoryProperty().getValue()),
                 () -> assertEquals(expected.memory().maximumMiB(), actual.maxMemoryProperty().getValue()),
                 () -> assertEquals(expected.javaRuntime().type(), actual.javaTypeProperty().getValue()),
