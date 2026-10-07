@@ -29,7 +29,6 @@ import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
@@ -170,8 +169,7 @@ final class ResourcePackCatalogReorderSupport {
                     || !item.enabled()) {
                 return false;
             }
-            @Nullable Rectangle bounds = list.getCellBounds(index, index);
-            return bounds != null && RichChoiceListCellRenderer.dragHandleBounds(bounds).contains(point);
+            return RichChoiceListCellRenderer.dragHandleBounds(list, index).contains(point);
         }
 
         /// Clears the current armed gesture state.
