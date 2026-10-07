@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogDragHitAssertions;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Rectangle;
 import java.awt.Dimension;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -67,6 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -698,6 +701,25 @@ public final class ResourcePackCatalogPanelActionsTest {
                     list, ChoiceListEntry.loaded(2, disabled), 2, false, false);
             boolean disabledHandle = findComponent(
                     (Container) disabledRow, "richChoiceListBadge", JLabel.class).getIcon() != null;
+            list.setFixedCellHeight(68);
+            for (int width : new int[] {240, 400, 720}) {
+                list.setSize(width, 250);
+                for (int selected : new int[] {-1, 0, 1}) {
+                    list.setSelectedIndex(selected);
+                    Rectangle painted = CatalogDragHitAssertions.paintedHandle(list, 1);
+                    for (java.awt.Point point : CatalogDragHitAssertions.handlePoints(painted)) {
+                        list.dispatchEvent(new java.awt.event.MouseEvent(list, java.awt.event.MouseEvent.MOUSE_MOVED,
+                                1L, 0, point.x, point.y, 0, false));
+                        assertEquals(java.awt.Cursor.HAND_CURSOR, list.getCursor().getType(), point.toString());
+                    }
+                }
+                Rectangle disabledBounds = list.getCellBounds(2, 2);
+                assertNotNull(disabledBounds);
+                list.dispatchEvent(new java.awt.event.MouseEvent(list, java.awt.event.MouseEvent.MOUSE_MOVED,
+                        1L, 0, disabledBounds.x + disabledBounds.width - 16,
+                        disabledBounds.y + disabledBounds.height / 2, 0, false));
+                assertEquals(java.awt.Cursor.DEFAULT_CURSOR, list.getCursor().getType());
+            }
             list.setSelectedIndex(1);
             model.selectResourcePack(second.path());
 

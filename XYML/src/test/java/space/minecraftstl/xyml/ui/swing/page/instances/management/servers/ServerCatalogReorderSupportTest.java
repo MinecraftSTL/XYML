@@ -23,12 +23,17 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogDragHitAssertions;
 
 import javax.swing.DropMode;
+import javax.swing.JComponent;
+import javax.swing.JScrollPane;
 import javax.swing.JList;
 import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.ComponentOrientation;
+import java.awt.Point;
 import java.awt.Cursor;
 import java.awt.Rectangle;
 import java.awt.datatransfer.StringSelection;
@@ -173,7 +178,7 @@ final class ServerCatalogReorderSupportTest {
                 list.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
                 list.setSize(400, 250);
                 Rectangle bounds = Objects.requireNonNull(list.getCellBounds(1, 1));
-                Rectangle handle = RichChoiceListCellRenderer.dragHandleBounds(bounds);
+                Rectangle handle = CatalogDragHitAssertions.paintedHandle(list, 1);
                 MouseEvent overHandle = new MouseEvent(list, MouseEvent.MOUSE_MOVED, 1L, 0,
                         handle.x + handle.width / 2, handle.y + handle.height / 2, 0, false);
                 for (var listener : list.getMouseMotionListeners()) listener.mouseMoved(overHandle);
@@ -187,6 +192,141 @@ final class ServerCatalogReorderSupportTest {
             });
         } finally {
             fixture.close();
+        }
+    }
+
+    /// Mouse events at painted icon corners, dots, and padding start the same drag whether selected or not.
+    @Test
+    void startsDragFromWholePaintedIconWithEitherSelectionState() {
+        Fixture fixture = new Fixture();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JList<ServerCatalogItem> list = fixture.panel.serverList();
+                list.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
+                ServerCatalogReorderSupport real = fixture.handler();
+                RecordingExport exporter = new RecordingExport(real);
+                list.setTransferHandler(exporter);
+                for (ComponentOrientation direction : new ComponentOrientation[] {
+                        ComponentOrientation.LEFT_TO_RIGHT, ComponentOrientation.RIGHT_TO_LEFT}) {
+                    list.applyComponentOrientation(direction);
+                    for (int width : new int[] {240, 400, 720}) {
+                        list.setSize(width, 250);
+                        for (int selected : new int[] {-1, 0, 1, 2}) {
+                            list.setSelectedIndex(selected);
+                            Rectangle icon = CatalogDragHitAssertions.paintedHandle(list, 1);
+                            for (Point point : CatalogDragHitAssertions.handlePoints(icon)) {
+                                list.setSelectedIndex(selected);
+                                exporter.exported = null;
+                                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_MOVED, point, 0));
+                                assertEquals(Cursor.HAND_CURSOR, list.getCursor().getType(), point.toString());
+                                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_PRESSED, point, MouseEvent.BUTTON1));
+                                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_DRAGGED,
+                                        new Point(point.x + 1, point.y + 1), MouseEvent.NOBUTTON));
+                                assertNull(exporter.exported, "Sub-threshold movement must not start a drag");
+                                // Cross into another row; BasicListUI may change selection before our handler runs.
+                                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_DRAGGED,
+                                        new Point(point.x, point.y + 80), MouseEvent.NOBUTTON));
+                                assertNotNull(exporter.exported, "Painted handle point must arm a drag: " + point);
+                                assertEquals(1, exporter.sourceIndex, "The pressed row, not the pointer row, is exported");
+                                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_RELEASED, point, MouseEvent.BUTTON1));
+                            }
+                        }
+                    }
+                }
+                list.setTransferHandler(real);
+                list.setSelectedIndex(1);
+                assertTrue(real.drop(Objects.requireNonNull(exporter.exported), 0));
+            });
+            fixture.drain();
+            EdtDispatcher.executeAndWait(() -> assertEquals(List.of("B", "A", "C"), fixture.names()));
+            assertEquals(1, fixture.access.writes);
+        } finally {
+            fixture.close();
+        }
+    }
+
+    /// Scrolling changes viewport position but not list-coordinate handle capture; ordinary text cannot arm a drag.
+    @Test
+    void scrollAndCancelledPressDoNotChangeHandleSemantics() {
+        Fixture fixture = new Fixture();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JList<ServerCatalogItem> list = fixture.panel.serverList();
+                list.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
+                list.setSize(400, 250);
+                JScrollPane scroll = new JScrollPane(list);
+                scroll.setSize(400, 80);
+                scroll.doLayout();
+                scroll.getViewport().setViewPosition(new Point(0, 70));
+                ServerCatalogReorderSupport real = fixture.handler();
+                RecordingExport exporter = new RecordingExport(real);
+                list.setTransferHandler(exporter);
+                Rectangle icon = CatalogDragHitAssertions.paintedHandle(list, 1);
+                Point center = new Point(icon.x + icon.width / 2, icon.y + icon.height / 2);
+                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_PRESSED, center, MouseEvent.BUTTON1));
+                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_RELEASED, center, MouseEvent.BUTTON1));
+                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_DRAGGED,
+                        new Point(center.x, center.y + 10), MouseEvent.NOBUTTON));
+                assertNull(exporter.exported, "A cancelled press cannot export");
+                for (Point point : List.of(new Point(30, 100), new Point(398, 240))) {
+                    list.dispatchEvent(mouse(list, MouseEvent.MOUSE_PRESSED, point, MouseEvent.BUTTON1));
+                    list.dispatchEvent(mouse(list, MouseEvent.MOUSE_DRAGGED,
+                            new Point(point.x, point.y + 10), MouseEvent.NOBUTTON));
+                    assertNull(exporter.exported, "Text and row-exterior whitespace cannot arm a drag");
+                    list.dispatchEvent(mouse(list, MouseEvent.MOUSE_RELEASED, point, MouseEvent.BUTTON1));
+                }
+                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_PRESSED, center, MouseEvent.BUTTON1));
+                list.dispatchEvent(mouse(list, MouseEvent.MOUSE_DRAGGED,
+                        new Point(center.x, center.y + 10), MouseEvent.NOBUTTON));
+                assertNotNull(exporter.exported);
+                list.setTransferHandler(real);
+                assertTrue(real.drop(exporter.exported, 0));
+            });
+            fixture.drain();
+            assertEquals(1, fixture.access.writes);
+        } finally {
+            fixture.close();
+        }
+    }
+
+    /// Creates a primary-button gesture event in list coordinates.
+    ///
+    /// @param list event owner
+    /// @param id mouse event kind
+    /// @param point list-coordinate pointer position
+    /// @param button button value accepted by the event kind
+    /// @return event routed through the list's actual listeners
+    private static MouseEvent mouse(JList<?> list, int id, Point point, int button) {
+        int modifiers = id == MouseEvent.MOUSE_DRAGGED || id == MouseEvent.MOUSE_PRESSED
+                ? MouseEvent.BUTTON1_DOWN_MASK : 0;
+        return new MouseEvent(list, id, 1L, modifiers, point.x, point.y, 1, false, button);
+    }
+
+    /// Replaces only the OS drag export to observe actual mouse-listener arming in a headless test.
+    @NotNullByDefault
+    private static final class RecordingExport extends TransferHandler {
+        /// Real handler retaining payload validation and persistence behavior.
+        private final ServerCatalogReorderSupport real;
+
+        /// Captured payload, or null before the listener exports.
+        private @Nullable Transferable exported;
+
+        /// Selection when the actual gesture listener starts exporting.
+        private int sourceIndex = -1;
+
+        /// Keeps production transfer creation unchanged.
+        ///
+        /// @param real actual list handler
+        private RecordingExport(ServerCatalogReorderSupport real) {
+            this.real = real;
+        }
+
+        /// Observes export without opening a native system drag session.
+        @Override
+        public void exportAsDrag(JComponent component, java.awt.event.InputEvent event, int action) {
+            assertEquals(MOVE, action);
+            sourceIndex = ((JList<?>) component).getSelectedIndex();
+            exported = real.createTransferable(component);
         }
     }
 

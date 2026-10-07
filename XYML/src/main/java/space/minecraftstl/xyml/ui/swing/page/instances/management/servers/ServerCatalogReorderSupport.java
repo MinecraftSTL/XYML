@@ -29,7 +29,6 @@ import javax.swing.JList;
 import javax.swing.TransferHandler;
 import java.awt.Cursor;
 import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
@@ -212,8 +211,12 @@ final class ServerCatalogReorderSupport extends TransferHandler implements AutoC
         /// Pointer position captured on handle press, or null outside a gesture.
         private @Nullable Point pressed;
 
+        /// Source row captured by a handle press, independent of Swing drag-selection updates.
+        private int armedIndex = -1;
+
         /// Clears a completed or cancelled gesture.
         private void reset() {
+            armedIndex = -1;
             pressed = null;
         }
 
@@ -224,6 +227,7 @@ final class ServerCatalogReorderSupport extends TransferHandler implements AutoC
             int index = list.locationToIndex(event.getPoint());
             if (event.getButton() == MouseEvent.BUTTON1 && isHandleHit(index, event.getPoint())) {
                 list.setSelectedIndex(index);
+                armedIndex = index;
                 pressed = event.getPoint();
             }
         }
@@ -234,8 +238,11 @@ final class ServerCatalogReorderSupport extends TransferHandler implements AutoC
             @Nullable Point origin = pressed;
             if (origin == null || !panel.canReorder()) return;
             if (Math.abs(event.getX() - origin.x) + Math.abs(event.getY() - origin.y) < 4) return;
+            // The list UI may select the row under the moving pointer before this listener runs.
+            list.setSelectedIndex(armedIndex);
             reset();
-            exportAsDrag(list, event, MOVE);
+            @Nullable TransferHandler handler = list.getTransferHandler();
+            if (handler != null) handler.exportAsDrag(list, event, MOVE);
         }
 
         /// Clears an uncompleted gesture after release.
@@ -265,8 +272,7 @@ final class ServerCatalogReorderSupport extends TransferHandler implements AutoC
         /// @return whether a writable row's handle contains the pointer
         private boolean isHandleHit(int index, Point point) {
             if (closed || !panel.canReorder() || index < 0 || index >= list.getModel().getSize()) return false;
-            @Nullable Rectangle bounds = list.getCellBounds(index, index);
-            return bounds != null && RichChoiceListCellRenderer.dragHandleBounds(bounds).contains(point);
+            return RichChoiceListCellRenderer.dragHandleBounds(list, index).contains(point);
         }
     }
 }

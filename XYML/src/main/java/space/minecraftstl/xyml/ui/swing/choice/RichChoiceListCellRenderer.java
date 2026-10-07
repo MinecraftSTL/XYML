@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.choice;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingOverlayColors;
 
 import javax.swing.BorderFactory;
@@ -28,6 +29,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 import java.awt.AlphaComposite;
@@ -75,6 +77,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Right-side drag-handle icon used by opt-in reorderable rows.
     private static final Icon DRAG_HANDLE_ICON = new DragHandleIcon();
+
+    /// Logical padding around the actual drag icon, clipped to the current row.
+    private static final int DRAG_HANDLE_HIT_PADDING = 6;
 
     /// Minimum list-coordinate hit width for the right-aligned drag handle.
     public static final int DRAG_HANDLE_HIT_WIDTH = 24;
@@ -472,16 +477,14 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 - (iconVisible ? horizontalGap : 0) - badgeWidth - horizontalGap);
     }
 
-    /// Computes a bounded badge width that still leaves room for the title.
+    /// Returns the legacy edge-based hit area for callers without a configured renderer.
     ///
-    /// @param list owning list
-    /// @param badgeText loaded-row badge text
-    /// @return non-negative badge width
-    /// Returns the list-coordinate hit area that starts dragging one reorderable row.
+    /// Interactive catalogs use [#dragHandleBounds(JList, int)] so theme margins and orientation are respected.
     ///
     /// @param cellBounds bounds of the row in list coordinates
-    /// @return mutable drag-handle hit rectangle
+    /// @return mutable legacy drag-handle rectangle
     public static Rectangle dragHandleBounds(Rectangle cellBounds) {
+        Objects.requireNonNull(cellBounds, "cellBounds");
         int width = Math.min(DRAG_HANDLE_HIT_WIDTH, cellBounds.width);
         int height = Math.min(DRAG_HANDLE_HIT_HEIGHT, cellBounds.height);
         return new Rectangle(
@@ -491,6 +494,61 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 height);
     }
 
+    /// Returns the actual rendered handle's hit area, including six logical pixels of surrounding space.
+    ///
+    /// This EDT-only query uses already loaded presentation values and performs no storage or network I/O.
+    /// Rows without a visible handle, disabled lists, and unsupported renderers return an empty rectangle.
+    ///
+    /// @param list owning list with its current renderer, palette, and allocation
+    /// @param index current row index
+    /// @param <V> list model element type
+    /// @return detached list-coordinate hit rectangle, clipped to the current row
+    public static <V> Rectangle dragHandleBounds(JList<V> list, int index) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(list, "list");
+        if (!list.isEnabled() || index < 0 || index >= list.getModel().getSize()) return new Rectangle();
+        @Nullable Rectangle cellBounds = list.getCellBounds(index, index);
+        @Nullable ListCellRenderer<? super V> renderer = list.getCellRenderer();
+        if (cellBounds == null || cellBounds.isEmpty() || renderer == null) return new Rectangle();
+        Component component = renderer.getListCellRendererComponent(
+                list, list.getModel().getElementAt(index), index, list.isSelectedIndex(index),
+                list.hasFocus() && list.getLeadSelectionIndex() == index);
+        if (!(component instanceof RichChoiceListCellRenderer<?> rich)) return new Rectangle();
+        rich.setSize(cellBounds.width, cellBounds.height);
+        rich.doLayout();
+        return rich.renderedDragHandleBounds(cellBounds);
+    }
+
+    /// Measures the same compound-label icon rectangle used by Swing to paint the configured badge.
+    ///
+    /// @param cellBounds current row in list coordinates
+    /// @return detached padded hit rectangle, or an empty rectangle when no handle is painted
+    private Rectangle renderedDragHandleBounds(Rectangle cellBounds) {
+        if (badgeLabel.getIcon() != DRAG_HANDLE_ICON || !badgeLabel.isVisible()) return new Rectangle();
+        Insets insets = badgeLabel.getInsets();
+        Rectangle view = new Rectangle(insets.left, insets.top,
+                Math.max(0, badgeLabel.getWidth() - insets.left - insets.right),
+                Math.max(0, badgeLabel.getHeight() - insets.top - insets.bottom));
+        Rectangle iconBounds = new Rectangle();
+        Rectangle textBounds = new Rectangle();
+        SwingUtilities.layoutCompoundLabel(badgeLabel, badgeLabel.getFontMetrics(badgeLabel.getFont()),
+                badgeLabel.getText(), badgeLabel.getIcon(), badgeLabel.getVerticalAlignment(),
+                badgeLabel.getHorizontalAlignment(), badgeLabel.getVerticalTextPosition(),
+                badgeLabel.getHorizontalTextPosition(), view, iconBounds, textBounds, badgeLabel.getIconTextGap());
+        Rectangle visibleIcon = iconBounds.intersection(new Rectangle(0, 0,
+                badgeLabel.getWidth(), badgeLabel.getHeight()));
+        if (visibleIcon.isEmpty()) return new Rectangle();
+        iconBounds.translate(cellBounds.x + badgeLabel.getX(), cellBounds.y + badgeLabel.getY());
+        iconBounds.grow(DRAG_HANDLE_HIT_PADDING, DRAG_HANDLE_HIT_PADDING);
+        Rectangle hit = iconBounds.intersection(cellBounds);
+        return hit.isEmpty() ? new Rectangle() : hit;
+    }
+
+    /// Computes a bounded badge width that still leaves room for the title.
+    ///
+    /// @param list owning list
+    /// @param badgeText loaded-row badge text
+    /// @return non-negative badge width
     private int badgeWidth(JList<?> list, String badgeText) {
         int width = list.getWidth() > 0 ? list.getWidth() : getPreferredSize().width;
         Insets insets = getInsets();
@@ -629,7 +687,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 copy.setColor(new Color(marker.getRed(), marker.getGreen(), marker.getBlue(), 150));
                 for (int row = 0; row < 3; row++) {
                     for (int column = 0; column < 2; column++) {
-                        copy.fillOval(x + 4 + column * 6, y + 6 + row * 6, 3, 3);
+                        copy.fillOval(x + 4 + column * 6, y + 3 + row * 6, 3, 3);
                     }
                 }
             } finally {
