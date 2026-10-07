@@ -205,23 +205,6 @@
       "type": "boolean",
       "default": true
     },
-    "instanceConfigMigration": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {"type": "boolean", "default": true},
-        "sourceType": {"enum": ["GLOBAL", "INSTANCE"], "default": "GLOBAL"},
-        "sourceGameDirectory": {"$ref": "#/$defs/gameDirectoryID"},
-        "sourceInstance": {"type": "string"},
-        "contents": {
-          "type": "array",
-          "items": {
-            "enum": ["OPTIONS", "RESOURCE_PACKS", "SHADER_PACKS", "SCHEMATICS", "HOTBARS", "SERVERS", "MOD_CONFIG"]
-          },
-          "uniqueItems": true
-        }
-      }
-    },
     "selectedGameDirectory": {
       "$ref": "#/$defs/gameDirectoryID"
     },

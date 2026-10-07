@@ -708,16 +708,6 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return mcpConfirmModDeletion;
     }
 
-    /// Launcher-wide isolated-instance configuration migration policy.
-    @SerializedName("instanceConfigMigration")
-    private final ObjectProperty<InstanceConfigMigrationPolicy> instanceConfigMigrationPolicy =
-            new SimpleObjectProperty<>(InstanceConfigMigrationPolicy.defaults());
-
-    /// Returns the launcher-wide isolated-instance configuration migration policy.
-    public ObjectProperty<InstanceConfigMigrationPolicy> instanceConfigMigrationPolicyProperty() {
-        return instanceConfigMigrationPolicy;
-    }
-
     /// The selected game directory ID.
     ///
     /// This field is owned by [GameDirectoryManager]. Code outside [GameDirectoryManager] should not modify it directly.

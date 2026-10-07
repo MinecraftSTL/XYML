@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.game.migration.InstanceConfigMigrationRequest;
 import space.minecraftstl.xyml.game.migration.InstanceConfigMigrationResult;
 import space.minecraftstl.xyml.game.migration.InstanceConfigMigrationService;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
+import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType;
 import space.minecraftstl.xyml.task.Task;
@@ -38,9 +40,8 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 
-/// Resolves the launcher-wide automatic migration policy and creates resource-aware filesystem tasks.
+/// Resolves the target instance's parent-preset migration policy and creates resource-aware filesystem tasks.
 @NotNullByDefault
 public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
         implements AutomaticInstanceConfigMigrationTaskFactory {
@@ -69,25 +70,47 @@ public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
             return createResolvedTask(
                     checkedRepository,
                     checkedInstanceId,
-                    checkedRepository.getRunDirectory(checkedInstanceId));
+                    checkedRepository.getRunDirectory(checkedInstanceId),
+                    checkedRepository.getInstanceGameSettings(checkedInstanceId));
         }).asOrchestration();
     }
 
-    /// Creates migration against the candidate isolated directory before settings are persisted.
+    /// Creates migration using the instance's currently persisted parent preset.
     @Override
     public Task<InstanceConfigMigrationResult> createBeforeIsolation(
             XYMLGameRepository repository,
             GameInstanceID instanceId,
             Path targetDirectory) {
+        return createIsolationTask(repository, instanceId, targetDirectory,
+                repository.getInstanceGameSettings(instanceId));
+    }
+
+    /// Creates migration using the parent preset selected in the unsaved isolation settings.
+    @Override
+    public Task<InstanceConfigMigrationResult> createBeforeIsolation(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            Path targetDirectory,
+            @Nullable GameSettingsPresetID parentPresetId) {
+        GameSettings.Instance candidate = new GameSettings.Instance();
+        candidate.parentProperty().setValue(parentPresetId);
+        return createIsolationTask(repository, instanceId, targetDirectory, candidate);
+    }
+
+    /// Creates an unstarted migration without changing the persisted instance settings.
+    private Task<InstanceConfigMigrationResult> createIsolationTask(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            Path targetDirectory,
+            @Nullable GameSettings.Instance candidate) {
         XYMLGameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
         GameInstanceID checkedInstanceId = Objects.requireNonNull(instanceId, "instanceId");
-        Path checkedTarget = Objects.requireNonNull(targetDirectory, "targetDirectory")
-                .toAbsolutePath().normalize();
+        Path checkedTarget = Objects.requireNonNull(targetDirectory, "targetDirectory").toAbsolutePath().normalize();
         return Task.composeAsync(executor, () -> {
             if (!checkedRepository.hasInstance(checkedInstanceId)) {
                 throw new IllegalStateException("Automatic migration target instance is unavailable: " + checkedInstanceId);
             }
-            return createResolvedTask(checkedRepository, checkedInstanceId, checkedTarget);
+            return createResolvedTask(checkedRepository, checkedInstanceId, checkedTarget, candidate);
         }).asOrchestration();
     }
 
@@ -95,8 +118,9 @@ public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
     private Task<InstanceConfigMigrationResult> createResolvedTask(
             XYMLGameRepository targetRepository,
             GameInstanceID targetInstanceId,
-            Path targetDirectory) {
-        CapturedPolicy captured = capturePolicy();
+            Path targetDirectory,
+            @Nullable GameSettings.Instance candidate) {
+        CapturedPolicy captured = capturePolicy(targetRepository, candidate);
         InstanceConfigMigrationPolicy policy = captured.policy();
         if (!policy.active()) {
             return emptyResult();
@@ -104,7 +128,7 @@ public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
 
         @Nullable XYMLGameRepository sourceRepository = captured.sourceRepository();
         if (sourceRepository == null) {
-            Path sourceDirectory = targetRepository.getSharedRunDirectory(targetInstanceId);
+            Path sourceDirectory = targetRepository.resolveSharedRunDirectory(targetInstanceId, candidate);
             return createFileTask(policy, sourceDirectory, targetDirectory);
         }
 
@@ -130,16 +154,18 @@ public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
                 .asOrchestration();
     }
 
-    /// Captures observable launcher settings and repository identity on the Swing event thread.
-    private static CapturedPolicy capturePolicy() {
+    /// Captures the selected parent preset policy and source identity on the Swing event thread.
+    private static CapturedPolicy capturePolicy(
+            XYMLGameRepository repository,
+            @Nullable GameSettings.Instance candidate) {
         AtomicReference<CapturedPolicy> captured = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             @Nullable InstanceConfigMigrationPolicy configured =
-                    settings().instanceConfigMigrationPolicyProperty().getValue();
+                    repository.getParentGameSettings(candidate).instanceConfigMigrationPolicyProperty().getValue();
             InstanceConfigMigrationPolicy policy = Objects.requireNonNullElse(
                     configured, InstanceConfigMigrationPolicy.defaults());
             @Nullable XYMLGameRepository sourceRepository = null;
-            if (policy.sourceType() == InstanceConfigMigrationSourceType.INSTANCE) {
+            if (policy.active() && policy.sourceType() == InstanceConfigMigrationSourceType.INSTANCE) {
                 sourceRepository = GameDirectoryManager.getRepository(Objects.requireNonNull(
                         policy.sourceGameDirectory(), "instance migration source game directory"));
             }
@@ -174,7 +200,7 @@ public final class LauncherAutomaticInstanceConfigMigrationTaskFactory
 
     /// Immutable EDT-captured policy and optional exact source repository.
     ///
-    /// @param policy launcher policy snapshot
+    /// @param policy parent-preset policy snapshot
     /// @param sourceRepository exact source repository, or null for the global source strategy
     private record CapturedPolicy(
             InstanceConfigMigrationPolicy policy,

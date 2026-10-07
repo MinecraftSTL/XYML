@@ -68,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSection.sectionPanel;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.enumKey;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.installRenderer;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -528,6 +529,22 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         reloadSnapshot();
     }
 
+    /// Adds the selected preset's migration policy to the existing launcher settings tab.
+    ///
+    /// @param policyPanel policy controls bound to the selected preset
+    public void addGlobalMigrationPolicyPanel(InstanceConfigMigrationPolicyPanel policyPanel) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (presentation != GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            throw new IllegalStateException("Migration policy belongs only to global presets");
+        }
+        JScrollPane launcherScroll = (JScrollPane) settingsTabs.getComponentAt(1);
+        JPanel launcherContent = (JPanel) launcherScroll.getViewport().getView();
+        launcherContent.add(new JSeparator(), "growx");
+        launcherContent.add(Objects.requireNonNull(policyPanel, "policyPanel"), "growx");
+        launcherContent.revalidate();
+        launcherContent.repaint();
+    }
+
     /// Enables or freezes every editor control while preserving draft values.
     public void setInteractionEnabled(boolean enabled) {
         EdtDispatcher.requireEventDispatchThread();
@@ -683,10 +700,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 i18n("settings.advanced.dont_check_game_completeness"),
                 notCheckGameControl);
         content.add(section, "growx");
-        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
-            content.add(new JSeparator(), "growx");
-            content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
-        }
         return content;
     }
 
@@ -1811,22 +1824,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         scrollPane.getVerticalScrollBar().setUnitIncrement(18);
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
-    }
-
-    /// Creates one unframed three-column section.
-    ///
-    /// @param name stable component name
-    /// @param title localized section title
-    /// @return configured section panel
-    private static JPanel sectionPanel(String name, String title) {
-        JPanel section = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3", "[26!,center]8[280!,fill]16[grow,fill]", "[]10[]"));
-        section.setName(Objects.requireNonNull(name, "name"));
-        section.setOpaque(false);
-        JLabel heading = new JLabel(Objects.requireNonNull(title, "title"));
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 15.0F));
-        section.add(heading, "span 3, growx");
-        return section;
     }
 
     /// Creates one transparent inherited-control row that can be version-gated as a unit.

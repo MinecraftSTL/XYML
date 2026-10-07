@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests immutable automatic migration policy invariants and launcher-settings persistence.
+/// Tests immutable policy invariants and independent preset persistence without legacy migration.
 @NotNullByDefault
 class InstanceConfigMigrationPolicyTest {
     /// Verifies the product default requested for absent persisted configuration.
@@ -85,19 +85,32 @@ class InstanceConfigMigrationPolicyTest {
         assertSame(policy, policy.renameSource(new GameDirectoryID(UUID.randomUUID()), previous, renamed));
     }
 
-    /// Verifies launcher settings preserve a cross-directory source and selected content.
+    /// Preset settings independently preserve exact cross-directory sources and content selections.
     @Test
-    void launcherSettingsRoundTripPolicy() {
-        InstanceConfigMigrationPolicy expected = new InstanceConfigMigrationPolicy(
-                true,
-                InstanceConfigMigrationSourceType.INSTANCE,
-                new GameDirectoryID(UUID.randomUUID()),
-                new GameInstanceID("source"),
-                EnumSet.of(InstanceConfigMigrationContent.OPTIONS, InstanceConfigMigrationContent.MOD_CONFIG));
-        LauncherSettings settings = new LauncherSettings();
-        settings.instanceConfigMigrationPolicyProperty().setValue(expected);
-        LauncherSettings restored = LauncherSettings.fromJson(
-                LauncherSettings.SETTINGS_GSON.fromJson(settings.toJson(), com.google.gson.JsonObject.class));
-        assertEquals(expected, restored.instanceConfigMigrationPolicyProperty().getValue());
+    void presetsRoundTripPoliciesIndependently() {
+        InstanceConfigMigrationPolicy expected = new InstanceConfigMigrationPolicy(true,
+                InstanceConfigMigrationSourceType.INSTANCE, GameDirectoryID.generate(), new GameInstanceID("source"),
+                Set.of(InstanceConfigMigrationContent.OPTIONS, InstanceConfigMigrationContent.MOD_CONFIG));
+        GameSettings.Preset first = new GameSettings.Preset(GameSettingsPresetID.generate());
+        GameSettings.Preset second = new GameSettings.Preset(GameSettingsPresetID.generate());
+        first.instanceConfigMigrationPolicyProperty().setValue(expected);
+        GameSettingsPresets presets = new GameSettingsPresets();
+        presets.getPresets().add(first);
+        presets.getPresets().add(second);
+        GameSettingsPresets restored = space.minecraftstl.xyml.util.gson.JsonUtils.GSON.fromJson(space.minecraftstl.xyml.util.gson.JsonUtils.GSON.toJson(presets),
+                GameSettingsPresets.class);
+        assertEquals(expected, restored.getPresets().get(0).instanceConfigMigrationPolicyProperty().getValue());
+        assertEquals(InstanceConfigMigrationPolicy.defaults(),
+                restored.getPresets().get(1).instanceConfigMigrationPolicyProperty().getValue());
+    }
+
+    /// An absent preset field gets its own default and never imports the obsolete launcher field.
+    @Test
+    void absentPresetPolicyIgnoresObsoleteLauncherPolicy() {
+        com.google.gson.JsonObject presetJson = new com.google.gson.JsonObject();
+        presetJson.addProperty("id", GameSettingsPresetID.generate().toString());
+        GameSettings.Preset restored = space.minecraftstl.xyml.util.gson.JsonUtils.GSON.fromJson(presetJson, GameSettings.Preset.class);
+        assertEquals(InstanceConfigMigrationPolicy.defaults(), restored.instanceConfigMigrationPolicyProperty().getValue());
+        assertEquals(false, presetJson.has("instanceConfigMigration"));
     }
 }

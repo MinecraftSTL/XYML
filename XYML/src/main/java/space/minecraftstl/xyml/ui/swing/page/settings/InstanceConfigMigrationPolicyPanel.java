@@ -28,7 +28,6 @@ import space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -39,10 +38,9 @@ import java.util.EnumSet;
 import java.util.Map;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Edits the launcher-wide automatic configuration-migration policy independently of game presets.
+/// Edits an immutable migration policy draft saved together with the currently selected preset.
 @NotNullByDefault
 public final class InstanceConfigMigrationPolicyPanel extends JPanel {
     /// Enables automatic migration at supported isolation transitions.
@@ -59,19 +57,19 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
     private final Map<InstanceConfigMigrationContent, JCheckBox> contentBoxes =
             new EnumMap<>(InstanceConfigMigrationContent.class);
 
-    /// Persists the complete immutable policy.
-    private final JButton saveButton = new JButton(i18n("button.save"));
-
-    /// Displays save and unavailable-source feedback.
+    /// Displays unavailable-source feedback.
     private final JLabel statusLabel = new JLabel();
 
-    /// Creates and populates the launcher policy editor on the EDT.
+    /// Whether the selected preset currently accepts edits.
+    private boolean interactionEnabled = true;
+
+    /// Creates the preset policy controls with default values on the EDT.
     public InstanceConfigMigrationPolicyPanel() {
         super(new MigLayout("insets 0, fillx, wrap 2", "[][grow,fill]", "[]10[]10[]10[]"));
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
         configureComponents();
-        reload();
+        loadPolicy(InstanceConfigMigrationPolicy.defaults());
     }
 
     /// Builds controls and stable automation names used by Swing tests.
@@ -106,24 +104,23 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
         add(new JLabel(i18n("settings.instance_config_migration.contents")), "aligny top");
         add(contents, "growx");
 
-        saveButton.setName("instanceConfigMigrationSave");
-        saveButton.addActionListener(event -> save());
-        add(saveButton, "split 2");
-        add(statusLabel, "growx");
+        statusLabel.setName("instanceConfigMigrationStatus");
+        add(statusLabel, "span 2, growx");
         setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
     }
 
-    /// Reloads persisted policy and preserves an unavailable exact source as a disabled placeholder.
-    private void reload() {
+    /// Loads a selected preset policy while preserving an unavailable exact source.
+    ///
+    /// @param policy immutable selected preset policy
+    public void loadPolicy(InstanceConfigMigrationPolicy policy) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(policy, "policy");
+        statusLabel.setText("");
         sourceInstanceBox.removeAllItems();
         for (InstanceConfigMigrationChoice choice :
                 InstanceConfigMigrationChoice.availableChoices(true, null, null)) {
             sourceInstanceBox.addItem(choice);
         }
-        @Nullable InstanceConfigMigrationPolicy configured =
-                settings().instanceConfigMigrationPolicyProperty().getValue();
-        InstanceConfigMigrationPolicy policy = Objects.requireNonNullElse(
-                configured, InstanceConfigMigrationPolicy.defaults());
         enabledBox.setSelected(policy.enabled());
         sourceTypeBox.setSelectedItem(policy.sourceType());
         for (Map.Entry<InstanceConfigMigrationContent, JCheckBox> entry : contentBoxes.entrySet()) {
@@ -152,8 +149,12 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
         statusLabel.setText(i18n("settings.instance_config_migration.source_unavailable"));
     }
 
-    /// Persists a complete immutable policy after validating an exact instance source.
-    private void save() {
+    /// Builds the immutable draft for the owning preset's normal save command.
+    ///
+    /// @return selected policy without changing persisted settings
+    /// @throws IllegalArgumentException when an instance source has not been selected
+    public InstanceConfigMigrationPolicy editedPolicy() {
+        EdtDispatcher.requireEventDispatchThread();
         EnumSet<InstanceConfigMigrationContent> contents = EnumSet.noneOf(InstanceConfigMigrationContent.class);
         for (Map.Entry<InstanceConfigMigrationContent, JCheckBox> entry : contentBoxes.entrySet()) {
             if (entry.getValue().isSelected()) {
@@ -168,28 +169,34 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
             @Nullable InstanceConfigMigrationChoice choice =
                     (InstanceConfigMigrationChoice) sourceInstanceBox.getSelectedItem();
             if (choice == null) {
-                statusLabel.setText(i18n("settings.instance_config_migration.source_required"));
-                return;
+                throw new IllegalArgumentException(i18n("settings.instance_config_migration.source_required"));
             }
             directoryId = choice.gameDirectoryId();
             instanceId = choice.instanceId();
         }
-        settings().instanceConfigMigrationPolicyProperty().setValue(new InstanceConfigMigrationPolicy(
-                enabledBox.isSelected(), sourceType, directoryId, instanceId, contents));
-        statusLabel.setText(i18n("settings.instance_config_migration.saved"));
+        return new InstanceConfigMigrationPolicy(
+                enabledBox.isSelected(), sourceType, directoryId, instanceId, contents);
+    }
+
+    /// Freezes the draft while its owning preset is read-only, saving, or closed.
+    ///
+    /// @param enabled whether preset editing is available
+    public void setInteractionEnabled(boolean enabled) {
+        EdtDispatcher.requireEventDispatchThread();
+        interactionEnabled = enabled;
         updateAvailability();
     }
 
     /// Enables dependent controls while retaining visible invalid persisted sources.
     private void updateAvailability() {
-        boolean enabled = enabledBox.isSelected();
+        enabledBox.setEnabled(interactionEnabled);
+        boolean enabled = interactionEnabled && enabledBox.isSelected();
         sourceTypeBox.setEnabled(enabled);
         boolean instanceSource = sourceTypeBox.getSelectedItem() == InstanceConfigMigrationSourceType.INSTANCE;
         sourceInstanceBox.setEnabled(enabled && instanceSource);
         for (JCheckBox box : contentBoxes.values()) {
             box.setEnabled(enabled);
         }
-        saveButton.setEnabled(true);
         @Nullable InstanceConfigMigrationChoice choice =
                 (InstanceConfigMigrationChoice) sourceInstanceBox.getSelectedItem();
         if (instanceSource && choice != null && !choice.available()) {

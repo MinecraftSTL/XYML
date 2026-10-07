@@ -18,8 +18,10 @@
 package space.minecraftstl.xyml.game.migration;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.task.Task;
 
 import java.nio.file.Path;
@@ -47,6 +49,21 @@ public interface AutomaticInstanceConfigMigrationTaskFactory {
             XYMLGameRepository repository,
             GameInstanceID instanceId,
             Path targetDirectory);
+
+    /// Creates migration with the unsaved parent-preset selection without persisting that selection first.
+    ///
+    /// @param repository target repository
+    /// @param instanceId existing instance being isolated
+    /// @param targetDirectory candidate isolated running directory
+    /// @param parentPresetId selected preset ID, or null for the launcher default
+    /// @return unstarted migration task
+    default Task<InstanceConfigMigrationResult> createBeforeIsolation(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            Path targetDirectory,
+            @Nullable GameSettingsPresetID parentPresetId) {
+        return createBeforeIsolation(repository, instanceId, targetDirectory);
+    }
 
     /// Returns a factory that always performs a successful no-op.
     ///

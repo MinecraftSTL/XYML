@@ -149,7 +149,8 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
         return migrationTaskFactory.createBeforeIsolation(
                         repository,
                         instanceId,
-                        repository.resolveRunDirectory(instanceId, candidate))
+                        repository.resolveRunDirectory(instanceId, candidate),
+                        candidate.parentProperty().getValue())
                 .thenComposeAsync(checkedExecutor, () -> saveTask)
                 .asOrchestration();
     }

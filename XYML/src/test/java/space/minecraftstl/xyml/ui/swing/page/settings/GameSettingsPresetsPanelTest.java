@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
+import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameWindowType;
@@ -139,6 +140,48 @@ public final class GameSettingsPresetsPanelTest {
         });
     }
 
+    /// Normal preset saves persist only that preset's policy and selection changes reload all policy controls.
+    @Test
+    public void savesMigrationPolicyOnlyForSelectedPreset() {
+        GameSettingsPresetSnapshot first = preset("1", "Default", true);
+        GameSettingsPresetSnapshot second = preset("2", "Other", false);
+        FakeGameSettingsPresetsStore store = new FakeGameSettingsPresetsStore(snapshot(1L, first, second));
+        GameSettingsPresetsPanel panel = onEventDispatchThread(
+                () -> new GameSettingsPresetsPanel(store, new StaticJavaRuntimeManagementService()));
+        InstanceConfigMigrationPolicy changed = new InstanceConfigMigrationPolicy(false,
+                space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType.GLOBAL, null, null,
+                java.util.EnumSet.complementOf(java.util.EnumSet.of(
+                        space.minecraftstl.xyml.setting.InstanceConfigMigrationContent.RESOURCE_PACKS)));
+        onEventDispatchThread(() -> {
+            findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class).doClick();
+            findComponent(panel, "instanceConfigMigrationContentRESOURCE_PACKS", JCheckBox.class).setSelected(false);
+            findComponent(panel, "gameSettingsPresetSave", AbstractButton.class).doClick();
+        });
+        onEventDispatchThread(() -> {
+            try {
+                assertEquals(changed, store.snapshot().presets().get(0).editor().launcher().migrationPolicy());
+                assertEquals(InstanceConfigMigrationPolicy.defaults(),
+                        store.snapshot().presets().get(1).editor().launcher().migrationPolicy());
+                JList<?> list = findComponent(panel, "gameSettingsPresetList", JList.class);
+                list.setSelectedIndex(1);
+                assertTrue(findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class).isSelected());
+                assertTrue(findComponent(panel, "instanceConfigMigrationContentRESOURCE_PACKS", JCheckBox.class)
+                        .isSelected());
+                findComponent(panel, "instanceConfigMigrationContentSERVERS", JCheckBox.class).doClick();
+                list.setSelectedIndex(0);
+                assertFalse(findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class).isSelected());
+                assertFalse(findComponent(panel, "instanceConfigMigrationContentRESOURCE_PACKS", JCheckBox.class)
+                        .isSelected());
+                list.setSelectedIndex(1);
+                assertTrue(findComponent(panel, "instanceConfigMigrationContentSERVERS", JCheckBox.class).isSelected());
+                assertEquals(InstanceConfigMigrationPolicy.defaults(),
+                        store.snapshot().presets().get(1).editor().launcher().migrationPolicy());
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
     /// Edits every settings group in a selected preset and makes it the default through the store contract.
     @Test
     public void savesCompleteSelectedPresetAndChangesDefault() {
@@ -187,7 +230,8 @@ public final class GameSettingsPresetsPanelTest {
                                     true,
                                     true,
                                     true,
-                                    true),
+                                    true,
+                        InstanceConfigMigrationPolicy.defaults()),
                             saved.launcher()),
                     () -> assertEquals(
                             new GameSettingsPresetEditor.QuickPlaySettings(
@@ -754,7 +798,8 @@ public final class GameSettingsPresetsPanelTest {
                                 false,
                                 false,
                                 false,
-                                false),
+                                false,
+                        InstanceConfigMigrationPolicy.defaults()),
                         new GameSettingsPresetEditor.QuickPlaySettings(QuickPlayType.NONE, "", "", ""),
                         new GameSettingsPresetEditor.LaunchOptionsSettings(
                                 "",
@@ -798,7 +843,8 @@ public final class GameSettingsPresetsPanelTest {
                         false,
                         false,
                         false,
-                        false),
+                        false,
+                        InstanceConfigMigrationPolicy.defaults()),
                 new GameSettingsPresetEditor.QuickPlaySettings(
                         QuickPlayType.NONE,
                         "host:99999",

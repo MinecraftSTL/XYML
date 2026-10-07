@@ -21,8 +21,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.setting.InstanceConfigMigrationContent;
-import space.minecraftstl.xyml.setting.LauncherSettings;
-import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -32,58 +30,49 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import java.awt.Component;
 import java.awt.Container;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 
-/// Tests launcher-wide migration policy defaults in the global game-settings page.
+/// Tests preset policy defaults, unavailable sources, and read-only draft controls.
 @NotNullByDefault
 public final class InstanceConfigMigrationPolicyPanelTest {
-    /// Process-wide settings field used to install a lightweight test configuration.
-    private static java.lang.reflect.Field launcherSettingsField;
-
     /// Default policy renders enabled, global, and with all seven content categories selected.
     @Test
     public void rendersDefaultAutomaticMigrationPolicy() {
-        AtomicReference<@Nullable InstanceConfigMigrationPolicyPanel> panelReference = new AtomicReference<>();
-        AtomicReference<@Nullable InstanceConfigMigrationPolicy> previousReference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
-            try {
-                launcherSettingsField = SettingsManager.class.getDeclaredField("launcherSettings");
-                launcherSettingsField.setAccessible(true);
-                launcherSettingsField.set(null, new LauncherSettings());
-            } catch (ReflectiveOperationException failure) {
-                throw new IllegalStateException("Unable to install test launcher settings", failure);
+            InstanceConfigMigrationPolicyPanel panel = new InstanceConfigMigrationPolicyPanel();
+            assertTrue(findNamed(panel, "instanceConfigMigrationEnabled", JCheckBox.class).isSelected());
+            assertEquals(InstanceConfigMigrationSourceType.GLOBAL,
+                    findNamed(panel, "instanceConfigMigrationSourceType", JComboBox.class).getSelectedItem());
+            for (InstanceConfigMigrationContent content : InstanceConfigMigrationContent.values()) {
+                assertTrue(findNamed(panel, "instanceConfigMigrationContent" + content.name(),
+                        JCheckBox.class).isSelected());
             }
-            previousReference.set(settings().instanceConfigMigrationPolicyProperty().getValue());
-            settings().instanceConfigMigrationPolicyProperty().setValue(InstanceConfigMigrationPolicy.defaults());
-            panelReference.set(new InstanceConfigMigrationPolicyPanel());
+            assertEquals(InstanceConfigMigrationPolicy.defaults(), panel.editedPolicy());
         });
-        try {
-            EdtDispatcher.executeAndWait(() -> {
-                InstanceConfigMigrationPolicyPanel panel = java.util.Objects.requireNonNull(panelReference.get(), "panel");
-                assertTrue(findNamed(panel, "instanceConfigMigrationEnabled", JCheckBox.class).isSelected());
-                assertEquals(
-                        InstanceConfigMigrationSourceType.GLOBAL,
-                        findNamed(panel, "instanceConfigMigrationSourceType", JComboBox.class).getSelectedItem());
-                for (InstanceConfigMigrationContent content : InstanceConfigMigrationContent.values()) {
-                    assertTrue(findNamed(
-                            panel,
-                            "instanceConfigMigrationContent" + content.name(),
-                            JCheckBox.class).isSelected());
-                }
-            });
-        } finally {
-            EdtDispatcher.executeAndWait(() -> {
-                try {
-                    launcherSettingsField.set(null, null);
-                } catch (IllegalAccessException failure) {
-                    throw new IllegalStateException("Unable to restore test launcher settings", failure);
-                }
-            });
-        }
+    }
+
+    /// Invalid sources remain visible and round-trip without fallback into another preset.
+    @Test
+    public void retainsUnavailableSourceAndFreezesReadOnlyDraft() {
+        EdtDispatcher.executeAndWait(() -> {
+            InstanceConfigMigrationPolicy policy = new InstanceConfigMigrationPolicy(true,
+                    InstanceConfigMigrationSourceType.INSTANCE,
+                    space.minecraftstl.xyml.setting.GameDirectoryID.generate(),
+                    new space.minecraftstl.xyml.game.GameInstanceID("missing"),
+                    java.util.Set.of(InstanceConfigMigrationContent.OPTIONS));
+            InstanceConfigMigrationPolicyPanel panel = new InstanceConfigMigrationPolicyPanel();
+            panel.loadPolicy(policy);
+            assertEquals(policy, panel.editedPolicy());
+            assertEquals(false, ((InstanceConfigMigrationChoice) findNamed(panel,
+                    "instanceConfigMigrationSourceInstance", JComboBox.class).getSelectedItem()).available());
+            panel.setInteractionEnabled(false);
+            assertEquals(false, findNamed(panel, "instanceConfigMigrationEnabled", JCheckBox.class).isEnabled());
+            panel.loadPolicy(InstanceConfigMigrationPolicy.defaults());
+            assertEquals(InstanceConfigMigrationPolicy.defaults(), panel.editedPolicy());
+            assertEquals("", findNamed(panel, "instanceConfigMigrationStatus", javax.swing.JLabel.class).getText());
+        });
     }
 
     /// Finds a required named descendant.

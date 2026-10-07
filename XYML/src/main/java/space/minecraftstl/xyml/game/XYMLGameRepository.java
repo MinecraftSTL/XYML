@@ -46,8 +46,6 @@ import space.minecraftstl.xyml.setting.GameDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.setting.SettingFileUtils;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
-import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
-import space.minecraftstl.xyml.setting.InstanceConfigMigrationSourceType;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -385,8 +383,16 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId instance whose parent preset selects the shared directory
     /// @return normalized shared running directory
     public Path getSharedRunDirectory(GameInstanceID instanceId) {
-        @Nullable GameSettings.Instance localSetting = getInstanceGameSettings(instanceId);
-        String runningDirectory = getSelectedRunningDirectory(localSetting, false);
+        return resolveSharedRunDirectory(instanceId, getInstanceGameSettings(instanceId));
+    }
+
+    /// Resolves a shared directory from an unsaved parent-preset selection without applying isolation.
+    ///
+    /// @param instanceId target instance identifier
+    /// @param candidate local settings selecting a parent preset, or null for the default preset
+    /// @return normalized parent-preset shared running directory
+    public Path resolveSharedRunDirectory(GameInstanceID instanceId, @Nullable GameSettings.Instance candidate) {
+        String runningDirectory = getSelectedRunningDirectory(candidate, false);
         if (StringUtils.isBlank(runningDirectory)) {
             return super.getRunDirectory(instanceId).toAbsolutePath().normalize();
         }
@@ -551,7 +557,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                     if (provisionalModpack) {
                         beingModpackInstances.add(to);
                     }
-                    updateMigrationSourceAfterRename(from, to);
+                    SettingsManager.renameInstanceConfigMigrationSources(gameDirectory.getId(), from, to);
                 }
                 return renamed;
             });
@@ -559,20 +565,6 @@ public final class XYMLGameRepository extends DefaultGameRepository {
             LOG.warning("Interrupted while flushing settings before renaming instance " + from, exception);
             return false;
         }
-    }
-
-    /// Updates a launcher migration source that identifies the successfully renamed instance.
-    private void updateMigrationSourceAfterRename(GameInstanceID from, GameInstanceID to) {
-        @Nullable InstanceConfigMigrationPolicy policy =
-                launcherSettings.instanceConfigMigrationPolicyProperty().getValue();
-        if (policy == null
-                || policy.sourceType() != InstanceConfigMigrationSourceType.INSTANCE
-                || !gameDirectory.getId().equals(policy.sourceGameDirectory())
-                || !from.equals(policy.sourceInstance())) {
-            return;
-        }
-        launcherSettings.instanceConfigMigrationPolicyProperty().setValue(
-                policy.renameSource(gameDirectory.getId(), from, to));
     }
 
     /// Removes an instance from disk and drops any cached instance settings for that instance.
