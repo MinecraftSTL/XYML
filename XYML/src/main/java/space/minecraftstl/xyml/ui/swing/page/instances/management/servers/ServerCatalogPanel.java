@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogIconSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.util.ServerAddress;
 
 import javax.swing.BorderFactory;
@@ -79,7 +80,9 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
 
     private final ServerCatalogModel model;
     private final DefaultListModel<ServerCatalogItem> listModel = new DefaultListModel<>();
-    private final JList<ServerCatalogItem> list = new JList<>(listModel);
+    /// Row-bounded selection list; blank presses retain the current entry and its details.
+    private final RowBoundsCheckedList<ServerCatalogItem> list = new RowBoundsCheckedList<>(
+            listModel, RowBoundsCheckedList.BlankClickPolicy.RETAIN);
     private final JLabel statusLabel;
     private final JLabel iconLabel = new JLabel();
     /// Read-only name of the selected multiplayer-list entry.

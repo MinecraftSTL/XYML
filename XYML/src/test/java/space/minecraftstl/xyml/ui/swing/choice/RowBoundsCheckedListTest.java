@@ -92,6 +92,25 @@ public final class RowBoundsCheckedListTest {
         });
     }
 
+    /// Right-side blank space on the final row is not treated as another click on that row.
+    @Test
+    public void rejectsRightSideBlankSpaceAfterLastRow() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            RowBoundsCheckedList<String> list = list(
+                    RowBoundsCheckedList.BlankClickPolicy.RETAIN,
+                    0);
+            list.setFixedCellWidth(120);
+            list.setLayoutOrientation(javax.swing.JList.HORIZONTAL_WRAP);
+            list.setVisibleRowCount(2);
+            Rectangle lastRow = Objects.requireNonNull(list.getCellBounds(1, 1));
+            Point blank = new Point(lastRow.x + lastRow.width + 12,
+                    lastRow.y + lastRow.height / 2);
+            click(list, blank);
+            assertEquals(0, list.getSelectedIndex());
+            assertEquals(-1, list.locationToIndex(blank));
+        });
+    }
+
     /// Both policies still select a row when the pointer is inside its actual cell bounds.
     @Test
     public void selectsActualRowInsideCellBounds() throws Exception {

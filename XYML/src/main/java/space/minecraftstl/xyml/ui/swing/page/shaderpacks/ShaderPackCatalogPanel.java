@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
@@ -36,7 +37,6 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -90,8 +90,9 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
     /// Visible list model.
     private final DefaultListModel<ShaderPackCatalogItem> listModel = new DefaultListModel<>();
 
-    /// Visible selection list.
-    private final JList<ShaderPackCatalogItem> list = new JList<>(listModel);
+    /// Row-bounded multi-selection list; blank presses clear selection without changing pack enablement.
+    private final RowBoundsCheckedList<ShaderPackCatalogItem> list = new RowBoundsCheckedList<>(
+            listModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Card layout for lifecycle states.
     private final CardLayout contentCards = new CardLayout();
