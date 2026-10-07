@@ -365,8 +365,10 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                             item -> resourcePackRowBadge(item),
                             item -> iconCache.iconFor(model, item, iconRepaintList()),
                             ResourcePackCatalogItem::description,
-                            item -> !item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
+                            item -> !item.enabled(),
+                            item -> item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
             choiceList = acquiredChoiceList;
+            ResourcePackCatalogReorderSupport.install(this);
             ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                     choiceList,
                     createDetailsPanel());
@@ -1303,6 +1305,52 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         return completion;
     }
 
+    /// Returns the panel-owned list for reorder interaction installation.
+    ///
+    /// @return resource-pack list
+    JList<ChoiceListEntry<ResourcePackCatalogItem>> resourcePackList() {
+        return choiceList.getList();
+    }
+
+    /// Returns the displayed snapshot for same-thread drag validation.
+    ///
+    /// @return displayed snapshot, or null before initialization
+    @Nullable ResourcePackCatalogSnapshot displayedSnapshotValue() {
+        return displayedSnapshot;
+    }
+
+    /// Returns whether handle interaction is currently allowed.
+    ///
+    /// @return whether the list may start or accept a reorder drag
+    boolean isReorderInteractionAllowed() {
+        return !closed && !writePending && searchField.getText().isBlank();
+    }
+
+    /// Starts one reorder only when the captured row still owns the current enabled prefix.
+    ///
+    /// @param selected captured loaded row
+    /// @param targetIndex final zero-based enabled display index
+    /// @return whether one model reorder was started
+    boolean reorderResourcePackToIndex(ResourcePackCatalogItem selected, int targetIndex) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || writePending || targetIndex < 0 || !searchField.getText().isBlank()) {
+            return false;
+        }
+        @Nullable ResourcePackCatalogSnapshot before = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem current = selectedActionTarget(before);
+        if (before == null || current == null || !current.path().equals(selected.path()) || !current.enabled()) {
+            return false;
+        }
+        int enabledCount = before.enabledItemCount();
+        int sourceIndex = filteredDataSource.indexOf(current.path());
+        if (sourceIndex < 0 || sourceIndex >= enabledCount || targetIndex >= enabledCount
+                || sourceIndex == targetIndex) {
+            return false;
+        }
+        startWrite(() -> model.reorderResourcePack(current.path(), targetIndex));
+        return true;
+    }
+
     /// Toggles the selected pack through the model after compatibility confirmation when required.
     private void toggleSelectedResourcePackEnabled() {
         EdtDispatcher.requireEventDispatchThread();
@@ -1605,6 +1653,15 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         enabledToggle.getAccessibleContext().setAccessibleName(toggleName);
         enabledToggle.getAccessibleContext().setAccessibleDescription(toggleTooltip);
         enabledToggle.setToolTipText(toggleTooltip);
+
+        boolean reorderAvailable = writable != null
+                && writable.enabledItemCount() > 1
+                && searchField.getText().isBlank();
+        @Nullable String reorderTooltip = reorderAvailable
+                ? i18n("swing.resourcepacks.reorder_tooltip")
+                : null;
+        choiceList.getList().setToolTipText(reorderTooltip);
+        choiceList.getList().getAccessibleContext().setAccessibleDescription(reorderTooltip);
     }
 
     /// Returns the displayed snapshot only when it still denotes the exact writable catalog.

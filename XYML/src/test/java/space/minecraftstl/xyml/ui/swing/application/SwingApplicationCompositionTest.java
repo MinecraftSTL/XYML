@@ -60,6 +60,9 @@ import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -770,6 +773,9 @@ class SwingApplicationCompositionTest {
                 resourcePackStrings(),
                 resourcePackStatusStrings(),
                 resourcePackActionStrings(),
+                shaderPackStrings(),
+                shaderPackStatusStrings(),
+                shaderPackActionStrings(),
                 new GameVersionCatalogStrings(
                         "Game versions",
                         "Search",
@@ -873,6 +879,36 @@ class SwingApplicationCompositionTest {
                 "Enable incompatible %s?", "Delete", "Delete resource pack", "Delete %s?",
                 "Reveal", "Reveal resource pack", "Open directory", "Open resource-pack directory",
                 "Operation failed", "Reveal failed", "Open directory failed");
+    }
+
+    /// Creates shader-pack catalog text for the composition fixture.
+    ///
+    /// @return complete shader-pack catalog text
+    private static ShaderPackCatalogStrings shaderPackStrings() {
+        return new ShaderPackCatalogStrings(
+                "Shader packs", "Refresh", "Refreshing", "Refresh shader packs",
+                "Retry", "Retry loading shader packs", "Details", "Select a shader pack",
+                "File", "Path", "Enabled", "Enabled", "Disabled", "Invalid", "Backends", "No backend");
+    }
+
+    /// Creates shader-pack lifecycle text for the composition fixture.
+    ///
+    /// @return complete shader-pack lifecycle text
+    private static ShaderPackCatalogStatusStrings shaderPackStatusStrings() {
+        return new ShaderPackCatalogStatusStrings(
+                "Idle", "Loading", "Ready", "Empty", "Failed", "Writing", "Write failed");
+    }
+
+    /// Creates shader-pack action text for the composition fixture.
+    ///
+    /// @return complete shader-pack action text
+    private static ShaderPackCatalogActionStrings shaderPackActionStrings() {
+        return new ShaderPackCatalogActionStrings(
+                "Import", "Import shader packs", "Choose shader packs", "ZIP archive",
+                "Enable", "Enable shader pack", "Disable", "Disable shader pack", "Delete",
+                "Delete shader pack", "Delete %s?", "Delete %s packs?", "Reveal", "Reveal shader pack",
+                "Open", "Open shaderpacks directory", "Operation failed", "Reveal failed",
+                "Open failed", "Backends", "Choose backends");
     }
 
     /// Creates a non-initialized theme manager suitable for the fake window.

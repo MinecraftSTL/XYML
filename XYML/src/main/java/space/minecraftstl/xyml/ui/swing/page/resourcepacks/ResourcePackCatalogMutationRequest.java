@@ -22,5 +22,5 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Immutable internal write request understood by resource-pack catalog access implementations.
 @NotNullByDefault
 sealed interface ResourcePackCatalogMutationRequest
-        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation {
+        permits ResourcePackImportMutation, ResourcePackEnabledMutation, ResourcePackDeleteMutation, ResourcePackReorderMutation {
 }

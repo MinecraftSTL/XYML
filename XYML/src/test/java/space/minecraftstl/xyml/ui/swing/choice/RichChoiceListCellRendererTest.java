@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.choice;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatListUI;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -28,11 +30,14 @@ import javax.swing.JList;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.ComponentOrientation;
+import java.awt.Insets;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +79,83 @@ public final class RichChoiceListCellRendererTest {
             assertEquals("Enabled", label(renderer, "richChoiceListBadge")
                     .getAccessibleContext().getAccessibleName());
             assertEquals("full tooltip", renderer.getAccessibleContext().getAccessibleDescription());
+        });
+    }
+
+    /// Icon-free catalogs reserve no icon space in loaded, loading, or failed states, including narrow rows.
+    @Test
+    public void iconFreeRowsDoNotReserveIconSpace() {
+        RichChoiceListCellRenderer<String> renderer = RichChoiceListCellRenderer.withoutIcon(
+                value -> "Shader pack", value -> "Local description", value -> "Enabled",
+                value -> "tooltip", value -> false);
+        JList<ChoiceListEntry<String>> list = new JList<>();
+        EdtDispatcher.executeAndWait(() -> {
+            for (int width : new int[] {1, 8, 24, 48, 96, 180, 400}) {
+                list.setSize(width, RichChoiceListCellRenderer.ROW_HEIGHT);
+                for (ChoiceListEntry<String> entry : java.util.List.of(
+                        ChoiceListEntry.loaded(0, "pack"), ChoiceListEntry.<String>loading(0),
+                        ChoiceListEntry.<String>failed(0, new IOException("fixture")))) {
+                    renderer.getListCellRendererComponent(list, entry, 0, false, false);
+                    assertEquals(2, renderer.getComponentCount());
+                    assertEquals("richChoiceListLabels", renderer.getComponents()[0].getName());
+                    assertEquals(renderer.getInsets().left, renderer.getComponents()[0].getX());
+                    assertChildrenInsideRow(renderer);
+                }
+            }
+        });
+    }
+
+    /// Actual painted icons stay inside their padded hit area across themes, selection, width, and direction.
+    @Test
+    public void hitAreaContainsActualPaintedHandle() {
+        EdtDispatcher.executeAndWait(() -> {
+            RichChoiceListCellRenderer<String> renderer = new RichChoiceListCellRenderer<>(
+                    value -> value, value -> "detail", value -> "enabled", value -> new TestIcon(),
+                    value -> "tooltip", value -> false, value -> true);
+            javax.swing.DefaultListModel<ChoiceListEntry<String>> rows = new javax.swing.DefaultListModel<>();
+            rows.addElement(ChoiceListEntry.loaded(0, "First"));
+            rows.addElement(ChoiceListEntry.loaded(1, "Second"));
+            JList<ChoiceListEntry<String>> list = new JList<>(rows);
+            list.setCellRenderer(renderer);
+            list.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
+            for (boolean flat : new boolean[] {false, true}) {
+                if (flat) {
+                    list.setUI(new FlatListUI());
+                    list.putClientProperty(FlatClientProperties.STYLE,
+                            java.util.Map.of("cellMargins", new Insets(4, 9, 6, 17)));
+                }
+                for (ComponentOrientation direction : new ComponentOrientation[] {
+                        ComponentOrientation.LEFT_TO_RIGHT, ComponentOrientation.RIGHT_TO_LEFT}) {
+                    list.applyComponentOrientation(direction);
+                    for (int width : new int[] {180, 320, 720}) {
+                        list.setSize(width, 250);
+                        for (int selected : new int[] {-1, 0, 1}) {
+                            list.setSelectedIndex(selected);
+                            Rectangle icon = CatalogDragHitAssertions.paintedHandle(list, 1);
+                            Rectangle hit = RichChoiceListCellRenderer.dragHandleBounds(list, 1);
+                            Rectangle row = list.getCellBounds(1, 1);
+                            assertNotNull(row);
+                            assertTrue(hit.contains(icon), "Painted icon must be draggable: " + icon + " / " + hit);
+                            Rectangle padded = new Rectangle(icon);
+                            padded.grow(6, 6);
+                            assertEquals(padded.intersection(row), hit);
+                            for (java.awt.Point point : CatalogDragHitAssertions.handlePoints(icon)) {
+                                if (row.contains(point)) assertTrue(hit.contains(point), point.toString());
+                            }
+                            assertFalse(hit.contains(row.x + row.width / 2, row.y + row.height / 2));
+                        }
+                    }
+                }
+            }
+            list.setEnabled(false);
+            assertTrue(RichChoiceListCellRenderer.dragHandleBounds(list, 1).isEmpty());
+            list.setEnabled(true);
+            assertTrue(RichChoiceListCellRenderer.dragHandleBounds(list, -1).isEmpty());
+            assertTrue(RichChoiceListCellRenderer.dragHandleBounds(list, 2).isEmpty());
+            list.setCellRenderer(new RichChoiceListCellRenderer<>(
+                    value -> "Not draggable", value -> "detail", value -> "", value -> new TestIcon(),
+                    value -> "tooltip"));
+            assertTrue(RichChoiceListCellRenderer.dragHandleBounds(list, 1).isEmpty());
         });
     }
 

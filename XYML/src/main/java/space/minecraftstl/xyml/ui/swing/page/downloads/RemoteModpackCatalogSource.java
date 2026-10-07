@@ -75,7 +75,7 @@ public enum RemoteModpackCatalogSource {
     /// @return non-null Core modpack repository
     public RemoteAddonRepository repository() {
         return Objects.requireNonNull(
-                source.getRepoForType(RemoteAddon.Type.MODPACK),
+                source.getRepository(),
                 "Missing modpack repository for " + source);
     }
 

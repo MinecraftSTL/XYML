@@ -131,12 +131,12 @@ public final class CurseModpackProvider implements ModpackProvider {
                             try {
                                 CurseManifestFile result = file;
                                 if (space.minecraftstl.xyml.util.StringUtils.isBlank(file.fileName()) || file.url() == null) {
-                                    RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.MODS.getAddonFile(
+                                    RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.getInstance().getAddonFile(
                                             Integer.toString(file.projectID()), Integer.toString(file.fileID()));
                                     result = result.withFileName(remoteFile.filename()).withURL(remoteFile.url());
                                 }
                                 if (!file.addonQueried()) {
-                                    RemoteAddon addon = CurseForgeRemoteAddonRepository.MODS.getAddonById(
+                                    RemoteAddon addon = CurseForgeRemoteAddonRepository.getInstance().getAddonById(
                                             downloadProvider, Integer.toString(file.projectID()));
                                     result = result.withAddon(addon);
                                 }

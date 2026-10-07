@@ -63,7 +63,7 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
             RemoteAddonCatalogSource source) throws IOException {
         RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
         RemoteAddonCatalogSource requestedSource = Objects.requireNonNull(source, "source");
-        return requestedSource.repository(requestedKind).getCategories().toList();
+        return requestedSource.repository(requestedKind).getCategories(requestedKind.repositoryType()).toList();
     }
 
     /// Queries one provider page with the exact user-measured viewport row count.
@@ -77,6 +77,7 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
         RemoteAddonRepository repository = request.source().repository(request.kind());
         RemoteAddonRepository.SearchResult result = repository.search(
                 downloadProvider,
+                request.kind().repositoryType(),
                 request.gameVersion(),
                 request.category(),
                 request.pageOffset(),
@@ -172,7 +173,7 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
         RemoteAddon.Source source = declaredSource == null
                 ? item.source().coreSource()
                 : declaredSource;
-        return source.getCommonRepo().resolveDependency(downloadProvider, rawId.trim());
+        return source.getRepository().resolveDependency(downloadProvider, rawId.trim());
     }
 
     /// {@inheritDoc}

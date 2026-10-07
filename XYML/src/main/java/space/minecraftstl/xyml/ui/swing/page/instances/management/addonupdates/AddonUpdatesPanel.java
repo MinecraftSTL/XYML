@@ -911,7 +911,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     private void loadSelectedChangelog(AddonUpdateItem selected) {
         try {
             RemoteAddon.Type type = selected.update().repoType();
-            RemoteAddonRepository repository = selected.source().getRepoForType(type);
+            RemoteAddonRepository repository = selected.source().getRepository();
             if (repository == null) {
                 throw new IOException("No remote repository for " + type);
             }

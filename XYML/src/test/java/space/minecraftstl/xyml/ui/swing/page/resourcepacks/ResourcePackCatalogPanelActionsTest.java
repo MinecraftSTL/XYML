@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogDragHitAssertions;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -26,18 +27,22 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.AbstractButton;
+import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Rectangle;
 import java.awt.Dimension;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -64,6 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -658,6 +664,76 @@ public final class ResourcePackCatalogPanelActionsTest {
         panel.close();
     }
 
+    /// Verifies enabled rows expose the handle and persist the exact final display index.
+    @Test
+    public void enabledRowsExposeHandleAndReorderToExactTargetIndex() {
+        Path resourcePackDirectory = testPath("resourcepacks");
+        ResourcePackCatalogItem first = item(
+                resourcePackDirectory.resolve("first.zip"),
+                ResourcePackCompatibility.COMPATIBLE,
+                true);
+        ResourcePackCatalogItem second = item(
+                resourcePackDirectory.resolve("second.zip"),
+                ResourcePackCompatibility.COMPATIBLE,
+                true);
+        ResourcePackCatalogItem disabled = item(
+                resourcePackDirectory.resolve("disabled.zip"),
+                ResourcePackCompatibility.COMPATIBLE,
+                false);
+        @Unmodifiable List<ResourcePackCatalogItem> rows = List.of(first, second, disabled);
+        FakeResourcePackCatalogModel model = readyModel(rows, 1L);
+        FakeResourcePackCatalogInteractions interactions = new FakeResourcePackCatalogInteractions();
+        ResourcePackCatalogPanel panel = onEventDispatchThread(() -> new ResourcePackCatalogPanel(
+                model,
+                STRINGS,
+                ACTION_STRINGS,
+                interactions,
+                resourcePackDirectory));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.choiceList().getList();
+            Component enabledRow = list.getCellRenderer().getListCellRendererComponent(
+                    list, ChoiceListEntry.loaded(0, first), 0, false, false);
+            boolean enabledHandle = findComponent(
+                    (Container) enabledRow, "richChoiceListBadge", JLabel.class).getIcon() != null;
+            Component disabledRow = list.getCellRenderer().getListCellRendererComponent(
+                    list, ChoiceListEntry.loaded(2, disabled), 2, false, false);
+            boolean disabledHandle = findComponent(
+                    (Container) disabledRow, "richChoiceListBadge", JLabel.class).getIcon() != null;
+            list.setFixedCellHeight(68);
+            for (int width : new int[] {240, 400, 720}) {
+                list.setSize(width, 250);
+                for (int selected : new int[] {-1, 0, 1}) {
+                    list.setSelectedIndex(selected);
+                    Rectangle painted = CatalogDragHitAssertions.paintedHandle(list, 1);
+                    for (java.awt.Point point : CatalogDragHitAssertions.handlePoints(painted)) {
+                        list.dispatchEvent(new java.awt.event.MouseEvent(list, java.awt.event.MouseEvent.MOUSE_MOVED,
+                                1L, 0, point.x, point.y, 0, false));
+                        assertEquals(java.awt.Cursor.HAND_CURSOR, list.getCursor().getType(), point.toString());
+                    }
+                }
+                Rectangle disabledBounds = list.getCellBounds(2, 2);
+                assertNotNull(disabledBounds);
+                list.dispatchEvent(new java.awt.event.MouseEvent(list, java.awt.event.MouseEvent.MOUSE_MOVED,
+                        1L, 0, disabledBounds.x + disabledBounds.width - 16,
+                        disabledBounds.y + disabledBounds.height / 2, 0, false));
+                assertEquals(java.awt.Cursor.DEFAULT_CURSOR, list.getCursor().getType());
+            }
+            list.setSelectedIndex(1);
+            model.selectResourcePack(second.path());
+
+            assertAll(
+                    () -> assertTrue(enabledHandle, "enabled handle"),
+                    () -> assertFalse(disabledHandle, "disabled handle"),
+                    () -> assertTrue(panel.reorderResourcePackToIndex(second, 0), "reorder started"),
+                    () -> assertEquals(List.of(second.path()), model.reorderedPaths()),
+                    () -> assertEquals(List.of(0), model.reorderTargets()),
+                    () -> assertFalse(panel.reorderResourcePackToIndex(second, 1), "no-op reorder"));
+            panel.close();
+        });
+    }
+
     /// Creates a ready fake model with no initial selection.
     ///
     /// @param rows exact immutable catalog rows
@@ -666,6 +742,7 @@ public final class ResourcePackCatalogPanelActionsTest {
     private static FakeResourcePackCatalogModel readyModel(
             @Unmodifiable List<ResourcePackCatalogItem> rows,
             long revision) {
+        int enabledCount = (int) rows.stream().filter(ResourcePackCatalogItem::enabled).count();
         return new FakeResourcePackCatalogModel(rows, snapshot(
                 OptionalInt.empty(),
                 OptionalInt.of(rows.size()),
@@ -675,7 +752,8 @@ public final class ResourcePackCatalogPanelActionsTest {
                 ResourcePackCatalogWriteStatus.IDLE,
                 "",
                 !rows.isEmpty(),
-                true));
+                true,
+                enabledCount));
     }
 
     /// Creates one normalized resource-pack row.
@@ -730,6 +808,43 @@ public final class ResourcePackCatalogPanelActionsTest {
                 writeStatusText,
                 listEnabled,
                 refreshEnabled);
+    }
+
+    /// Creates one validated catalog snapshot with an explicit enabled prefix.
+    ///
+    /// @param selectedIndex selected logical index
+    /// @param itemCount exact count when known
+    /// @param contentRevision indexed-content revision
+    /// @param status scan lifecycle
+    /// @param statusText localized scan status
+    /// @param writeStatus write lifecycle
+    /// @param writeStatusText localized write status
+    /// @param listEnabled whether row selection is enabled
+    /// @param refreshEnabled whether refresh is enabled
+    /// @param enabledItemCount enabled prefix count
+    /// @return validated catalog snapshot
+    private static ResourcePackCatalogSnapshot snapshot(
+            OptionalInt selectedIndex,
+            OptionalInt itemCount,
+            long contentRevision,
+            ResourcePackCatalogStatus status,
+            String statusText,
+            ResourcePackCatalogWriteStatus writeStatus,
+            String writeStatusText,
+            boolean listEnabled,
+            boolean refreshEnabled,
+            int enabledItemCount) {
+        return new ResourcePackCatalogSnapshot(
+                selectedIndex,
+                itemCount,
+                contentRevision,
+                status,
+                statusText,
+                writeStatus,
+                writeStatusText,
+                listEnabled,
+                refreshEnabled,
+                enabledItemCount);
     }
 
     /// Resolves one workspace-relative test path to its normalized absolute form.
@@ -947,6 +1062,12 @@ public final class ResourcePackCatalogPanelActionsTest {
         /// Captured delete targets in invocation order.
         private final List<Path> deletedPaths = new ArrayList<>();
 
+        /// Captured reorder targets in invocation order.
+        private final List<Path> reorderedPaths = new ArrayList<>();
+
+        /// Captured final enabled display indexes in invocation order.
+        private final List<Integer> reorderTargets = new ArrayList<>();
+
         /// Number of first-load requests.
         private final AtomicInteger lazyLoads = new AtomicInteger();
 
@@ -1124,6 +1245,18 @@ public final class ResourcePackCatalogPanelActionsTest {
             return CompletableFuture.completedFuture(current.get());
         }
 
+        /// Rejects unsupported reorder commands in this focused fake.
+        ///
+        /// @param path requested stable path
+        /// @param targetIndex requested final index
+        /// @return never
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex) {
+            reorderedPaths.add(path.toAbsolutePath().normalize());
+            reorderTargets.add(targetIndex);
+            return CompletableFuture.completedFuture(current.get());
+        }
+
         /// Closes this fake once.
         @Override
         public void close() {
@@ -1172,6 +1305,20 @@ public final class ResourcePackCatalogPanelActionsTest {
             return List.copyOf(deletedPaths);
         }
 
+        /// Returns immutable captured reorder paths.
+        ///
+        /// @return reorder paths
+        private @Unmodifiable List<Path> reorderedPaths() {
+            return List.copyOf(reorderedPaths);
+        }
+
+        /// Returns immutable captured reorder target indexes.
+        ///
+        /// @return reorder target indexes
+        private @Unmodifiable List<Integer> reorderTargets() {
+            return List.copyOf(reorderTargets);
+        }
+
         /// Copies a snapshot while replacing only its stable selection.
         ///
         /// @param source source snapshot
@@ -1189,7 +1336,8 @@ public final class ResourcePackCatalogPanelActionsTest {
                     source.writeStatus(),
                     source.writeStatusText(),
                     source.listEnabled(),
-                    source.refreshEnabled());
+                    source.refreshEnabled(),
+                    source.enabledItemCount());
         }
     }
 

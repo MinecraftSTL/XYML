@@ -263,6 +263,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             preset.useNativeGLFWorSDLProperty().setValue(values.nativeLibraries().nativeGlfw());
             preset.useNativeOpenALProperty().setValue(values.nativeLibraries().nativeOpenAl());
             preset.defaultIsolationTypeProperty().setValue(values.defaultIsolationType());
+            preset.instanceConfigMigrationPolicyProperty().setValue(values.launcher().migrationPolicy());
             return snapshot();
         });
     }
@@ -445,7 +446,8 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                                 source.disableAutoGameOptionsProperty().getValue(),
                                 source.showLogsProperty().getValue(),
                                 source.enableDebugLogOutputProperty().getValue(),
-                                source.notCheckGameProperty().getValue()),
+                                source.notCheckGameProperty().getValue(),
+                                source.instanceConfigMigrationPolicyProperty().getValue()),
                         new GameSettingsPresetEditor.QuickPlaySettings(
                                 source.quickPlayProperty().getValue(),
                                 source.quickPlayMultiplayerProperty().getValue(),

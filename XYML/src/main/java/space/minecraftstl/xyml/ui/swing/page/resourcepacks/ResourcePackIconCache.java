@@ -22,18 +22,24 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.image.EncodedImage;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JList;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -44,7 +50,10 @@ final class ResourcePackIconCache {
     static final int ICON_SIZE = 32;
 
     /// Maximum decoded source edge accepted before scaling.
-    private static final int MAX_SOURCE_EDGE = 4096;
+    private static final int MAX_SOURCE_EDGE = 8_192;
+
+    /// Maximum decoded source pixel count accepted before scaling.
+    private static final long MAX_SOURCE_PIXELS = 16L * 1024L * 1024L;
 
     /// Placeholder for a pack without pack.png.
     static final Icon PLACEHOLDER = createPlaceholder(new Color(128, 128, 128, 80));
@@ -52,28 +61,20 @@ final class ResourcePackIconCache {
     /// Marker for a malformed or unreadable pack icon.
     static final Icon FAILURE = createPlaceholder(new Color(190, 90, 90, 180));
 
-    /// In-flight and completed icons keyed by normalized pack path.
-    private final ConcurrentMap<Path, CompletableFuture<Icon>> icons = new ConcurrentHashMap<>();
+    /// Stable in-flight and completed icons keyed by normalized pack path.
+    private final ConcurrentMap<Path, AsyncIcon> icons = new ConcurrentHashMap<>();
 
-    /// Returns a completed icon or null while the model loads encoded icon data.
+    /// Returns one stable path icon that updates after encoded data becomes available.
     ///
     /// @param model resource-pack model owning the file access boundary
     /// @param item visible resource-pack row
     /// @param list list to repaint after asynchronous completion
-    /// @return cached icon, placeholder, or null while loading
-    @Nullable Icon iconFor(ResourcePackCatalogModel model, ResourcePackCatalogItem item, JList<?> list) {
+    /// @return stable path icon, initially showing the placeholder
+    Icon iconFor(ResourcePackCatalogModel model, ResourcePackCatalogItem item, JList<?> list) {
         Path path = Objects.requireNonNull(item, "item").path().toAbsolutePath().normalize();
-        CompletableFuture<Icon> future = icons.computeIfAbsent(path, ignored ->
-                model.loadIcon(path)
-                        .thenApply(ResourcePackIconCache::decode)
-                        .toCompletableFuture()
-                        .exceptionally(ignoredFailure -> FAILURE));
-        if (!future.isDone()) {
-            future.whenComplete((ignoredIcon, ignoredFailure) ->
-                    SwingUtilities.invokeLater(list::repaint));
-            return PLACEHOLDER;
-        }
-        return future.getNow(PLACEHOLDER);
+        AsyncIcon icon = icons.computeIfAbsent(path, ignored -> new AsyncIcon());
+        icon.load(model, path, list);
+        return icon;
     }
 
     /// Invalidates paths after a catalog content revision changes.
@@ -86,28 +87,156 @@ final class ResourcePackIconCache {
         if (encodedImage == null) {
             return PLACEHOLDER;
         }
-        try {
-            BufferedImage source = ImageIO.read(encodedImage.openStream());
-            if (source == null
-                    || source.getWidth() > MAX_SOURCE_EDGE
-                    || source.getHeight() > MAX_SOURCE_EDGE) {
+        try (InputStream input = encodedImage.openStream();
+             ImageInputStream imageInput = new MemoryCacheImageInputStream(input)) {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+            if (!readers.hasNext()) {
                 return FAILURE;
             }
-            BufferedImage target = new BufferedImage(
-                    ICON_SIZE,
-                    ICON_SIZE,
-                    BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = target.createGraphics();
+
+            ImageReader reader = readers.next();
             try {
-                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                graphics.drawImage(source, 0, 0, ICON_SIZE, ICON_SIZE, null);
+                reader.setInput(imageInput, true, true);
+                validateSourceDimensions(reader.getWidth(0), reader.getHeight(0));
+                BufferedImage source = reader.read(0);
+                if (source == null) {
+                    return FAILURE;
+                }
+                try {
+                    validateSourceDimensions(source.getWidth(), source.getHeight());
+                    BufferedImage target = new BufferedImage(
+                            ICON_SIZE,
+                            ICON_SIZE,
+                            BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D graphics = target.createGraphics();
+                    try {
+                        graphics.setRenderingHint(
+                                RenderingHints.KEY_INTERPOLATION,
+                                RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                        graphics.drawImage(source, 0, 0, ICON_SIZE, ICON_SIZE, null);
+                    } finally {
+                        graphics.dispose();
+                    }
+                    return new ImageIcon(target);
+                } finally {
+                    source.flush();
+                }
             } finally {
-                graphics.dispose();
-                source.flush();
+                reader.dispose();
             }
-            return new ImageIcon(target);
         } catch (IOException | RuntimeException failure) {
             return FAILURE;
+        }
+    }
+
+    /// Rejects invalid or excessively large dimensions before pixel allocation.
+    ///
+    /// @param width source width reported by ImageIO
+    /// @param height source height reported by ImageIO
+    /// @throws IOException when dimensions violate the source safety bounds
+    private static void validateSourceDimensions(int width, int height) throws IOException {
+        if (width <= 0 || height <= 0) {
+            throw new IOException("Resource-pack icon has invalid dimensions");
+        }
+        if (width > MAX_SOURCE_EDGE || height > MAX_SOURCE_EDGE) {
+            throw new IOException("Resource-pack icon exceeds its dimension limit");
+        }
+        if ((long) width * height > MAX_SOURCE_PIXELS) {
+            throw new IOException("Resource-pack icon exceeds its pixel limit");
+        }
+    }
+
+    /// Mutable fixed-size icon whose delegate changes only after a background request completes.
+    @NotNullByDefault
+    private static final class AsyncIcon implements Icon {
+        /// Synchronizes request ownership and delegate publication.
+        private final Object lock = new Object();
+
+        /// Resolved icon currently painted, or null while the placeholder is active.
+        private volatile @Nullable Icon delegate;
+
+        /// Whether one model request is currently active.
+        private boolean loading;
+
+        /// Model used for the latest request, or null before first render.
+        private @Nullable ResourcePackCatalogModel model;
+
+        /// Path used for the latest request, or null before first render.
+        private @Nullable Path path;
+
+        /// List repainted after the latest request completes, or null before first render.
+        private @Nullable JList<?> list;
+
+        /// Starts one request for this stable path unless loading or already resolved.
+        ///
+        /// @param model resource-pack model owning the file access boundary
+        /// @param path normalized resource-pack path
+        /// @param list list to repaint after completion
+        private void load(ResourcePackCatalogModel model, Path path, JList<?> list) {
+            synchronized (lock) {
+                this.model = Objects.requireNonNull(model, "model");
+                this.path = Objects.requireNonNull(path, "path");
+                this.list = Objects.requireNonNull(list, "list");
+                if (loading || delegate != null) {
+                    return;
+                }
+                loading = true;
+                startLoadLocked();
+            }
+        }
+
+        /// Starts the latest retained request while holding [#lock].
+        private void startLoadLocked() {
+            ResourcePackCatalogModel source = Objects.requireNonNull(model, "model");
+            Path sourcePath = Objects.requireNonNull(path, "path");
+            JList<?> targetList = Objects.requireNonNull(list, "list");
+            try {
+                Objects.requireNonNull(source.loadIcon(sourcePath), "loadIcon result")
+                        .whenComplete((@Nullable EncodedImage encodedImage, @Nullable Throwable failure) -> {
+                            Icon resolved = failure == null ? decode(encodedImage) : FAILURE;
+                            synchronized (lock) {
+                                delegate = resolved;
+                                loading = false;
+                            }
+                            SwingUtilities.invokeLater(targetList::repaint);
+                        });
+            } catch (RuntimeException failure) {
+                delegate = FAILURE;
+                loading = false;
+                SwingUtilities.invokeLater(targetList::repaint);
+            }
+        }
+
+        /// Paints the current delegate or the loading placeholder.
+        ///
+        /// @param component icon host, possibly null
+        /// @param graphics destination graphics
+        /// @param x horizontal origin
+        /// @param y vertical origin
+        @Override
+        public void paintIcon(@Nullable Component component, Graphics graphics, int x, int y) {
+            Icon resolved = delegate;
+            if (resolved == null) {
+                PLACEHOLDER.paintIcon(component, graphics, x, y);
+            } else {
+                resolved.paintIcon(component, graphics, x, y);
+            }
+        }
+
+        /// Returns the fixed row icon width.
+        ///
+        /// @return icon width in pixels
+        @Override
+        public int getIconWidth() {
+            return ICON_SIZE;
+        }
+
+        /// Returns the fixed row icon height.
+        ///
+        /// @return icon height in pixels
+        @Override
+        public int getIconHeight() {
+            return ICON_SIZE;
         }
     }
 

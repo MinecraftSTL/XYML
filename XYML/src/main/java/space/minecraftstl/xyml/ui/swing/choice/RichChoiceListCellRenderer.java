@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.choice;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingOverlayColors;
 
 import javax.swing.BorderFactory;
@@ -28,6 +29,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 import java.awt.AlphaComposite;
@@ -41,6 +43,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.util.Map;
 import java.util.Objects;
@@ -72,6 +75,18 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
     /// Minimum width reserved for one badge glyph when the row has enough room.
     private static final int MIN_BADGE_WIDTH = 8;
 
+    /// Right-side drag-handle icon used by opt-in reorderable rows.
+    private static final Icon DRAG_HANDLE_ICON = new DragHandleIcon();
+
+    /// Logical padding around the actual drag icon, clipped to the current row.
+    private static final int DRAG_HANDLE_HIT_PADDING = 6;
+
+    /// Minimum list-coordinate hit width for the right-aligned drag handle.
+    public static final int DRAG_HANDLE_HIT_WIDTH = 24;
+
+    /// Minimum list-coordinate hit height for the right-aligned drag handle.
+    public static final int DRAG_HANDLE_HIT_HEIGHT = 32;
+
     /// Normal horizontal gap between the icon, labels, and badge.
     private static final int NORMAL_HORIZONTAL_GAP = 12;
 
@@ -101,6 +116,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Predicate identifying loaded rows that should use the muted disabled-row surface.
     private final Predicate<? super T> disabledProvider;
+
+    /// Predicate identifying loaded rows that expose the reorder handle.
+    private final Predicate<? super T> draggableProvider;
 
     /// Fixed icon host.
     private final JLabel iconLabel = new JLabel();
@@ -134,6 +152,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Whether an unselected loaded row needs the disabled wash during painting.
     private boolean muted;
+
+    /// Whether this renderer reserves and paints a row icon; false only for an explicitly icon-free catalog.
+    private boolean iconVisible = true;
 
     /// Current icon slot size after responsive geometry negotiation.
     private int iconSlotSize = ICON_SIZE;
@@ -184,6 +205,56 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             Function<? super T, Icon> iconProvider,
             Function<? super T, String> tooltipProvider,
             Predicate<? super T> disabledProvider) {
+        this(
+                primaryTextProvider,
+                secondaryTextProvider,
+                badgeTextProvider,
+                iconProvider,
+                tooltipProvider,
+                disabledProvider,
+                value -> false);
+    }
+
+    /// Creates an icon-free row without reserving space for loading or package icons.
+    ///
+    /// @param primaryTextProvider primary row title provider
+    /// @param secondaryTextProvider secondary metadata provider
+    /// @param badgeTextProvider right-aligned state provider
+    /// @param tooltipProvider loaded-row tooltip provider
+    /// @param disabledProvider predicate identifying muted rows
+    /// @param <T> loaded row type
+    /// @return renderer with no icon slot
+    public static <T extends Object> RichChoiceListCellRenderer<T> withoutIcon(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider) {
+        RichChoiceListCellRenderer<T> renderer = new RichChoiceListCellRenderer<>(
+                primaryTextProvider, secondaryTextProvider, badgeTextProvider,
+                value -> LOADING_ICON, tooltipProvider, disabledProvider);
+        renderer.iconVisible = false;
+        renderer.remove(renderer.iconLabel);
+        return renderer;
+    }
+
+    /// Creates a reusable rich row renderer with optional muted and reorderable rows.
+    ///
+    /// @param primaryTextProvider primary row title provider
+    /// @param secondaryTextProvider secondary description and metadata provider
+    /// @param badgeTextProvider right-aligned state or version provider
+    /// @param iconProvider loaded-row icon provider
+    /// @param tooltipProvider loaded-row tooltip provider
+    /// @param disabledProvider predicate for rows rendered with a muted background
+    /// @param draggableProvider predicate for loaded rows exposing the reorder handle
+    public RichChoiceListCellRenderer(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, Icon> iconProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider,
+            Predicate<? super T> draggableProvider) {
         super(new BorderLayout(NORMAL_HORIZONTAL_GAP, 0));
         this.primaryTextProvider = Objects.requireNonNull(primaryTextProvider, "primaryTextProvider");
         this.secondaryTextProvider = Objects.requireNonNull(secondaryTextProvider, "secondaryTextProvider");
@@ -191,6 +262,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         this.iconProvider = Objects.requireNonNull(iconProvider, "iconProvider");
         this.tooltipProvider = Objects.requireNonNull(tooltipProvider, "tooltipProvider");
         this.disabledProvider = Objects.requireNonNull(disabledProvider, "disabledProvider");
+        this.draggableProvider = Objects.requireNonNull(draggableProvider, "draggableProvider");
 
         setOpaque(false);
         setPreferredSize(new Dimension(320, ROW_HEIGHT));
@@ -247,6 +319,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         boolean rowMuted = entry.status() == ChoiceLoadStatus.LOADED
                 && value != null
                 && disabledProvider.test(value);
+        boolean rowDraggable = entry.status() == ChoiceLoadStatus.LOADED
+                && value != null
+                && draggableProvider.test(value);
         configurePalette(list, isSelected, rowMuted);
         Font baseFont = list.getFont();
         primaryLabel.setFont(baseFont.deriveFont(Font.BOLD));
@@ -255,6 +330,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 8.0F,
                 baseFont.getSize2D() - 1.0F)));
         setToolTipText(null);
+        badgeLabel.setIcon(null);
 
         String badgeText = "";
         if (entry.status() == ChoiceLoadStatus.LOADED && value != null) {
@@ -267,15 +343,19 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             String secondaryText = Objects.requireNonNull(secondaryTextProvider.apply(value),
                     "secondaryTextProvider result");
             int badgeWidth = badgeText.isBlank() ? 0 : badgeWidth(list, badgeText);
-            int textWidth = textWidth(list, badgeWidth);
+            int badgeContentWidth = badgeWidth + (rowDraggable ? DRAG_HANDLE_ICON.getIconWidth() + 6 : 0);
+            int textWidth = textWidth(list, badgeContentWidth);
             primaryLabel.setText(clip(primaryText, primaryLabel.getFontMetrics(
                     primaryLabel.getFont()), textWidth));
             secondaryLabel.setText(clip(secondaryText, secondaryLabel.getFontMetrics(
                     secondaryLabel.getFont()), textWidth));
-            badgeLabel.setPreferredSize(new Dimension(badgeWidth, ROW_HEIGHT - 12));
+            badgeLabel.setPreferredSize(new Dimension(badgeContentWidth, ROW_HEIGHT - 12));
             badgeLabel.setText(clip(badgeText, badgeLabel.getFontMetrics(
                     badgeLabel.getFont()), badgeWidth));
-            iconLabel.setIcon(fitIcon(iconFor(value), iconSlotSize));
+            badgeLabel.setIcon(rowDraggable ? DRAG_HANDLE_ICON : null);
+            badgeLabel.setIconTextGap(6);
+            badgeLabel.setHorizontalTextPosition(SwingConstants.LEFT);
+            if (iconVisible) iconLabel.setIcon(fitIcon(iconFor(value), iconSlotSize));
             String tooltip = Objects.requireNonNull(tooltipProvider.apply(value), "tooltipProvider result");
             setToolTipText(tooltip.isBlank() ? null : tooltip);
             primaryLabel.getAccessibleContext().setAccessibleName(primaryText);
@@ -289,7 +369,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(fitIcon(ERROR_ICON, iconSlotSize));
+            if (iconVisible) iconLabel.setIcon(fitIcon(ERROR_ICON, iconSlotSize));
             @Nullable Throwable failure = entry.failure();
             setToolTipText(failure == null ? null : failure.getMessage());
             primaryLabel.getAccessibleContext().setAccessibleName("!");
@@ -303,7 +383,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(fitIcon(LOADING_ICON, iconSlotSize));
+            if (iconVisible) iconLabel.setIcon(fitIcon(LOADING_ICON, iconSlotSize));
             setToolTipText(null);
             primaryLabel.getAccessibleContext().setAccessibleName("...");
             secondaryLabel.getAccessibleContext().setAccessibleName(null);
@@ -394,7 +474,74 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         int width = list.getWidth() > 0 ? list.getWidth() : getPreferredSize().width;
         Insets insets = getInsets();
         return Math.max(1, width - insets.left - insets.right - iconSlotSize
-                - horizontalGap - badgeWidth - horizontalGap);
+                - (iconVisible ? horizontalGap : 0) - badgeWidth - horizontalGap);
+    }
+
+    /// Returns the legacy edge-based hit area for callers without a configured renderer.
+    ///
+    /// Interactive catalogs use [#dragHandleBounds(JList, int)] so theme margins and orientation are respected.
+    ///
+    /// @param cellBounds bounds of the row in list coordinates
+    /// @return mutable legacy drag-handle rectangle
+    public static Rectangle dragHandleBounds(Rectangle cellBounds) {
+        Objects.requireNonNull(cellBounds, "cellBounds");
+        int width = Math.min(DRAG_HANDLE_HIT_WIDTH, cellBounds.width);
+        int height = Math.min(DRAG_HANDLE_HIT_HEIGHT, cellBounds.height);
+        return new Rectangle(
+                cellBounds.x + cellBounds.width - width,
+                cellBounds.y + Math.max(0, (cellBounds.height - height) / 2),
+                width,
+                height);
+    }
+
+    /// Returns the actual rendered handle's hit area, including six logical pixels of surrounding space.
+    ///
+    /// This EDT-only query uses already loaded presentation values and performs no storage or network I/O.
+    /// Rows without a visible handle, disabled lists, and unsupported renderers return an empty rectangle.
+    ///
+    /// @param list owning list with its current renderer, palette, and allocation
+    /// @param index current row index
+    /// @param <V> list model element type
+    /// @return detached list-coordinate hit rectangle, clipped to the current row
+    public static <V> Rectangle dragHandleBounds(JList<V> list, int index) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(list, "list");
+        if (!list.isEnabled() || index < 0 || index >= list.getModel().getSize()) return new Rectangle();
+        @Nullable Rectangle cellBounds = list.getCellBounds(index, index);
+        @Nullable ListCellRenderer<? super V> renderer = list.getCellRenderer();
+        if (cellBounds == null || cellBounds.isEmpty() || renderer == null) return new Rectangle();
+        Component component = renderer.getListCellRendererComponent(
+                list, list.getModel().getElementAt(index), index, list.isSelectedIndex(index),
+                list.hasFocus() && list.getLeadSelectionIndex() == index);
+        if (!(component instanceof RichChoiceListCellRenderer<?> rich)) return new Rectangle();
+        rich.setSize(cellBounds.width, cellBounds.height);
+        rich.doLayout();
+        return rich.renderedDragHandleBounds(cellBounds);
+    }
+
+    /// Measures the same compound-label icon rectangle used by Swing to paint the configured badge.
+    ///
+    /// @param cellBounds current row in list coordinates
+    /// @return detached padded hit rectangle, or an empty rectangle when no handle is painted
+    private Rectangle renderedDragHandleBounds(Rectangle cellBounds) {
+        if (badgeLabel.getIcon() != DRAG_HANDLE_ICON || !badgeLabel.isVisible()) return new Rectangle();
+        Insets insets = badgeLabel.getInsets();
+        Rectangle view = new Rectangle(insets.left, insets.top,
+                Math.max(0, badgeLabel.getWidth() - insets.left - insets.right),
+                Math.max(0, badgeLabel.getHeight() - insets.top - insets.bottom));
+        Rectangle iconBounds = new Rectangle();
+        Rectangle textBounds = new Rectangle();
+        SwingUtilities.layoutCompoundLabel(badgeLabel, badgeLabel.getFontMetrics(badgeLabel.getFont()),
+                badgeLabel.getText(), badgeLabel.getIcon(), badgeLabel.getVerticalAlignment(),
+                badgeLabel.getHorizontalAlignment(), badgeLabel.getVerticalTextPosition(),
+                badgeLabel.getHorizontalTextPosition(), view, iconBounds, textBounds, badgeLabel.getIconTextGap());
+        Rectangle visibleIcon = iconBounds.intersection(new Rectangle(0, 0,
+                badgeLabel.getWidth(), badgeLabel.getHeight()));
+        if (visibleIcon.isEmpty()) return new Rectangle();
+        iconBounds.translate(cellBounds.x + badgeLabel.getX(), cellBounds.y + badgeLabel.getY());
+        iconBounds.grow(DRAG_HANDLE_HIT_PADDING, DRAG_HANDLE_HIT_PADDING);
+        Rectangle hit = iconBounds.intersection(cellBounds);
+        return hit.isEmpty() ? new Rectangle() : hit;
     }
 
     /// Computes a bounded badge width that still leaves room for the title.
@@ -406,7 +553,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         int width = list.getWidth() > 0 ? list.getWidth() : getPreferredSize().width;
         Insets insets = getInsets();
         int contentWidth = Math.max(0, width - insets.left - insets.right);
-        int remaining = Math.max(0, contentWidth - iconSlotSize - horizontalGap * 2);
+        int remaining = Math.max(0, contentWidth - iconSlotSize - horizontalGap * (iconVisible ? 2 : 1));
         if (remaining == 0) {
             return 0;
         }
@@ -429,7 +576,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         Insets insets = getInsets();
         int contentWidth = Math.max(1, width - insets.left - insets.right);
         horizontalGap = contentWidth < 180 ? COMPACT_HORIZONTAL_GAP : NORMAL_HORIZONTAL_GAP;
-        iconSlotSize = contentWidth < 150
+        iconSlotSize = !iconVisible ? 0 : contentWidth < 150
                 ? Math.max(18, Math.min(ICON_SIZE, contentWidth / 4))
                 : ICON_SIZE;
         int badgeMinimum = badgeText.isBlank()
@@ -522,6 +669,43 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             fittingCharacters++;
         }
         return fittingCharacters == 0 ? "" : value.substring(0, fittingCharacters);
+    }
+
+    /// Paints the six-dot reorder affordance using the owning row foreground.
+    @NotNullByDefault
+    private static final class DragHandleIcon implements Icon {
+        /// Paints the six-dot affordance with enabled or disabled theme color.
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D copy = (Graphics2D) graphics.create();
+            try {
+                copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                @Nullable Color themed = component.isEnabled()
+                        ? component.getForeground()
+                        : UIManager.getColor("Label.disabledForeground");
+                Color marker = themed == null ? Color.GRAY : themed;
+                copy.setColor(new Color(marker.getRed(), marker.getGreen(), marker.getBlue(), 150));
+                for (int row = 0; row < 3; row++) {
+                    for (int column = 0; column < 2; column++) {
+                        copy.fillOval(x + 4 + column * 6, y + 3 + row * 6, 3, 3);
+                    }
+                }
+            } finally {
+                copy.dispose();
+            }
+        }
+
+        /// Returns the icon width.
+        @Override
+        public int getIconWidth() {
+            return 18;
+        }
+
+        /// Returns the icon height.
+        @Override
+        public int getIconHeight() {
+            return 18;
+        }
     }
 
     /// Delegates one icon paint through a fixed square scale negotiated by the row geometry.

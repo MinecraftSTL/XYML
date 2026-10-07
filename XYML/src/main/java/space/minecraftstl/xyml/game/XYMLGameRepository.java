@@ -349,24 +349,71 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @return isolated, custom, or repository-default running directory
     @Override
     public Path getRunDirectory(GameInstanceID instanceId) {
+        return resolveRunDirectory(instanceId, getInstanceGameSettings(instanceId));
+    }
+
+    /// Resolves the running directory for one explicit candidate instance setting without mutating repository state.
+    ///
+    /// @param instanceId instance whose default isolated root is used for a blank or invalid local value
+    /// @param localSetting candidate local setting, or null when no local setting exists
+    /// @return isolated, custom, or repository-shared running directory
+    public Path resolveRunDirectory(
+            GameInstanceID instanceId,
+            @Nullable GameSettings.Instance localSetting) {
         if (beingModpackInstances.contains(instanceId) || isModpack(instanceId)) {
             return getInstanceRoot(instanceId);
         }
 
-        @Nullable GameSettings.Instance localSetting = getInstanceGameSettings(instanceId);
         boolean useInstanceRunningDirectory =
                 localSetting != null && localSetting.getOverrideProperties().contains(GameSettings.PROPERTY_RUNNING_DIRECTORY);
-
         String runningDirectory = getSelectedRunningDirectory(localSetting, useInstanceRunningDirectory);
         if (StringUtils.isBlank(runningDirectory)) {
             return useInstanceRunningDirectory ? getInstanceRoot(instanceId) : super.getRunDirectory(instanceId);
         }
 
         try {
-            return Path.of(runningDirectory);
+            return Path.of(runningDirectory).toAbsolutePath().normalize();
         } catch (InvalidPathException ignored) {
-            return getInstanceRoot(instanceId);
+            return useInstanceRunningDirectory ? getInstanceRoot(instanceId) : super.getRunDirectory(instanceId);
         }
+    }
+
+    /// Resolves the shared running directory selected by this instance's parent preset while ignoring local isolation.
+    ///
+    /// @param instanceId instance whose parent preset selects the shared directory
+    /// @return normalized shared running directory
+    public Path getSharedRunDirectory(GameInstanceID instanceId) {
+        return resolveSharedRunDirectory(instanceId, getInstanceGameSettings(instanceId));
+    }
+
+    /// Resolves a shared directory from an unsaved parent-preset selection without applying isolation.
+    ///
+    /// @param instanceId target instance identifier
+    /// @param candidate local settings selecting a parent preset, or null for the default preset
+    /// @return normalized parent-preset shared running directory
+    public Path resolveSharedRunDirectory(GameInstanceID instanceId, @Nullable GameSettings.Instance candidate) {
+        String runningDirectory = getSelectedRunningDirectory(candidate, false);
+        if (StringUtils.isBlank(runningDirectory)) {
+            return super.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        }
+        try {
+            return Path.of(runningDirectory).toAbsolutePath().normalize();
+        } catch (InvalidPathException ignored) {
+            return super.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        }
+    }
+
+    /// Returns whether an instance owns an isolated running-directory selection.
+    ///
+    /// @param instanceId instance identifier
+    /// @return true for modpacks or an explicit local running-directory override
+    public boolean isInstanceIsolated(GameInstanceID instanceId) {
+        if (beingModpackInstances.contains(instanceId) || isModpack(instanceId)) {
+            return true;
+        }
+        @Nullable GameSettings.Instance localSetting = getInstanceGameSettings(instanceId);
+        return localSetting != null
+                && localSetting.getOverrideProperties().contains(GameSettings.PROPERTY_RUNNING_DIRECTORY);
     }
 
     /// Returns the running directory string selected by the current source.
@@ -510,6 +557,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                     if (provisionalModpack) {
                         beingModpackInstances.add(to);
                     }
+                    SettingsManager.renameInstanceConfigMigrationSources(gameDirectory.getId(), from, to);
                 }
                 return renamed;
             });

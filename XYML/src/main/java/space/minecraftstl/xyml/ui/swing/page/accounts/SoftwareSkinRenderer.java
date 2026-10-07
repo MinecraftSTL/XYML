@@ -52,6 +52,16 @@ final class SoftwareSkinRenderer {
     /// Largest accepted wheel zoom.
     private static final double MAX_ZOOM = 2.4;
 
+    /// Converts vanilla entity model space into this renderer's view space.
+    ///
+    /// Every model cuboid, pivot and offset is written in Minecraft's `ModelPart` space: positive Y points down, the
+    /// player faces negative Z, the player's right side lies on negative X, the head top sits at Y -8 and the feet at
+    /// Y 24. The view keeps positive Y up and positive Z toward the camera, so the conversion is the proper 180 degree
+    /// turn about X that the vanilla entity renderer also applies, followed by centring the body on the origin. It
+    /// never mirrors the model.
+    private static final SkinPreviewTransform VANILLA_TO_VIEW = SkinPreviewTransform.translate(0.0, 8.0, 0.0)
+            .multiply(SkinPreviewTransform.rotateX(180.0));
+
     /// Prevents utility instantiation.
     private SoftwareSkinRenderer() {
     }
@@ -264,7 +274,6 @@ final class SoftwareSkinRenderer {
             leftArmYaw = 11.4592;
         }
 
-        double rootY = 0.0;
         double bodyPitch = 0.0;
         double bodyYOffset = 0.0;
         double headPitch = 0.0;
@@ -285,11 +294,11 @@ final class SoftwareSkinRenderer {
             }
             case SNEAKING -> {
                 bodyPitch = 28.6479;
-                bodyYOffset = -3.2;
-                headYOffset = -4.2;
-                armYOffset = -3.2;
-                legYOffset = -0.2;
-                legZOffset = -4.0;
+                bodyYOffset = 3.2;
+                headYOffset = 4.2;
+                armYOffset = 3.2;
+                legYOffset = 0.2;
+                legZOffset = 4.0;
                 armPitchOffset = 22.9183;
                 capePitch += 10.0;
             }
@@ -304,13 +313,10 @@ final class SoftwareSkinRenderer {
                 capePitch += 10.0;
             }
             case SWIMMING -> {
-                root = SkinPreviewTransform.translate(0.0, 0.0, 0.0)
-                        .multiply(SkinPreviewTransform.rotateX(90.0));
-                headPitch = 0.0;
-                rightArmPitch = 180.0;
-                leftArmPitch = 180.0;
-                rightArmYaw = -20.0;
-                leftArmYaw = 20.0;
+                root = SkinPreviewTransform.around(
+                        new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
+                        SkinPreviewTransform.Axis.X,
+                        90.0);
                 SwimPose swim = swimPose(limbSwing % 26.0, limbSwing);
                 rightArmPitch = swim.rightArmPitch();
                 leftArmPitch = swim.leftArmPitch();
@@ -323,359 +329,244 @@ final class SoftwareSkinRenderer {
                 capePitch = 18.0;
             }
         }
-        root = SkinPreviewTransform.translate(0.0, rootY, 0.0).multiply(root);
         rightArmPitch += armPitchOffset;
         leftArmPitch += armPitchOffset;
 
-        SkinPreviewTransform torso = root
-                .multiply(SkinPreviewTransform.translate(0.0, bodyYOffset, 0.0))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        bodyPitch));
-        SkinPreviewTransform head = root
-                .multiply(SkinPreviewTransform.translate(0.0, headYOffset, 0.0))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(0.0, 8.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        headPitch));
-
+        // Joint pivots and cuboids below are the vanilla PlayerModel values, in vanilla model space.
+        SkinPreviewTransform torso = joint(root, 0.0, bodyYOffset, 0.0, bodyPitch, 0.0, 0.0);
+        SkinPreviewTransform head = joint(root, 0.0, headYOffset, 0.0, headPitch, 0.0, 0.0);
         int armWidth = model == TextureModel.SLIM ? 3 : 4;
-        double armCenterX = 4.0 + armWidth / 2.0;
-        SkinPreviewTransform rightArm = root
-                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.Z,
-                        rightArmRoll))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.Y,
-                        rightArmYaw))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        rightArmPitch));
-        SkinPreviewTransform leftArm = root
-                .multiply(SkinPreviewTransform.translate(0.0, armYOffset, 0.0))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.Z,
-                        leftArmRoll))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.Y,
-                        leftArmYaw))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-5.0, 6.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        leftArmPitch));
-        SkinPreviewTransform rightLeg = root
-                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.Z,
-                        rightLegRoll))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.Y,
-                        rightLegYaw))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        rightLegPitch));
-        SkinPreviewTransform leftLeg = root
-                .multiply(SkinPreviewTransform.translate(0.0, legYOffset, legZOffset))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.Z,
-                        leftLegRoll))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.Y,
-                        leftLegYaw))
-                .multiply(SkinPreviewTransform.around(
-                        new SkinPreviewTransform.Vector(-1.9, -4.0, 0.0),
-                        SkinPreviewTransform.Axis.X,
-                        leftLegPitch));
+        double armOffset = model == TextureModel.SLIM ? 0.5 : 0.0;
+        SkinPreviewTransform rightArm = joint(
+                root, -5.0, 2.0 + armYOffset, 0.0, rightArmPitch, rightArmYaw, rightArmRoll);
+        SkinPreviewTransform leftArm = joint(
+                root, 5.0, 2.0 + armYOffset, 0.0, leftArmPitch, leftArmYaw, leftArmRoll);
+        SkinPreviewTransform rightLeg = joint(
+                root, -1.9, 12.0 + legYOffset, legZOffset, rightLegPitch, rightLegYaw, rightLegRoll);
+        SkinPreviewTransform leftLeg = joint(
+                root, 1.9, 12.0 + legYOffset, legZOffset, leftLegPitch, leftLegYaw, leftLegRoll);
 
         List<BoxPart> parts = new ArrayList<>();
         parts.add(boxPart(
-                box(0.0, 12.0, 0.0, 8.0, 8.0, 8.0, boxTexture(0, 0, 8, 8, 8)),
+                box(-4.0, -8.0, -4.0, 8.0, 8.0, 8.0, 0.0, false, boxTexture(0, 0, 8, 8, 8)),
                 head,
                 0));
         parts.add(boxPart(
-                box(0.0, 2.0, 0.0, 8.0, 12.0, 4.0, boxTexture(16, 16, 8, 12, 4)),
+                box(-4.0, 0.0, -2.0, 8.0, 12.0, 4.0, 0.0, false, boxTexture(16, 16, 8, 12, 4)),
                 torso,
                 0));
         parts.add(boxPart(
-                box(armCenterX, 2.0, 0.0, armWidth, 12.0, 4.0, boxTexture(40, 16, armWidth, 12, 4)),
+                box(-3.0 - armOffset, -2.0, -2.0, armWidth, 12.0, 4.0, 0.0, false,
+                        boxTexture(40, 16, armWidth, 12, 4)),
                 rightArm,
                 0));
+        // Legacy 64x32 skins reuse the right limb artwork, mirrored, for the left limbs.
         parts.add(boxPart(
-                box(-armCenterX, 2.0, 0.0, armWidth, 12.0, 4.0,
+                box(-1.0, -2.0, -2.0, armWidth, 12.0, 4.0, 0.0, !modern,
                         boxTexture(modern ? 32 : 40, modern ? 48 : 16, armWidth, 12, 4)),
                 leftArm,
                 0));
         parts.add(boxPart(
-                box(2.0, -10.0, 0.0, 4.0, 12.0, 4.0, boxTexture(0, 16, 4, 12, 4)),
+                box(-2.0, 0.0, -2.0, 4.0, 12.0, 4.0, 0.0, false, boxTexture(0, 16, 4, 12, 4)),
                 rightLeg,
                 0));
         parts.add(boxPart(
-                box(-2.0, -10.0, 0.0, 4.0, 12.0, 4.0,
+                box(-2.0, 0.0, -2.0, 4.0, 12.0, 4.0, 0.0, !modern,
                         boxTexture(modern ? 16 : 0, modern ? 48 : 16, 4, 12, 4)),
                 leftLeg,
                 0));
+        parts.add(boxPart(
+                box(-4.0, -8.0, -4.0, 8.0, 8.0, 8.0, 0.5, false, boxTexture(32, 0, 8, 8, 8)),
+                head,
+                1));
+        if (modern) {
+            parts.add(boxPart(
+                    box(-4.0, 0.0, -2.0, 8.0, 12.0, 4.0, 0.25, false, boxTexture(16, 32, 8, 12, 4)),
+                    torso,
+                    1));
+            parts.add(boxPart(
+                    box(-3.0 - armOffset, -2.0, -2.0, armWidth, 12.0, 4.0, 0.25, false,
+                            boxTexture(40, 32, armWidth, 12, 4)),
+                    rightArm,
+                    1));
+            parts.add(boxPart(
+                    box(-1.0, -2.0, -2.0, armWidth, 12.0, 4.0, 0.25, false, boxTexture(48, 48, armWidth, 12, 4)),
+                    leftArm,
+                    1));
+            parts.add(boxPart(
+                    box(-2.0, 0.0, -2.0, 4.0, 12.0, 4.0, 0.25, false, boxTexture(0, 32, 4, 12, 4)),
+                    rightLeg,
+                    1));
+            parts.add(boxPart(
+                    box(-2.0, 0.0, -2.0, 4.0, 12.0, 4.0, 0.25, false, boxTexture(0, 48, 4, 12, 4)),
+                    leftLeg,
+                    1));
+        }
 
         if (cape != null) {
-            SkinPreviewTransform capeTransform = torso.multiply(SkinPreviewTransform.around(
-                    new SkinPreviewTransform.Vector(0.0, 8.0, -4.0),
-                    SkinPreviewTransform.Axis.X,
-                    capePitch + bodyPitch * 0.2));
+            // CapeLayer: hang from the shoulders two pixels behind the body, then turn the cloak 180 degrees about Y.
+            SkinPreviewTransform capeTransform = torso
+                    .multiply(SkinPreviewTransform.translate(0.0, 0.0, 2.0))
+                    .multiply(SkinPreviewTransform.rotateX(capePitch + bodyPitch * 0.2))
+                    .multiply(SkinPreviewTransform.rotateY(180.0));
             parts.add(capePart(
-                    box(0.0, 0.0, -4.5, 10.0, 16.0, 1.0, boxTexture(0, 0, 10, 16, 1)),
+                    box(-5.0, 0.0, -1.0, 10.0, 16.0, 1.0, 0.0, false, boxTexture(0, 0, 10, 16, 1)),
                     capeTransform));
         }
+        return new Model(List.copyOf(parts));
+    }
 
-        List<OuterPart> outerParts = new ArrayList<>();
-        outerParts.add(new OuterPart(
-                boxTexture(32, 0, 8, 8, 8),
-                4.5, 4.5, 4.5,
-                head.multiply(SkinPreviewTransform.translate(0.0, 12.0, 0.0))));
-        if (modern) {
-            outerParts.add(new OuterPart(
-                    boxTexture(16, 32, 8, 12, 4),
-                    4.25, 6.25, 2.25,
-                    torso.multiply(SkinPreviewTransform.translate(0.0, 2.0, 0.0))));
-            outerParts.add(new OuterPart(
-                    boxTexture(40, 32, armWidth, 12, 4),
-                    (armWidth + 0.5) / 2.0, 6.25, 2.25,
-                    rightArm.multiply(SkinPreviewTransform.translate(armCenterX, 2.0, 0.0))));
-            outerParts.add(new OuterPart(
-                    boxTexture(48, 48, armWidth, 12, 4),
-                    (armWidth + 0.5) / 2.0, 6.25, 2.25,
-                    leftArm.multiply(SkinPreviewTransform.translate(-armCenterX, 2.0, 0.0))));
-            outerParts.add(new OuterPart(
-                    boxTexture(0, 32, 4, 12, 4),
-                    2.25, 6.25, 2.25,
-                    rightLeg.multiply(SkinPreviewTransform.translate(2.0, -10.0, 0.0))));
-            outerParts.add(new OuterPart(
-                    boxTexture(0, 48, 4, 12, 4),
-                    2.25, 6.25, 2.25,
-                    leftLeg.multiply(SkinPreviewTransform.translate(-2.0, -10.0, 0.0))));
-        }
-        return new Model(List.copyOf(parts), List.copyOf(outerParts));
+    /// Builds one vanilla `ModelPart` joint transform.
+    ///
+    /// The cuboids of the part are given relative to its pivot, which is translated in the parent space and then
+    /// rotated in the `ModelPart#translateAndRotate` order: roll about Z, yaw about Y and pitch about X, with pitch
+    /// applied to the geometry first.
+    ///
+    /// @param parent parent transform
+    /// @param pivotX pivot X in parent space
+    /// @param pivotY pivot Y in parent space
+    /// @param pivotZ pivot Z in parent space
+    /// @param pitch X rotation in degrees
+    /// @param yaw Y rotation in degrees
+    /// @param roll Z rotation in degrees
+    /// @return joint transform
+    private static SkinPreviewTransform joint(
+            SkinPreviewTransform parent,
+            double pivotX,
+            double pivotY,
+            double pivotZ,
+            double pitch,
+            double yaw,
+            double roll) {
+        return parent
+                .multiply(SkinPreviewTransform.translate(pivotX, pivotY, pivotZ))
+                .multiply(SkinPreviewTransform.rotateZ(roll))
+                .multiply(SkinPreviewTransform.rotateY(yaw))
+                .multiply(SkinPreviewTransform.rotateX(pitch));
     }
 
     /// Transforms and back-face-culls all cuboid faces.
     ///
-    /// @param parts model parts
+    /// @param scene vanilla-space model
     /// @param view camera rotation
+    /// @param skin decoded player texture
+    /// @param cape decoded cape texture, or null
     /// @return visible faces
     private static List<RawFace> transformFaces(
             Model scene,
             SkinPreviewTransform view,
             BufferedImage skin,
             @Nullable BufferedImage cape) {
+        SkinPreviewTransform modelView = view.multiply(VANILLA_TO_VIEW);
         List<RawFace> faces = new ArrayList<>();
         for (BoxPart part : scene.parts()) {
-            addBoxFaces(faces, part, view, skin, cape);
-        }
-        for (OuterPart part : scene.outerParts()) {
-            addOuterFaces(faces, part, view, skin);
+            addBoxFaces(faces, part, modelView, skin, cape);
         }
         return faces;
     }
 
-    /// Adds the six textured outer-layer planes used by double-layer skin textures.
-    ///
-    /// Every outer face uses the Minecraft 1.21 dilation of 0.25 on each side and is rendered as one textured quad,
-    /// preserving alpha instead of converting transparent pixels into opaque solid tiles.
-    ///
-    /// @param faces destination faces
-    /// @param part outer layer surface definition
-    /// @param view camera rotation
-    /// @param skin decoded player texture
-    private static void addOuterFaces(
-            List<RawFace> faces,
-            OuterPart part,
-            SkinPreviewTransform view,
-            BufferedImage skin) {
-        SkinPreviewTransform transform = view.multiply(part.transform());
-        double x = part.halfWidth();
-        double y = part.halfHeight();
-        double z = part.halfDepth();
-        double planeX = x;
-        double planeY = y;
-        double planeZ = z;
-        BoxTexture texture = part.texture();
-
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(-x, y, planeZ),
-                new SkinPreviewTransform.Vector(x, y, planeZ),
-                new SkinPreviewTransform.Vector(x, -y, planeZ),
-                new SkinPreviewTransform.Vector(-x, -y, planeZ),
-                new SkinPreviewTransform.Vector(0.0, 0.0, 1.0),
-                texture.front(),
-                1.0,
-                1,
-                transform,
-                skin);
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(x, y, -planeZ),
-                new SkinPreviewTransform.Vector(-x, y, -planeZ),
-                new SkinPreviewTransform.Vector(-x, -y, -planeZ),
-                new SkinPreviewTransform.Vector(x, -y, -planeZ),
-                new SkinPreviewTransform.Vector(0.0, 0.0, -1.0),
-                texture.back(),
-                0.78,
-                1,
-                transform,
-                skin);
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(planeX, y, z),
-                new SkinPreviewTransform.Vector(planeX, y, -z),
-                new SkinPreviewTransform.Vector(planeX, -y, -z),
-                new SkinPreviewTransform.Vector(planeX, -y, z),
-                new SkinPreviewTransform.Vector(1.0, 0.0, 0.0),
-                texture.right(),
-                0.88,
-                1,
-                transform,
-                skin);
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(-planeX, y, z),
-                new SkinPreviewTransform.Vector(-planeX, y, -z),
-                new SkinPreviewTransform.Vector(-planeX, -y, -z),
-                new SkinPreviewTransform.Vector(-planeX, -y, z),
-                new SkinPreviewTransform.Vector(-1.0, 0.0, 0.0),
-                texture.left(),
-                0.88,
-                1,
-                transform,
-                skin);
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(-x, planeY, -z),
-                new SkinPreviewTransform.Vector(x, planeY, -z),
-                new SkinPreviewTransform.Vector(x, planeY, z),
-                new SkinPreviewTransform.Vector(-x, planeY, z),
-                new SkinPreviewTransform.Vector(0.0, 1.0, 0.0),
-                texture.top(),
-                1.05,
-                1,
-                transform,
-                skin);
-        addFace(
-                faces,
-                new SkinPreviewTransform.Vector(-x, -planeY, -z),
-                new SkinPreviewTransform.Vector(x, -planeY, -z),
-                new SkinPreviewTransform.Vector(x, -planeY, z),
-                new SkinPreviewTransform.Vector(-x, -planeY, z),
-                new SkinPreviewTransform.Vector(0.0, -1.0, 0.0),
-                texture.bottom(),
-                0.68,
-                1,
-                transform,
-                skin);
-    }
-
     /// Adds the visible faces of one transformed cuboid.
+    ///
+    /// Follows `ModelPart.Cube`: the cuboid is dilated by its grow amount without changing its texture size, and a
+    /// mirrored cuboid swaps its X extents so each face samples its atlas region horizontally reversed. Face names
+    /// follow the player, so the front face lies on negative Z and the right face on negative X.
     ///
     /// @param faces destination list
     /// @param part model part
-    /// @param view camera rotation
+    /// @param modelView vanilla model space to camera transform
+    /// @param skin decoded player texture
+    /// @param cape decoded cape texture, or null
     private static void addBoxFaces(
             List<RawFace> faces,
             BoxPart part,
-            SkinPreviewTransform view,
+            SkinPreviewTransform modelView,
             BufferedImage skin,
             @Nullable BufferedImage cape) {
         Box box = part.box();
         BufferedImage image = part.cape() ? Objects.requireNonNull(cape, "cape") : skin;
-        double x0 = box.x() - box.width() / 2.0;
-        double x1 = box.x() + box.width() / 2.0;
-        double y0 = box.y() - box.height() / 2.0;
-        double y1 = box.y() + box.height() / 2.0;
-        double z0 = box.z() - box.depth() / 2.0;
-        double z1 = box.z() + box.depth() / 2.0;
-        SkinPreviewTransform transform = view.multiply(part.transform());
+        double minX = box.x() - box.grow();
+        double maxX = box.x() + box.width() + box.grow();
+        double minY = box.y() - box.grow();
+        double maxY = box.y() + box.height() + box.grow();
+        double minZ = box.z() - box.grow();
+        double maxZ = box.z() + box.depth() + box.grow();
+        double rightX = box.mirror() ? maxX : minX;
+        double leftX = box.mirror() ? minX : maxX;
+        double rightNormal = box.mirror() ? 1.0 : -1.0;
+        SkinPreviewTransform transform = modelView.multiply(part.transform());
         BoxTexture texture = box.texture();
+        int layer = part.layer();
 
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x0, y1, z1),
-                new SkinPreviewTransform.Vector(x1, y1, z1),
-                new SkinPreviewTransform.Vector(x1, y0, z1),
-                new SkinPreviewTransform.Vector(x0, y0, z1),
-                new SkinPreviewTransform.Vector(0.0, 0.0, 1.0),
+                new SkinPreviewTransform.Vector(rightX, minY, minZ),
+                new SkinPreviewTransform.Vector(leftX, minY, minZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, minZ),
+                new SkinPreviewTransform.Vector(rightX, maxY, minZ),
+                new SkinPreviewTransform.Vector(0.0, 0.0, -1.0),
                 texture.front(),
                 1.0,
-                part.layer(),
+                layer,
                 transform,
                 image);
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x1, y1, z0),
-                new SkinPreviewTransform.Vector(x0, y1, z0),
-                new SkinPreviewTransform.Vector(x0, y0, z0),
-                new SkinPreviewTransform.Vector(x1, y0, z0),
-                new SkinPreviewTransform.Vector(0.0, 0.0, -1.0),
+                new SkinPreviewTransform.Vector(leftX, minY, maxZ),
+                new SkinPreviewTransform.Vector(rightX, minY, maxZ),
+                new SkinPreviewTransform.Vector(rightX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(0.0, 0.0, 1.0),
                 texture.back(),
                 0.78,
-                part.layer(),
+                layer,
                 transform,
                 image);
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x1, y1, z0),
-                new SkinPreviewTransform.Vector(x1, y1, z1),
-                new SkinPreviewTransform.Vector(x1, y0, z1),
-                new SkinPreviewTransform.Vector(x1, y0, z0),
-                new SkinPreviewTransform.Vector(1.0, 0.0, 0.0),
+                new SkinPreviewTransform.Vector(rightX, minY, maxZ),
+                new SkinPreviewTransform.Vector(rightX, minY, minZ),
+                new SkinPreviewTransform.Vector(rightX, maxY, minZ),
+                new SkinPreviewTransform.Vector(rightX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(rightNormal, 0.0, 0.0),
                 texture.right(),
                 0.88,
-                part.layer(),
+                layer,
                 transform,
                 image);
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x0, y1, z1),
-                new SkinPreviewTransform.Vector(x0, y1, z0),
-                new SkinPreviewTransform.Vector(x0, y0, z0),
-                new SkinPreviewTransform.Vector(x0, y0, z1),
-                new SkinPreviewTransform.Vector(-1.0, 0.0, 0.0),
+                new SkinPreviewTransform.Vector(leftX, minY, minZ),
+                new SkinPreviewTransform.Vector(leftX, minY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, minZ),
+                new SkinPreviewTransform.Vector(-rightNormal, 0.0, 0.0),
                 texture.left(),
                 0.88,
-                part.layer(),
+                layer,
                 transform,
                 image);
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x1, y1, z0),
-                new SkinPreviewTransform.Vector(x0, y1, z0),
-                new SkinPreviewTransform.Vector(x0, y1, z1),
-                new SkinPreviewTransform.Vector(x1, y1, z1),
-                new SkinPreviewTransform.Vector(0.0, 1.0, 0.0),
+                new SkinPreviewTransform.Vector(rightX, minY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, minY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, minY, minZ),
+                new SkinPreviewTransform.Vector(rightX, minY, minZ),
+                new SkinPreviewTransform.Vector(0.0, -1.0, 0.0),
                 texture.top(),
                 1.05,
-                part.layer(),
+                layer,
                 transform,
                 image);
         addFace(
                 faces,
-                new SkinPreviewTransform.Vector(x1, y0, z0),
-                new SkinPreviewTransform.Vector(x0, y0, z0),
-                new SkinPreviewTransform.Vector(x0, y0, z1),
-                new SkinPreviewTransform.Vector(x1, y0, z1),
-                new SkinPreviewTransform.Vector(0.0, -1.0, 0.0),
+                new SkinPreviewTransform.Vector(rightX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, maxZ),
+                new SkinPreviewTransform.Vector(leftX, maxY, minZ),
+                new SkinPreviewTransform.Vector(rightX, maxY, minZ),
+                new SkinPreviewTransform.Vector(0.0, 1.0, 0.0),
                 texture.bottom(),
                 0.68,
-                part.layer(),
+                layer,
                 transform,
                 image);
     }
@@ -952,7 +843,8 @@ final class SoftwareSkinRenderer {
                 }
                 double u = (w0 * v0.u() * invW0 + w1 * v1.u() * invW1 + w2 * v2.u() * invW2) / oneOverW;
                 double v = (w0 * v0.v() * invW0 + w1 * v1.v() * invW1 + w2 * v2.v() * invW2) / oneOverW;
-                int sourceX = Math.min(image.getWidth() - 1, Math.max(0, (int) (source.x() + u * source.width())));
+                double sourceU = source.mirrored() ? 1.0 - u : u;
+                int sourceX = Math.min(image.getWidth() - 1, Math.max(0, (int) (source.x() + sourceU * source.width())));
                 int sourceY = Math.min(image.getHeight() - 1, Math.max(0, (int) (source.y() + v * source.height())));
                 int argb = image.getRGB(sourceX, sourceY);
                 int alpha = argb >>> 24;
@@ -1018,17 +910,19 @@ final class SoftwareSkinRenderer {
         double y = Math.max(0.0, region.y() * scaleY);
         double x2 = Math.min(image.getWidth(), (region.x() + region.width()) * scaleX);
         double y2 = Math.min(image.getHeight(), (region.y() + region.height()) * scaleY);
-        return new ImageRegion(x, y, Math.max(1.0, x2 - x), Math.max(1.0, y2 - y));
+        return new ImageRegion(x, y, Math.max(1.0, x2 - x), Math.max(1.0, y2 - y), region.mirrored());
     }
 
     /// Creates one cuboid definition.
     ///
-    /// @param x center X
-    /// @param y center Y
-    /// @param z center Z
+    /// @param x minimum X
+    /// @param y minimum Y
+    /// @param z minimum Z
     /// @param width X size
     /// @param height Y size
     /// @param depth Z size
+    /// @param grow uniform dilation applied before projection
+    /// @param mirror whether the X extent is mirrored for legacy skin artwork
     /// @param texture six-face texture mapping
     /// @return cuboid definition
     private static Box box(
@@ -1038,8 +932,10 @@ final class SoftwareSkinRenderer {
             double width,
             double height,
             double depth,
+            double grow,
+            boolean mirror,
             BoxTexture texture) {
-        return new Box(x, y, z, width, height, depth, texture);
+        return new Box(x, y, z, width, height, depth, grow, mirror, texture);
     }
 
     /// Creates one model part.
@@ -1084,14 +980,33 @@ final class SoftwareSkinRenderer {
                 new TextureRegion(x + depth + width + depth, y + depth, width, height));
     }
 
+    /// Creates the atlas mapping used by the official cape texture.
+    ///
+    /// The cape cuboid is one pixel deep, so only the two broad faces carry the 10x16 cape artwork and the remaining
+    /// faces sample the thin perimeter strips of the same region.
+    ///
+    /// @return official cape six-face texture mapping
+    private static BoxTexture capeTexture() {
+        TextureRegion face = new TextureRegion(1, 1, 10, 16);
+        return new BoxTexture(
+                new TextureRegion(1, 1, 10, 1),
+                new TextureRegion(1, 16, 10, 1),
+                new TextureRegion(10, 1, 1, 16),
+                face,
+                new TextureRegion(1, 1, 1, 16),
+                face);
+    }
+
     /// One textured cuboid definition.
     ///
-    /// @param x center X
-    /// @param y center Y
-    /// @param z center Z
+    /// @param x minimum X
+    /// @param y minimum Y
+    /// @param z minimum Z
     /// @param width X size
     /// @param height Y size
     /// @param depth Z size
+    /// @param grow uniform dilation applied before projection
+    /// @param mirror whether the X extent is mirrored for legacy skin artwork
     /// @param texture six-face texture mapping
     @NotNullByDefault
     private record Box(
@@ -1101,9 +1016,10 @@ final class SoftwareSkinRenderer {
             double width,
             double height,
             double depth,
+            double grow,
+            boolean mirror,
             BoxTexture texture) {
     }
-
     /// One transformed cuboid part.
     ///
     /// @param box cuboid geometry
@@ -1120,35 +1036,15 @@ final class SoftwareSkinRenderer {
 
     /// Complete renderable model.
     ///
-    /// @param parts textured base and cape cuboids
-    /// @param outerParts expanded outer-shell surfaces
+    /// @param parts textured base, outer-layer, and cape cuboids
     @NotNullByDefault
     private record Model(
-            List<BoxPart> parts,
-            List<OuterPart> outerParts) {
+            List<BoxPart> parts) {
         /// Validates and freezes the complete model.
         private Model {
             parts = List.copyOf(parts);
-            outerParts = List.copyOf(outerParts);
         }
     }
-
-    /// One outer-layer plane definition.
-    ///
-    /// @param texture six face texture regions
-    /// @param halfWidth half width of the expanded outer plane
-    /// @param halfHeight half height of the expanded outer plane
-    /// @param halfDepth half depth of the expanded outer plane
-    /// @param transform model transform
-    @NotNullByDefault
-    private record OuterPart(
-            BoxTexture texture,
-            double halfWidth,
-            double halfHeight,
-            double halfDepth,
-            SkinPreviewTransform transform) {
-    }
-
     /// Six texture regions arranged in Minecraft box order.
     ///
     /// @param top top face
@@ -1173,8 +1069,25 @@ final class SoftwareSkinRenderer {
     /// @param y source Y
     /// @param width source width
     /// @param height source height
+    /// @param mirrored whether horizontal sampling is reversed
     @NotNullByDefault
-    private record TextureRegion(int x, int y, int width, int height) {
+    private record TextureRegion(int x, int y, int width, int height, boolean mirrored) {
+        /// Creates one non-mirrored texture region.
+        ///
+        /// @param x source X
+        /// @param y source Y
+        /// @param width source width
+        /// @param height source height
+        private TextureRegion(int x, int y, int width, int height) {
+            this(x, y, width, height, false);
+        }
+
+        /// Returns a horizontally mirrored copy of this region.
+        ///
+        /// @return mirrored region
+        private TextureRegion mirroredCopy() {
+            return new TextureRegion(x, y, width, height, !mirrored);
+        }
     }
 
     /// Scalar source rectangle in actual texture pixels.
@@ -1183,8 +1096,9 @@ final class SoftwareSkinRenderer {
     /// @param y source Y
     /// @param width source width
     /// @param height source height
+    /// @param mirrored whether horizontal sampling is reversed
     @NotNullByDefault
-    private record ImageRegion(double x, double y, double width, double height) {
+    private record ImageRegion(double x, double y, double width, double height, boolean mirrored) {
     }
 
     /// One normalized projected point.

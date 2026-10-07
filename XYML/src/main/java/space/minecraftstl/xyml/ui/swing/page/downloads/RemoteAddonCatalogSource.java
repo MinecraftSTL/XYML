@@ -18,7 +18,6 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
@@ -66,8 +65,8 @@ public enum RemoteAddonCatalogSource {
     /// @param kind requested acquisition category
     /// @return true when a matching Core repository exists
     public boolean supports(RemoteAddonCatalogKind kind) {
-        Objects.requireNonNull(kind, "kind");
-        return source.getRepoForType(kind.repositoryType()) != null;
+        RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
+        return this != MODRINTH || requestedKind.repositoryType() != RemoteAddon.Type.WORLD;
     }
 
     /// Returns every result ordering exposed by the shared catalog control.
@@ -87,11 +86,10 @@ public enum RemoteAddonCatalogSource {
     /// @throws IllegalArgumentException when the provider does not support the category
     public RemoteAddonRepository repository(RemoteAddonCatalogKind kind) {
         RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
-        @Nullable RemoteAddonRepository repository = source.getRepoForType(requestedKind.repositoryType());
-        if (repository == null) {
+        if (!supports(requestedKind)) {
             throw new IllegalArgumentException("Source " + name() + " does not support " + requestedKind.name());
         }
-        return repository;
+        return source.getRepository();
     }
 
     /// Returns the visible source name.

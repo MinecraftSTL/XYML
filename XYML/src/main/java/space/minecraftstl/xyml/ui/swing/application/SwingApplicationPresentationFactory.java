@@ -34,6 +34,9 @@ import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -105,6 +108,9 @@ public final class SwingApplicationPresentationFactory {
                 createResourcePackStrings(),
                 createResourcePackStatusStrings(),
                 createResourcePackActionStrings(),
+                createShaderPackStrings(),
+                createShaderPackStatusStrings(),
+                createShaderPackActionStrings(),
                 createGameVersionStrings(),
                 createGameVersionStatusStrings(),
                 createGameInstallStrings(),
@@ -280,8 +286,8 @@ public final class SwingApplicationPresentationFactory {
                 i18n("search"),
                 i18n("swing.mods.filter"),
                 i18n("swing.mods.filter.all"),
-                i18n("swing.mods.filter.enabled"),
-                i18n("swing.mods.filter.disabled"),
+                i18n("button.enabled"),
+                i18n("button.disabled"),
                 i18n("swing.mods.no_selection"),
                 i18n("swing.mods.id"),
                 i18n("swing.mods.version"),
@@ -290,7 +296,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.mods.authors"),
                 i18n("file"),
                 i18n("swing.mods.description"),
-                i18n("swing.mods.enabled"));
+                i18n("button.enabled"));
     }
 
     /// Creates localized installed-Mod lifecycle text.
@@ -352,7 +358,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.resourcepacks.path"),
                 i18n("swing.resourcepacks.description"),
                 i18n("swing.resourcepacks.compatibility"),
-                i18n("swing.resourcepacks.enabled"),
+                i18n("button.enabled"),
                 i18n("button.enable"),
                 i18n("button.disable"),
                 i18n("swing.resourcepacks.compatible"),
@@ -404,6 +410,71 @@ public final class SwingApplicationPresentationFactory {
                 i18n("message.failed"),
                 i18n("swing.resourcepacks.reveal_failed"),
                 i18n("swing.resourcepacks.open_directory_failed"));
+    }
+
+    /// Creates localized installed-shader-pack content text.
+    ///
+    /// @return shader-pack catalog text
+    private static ShaderPackCatalogStrings createShaderPackStrings() {
+        return new ShaderPackCatalogStrings(
+                i18n("shaderpack.manage"),
+                i18n("button.refresh"),
+                i18n("swing.common.refreshing"),
+                i18n("swing.shaderpacks.refresh_tooltip"),
+                i18n("button.retry"),
+                i18n("swing.shaderpacks.retry_tooltip"),
+                i18n("swing.shaderpacks.details"),
+                i18n("swing.shaderpacks.no_selection"),
+                i18n("file"),
+                i18n("swing.shaderpacks.path"),
+                i18n("button.enabled"),
+                i18n("button.enable"),
+                i18n("button.disable"),
+                i18n("swing.shaderpacks.invalid"),
+                i18n("swing.shaderpacks.backends"),
+                i18n("swing.shaderpacks.no_backend"));
+    }
+
+    /// Creates localized installed-shader-pack lifecycle text.
+    ///
+    /// @return shader-pack status text
+    private static ShaderPackCatalogStatusStrings createShaderPackStatusStrings() {
+        return new ShaderPackCatalogStatusStrings(
+                i18n("swing.shaderpacks.status.idle"),
+                i18n("swing.shaderpacks.status.loading"),
+                i18n("swing.shaderpacks.status.ready"),
+                i18n("swing.shaderpacks.status.empty"),
+                i18n("message.failed"),
+                i18n("swing.shaderpacks.status.writing"),
+                i18n("swing.shaderpacks.status.write_failed"));
+    }
+
+    /// Creates localized installed-shader-pack action text.
+    ///
+    /// @return shader-pack action text
+    private static ShaderPackCatalogActionStrings createShaderPackActionStrings() {
+        return new ShaderPackCatalogActionStrings(
+                i18n("shaderpack.add"),
+                i18n("swing.shaderpacks.import_tooltip"),
+                i18n("shaderpack.add.title"),
+                i18n("extension.shaderpack"),
+                i18n("button.enable"),
+                i18n("swing.shaderpacks.enable_tooltip"),
+                i18n("button.disable"),
+                i18n("swing.shaderpacks.disable_tooltip"),
+                i18n("button.delete"),
+                i18n("swing.shaderpacks.delete_tooltip"),
+                i18n("swing.shaderpacks.delete_confirm"),
+                i18n("swing.shaderpacks.batch_delete_confirm"),
+                i18n("button.reveal_dir"),
+                i18n("reveal.in_file_manager"),
+                i18n("folder.shaderpacks"),
+                i18n("swing.shaderpacks.open_directory_tooltip"),
+                i18n("message.failed"),
+                i18n("swing.shaderpacks.reveal_failed"),
+                i18n("swing.shaderpacks.open_directory_failed"),
+                i18n("swing.shaderpacks.backend_title"),
+                i18n("swing.shaderpacks.backend_prompt"));
     }
 
     /// Creates localized game-version catalog controls.

@@ -153,7 +153,7 @@ public final class CurseCompletionTask extends Task<Void> {
                             updateProgress(finished.incrementAndGet(), manifest.files().size());
                             if (StringUtils.isBlank(file.fileName()) || file.url() == null) {
                                 try {
-                                    RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.MODS.getAddonFile(Integer.toString(file.projectID()), Integer.toString(file.fileID()));
+                                    RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.getInstance().getAddonFile(Integer.toString(file.projectID()), Integer.toString(file.fileID()));
                                     return file
                                             .withFileName(remoteFile.filename())
                                             .withURL(remoteFile.url())
@@ -222,7 +222,7 @@ public final class CurseCompletionTask extends Task<Void> {
      * @throws IOException If IOException was encountered during getting data from CurseForge.
      */
     private Path guessFilePath(CurseManifestFile file, DownloadProvider downloadProvider, Path resourcePacksRoot, Path shaderPacksRoot) throws IOException {
-        RemoteAddon mod = CurseForgeRemoteAddonRepository.MODS.getAddonById(downloadProvider, Integer.toString(file.projectID()));
+        RemoteAddon mod = CurseForgeRemoteAddonRepository.getInstance().getAddonById(downloadProvider, Integer.toString(file.projectID()));
         int classID = ((CurseForgeRemoteAddonRepository.CurseAddon) mod.data()).classId();
         String fileName = file.fileName();
         return switch (classID) {
