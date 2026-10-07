@@ -31,8 +31,6 @@ import java.util.stream.Stream;
 @NotNullByDefault
 public interface RemoteAddonRepository {
 
-    RemoteAddon.Type getType();
-
     /// Returns the provider API base URL used for raw metadata requests.
     ///
     /// @return absolute provider API base URL
@@ -85,6 +83,10 @@ public interface RemoteAddonRepository {
             this.totalPages = pages;
         }
 
+        public static SearchResult empty() {
+            return new SearchResult(Stream.empty(), 0);
+        }
+
         public Stream<RemoteAddon> getResults() {
             return this.sortedResults;
         }
@@ -98,7 +100,7 @@ public interface RemoteAddonRepository {
         }
     }
 
-    SearchResult search(DownloadProvider downloadProvider, String gameVersion, @Nullable Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder)
+    SearchResult search(DownloadProvider downloadProvider, RemoteAddon.Type type, String gameVersion, @Nullable Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder)
             throws IOException;
 
     Optional<RemoteAddon.Version> getRemoteVersionByLocalFile(Path file) throws IOException;
@@ -134,7 +136,7 @@ public interface RemoteAddonRepository {
     /// @throws IOException when required provider project metadata cannot be loaded
     String getVersionPageUrl(RemoteAddon.Version version) throws IOException;
 
-    Stream<Category> getCategories() throws IOException;
+    Stream<Category> getCategories(RemoteAddon.Type type) throws IOException;
 
     record Category(Object self, String id, List<Category> subcategories) {
     }

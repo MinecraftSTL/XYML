@@ -227,10 +227,7 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
     private @Nullable URI resolveSourcePage(
             LocalAddonFile.AddonUpdate update,
             RemoteAddon.Source source) {
-        @Nullable RemoteAddonRepository remoteRepository = source.getRepoForType(update.repoType());
-        if (remoteRepository == null) {
-            return null;
-        }
+        RemoteAddonRepository remoteRepository = source.getRepository();
         try {
             String sourcePage = remoteRepository.getVersionPageUrl(update.targetVersion());
             return sourcePage.isBlank() ? null : URI.create(sourcePage);

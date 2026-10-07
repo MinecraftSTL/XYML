@@ -352,6 +352,7 @@ public final class GameDirectoryManager {
         if (source == target) {
             gameDirectory.setName(name);
             gameDirectory.setPath(path);
+            rebuildGameDirectories();
             return;
         }
 
