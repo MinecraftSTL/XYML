@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.settings.InstanceConfigMigrationPolicyPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
@@ -661,6 +662,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         addControlRow(launch, i18n("settings.advanced.environment_variables"), environmentVariablesControl);
         addControlRow(launch, i18n("settings.advanced.process_priority"), processPriorityControl);
         content.add(launch, "growx");
+        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            content.add(new JSeparator(), "growx");
+            content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
+        }
         return content;
     }
 

@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.GraphicsAPI;
 import space.minecraftstl.xyml.game.ProcessPriority;
@@ -35,6 +37,8 @@ import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.setting.LauncherSettings;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -72,6 +76,63 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests complete global-preset editing, selection, and default-preset commands in the Swing settings page.
 @NotNullByDefault
 public final class GameSettingsPresetsPanelTest {
+    /// Previous process-wide settings restored after each headless UI test.
+    private @Nullable LauncherSettings previousLauncherSettings;
+
+    /// Supplies in-memory launcher-wide settings without reading or writing user configuration.
+    @BeforeEach
+    public void installLauncherSettings() throws ReflectiveOperationException {
+        java.lang.reflect.Field field = SettingsManager.class.getDeclaredField("launcherSettings");
+        field.setAccessible(true);
+        previousLauncherSettings = (LauncherSettings) field.get(null);
+        field.set(null, new LauncherSettings());
+    }
+
+    /// Restores the exact process-wide settings reference after each test, including failure paths.
+    @AfterEach
+    public void restoreLauncherSettings() throws ReflectiveOperationException {
+        java.lang.reflect.Field field = SettingsManager.class.getDeclaredField("launcherSettings");
+        field.setAccessible(true);
+        field.set(null, previousLauncherSettings);
+    }
+
+    /// Keeps migration policy inside the existing game tab without shrinking the preset editor's outer height.
+    @Test
+    public void migrationPolicySharesGameTabScrollWithoutSplittingPresetArea() {
+        GameSettingsPresetSnapshot first = preset("1", "Default", true);
+        GameSettingsPresetSnapshot second = preset("2", "Other", false);
+        FakeGameSettingsPresetsStore store = new FakeGameSettingsPresetsStore(snapshot(1L, first, second));
+        GameSettingsPresetsPanel panel = onEventDispatchThread(
+                () -> new GameSettingsPresetsPanel(store, new StaticJavaRuntimeManagementService()));
+        onEventDispatchThread(() -> {
+            try {
+                JTabbedPane tabs = findComponent(panel, "globalGameSettingsPresetTabs", JTabbedPane.class);
+                assertEquals(6, tabs.getTabCount());
+                assertNull(findOptionalComponent(panel, "globalGameSettingsPages", JTabbedPane.class));
+                JScrollPane gameScroll = (JScrollPane) tabs.getComponentAt(0);
+                JCheckBox migration = findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class);
+                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, gameScroll));
+                for (Dimension size : List.of(new Dimension(960, 720), new Dimension(1280, 900))) {
+                    panel.setSize(size);
+                    layoutTree(panel);
+                    assertTrue(tabs.getHeight() > size.height * 0.6D,
+                            "Migration must not reserve a separate outer row: " + tabs.getHeight());
+                    layoutScrollableTab(gameScroll, gameScroll.getWidth(), gameScroll.getHeight());
+                    assertTrue(gameScroll.getViewport().getView().getHeight()
+                            > gameScroll.getViewport().getHeight(), "Long game settings must scroll");
+                }
+                JList<?> presets = findComponent(panel, "gameSettingsPresetList", JList.class);
+                presets.setSelectedIndex(1);
+                presets.setSelectedIndex(0);
+                assertEquals(first.id(), Objects.requireNonNull(panel.selectedPreset()).id());
+                assertTrue(migration == findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class));
+                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, gameScroll));
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
     /// Edits every settings group in a selected preset and makes it the default through the store contract.
     @Test
     public void savesCompleteSelectedPresetAndChangesDefault() {

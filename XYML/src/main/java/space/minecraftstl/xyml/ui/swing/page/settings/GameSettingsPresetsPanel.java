@@ -213,7 +213,6 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         content.add(createHeader(), "growx");
         content.add(createContentSplit(), "grow, push");
         content.add(statusLabel, "growx");
-        content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
         add(content, BorderLayout.CENTER);
 
         presetList.setName("gameSettingsPresetList");
