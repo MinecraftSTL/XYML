@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -27,6 +28,8 @@ import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogIconSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.util.ServerAddress;
@@ -39,12 +42,10 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
-import javax.swing.table.DefaultTableModel;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -78,10 +79,11 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     private final ServerCatalogModel model;
     private final DefaultListModel<ServerCatalogItem> listModel = new DefaultListModel<>();
     private final JList<ServerCatalogItem> list = new JList<>(listModel);
-    private final DefaultTableModel tableModel;
-    private final JTable table;
     private final JLabel statusLabel;
     private final JLabel iconLabel = new JLabel();
+    /// Read-only name of the selected multiplayer-list entry.
+    private final JTextArea nameValue = detailValue("serverCatalogName");
+
     private final JTextArea addressValue = detailValue("serverCatalogAddress");
     private final JTextArea descriptionValue = detailValue("serverCatalogDescription");
     private final JButton editButton;
@@ -97,23 +99,19 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Creates a server-list panel with an injectable storage boundary.
     ServerCatalogPanel(ServerCatalogAccess access, Executor executor) {
-        super(new MigLayout("insets 0, fill", "[grow,fill]", "[][grow,fill]8[]"));
+        super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[]12[grow,fill]8[]"));
+        setName("serverCatalogPage");
+        setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
         model = new ServerCatalogModel(access, executor);
-        tableModel = new DefaultTableModel(new Object[] {i18n("server.name"), i18n("server.address")}, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        table = new JTable(tableModel);
-        table.setName("serverCatalogTable");
 
-        JPanel heading = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[40!]"));
+        JPanel heading = new JPanel(new MigLayout("insets 0, fillx, wrap 2", "[grow,fill][]", "[40!]4[]"));
+        heading.setName("serverCatalogHeading");
         heading.setOpaque(false);
         JLabel title = new JLabel(i18n("server.management.title"));
         title.setName("serverCatalogTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 28.0F));
-        heading.add(title, "growx");
+        heading.add(title, "growx, wmin 0");
         add(heading, "growx");
 
         list.setName("serverCatalogList");
@@ -135,8 +133,9 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         listScroll.setName("serverCatalogListScroll");
         listScroll.setBorder(BorderFactory.createEmptyBorder());
         listScroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(listScroll);
 
-        JPanel details = new JPanel(new MigLayout("insets 12, fillx, wrap 1", "[grow,fill]", "[]8[]6[][]6[][][grow]"));
+        JPanel details = new JPanel(new MigLayout("insets 8 16 8 12, fillx, wrap 2", "[90!][grow,fill]"));
         details.setName("serverCatalogDetails");
         details.setOpaque(false);
         iconLabel.setName("serverCatalogIcon");
@@ -144,15 +143,29 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         details.add(iconLabel, "w 40!, h 40!");
         JLabel detailsTitle = new JLabel(i18n("server.details"));
         detailsTitle.setFont(detailsTitle.getFont().deriveFont(Font.BOLD));
-        details.add(detailsTitle, "growx");
-        details.add(new JLabel(i18n("server.address")), "growx");
+        details.add(detailsTitle, "growx, wmin 0");
+        details.add(new JLabel(i18n("server.name")), "aligny top");
+        details.add(nameValue, "growx, wmin 0");
+        details.add(new JLabel(i18n("server.address")), "aligny top");
         details.add(addressValue, "growx, wmin 0");
-        details.add(new JLabel(i18n("server.description")), "growx");
+        details.add(new JLabel(i18n("server.description")), "aligny top");
         details.add(descriptionValue, "growx, wmin 0");
+        if (access instanceof FileSystemServerCatalogAccess localAccess) {
+            JTextArea sourceFile = detailValue("serverCatalogSourceFile");
+            sourceFile.setText(localAccess.file.toAbsolutePath().normalize().toString());
+            details.add(new JLabel(i18n("server.list_file")), "aligny top");
+            details.add(sourceFile, "growx, wmin 0");
+        }
 
-        JButton addButton = new JButton(i18n("server.add"));
+        JButton addButton = new JButton(new FlatSVGIcon("assets/swing/icons/add.svg", 18, 18));
+        addButton.setToolTipText(i18n("server.add"));
+        addButton.getAccessibleContext().setAccessibleName(i18n("server.add"));
         addButton.setName("serverCatalogAdd");
         addButton.addActionListener(event -> addServer());
+        heading.add(addButton, "w 40!, h 40!");
+        JLabel description = new JLabel(i18n("server.management.description"));
+        description.setName("serverCatalogExplanation");
+        heading.add(description, "span 2, growx, wmin 0");
         editButton = new JButton(i18n("server.edit"));
         editButton.setName("serverCatalogEdit");
         editButton.addActionListener(event -> editSelected());
@@ -167,23 +180,29 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         downButton.addActionListener(event -> moveSelected(1));
         JPanel commands = new JPanel(new MigLayout("insets 0, fillx, wrap 2", "[grow,fill][grow,fill]", "[40!]"));
         commands.setOpaque(false);
-        commands.add(addButton, "growx");
-        commands.add(editButton, "growx");
-        commands.add(removeButton, "growx");
-        commands.add(upButton, "growx");
-        commands.add(downButton, "growx");
-        details.add(commands, "growx");
+        commands.add(editButton, "growx, h 40!");
+        commands.add(removeButton, "growx, h 40!");
+        commands.add(upButton, "growx, h 40!");
+        commands.add(downButton, "growx, h 40!");
+        details.add(commands, "span 2, growx, gapy 12");
 
-        JPanel center = new JPanel(new MigLayout("insets 0, fill", "[grow,fill]12[280!,fill]", "[grow,fill]"));
+        JPanel center = new JPanel(new MigLayout("insets 0, fill", "[grow,fill]12[320!,fill]", "[grow,fill]"));
+        center.setName("serverCatalogWorkspace");
         center.setOpaque(false);
-        center.add(listScroll, "grow, wmin 0, hmin 0");
-        center.add(details, "grow, wmin 0, hmin 0");
-        add(center, "grow, wmin 0, hmin 0");
+        JScrollPane detailsScroll = new JScrollPane(details);
+        detailsScroll.setName("serverCatalogDetailsScroll");
+        detailsScroll.setBorder(BorderFactory.createEmptyBorder());
+        detailsScroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(detailsScroll);
+        center.add(listScroll, "cell 0 0, grow, wmin 0, hmin 0");
+        center.add(detailsScroll, "cell 1 0, grow, wmin 0, hmin 0");
+        add(new SwingHorizontalScrollPane(center, "serverCatalogWorkspaceScroll", 600),
+                "grow, wmin 0, hmin 0");
 
         statusLabel = new JLabel(i18n("server.loading"));
         statusLabel.setName("serverCatalogStatus");
         statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
-        add(statusLabel, "growx");
+        add(statusLabel, "growx, wmin 0, hmin 28, hmax 72");
         showNoSelection();
         updateButtonState();
         model.load().thenAccept(this::publishSnapshot);
@@ -200,10 +219,8 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
             }
             int previousIndex = list.getSelectedIndex();
             listModel.clear();
-            tableModel.setRowCount(0);
             for (ServerCatalogItem server : snapshot.servers()) {
                 listModel.addElement(server);
-                tableModel.addRow(new Object[] {server.name(), server.address()});
             }
             if (previousIndex >= 0 && previousIndex < listModel.size()) {
                 list.setSelectedIndex(previousIndex);
@@ -303,6 +320,7 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         JOptionPane.showMessageDialog(this, i18n("server.invalid"), i18n("server.edit"), JOptionPane.ERROR_MESSAGE);
     }
 
+    /// Updates read-only metadata from the actual list selection.
     private void showSelectedDetails() {
         int index = list.getSelectedIndex();
         if (index < 0 || index >= listModel.size()) {
@@ -310,12 +328,15 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         ServerCatalogItem selected = listModel.get(index);
+        nameValue.setText(selected.name());
         addressValue.setText(selected.address());
         descriptionValue.setText(selected.description().isBlank() ? i18n("server.description.unavailable") : selected.description());
         iconLabel.setIcon(CatalogIconSupport.decode(selected.icon(), FALLBACK_ICON));
     }
 
+    /// Clears details without creating or modifying any saved multiplayer entry.
     private void showNoSelection() {
+        nameValue.setText("");
         addressValue.setText("");
         descriptionValue.setText(i18n("server.no_selection"));
         iconLabel.setIcon(FALLBACK_ICON);
@@ -344,9 +365,9 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         return null;
     }
 
-    /// Returns the compatibility table used by existing model/UI tests.
-    JTable table() {
-        return table;
+    /// Returns the actual mounted list for package-local presentation tests.
+    JList<ServerCatalogItem> serverList() {
+        return list;
     }
 
     private static JTextArea detailValue(String name) {
