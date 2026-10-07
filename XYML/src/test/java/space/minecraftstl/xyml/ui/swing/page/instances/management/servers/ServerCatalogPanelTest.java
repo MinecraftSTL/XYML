@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.JLabel;
 import javax.swing.JTextArea;
@@ -188,6 +189,18 @@ final class ServerCatalogPanelTest {
                             new CompoundTag().addString("motd", "本地保存的描述，不是服务端进程。")))), Runnable::run);
             try {
                 assertInstanceOf(RichValueListCellRenderer.class, panel.serverList().getCellRenderer());
+                assertInstanceOf(RowBoundsCheckedList.class, panel.serverList());
+                panel.serverList().setFixedCellHeight(68);
+                panel.serverList().setSize(520, 220);
+                panel.serverList().setSelectedIndex(0);
+                java.awt.Rectangle lastRow = java.util.Objects.requireNonNull(
+                        panel.serverList().getCellBounds(0, 0));
+                java.awt.Point blank = new java.awt.Point(
+                        lastRow.x + 8, lastRow.y + lastRow.height + 20);
+                dispatchPrimaryClick(panel.serverList(), blank);
+                assertEquals(0, panel.serverList().getSelectedIndex(),
+                        "Server blank click retains the selected row");
+
                 assertEquals(space.minecraftstl.xyml.util.i18n.I18n.i18n("server.manage"),
                         CatalogLayoutAssertions.requireNamed(panel, "serverCatalogTitle", JLabel.class).getText());
                 assertEquals("示例多人游戏条目",
@@ -210,6 +223,70 @@ final class ServerCatalogPanelTest {
                 panel.close();
             }
         });
+    }
+
+    /// Blank space in short lists never selects the last entry, changes details, or starts a drag.
+    @Test
+    void shortListBlankClicksRetainSelectionAndDetails() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            for (int count : new int[] {1, 3}) {
+                List<ServerCatalogItem> entries = java.util.stream.IntStream.range(0, count)
+                        .mapToObj(index -> new ServerCatalogItem("Server " + index, "server" + index + ".test",
+                                new CompoundTag().addString("motd", "Description " + index)))
+                        .toList();
+                ServerCatalogPanel panel = new ServerCatalogPanel(new FixedAccess(entries), Runnable::run);
+                try {
+                    javax.swing.JList<ServerCatalogItem> list = panel.serverList();
+                    list.setFixedCellHeight(68);
+                    list.setSize(520, 360);
+                    list.setSelectedIndex(0);
+                    javax.swing.Icon originalIcon = CatalogLayoutAssertions.requireNamed(
+                            panel, "serverCatalogIcon", JLabel.class).getIcon();
+                    java.awt.Rectangle last = java.util.Objects.requireNonNull(list.getCellBounds(count - 1, count - 1));
+                    java.awt.Point blank = new java.awt.Point(20, last.y + last.height + 25);
+                    AtomicInteger changes = new AtomicInteger();
+                    list.addListSelectionListener(event -> changes.incrementAndGet());
+                    for (int repeat = 0; repeat < 3; repeat++) dispatchPrimaryClick(list, blank);
+                    assertEquals(0, changes.get(), "Blank presses must not transiently select the last entry");
+                    assertEquals(0, list.getSelectedIndex());
+                    assertEquals(-1, list.locationToIndex(blank));
+                    assertEquals("Server 0", CatalogLayoutAssertions.requireNamed(
+                            panel, "serverCatalogName", JTextArea.class).getText());
+                    assertEquals("server0.test", CatalogLayoutAssertions.requireNamed(
+                            panel, "serverCatalogAddress", JTextArea.class).getText());
+                    assertEquals("Description 0", CatalogLayoutAssertions.requireNamed(
+                            panel, "serverCatalogDescription", JTextArea.class).getText());
+                    assertEquals(originalIcon, CatalogLayoutAssertions.requireNamed(
+                            panel, "serverCatalogIcon", JLabel.class).getIcon());
+                    assertTrue(panel.canReorder());
+                    java.awt.Rectangle target = java.util.Objects.requireNonNull(list.getCellBounds(count - 1, count - 1));
+                    // The content icon is a normal row click, not a reorder gesture.
+                    dispatchPrimaryClick(list, new java.awt.Point(target.x + 24, target.y + 24));
+                    assertEquals(count - 1, list.getSelectedIndex());
+                    list.clearSelection();
+                    dispatchPrimaryClick(list, blank);
+                    assertEquals(-1, list.getSelectedIndex(), "No selection must also remain unchanged");
+                } finally {
+                    panel.close();
+                }
+            }
+        });
+    }
+
+    /// Dispatches a primary click through the real row-bounds list implementation.
+    ///
+    /// @param list target server list
+    /// @param point list-coordinate click point
+    private static void dispatchPrimaryClick(
+            javax.swing.JList<?> list,
+            java.awt.Point point) {
+        long when = System.currentTimeMillis();
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_PRESSED, when, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_RELEASED, when + 1L, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
     }
 
     /// Access fixture that blocks the first write so overlap is observable.

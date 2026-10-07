@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.JCheckBox;
@@ -117,7 +118,28 @@ final class ShaderPackCatalogPanelTest {
                 assertNull(findNamed(panel, "shaderPacksDisableSelected", JComponent.class));
                 assertNull(findNamed(panel, "shaderPacksSort", JComponent.class));
                 assertInstanceOf(RichValueListCellRenderer.class, list.getCellRenderer());
+                assertInstanceOf(RowBoundsCheckedList.class, list);
+                list.setFixedCellHeight(68);
+                list.setSize(520, 220);
                 list.setSelectedIndex(0);
+                java.awt.Rectangle lastRow = java.util.Objects.requireNonNull(list.getCellBounds(0, 0));
+                java.awt.Point blank = new java.awt.Point(
+                        lastRow.x + 8, lastRow.y + lastRow.height + 20);
+                dispatchPrimaryClick(list, blank);
+                assertEquals(-1, list.getSelectedIndex(),
+                        "Shader-pack blank click clears the selected row");
+                assertEquals("No selection", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksEnabled", JTextArea.class).getText());
+
+                assertEquals(-1, list.locationToIndex(blank));
+                assertEquals("", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksFileName", JTextArea.class).getText());
+                assertFalse(CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksEnabledToggle", JCheckBox.class).isEnabled());
+                dispatchPrimaryClick(list, blank);
+                assertEquals(-1, list.getSelectedIndex());
+                dispatchPrimaryClick(list, new java.awt.Point(lastRow.x + 20, lastRow.y + 20));
+                assertEquals(0, list.getSelectedIndex(), "A real row click still selects the shader pack");
                 assertEquals("Shader Packs", CatalogLayoutAssertions.requireNamed(
                         panel, "shaderPacksPageTitle", JLabel.class).getText());
                 assertEquals("Local shader description", CatalogLayoutAssertions.requireNamed(
@@ -145,6 +167,22 @@ final class ShaderPackCatalogPanelTest {
                 panel.close();
             }
         });
+    }
+
+    /// Dispatches a primary click through the real row-bounds list implementation.
+    ///
+    /// @param list target shader-pack list
+    /// @param point list-coordinate click point
+    private static void dispatchPrimaryClick(
+            javax.swing.JList<?> list,
+            java.awt.Point point) {
+        long when = System.currentTimeMillis();
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_PRESSED, when, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_RELEASED, when + 1L, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
     }
 
     /// Verifies invalid packs cannot be activated from the panel.
