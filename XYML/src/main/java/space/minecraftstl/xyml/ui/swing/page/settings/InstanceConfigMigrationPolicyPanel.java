@@ -67,7 +67,7 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
 
     /// Creates and populates the launcher policy editor on the EDT.
     public InstanceConfigMigrationPolicyPanel() {
-        super(new MigLayout("insets 20, fillx, wrap 2", "[][grow,fill]", "[]10[]10[]10[]"));
+        super(new MigLayout("insets 0, fillx, wrap 2", "[][grow,fill]", "[]10[]10[]10[]"));
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
         configureComponents();
@@ -77,7 +77,8 @@ public final class InstanceConfigMigrationPolicyPanel extends JPanel {
     /// Builds controls and stable automation names used by Swing tests.
     private void configureComponents() {
         JLabel heading = new JLabel(i18n("settings.instance_config_migration.title"));
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20.0F));
+        heading.setName("instanceConfigMigrationTitle");
+        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 15.0F));
         add(heading, "span 2, growx");
         add(new JLabel(i18n("settings.instance_config_migration.description")), "span 2, growx");
 

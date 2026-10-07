@@ -96,9 +96,9 @@ public final class GameSettingsPresetsPanelTest {
         field.set(null, previousLauncherSettings);
     }
 
-    /// Keeps migration policy inside the existing game tab without shrinking the preset editor's outer height.
+    /// Keeps migration in the existing launcher tab with matching typography and a full-height preset editor.
     @Test
-    public void migrationPolicySharesGameTabScrollWithoutSplittingPresetArea() {
+    public void migrationPolicySharesLauncherTabScrollWithoutSplittingPresetArea() {
         GameSettingsPresetSnapshot first = preset("1", "Default", true);
         GameSettingsPresetSnapshot second = preset("2", "Other", false);
         FakeGameSettingsPresetsStore store = new FakeGameSettingsPresetsStore(snapshot(1L, first, second));
@@ -109,24 +109,30 @@ public final class GameSettingsPresetsPanelTest {
                 JTabbedPane tabs = findComponent(panel, "globalGameSettingsPresetTabs", JTabbedPane.class);
                 assertEquals(6, tabs.getTabCount());
                 assertNull(findOptionalComponent(panel, "globalGameSettingsPages", JTabbedPane.class));
-                JScrollPane gameScroll = (JScrollPane) tabs.getComponentAt(0);
+                JScrollPane launcherScroll = (JScrollPane) tabs.getComponentAt(1);
                 JCheckBox migration = findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class);
-                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, gameScroll));
+                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, launcherScroll));
+                assertFalse(javax.swing.SwingUtilities.isDescendingFrom(migration, tabs.getComponentAt(0)));
+                JLabel migrationTitle = findComponent(panel, "instanceConfigMigrationTitle", JLabel.class);
+                JPanel launcherSection = findComponent(panel, "instanceGameSettingsLauncher", JPanel.class);
+                JLabel launcherTitle = (JLabel) launcherSection.getComponent(0);
+                assertEquals(launcherTitle.getFont(), migrationTitle.getFont());
                 for (Dimension size : List.of(new Dimension(960, 720), new Dimension(1280, 900))) {
                     panel.setSize(size);
                     layoutTree(panel);
                     assertTrue(tabs.getHeight() > size.height * 0.6D,
                             "Migration must not reserve a separate outer row: " + tabs.getHeight());
-                    layoutScrollableTab(gameScroll, gameScroll.getWidth(), gameScroll.getHeight());
-                    assertTrue(gameScroll.getViewport().getView().getHeight()
-                            > gameScroll.getViewport().getHeight(), "Long game settings must scroll");
+                    layoutScrollableTab(launcherScroll, launcherScroll.getWidth(), launcherScroll.getHeight());
                 }
+                layoutScrollableTab(launcherScroll, 520, 300);
+                assertTrue(launcherScroll.getViewport().getView().getHeight()
+                        > launcherScroll.getViewport().getHeight(), "Long launcher settings must scroll");
                 JList<?> presets = findComponent(panel, "gameSettingsPresetList", JList.class);
                 presets.setSelectedIndex(1);
                 presets.setSelectedIndex(0);
                 assertEquals(first.id(), Objects.requireNonNull(panel.selectedPreset()).id());
                 assertTrue(migration == findComponent(panel, "instanceConfigMigrationEnabled", JCheckBox.class));
-                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, gameScroll));
+                assertTrue(javax.swing.SwingUtilities.isDescendingFrom(migration, launcherScroll));
             } finally {
                 panel.close();
             }

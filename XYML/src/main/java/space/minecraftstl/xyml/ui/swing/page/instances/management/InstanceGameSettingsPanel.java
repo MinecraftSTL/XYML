@@ -662,14 +662,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         addControlRow(launch, i18n("settings.advanced.environment_variables"), environmentVariablesControl);
         addControlRow(launch, i18n("settings.advanced.process_priority"), processPriorityControl);
         content.add(launch, "growx");
-        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
-            content.add(new JSeparator(), "growx");
-            content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
-        }
         return content;
     }
 
-    /// Creates launcher behavior and diagnostics controls.
+    /// Creates launcher behavior, diagnostics, and global-preset migration policy controls.
     /// @return launcher settings content
     private JPanel createLauncherSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsLauncherTab");
@@ -687,6 +683,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 i18n("settings.advanced.dont_check_game_completeness"),
                 notCheckGameControl);
         content.add(section, "growx");
+        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            content.add(new JSeparator(), "growx");
+            content.add(new InstanceConfigMigrationPolicyPanel(), "growx");
+        }
         return content;
     }
 
