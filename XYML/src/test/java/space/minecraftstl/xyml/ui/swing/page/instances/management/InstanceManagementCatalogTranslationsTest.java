@@ -63,7 +63,11 @@ final class InstanceManagementCatalogTranslationsTest {
             assertEquals(expected, properties.getProperty("server.manage"), language);
             assertEquals(expected, properties.getProperty("server.management.title"), language);
             assertFalse(properties.getProperty("server.management.description", "").isBlank(), language);
-            for (String key : List.of("server.manage", "server.management.title", "server.management.description")) {
+            assertFalse(properties.getProperty("server.reorder", "").isBlank(), language);
+            assertEquals(properties.getProperty("button.enable"),
+                    properties.getProperty("swing.shaderpacks.enabled"), language);
+            for (String key : List.of("server.manage", "server.management.title", "server.management.description",
+                    "server.reorder", "swing.shaderpacks.enabled")) {
                 assertEquals(1L, Pattern.compile("^" + Pattern.quote(key) + "=", Pattern.MULTILINE)
                         .matcher(text).results().count(), language + ": " + key);
             }
