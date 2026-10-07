@@ -33,6 +33,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +75,29 @@ public final class RichChoiceListCellRendererTest {
             assertEquals("Enabled", label(renderer, "richChoiceListBadge")
                     .getAccessibleContext().getAccessibleName());
             assertEquals("full tooltip", renderer.getAccessibleContext().getAccessibleDescription());
+        });
+    }
+
+    /// Icon-free catalogs reserve no icon space in loaded, loading, or failed states, including narrow rows.
+    @Test
+    public void iconFreeRowsDoNotReserveIconSpace() {
+        RichChoiceListCellRenderer<String> renderer = RichChoiceListCellRenderer.withoutIcon(
+                value -> "Shader pack", value -> "Local description", value -> "Enabled",
+                value -> "tooltip", value -> false);
+        JList<ChoiceListEntry<String>> list = new JList<>();
+        EdtDispatcher.executeAndWait(() -> {
+            for (int width : new int[] {1, 8, 24, 48, 96, 180, 400}) {
+                list.setSize(width, RichChoiceListCellRenderer.ROW_HEIGHT);
+                for (ChoiceListEntry<String> entry : java.util.List.of(
+                        ChoiceListEntry.loaded(0, "pack"), ChoiceListEntry.<String>loading(0),
+                        ChoiceListEntry.<String>failed(0, new IOException("fixture")))) {
+                    renderer.getListCellRendererComponent(list, entry, 0, false, false);
+                    assertEquals(2, renderer.getComponentCount());
+                    assertEquals("richChoiceListLabels", renderer.getComponents()[0].getName());
+                    assertEquals(renderer.getInsets().left, renderer.getComponents()[0].getX());
+                    assertChildrenInsideRow(renderer);
+                }
+            }
         });
     }
 
