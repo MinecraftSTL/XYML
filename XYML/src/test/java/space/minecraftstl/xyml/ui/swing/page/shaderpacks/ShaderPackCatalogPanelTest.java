@@ -23,14 +23,20 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
+import javax.swing.JLabel;
+import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
 import java.awt.Component;
 import java.awt.Container;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalInt;
@@ -40,6 +46,7 @@ import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -109,6 +116,22 @@ final class ShaderPackCatalogPanelTest {
                 assertNull(findNamed(panel, "shaderPacksEnableSelected", JComponent.class));
                 assertNull(findNamed(panel, "shaderPacksDisableSelected", JComponent.class));
                 assertNull(findNamed(panel, "shaderPacksSort", JComponent.class));
+                assertInstanceOf(RichValueListCellRenderer.class, list.getCellRenderer());
+                list.setSelectedIndex(0);
+                assertEquals("Shader Packs", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksPageTitle", JLabel.class).getText());
+                assertEquals("Local shader description", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksDescription", JTextArea.class).getText());
+                assertNotNull(CatalogLayoutAssertions.requireNamed(panel, "shaderPacksIcon", JLabel.class).getIcon());
+                for (int width : new int[] {1000, 720, 520}) {
+                    CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "shaderPacks", width, 460);
+                }
+                CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "shaderPacks", 1000, 600);
+                try {
+                    CatalogLayoutAssertions.writePreview(panel, "shader-pack-management.png");
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                }
             } finally {
                 panel.close();
             }
@@ -199,7 +222,9 @@ final class ShaderPackCatalogPanelTest {
                             "A",
                             "A",
                             valid,
-                            Set.of(ShaderPackBackend.IRIS_OCULUS))),
+                            Set.of(ShaderPackBackend.IRIS_OCULUS),
+                            "Local shader description",
+                            null)),
                     Set.of(ShaderPackBackend.IRIS_OCULUS));
         }
 

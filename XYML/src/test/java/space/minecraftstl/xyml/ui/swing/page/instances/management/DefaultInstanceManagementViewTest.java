@@ -212,6 +212,31 @@ final class DefaultInstanceManagementViewTest {
                 assertFalse(returned.get());
             });
 
+            for (InstanceManagementPageId pageId : List.of(
+                    InstanceManagementPageId.SERVERS,
+                    InstanceManagementPageId.SHADERS,
+                    InstanceManagementPageId.SERVERS)) {
+                EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(findNamed(
+                        view, "instanceManagementNavigation", InstanceManagementNavigationPanel.class))
+                        .button(pageId).doClick());
+                awaitExecutor(executor);
+                EdtDispatcher.executeAndWait(() -> {
+                    sizeAndLayout(view, RENDER_WIDTH, RENDER_HEIGHT);
+                    InstanceManagementPageDeck deck = Objects.requireNonNull(findNamed(
+                            view, "instanceManagementPageDeck", InstanceManagementPageDeck.class));
+                    assertEquals(pageId, deck.selectedPage());
+                    String prefix = pageId == InstanceManagementPageId.SERVERS ? "serverCatalog" : "shaderPacks";
+                    JComponent page = Objects.requireNonNull(findNamed(view, prefix + "Page", JComponent.class));
+                    JComponent heading = Objects.requireNonNull(findNamed(page, prefix + "Heading", JComponent.class));
+                    JLabel title = Objects.requireNonNull(findNamed(page,
+                            prefix + (pageId == InstanceManagementPageId.SERVERS ? "Title" : "PageTitle"), JLabel.class));
+                    assertEquals(pageId.localizedLabel(), title.getText());
+                    assertEquals(0, heading.getX());
+                    assertEquals(page.getWidth(), heading.getWidth(), "Heading spans the selected page");
+                    assertTrue(page.getHeight() > heading.getHeight());
+                });
+            }
+            assertFalse(Files.exists(repositoryRoot.resolve("servers.dat")), "Opening management never creates entries");
             view.close();
             view.close();
             assertEquals(new GameInstanceID("instance"), view.instanceId());

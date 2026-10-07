@@ -19,9 +19,15 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.servers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 
+import javax.swing.JLabel;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -36,6 +42,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies serialized server-list persistence, failure recovery, and closed-panel callback suppression.
@@ -126,7 +134,40 @@ final class ServerCatalogPanelTest {
         executor.runAll();
         SwingUtilities.invokeAndWait(() -> { });
 
-        SwingUtilities.invokeAndWait(() -> assertEquals(0, panel.table().getRowCount()));
+        SwingUtilities.invokeAndWait(() -> assertEquals(0, panel.serverList().getModel().getSize()));
+    }
+
+    /// Allocated headings span the page and details stay beside the list at normal and narrow widths.
+    @Test
+    void laysOutActualListAndDetailsWithManagementTitle() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            ServerCatalogPanel panel = new ServerCatalogPanel(new FixedAccess(List.of(
+                    new ServerCatalogItem("示例多人游戏条目", "example.test:25565",
+                            new CompoundTag().addString("motd", "本地保存的描述，不是服务端进程。")))), Runnable::run);
+            try {
+                assertInstanceOf(RichValueListCellRenderer.class, panel.serverList().getCellRenderer());
+                assertEquals(space.minecraftstl.xyml.util.i18n.I18n.i18n("server.manage"),
+                        CatalogLayoutAssertions.requireNamed(panel, "serverCatalogTitle", JLabel.class).getText());
+                assertEquals("示例多人游戏条目",
+                        CatalogLayoutAssertions.requireNamed(panel, "serverCatalogName", JTextArea.class).getText());
+                assertEquals("example.test:25565",
+                        CatalogLayoutAssertions.requireNamed(panel, "serverCatalogAddress", JTextArea.class).getText());
+                assertEquals("本地保存的描述，不是服务端进程。",
+                        CatalogLayoutAssertions.requireNamed(panel, "serverCatalogDescription", JTextArea.class).getText());
+                assertNotNull(CatalogLayoutAssertions.requireNamed(panel, "serverCatalogIcon", JLabel.class).getIcon());
+                for (int width : new int[] {1000, 720, 520}) {
+                    CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "serverCatalog", width, 460);
+                }
+                CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "serverCatalog", 1000, 600);
+                try {
+                    CatalogLayoutAssertions.writePreview(panel, "server-management.png");
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                }
+            } finally {
+                panel.close();
+            }
+        });
     }
 
     /// Access fixture that blocks the first write so overlap is observable.
