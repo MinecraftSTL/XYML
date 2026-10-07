@@ -64,6 +64,53 @@ public final class RichValueListCellRenderer<T extends Object> implements ListCe
                 disabledProvider);
     }
 
+    /// Creates an icon-free loaded row without an icon slot or placeholder.
+    ///
+    /// @param primaryTextProvider primary row text
+    /// @param secondaryTextProvider secondary row text
+    /// @param badgeTextProvider right-aligned status
+    /// @param tooltipProvider row tooltip
+    /// @param disabledProvider predicate identifying muted rows
+    /// @param <T> loaded row type
+    /// @return renderer with no icon slot
+    public static <T extends Object> RichValueListCellRenderer<T> withoutIcon(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider) {
+        return new RichValueListCellRenderer<>(RichChoiceListCellRenderer.withoutIcon(
+                primaryTextProvider, secondaryTextProvider, badgeTextProvider, tooltipProvider, disabledProvider));
+    }
+
+    /// Wraps one fully configured shared rich renderer.
+    ///
+    /// @param delegate shared renderer owned by this adapter
+    private RichValueListCellRenderer(RichChoiceListCellRenderer<T> delegate) {
+        this.delegate = Objects.requireNonNull(delegate, "delegate");
+    }
+
+    /// Creates a loaded row with the shared six-dot drag handle.
+    ///
+    /// @param primaryTextProvider primary row text
+    /// @param secondaryTextProvider secondary row text
+    /// @param badgeTextProvider right-aligned status
+    /// @param iconProvider loaded icon provider
+    /// @param tooltipProvider row tooltip
+    /// @param disabledProvider predicate identifying muted rows
+    /// @param draggableProvider predicate identifying reorderable rows
+    public RichValueListCellRenderer(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, Icon> iconProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider,
+            Predicate<? super T> draggableProvider) {
+        delegate = new RichChoiceListCellRenderer<>(primaryTextProvider, secondaryTextProvider, badgeTextProvider,
+                iconProvider, tooltipProvider, disabledProvider, draggableProvider);
+    }
+
     /// Renders one loaded value through the shared catalog row implementation.
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})

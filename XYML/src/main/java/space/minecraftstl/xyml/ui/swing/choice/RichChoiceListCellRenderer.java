@@ -148,6 +148,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
     /// Whether an unselected loaded row needs the disabled wash during painting.
     private boolean muted;
 
+    /// Whether this renderer reserves and paints a row icon; false only for an explicitly icon-free catalog.
+    private boolean iconVisible = true;
+
     /// Current icon slot size after responsive geometry negotiation.
     private int iconSlotSize = ICON_SIZE;
 
@@ -205,6 +208,29 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 tooltipProvider,
                 disabledProvider,
                 value -> false);
+    }
+
+    /// Creates an icon-free row without reserving space for loading or package icons.
+    ///
+    /// @param primaryTextProvider primary row title provider
+    /// @param secondaryTextProvider secondary metadata provider
+    /// @param badgeTextProvider right-aligned state provider
+    /// @param tooltipProvider loaded-row tooltip provider
+    /// @param disabledProvider predicate identifying muted rows
+    /// @param <T> loaded row type
+    /// @return renderer with no icon slot
+    public static <T extends Object> RichChoiceListCellRenderer<T> withoutIcon(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider) {
+        RichChoiceListCellRenderer<T> renderer = new RichChoiceListCellRenderer<>(
+                primaryTextProvider, secondaryTextProvider, badgeTextProvider,
+                value -> LOADING_ICON, tooltipProvider, disabledProvider);
+        renderer.iconVisible = false;
+        renderer.remove(renderer.iconLabel);
+        return renderer;
     }
 
     /// Creates a reusable rich row renderer with optional muted and reorderable rows.
@@ -324,7 +350,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             badgeLabel.setIcon(rowDraggable ? DRAG_HANDLE_ICON : null);
             badgeLabel.setIconTextGap(6);
             badgeLabel.setHorizontalTextPosition(SwingConstants.LEFT);
-            iconLabel.setIcon(fitIcon(iconFor(value), iconSlotSize));
+            if (iconVisible) iconLabel.setIcon(fitIcon(iconFor(value), iconSlotSize));
             String tooltip = Objects.requireNonNull(tooltipProvider.apply(value), "tooltipProvider result");
             setToolTipText(tooltip.isBlank() ? null : tooltip);
             primaryLabel.getAccessibleContext().setAccessibleName(primaryText);
@@ -338,7 +364,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(fitIcon(ERROR_ICON, iconSlotSize));
+            if (iconVisible) iconLabel.setIcon(fitIcon(ERROR_ICON, iconSlotSize));
             @Nullable Throwable failure = entry.failure();
             setToolTipText(failure == null ? null : failure.getMessage());
             primaryLabel.getAccessibleContext().setAccessibleName("!");
@@ -352,7 +378,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(fitIcon(LOADING_ICON, iconSlotSize));
+            if (iconVisible) iconLabel.setIcon(fitIcon(LOADING_ICON, iconSlotSize));
             setToolTipText(null);
             primaryLabel.getAccessibleContext().setAccessibleName("...");
             secondaryLabel.getAccessibleContext().setAccessibleName(null);
@@ -443,7 +469,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         int width = list.getWidth() > 0 ? list.getWidth() : getPreferredSize().width;
         Insets insets = getInsets();
         return Math.max(1, width - insets.left - insets.right - iconSlotSize
-                - horizontalGap - badgeWidth - horizontalGap);
+                - (iconVisible ? horizontalGap : 0) - badgeWidth - horizontalGap);
     }
 
     /// Computes a bounded badge width that still leaves room for the title.
@@ -469,7 +495,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         int width = list.getWidth() > 0 ? list.getWidth() : getPreferredSize().width;
         Insets insets = getInsets();
         int contentWidth = Math.max(0, width - insets.left - insets.right);
-        int remaining = Math.max(0, contentWidth - iconSlotSize - horizontalGap * 2);
+        int remaining = Math.max(0, contentWidth - iconSlotSize - horizontalGap * (iconVisible ? 2 : 1));
         if (remaining == 0) {
             return 0;
         }
@@ -492,7 +518,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         Insets insets = getInsets();
         int contentWidth = Math.max(1, width - insets.left - insets.right);
         horizontalGap = contentWidth < 180 ? COMPACT_HORIZONTAL_GAP : NORMAL_HORIZONTAL_GAP;
-        iconSlotSize = contentWidth < 150
+        iconSlotSize = !iconVisible ? 0 : contentWidth < 150
                 ? Math.max(18, Math.min(ICON_SIZE, contentWidth / 4))
                 : ICON_SIZE;
         int badgeMinimum = badgeText.isBlank()

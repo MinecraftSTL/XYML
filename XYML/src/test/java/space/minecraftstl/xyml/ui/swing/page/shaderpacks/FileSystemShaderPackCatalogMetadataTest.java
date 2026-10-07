@@ -26,12 +26,11 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /// Verifies bounded local shader-pack metadata extraction.
 @NotNullByDefault
 final class FileSystemShaderPackCatalogMetadataTest {
-    /// Reads pack.mcmeta and icon bytes from a directory without requiring a shader runtime.
+    /// Reads pack.mcmeta without reading or representing package icons.
     @Test
     void readsDirectoryPresentationMetadata(@TempDir Path temporaryDirectory) throws Exception {
         Path shaderPack = temporaryDirectory.resolve("shaderpacks").resolve("example");
@@ -46,11 +45,10 @@ final class FileSystemShaderPackCatalogMetadataTest {
         ShaderPackCatalogItem item = access.loadItems(List.of(shaderPack)).get(0);
 
         assertEquals("Example shader", item.description());
-        assertNotNull(item.icon());
         assertEquals(true, item.valid());
     }
 
-    /// Missing metadata is represented as an empty description and no icon.
+    /// Missing metadata is represented as an empty description.
     @Test
     void missingPresentationMetadataUsesFallback(@TempDir Path temporaryDirectory) throws Exception {
         Path shaderPack = temporaryDirectory.resolve("shaderpacks").resolve("empty");
@@ -63,6 +61,5 @@ final class FileSystemShaderPackCatalogMetadataTest {
         ShaderPackCatalogItem item = access.loadItems(List.of(shaderPack)).get(0);
 
         assertEquals("", item.description());
-        assertEquals(null, item.icon());
     }
 }

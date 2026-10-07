@@ -120,6 +120,48 @@ final class ServerCatalogPanelTest {
         model.close();
     }
 
+    /// A queued preceding mutation invalidates the exact order captured by a drag before it writes.
+    @Test
+    void rejectsCapturedDragAfterEarlierQueuedMutation() {
+        ManualExecutor executor = new ManualExecutor();
+        RevisionCheckingAccess access = new RevisionCheckingAccess(List.of(
+                new ServerCatalogItem("A", "a.example"), new ServerCatalogItem("B", "b.example")));
+        ServerCatalogPanel.ServerCatalogModel model = new ServerCatalogPanel.ServerCatalogModel(access, executor);
+        try {
+            CompletableFuture<ServerCatalogSnapshot> load = model.load();
+            executor.runAll();
+            List<ServerCatalogItem> captured = load.join().servers();
+            CompletableFuture<ServerCatalogSnapshot> added = model.add(new ServerCatalogItem("C", "c.example"));
+            CompletableFuture<ServerCatalogSnapshot> moved = model.move(captured, 0, 1);
+            executor.runAll();
+            assertEquals(ServerCatalogStatus.READY, added.join().status());
+            assertEquals(ServerCatalogStatus.FAILURE, moved.join().status());
+            assertEquals(List.of("A", "B", "C"), model.snapshot().servers().stream()
+                    .map(ServerCatalogItem::name).toList());
+            assertEquals(1, access.successfulWrites);
+        } finally {
+            model.close();
+        }
+    }
+
+    /// External storage replacement is recovered without overwriting it using drag-captured indices.
+    @Test
+    void rejectsCapturedDragAfterExternalReplacement() {
+        RevisionCheckingAccess access = new RevisionCheckingAccess(List.of(
+                new ServerCatalogItem("A", "a.example"), new ServerCatalogItem("B", "b.example")));
+        ServerCatalogPanel.ServerCatalogModel model = new ServerCatalogPanel.ServerCatalogModel(access, Runnable::run);
+        try {
+            List<ServerCatalogItem> captured = model.load().join().servers();
+            access.replaceExternally(List.of(new ServerCatalogItem("External", "external.example")));
+            ServerCatalogSnapshot failed = model.move(captured, 0, 1).join();
+            assertEquals(ServerCatalogStatus.FAILURE, failed.status());
+            assertEquals(List.of("External"), failed.servers().stream().map(ServerCatalogItem::name).toList());
+            assertEquals(0, access.successfulWrites);
+        } finally {
+            model.close();
+        }
+    }
+
     /// Closing the panel prevents a delayed initial load from repopulating Swing components.
     @Test
     void closeSuppressesDelayedSwingPublication() throws Exception {

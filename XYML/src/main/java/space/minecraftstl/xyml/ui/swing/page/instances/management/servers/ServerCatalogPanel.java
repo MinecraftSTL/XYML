@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
@@ -88,8 +89,14 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     private final JTextArea descriptionValue = detailValue("serverCatalogDescription");
     private final JButton editButton;
     private final JButton removeButton;
-    private final JButton upButton;
-    private final JButton downButton;
+    /// Drag gesture and transfer owner, detached when this page closes.
+    private final ServerCatalogReorderSupport reorderSupport;
+
+    /// Header add command, unavailable while an accepted drag is being saved.
+    private final JButton addButton;
+
+    /// EDT-confined gate preventing a second drag from using pre-save row indices.
+    private boolean reorderPending;
     private volatile boolean closed;
 
     /// Creates a server-list panel backed by the supplied instance repository.
@@ -128,7 +135,11 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
                 item -> item.description().isBlank() ? item.address() : item.description(),
                 item -> "",
                 item -> CatalogIconSupport.decode(item.icon(), FALLBACK_ICON),
-                item -> item.name() + " — " + item.address()));
+                item -> item.name() + " — " + item.address(),
+                item -> false,
+                item -> canReorder()));
+        list.setToolTipText(i18n("server.reorder"));
+        reorderSupport = new ServerCatalogReorderSupport(this);
         JScrollPane listScroll = new JScrollPane(list);
         listScroll.setName("serverCatalogListScroll");
         listScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -157,7 +168,7 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
             details.add(sourceFile, "growx, wmin 0");
         }
 
-        JButton addButton = new JButton(new FlatSVGIcon("assets/swing/icons/add.svg", 18, 18));
+        addButton = new JButton(new FlatSVGIcon("assets/swing/icons/add.svg", 18, 18));
         addButton.setToolTipText(i18n("server.add"));
         addButton.getAccessibleContext().setAccessibleName(i18n("server.add"));
         addButton.setName("serverCatalogAdd");
@@ -172,18 +183,10 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         removeButton = new JButton(i18n("server.remove"));
         removeButton.setName("serverCatalogRemove");
         removeButton.addActionListener(event -> removeSelected());
-        upButton = new JButton(i18n("server.move_up"));
-        upButton.setName("serverCatalogMoveUp");
-        upButton.addActionListener(event -> moveSelected(-1));
-        downButton = new JButton(i18n("server.move_down"));
-        downButton.setName("serverCatalogMoveDown");
-        downButton.addActionListener(event -> moveSelected(1));
         JPanel commands = new JPanel(new MigLayout("insets 0, fillx, wrap 2", "[grow,fill][grow,fill]", "[40!]"));
         commands.setOpaque(false);
         commands.add(editButton, "growx, h 40!");
         commands.add(removeButton, "growx, h 40!");
-        commands.add(upButton, "growx, h 40!");
-        commands.add(downButton, "growx, h 40!");
         details.add(commands, "span 2, growx, gapy 12");
 
         JPanel center = new JPanel(new MigLayout("insets 0, fill", "[grow,fill]12[320!,fill]", "[grow,fill]"));
@@ -269,22 +272,47 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    private void moveSelected(int delta) {
-        int index = list.getSelectedIndex();
-        if (index < 0) {
-            return;
-        }
-        model.move(index, index + delta).thenAccept(snapshot -> {
-            publishSnapshot(snapshot);
-            SwingUtilities.invokeLater(() -> {
-                if (!closed) {
-                    int target = index + delta;
-                    if (target >= 0 && target < listModel.getSize()) {
-                        list.setSelectedIndex(target);
-                    }
-                }
-            });
-        }).exceptionally(this::showFailure);
+    /// Returns a detached immutable snapshot of the actual rows used to validate same-list drag requests.
+    ///
+    /// @return currently displayed order
+    @Unmodifiable
+    List<ServerCatalogItem> displayedServers() {
+        return java.util.Collections.list(listModel.elements()).stream().toList();
+    }
+
+    /// Returns whether a drag can safely capture the displayed snapshot.
+    ///
+    /// @return true only for the ready, writable, unchanged displayed catalog
+    boolean canReorder() {
+        return !closed && !reorderPending && model.snapshot().status() == ServerCatalogStatus.READY
+                && model.snapshot().servers().equals(displayedServers());
+    }
+
+    /// Saves a captured same-list move without optimistically changing visible or persistent row order.
+    ///
+    /// @param expected immutable row order captured by the drag
+    /// @param from captured source index
+    /// @param to final destination index
+    /// @return whether an asynchronous reorder was accepted
+    boolean reorderServers(@Unmodifiable List<ServerCatalogItem> expected, int from, int to) {
+        space.minecraftstl.xyml.ui.swing.EdtDispatcher.requireEventDispatchThread();
+        if (!canReorder() || !expected.equals(displayedServers()) || from == to
+                || from < 0 || from >= expected.size() || to < 0 || to >= expected.size()) return false;
+        reorderPending = true;
+        updateButtonState();
+        model.move(expected, from, to).whenComplete((snapshot, failure) -> SwingUtilities.invokeLater(() -> {
+            if (closed) return;
+            reorderPending = false;
+            if (snapshot != null) {
+                publishSnapshot(snapshot);
+                if (snapshot.status() == ServerCatalogStatus.READY) list.setSelectedIndex(to);
+            } else {
+                publishSnapshot(model.snapshot());
+                if (failure != null) showFailure(failure);
+            }
+            updateButtonState();
+        }));
+        return true;
     }
 
     private java.util.Optional<EditorValues> showEditor(ServerCatalogItem selected) {
@@ -342,14 +370,17 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
         iconLabel.setIcon(FALLBACK_ICON);
     }
 
+    /// Locks displayed index-based commands while a captured reorder is being persisted.
     private void updateButtonState() {
         int index = list.getSelectedIndex();
         int size = listModel.getSize();
         boolean selected = index >= 0 && index < size;
-        editButton.setEnabled(selected);
-        removeButton.setEnabled(selected);
-        upButton.setEnabled(selected && index > 0);
-        downButton.setEnabled(selected && index + 1 < size);
+        boolean writable = !closed && !reorderPending;
+        addButton.setEnabled(writable);
+        editButton.setEnabled(writable && selected);
+        removeButton.setEnabled(writable && selected);
+        list.setEnabled(writable);
+        list.repaint();
     }
 
     private Void showFailure(Throwable failure) {
@@ -385,6 +416,8 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
     public void close() {
         closed = true;
         model.close();
+        if (SwingUtilities.isEventDispatchThread()) reorderSupport.close();
+        else SwingUtilities.invokeLater(reorderSupport::close);
     }
 
     private record EditorValues(String name, String address) {
@@ -468,6 +501,25 @@ public final class ServerCatalogPanel extends JPanel implements AutoCloseable {
                 ServerCatalogItem item = result.remove(from);
                 result.add(to, item);
                 return result;
+            });
+        }
+
+        /// Moves a captured drag only if preceding queued operations have not replaced its row snapshot.
+        ///
+        /// @param expected immutable drag snapshot
+        /// @param from captured source row index
+        /// @param to final row index after source removal
+        /// @return terminal storage snapshot, including recovered failure state
+        CompletableFuture<ServerCatalogSnapshot> move(@Unmodifiable List<ServerCatalogItem> expected, int from, int to) {
+            @Unmodifiable List<ServerCatalogItem> captured = List.copyOf(expected);
+            return mutate(current -> {
+                if (!captured.equals(current)) throw new IllegalStateException("Server list changed during drag");
+                if (from < 0 || from >= current.size() || to < 0 || to >= current.size()) {
+                    throw new IndexOutOfBoundsException("server reorder index out of range");
+                }
+                List<ServerCatalogItem> next = new ArrayList<>(current);
+                next.add(to, next.remove(from));
+                return next;
             });
         }
 

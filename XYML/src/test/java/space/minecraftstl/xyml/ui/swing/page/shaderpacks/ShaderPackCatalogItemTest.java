@@ -19,32 +19,27 @@ package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.image.EncodedImage;
 
 import java.nio.file.Path;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 
-/// Verifies shader-pack rows retain local descriptions and icon payloads.
+/// Verifies shader-pack rows retain local descriptions without a package-icon field.
 @NotNullByDefault
 final class ShaderPackCatalogItemTest {
     /// Optional presentation metadata is immutable and available to the details view.
     @Test
     void retainsPresentationMetadata() {
-        EncodedImage icon = new EncodedImage(new byte[] {3, 2, 1});
         ShaderPackCatalogItem item = new ShaderPackCatalogItem(
                 Path.of("shaderpacks", "example.zip"),
                 "example.zip",
                 "Example",
                 true,
                 Set.of(ShaderPackBackend.IRIS_OCULUS),
-                "Local description",
-                icon);
+                "Local description");
 
         assertEquals("Local description", item.description());
-        assertSame(icon, item.icon());
         assertEquals("Example", item.displayText());
     }
 }

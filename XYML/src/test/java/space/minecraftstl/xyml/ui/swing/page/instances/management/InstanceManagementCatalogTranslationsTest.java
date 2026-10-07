@@ -63,9 +63,32 @@ final class InstanceManagementCatalogTranslationsTest {
             assertEquals(expected, properties.getProperty("server.manage"), language);
             assertEquals(expected, properties.getProperty("server.management.title"), language);
             assertFalse(properties.getProperty("server.management.description", "").isBlank(), language);
-            for (String key : List.of("server.manage", "server.management.title", "server.management.description")) {
+            assertFalse(properties.getProperty("server.reorder", "").isBlank(), language);
+            assertFalse(properties.getProperty("button.enabled", "").isBlank(), language);
+            assertFalse(properties.getProperty("button.disabled", "").isBlank(), language);
+            assertFalse(properties.getProperty("button.enable").equals(properties.getProperty("button.enabled")),
+                    language + ": action/state wording must stay distinct");
+            assertFalse(properties.getProperty("button.disable").equals(properties.getProperty("button.disabled")),
+                    language + ": action/state wording must stay distinct");
+            for (String key : List.of(
+                    "server.manage",
+                    "server.management.title",
+                    "server.management.description",
+                    "server.reorder",
+                    "button.enable",
+                    "button.disable",
+                    "button.enabled",
+                    "button.disabled")) {
                 assertEquals(1L, Pattern.compile("^" + Pattern.quote(key) + "=", Pattern.MULTILINE)
                         .matcher(text).results().count(), language + ": " + key);
+            }
+            for (String obsolete : List.of(
+                    "swing.mods.enabled",
+                    "swing.mods.filter.enabled",
+                    "swing.mods.filter.disabled",
+                    "swing.resourcepacks.enabled",
+                    "swing.shaderpacks.enabled")) {
+                assertFalse(text.contains(obsolete + "="), language + ": obsolete key " + obsolete);
             }
         }
     }

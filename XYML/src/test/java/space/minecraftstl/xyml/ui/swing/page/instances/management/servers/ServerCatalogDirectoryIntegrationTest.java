@@ -29,7 +29,6 @@ import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
 
-import javax.swing.JButton;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import java.io.IOException;
@@ -46,6 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Exercises the production panel and real NBT files with an injected instance-directory resolver.
 ///
@@ -98,7 +99,11 @@ final class ServerCatalogDirectoryIntegrationTest {
                         CatalogLayoutAssertions.requireNamed(panel, "serverCatalogSourceFile", JTextArea.class).getText());
                 assertEquals("Isolated A", panel.serverList().getModel().getElementAt(0).name());
                 assertEquals("Isolated B", panel.serverList().getModel().getElementAt(1).name());
-                CatalogLayoutAssertions.requireNamed(panel, "serverCatalogMoveDown", JButton.class).doClick();
+                ServerCatalogReorderSupport handler = assertInstanceOf(ServerCatalogReorderSupport.class,
+                        panel.serverList().getTransferHandler());
+                java.awt.datatransfer.Transferable transfer = handler.createTransferable(panel.serverList());
+                assertNotNull(transfer);
+                assertTrue(handler.drop(transfer, 2));
             });
             executor.runAll();
             SwingUtilities.invokeAndWait(() -> assertEquals(

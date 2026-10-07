@@ -286,8 +286,8 @@ public final class SwingApplicationPresentationFactory {
                 i18n("search"),
                 i18n("swing.mods.filter"),
                 i18n("swing.mods.filter.all"),
-                i18n("swing.mods.filter.enabled"),
-                i18n("swing.mods.filter.disabled"),
+                i18n("button.enabled"),
+                i18n("button.disabled"),
                 i18n("swing.mods.no_selection"),
                 i18n("swing.mods.id"),
                 i18n("swing.mods.version"),
@@ -296,7 +296,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.mods.authors"),
                 i18n("file"),
                 i18n("swing.mods.description"),
-                i18n("swing.mods.enabled"));
+                i18n("button.enabled"));
     }
 
     /// Creates localized installed-Mod lifecycle text.
@@ -358,7 +358,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.resourcepacks.path"),
                 i18n("swing.resourcepacks.description"),
                 i18n("swing.resourcepacks.compatibility"),
-                i18n("swing.resourcepacks.enabled"),
+                i18n("button.enabled"),
                 i18n("button.enable"),
                 i18n("button.disable"),
                 i18n("swing.resourcepacks.compatible"),
@@ -427,7 +427,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.shaderpacks.no_selection"),
                 i18n("file"),
                 i18n("swing.shaderpacks.path"),
-                i18n("swing.shaderpacks.enabled"),
+                i18n("button.enabled"),
                 i18n("button.enable"),
                 i18n("button.disable"),
                 i18n("swing.shaderpacks.invalid"),
