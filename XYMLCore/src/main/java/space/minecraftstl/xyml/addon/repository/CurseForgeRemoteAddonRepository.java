@@ -59,7 +59,18 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     private static final Semaphore SEMAPHORE = new Semaphore(16);
     private static final int DEFAULT_RETRY_COUNT = 3;
 
-    public static final String API_KEY = System.getProperty("hmcl.curseforge.apikey", JarUtils.getAttribute("hmcl.curseforge.apikey", ""));
+    /// System property and embedded properties key for the CurseForge API key.
+    private static final String API_KEY_PROPERTY = "xyml.curseforge.apikey";
+
+    /// CurseForge API key loaded from the build-provided system property or embedded properties.
+    public static final String API_KEY = resolveApiKey();
+
+    /// Resolves the CurseForge API key from the build-provided property or embedded properties.
+    ///
+    /// @return the configured API key, or an empty string when unavailable
+    static String resolveApiKey() {
+        return System.getProperty(API_KEY_PROPERTY, JarUtils.getAttribute(API_KEY_PROPERTY, ""));
+    }
 
     private static <R extends HttpRequest> R withApiKey(R request) {
         if (request.getUrl().startsWith(PREFIX) && !API_KEY.isEmpty()) {
