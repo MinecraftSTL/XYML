@@ -1209,7 +1209,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     /// @param entryPath expected executable path
     private static <F, E extends ArchiveEntry> void assertPreparedExecutable(
             ArchiveFileTree<F, E> tree,
-            String entryPath) {
+            String entryPath) throws IOException {
         E javaEntry = Objects.requireNonNull(tree.getEntry(entryPath), "normalized Java executable");
         assertTrue(tree.isExecutable(javaEntry));
     }

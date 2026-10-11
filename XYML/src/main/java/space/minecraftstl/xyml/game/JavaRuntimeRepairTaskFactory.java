@@ -83,19 +83,29 @@ public final class JavaRuntimeRepairTaskFactory {
             XYMLGameRepository repository,
             GameInstanceManifest manifest,
             Supplier<@Nullable Task<?>> validatorFactory) {
+        return createRepair(repository, manifest, validatorFactory, false);
+    }
+
+    /// Creates a repair boundary whose Java-selection attempt is owned by one repository draft.
+    public static LogAnalyzable.JavaRuntimeRepair createRepair(
+            XYMLGameRepository repository,
+            GameInstanceManifest manifest,
+            Supplier<@Nullable Task<?>> validatorFactory,
+            boolean draftOwned) {
         XYMLGameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
         GameInstanceManifest checkedManifest = Objects.requireNonNull(manifest, "manifest");
         Supplier<@Nullable Task<?>> checkedValidatorFactory = Objects.requireNonNull(
                 validatorFactory,
                 "validatorFactory");
+        boolean checkedDraftOwned = draftOwned;
         return new LogAnalyzable.JavaRuntimeRepair() {
             /// {@inheritDoc}
             @Override
             public Task<?> createTask() {
                 @Nullable Task<?> validator = checkedValidatorFactory.get();
-                return validator == null
+                return draftTask(checkedRepository, checkedManifest, checkedDraftOwned, () -> validator == null
                         ? JavaRuntimeRepairTaskFactory.create(checkedRepository, checkedManifest)
-                        : JavaRuntimeRepairTaskFactory.create(checkedRepository, checkedManifest, validator);
+                        : JavaRuntimeRepairTaskFactory.create(checkedRepository, checkedManifest, validator));
             }
 
             /// {@inheritDoc}
@@ -111,7 +121,7 @@ public final class JavaRuntimeRepairTaskFactory {
                     return createTask();
                 }
                 @Nullable Task<?> validator = checkedValidatorFactory.get();
-                return validator == null
+                return draftTask(checkedRepository, checkedManifest, checkedDraftOwned, () -> validator == null
                         ? JavaRuntimeRepairTaskFactory.createForCandidate(
                                 checkedRepository,
                                 checkedManifest,
@@ -120,7 +130,7 @@ public final class JavaRuntimeRepairTaskFactory {
                                 checkedRepository,
                                 checkedManifest,
                                 candidateId,
-                                validator);
+                                validator));
             }
 
             /// {@inheritDoc}
@@ -132,6 +142,51 @@ public final class JavaRuntimeRepairTaskFactory {
                 return createTask(candidateId);
             }
         };
+    }
+
+    /// Wraps one fresh Java task in a root draft when the caller owns this repair boundary.
+    private static Task<?> draftTask(
+            XYMLGameRepository repository,
+            GameInstanceManifest manifest,
+            boolean draftOwned,
+            Supplier<Task<?>> taskFactory) {
+        if (!draftOwned) return Objects.requireNonNull(taskFactory.get(), "taskFactory result");
+        return repository.runDraftAsync(draft -> {
+            GameSettings.Instance setting = requireWritableSettings(repository, manifest.id());
+            draft.enlist(new JavaSettingsDraftParticipant(repository, manifest, setting));
+            return Objects.requireNonNull(taskFactory.get(), "taskFactory result");
+        });
+    }
+
+    /// Restores Java selection and its durable save when a draft-owned repair fails.
+    @NotNullByDefault
+    private static final class JavaSettingsDraftParticipant implements GameRepositoryDraftParticipant {
+        private final XYMLGameRepository repository;
+        private final GameInstanceManifest manifest;
+        private final JavaSelectionSnapshot snapshot;
+
+        private JavaSettingsDraftParticipant(XYMLGameRepository repository, GameInstanceManifest manifest,
+                                             GameSettings.Instance setting) {
+            this.repository = Objects.requireNonNull(repository, "repository");
+            this.manifest = Objects.requireNonNull(manifest, "manifest");
+            this.snapshot = JavaSelectionSnapshot.capture(setting);
+        }
+
+        @Override
+        public void validate() {
+            requireCurrentManifest(repository, manifest);
+        }
+
+        @Override
+        public void apply() {
+        }
+
+        @Override
+        public void rollback() throws Exception {
+            snapshot.restore();
+            repository.saveGameSettingsSync(manifest.id());
+            FileSaver.waitForAllSaves();
+        }
     }
 
     /// Returns a read-only snapshot of compatible Java runtimes for one launch.

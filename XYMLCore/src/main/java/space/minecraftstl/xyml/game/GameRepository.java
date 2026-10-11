@@ -36,6 +36,22 @@ import java.util.Set;
 /// locating instance-owned files, and exposing helper paths used by launch, download, and maintenance code.
 @NotNullByDefault
 public interface GameRepository {
+    /// Returns a detached view of committed filesystem repository state.
+    default GameRepositorySnapshot getSnapshot() {
+        throw new UnsupportedOperationException("Repository snapshots are unavailable");
+    }
+
+    /// Opens an independent filesystem draft whose close is owned by the root operation.
+    default GameRepositoryDraft openDraft() throws IOException {
+        throw new UnsupportedOperationException("Repository drafts are unavailable");
+    }
+
+    /// Creates a stopped task that prepares, commits or aborts one root draft.
+    default <T> Task<T> runDraftAsync(java.util.function.Function<GameRepositoryDraft, Task<T>> factory) {
+        throw new UnsupportedOperationException("Repository transactions are unavailable");
+    }
+
+
     /// Resolves inheritance into launch and standalone manifest views.
     ///
     /// @param manifest the manifest to resolve

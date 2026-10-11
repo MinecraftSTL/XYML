@@ -159,6 +159,15 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
                 JOptionPane.QUESTION_MESSAGE);
     }
 
+    /// Uses the injected dialog boundary for editable asynchronous validation.
+    @Override
+    public CompletionStage<@Nullable String> promptDirectoryName(Component owner,
+            java.util.function.Function<String, CompletionStage<@Nullable String>> validator) {
+        EdtDispatcher.requireEventDispatchThread();
+        return dialogActions.showValidatedInputDialog(owner, strings.createDirectoryPrompt(),
+                strings.createDirectoryAction(), validator);
+    }
+
     /// Confirms deletion of one exact row on the event-dispatch thread.
     @Override
     public boolean confirmDelete(Component owner, SchematicBrowserItem target) {
@@ -276,6 +285,13 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
                 String title,
                 int messageType) {
             return JOptionPane.showInputDialog(owner, message, title, messageType);
+        }
+
+        /// Opens the live inline-validation editor without blocking the EDT on validation I/O.
+        @Override
+        public CompletionStage<@Nullable String> showValidatedInputDialog(Component owner, String message, String title,
+                java.util.function.Function<String, CompletionStage<@Nullable String>> validator) {
+            return SchematicNameDialog.show(owner, message, title, validator);
         }
 
         /// Displays the deletion confirmation.

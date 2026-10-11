@@ -42,6 +42,18 @@ interface DialogActions {
     /// @return entered value, or null after cancellation
     @Nullable String showInputDialog(Component owner, Object message, String title, int messageType);
 
+    /// Provides an asynchronous validated input boundary while preserving deterministic injected dialogs.
+    default java.util.concurrent.CompletionStage<@Nullable String> showValidatedInputDialog(
+            Component owner, String message, String title,
+            java.util.function.Function<String, java.util.concurrent.CompletionStage<@Nullable String>> validator) {
+        @Nullable String name = showInputDialog(owner, message, title, javax.swing.JOptionPane.QUESTION_MESSAGE);
+        if (name == null) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        return validator.apply(name).thenApply(error -> {
+            if (error != null) throw new IllegalArgumentException(error);
+            return name;
+        });
+    }
+
     /// Displays a confirmation dialog.
     ///
     /// @param owner dialog owner

@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.util.tree;
 import kala.compress.archivers.tar.TarArchiveEntry;
 import kala.compress.archivers.tar.TarArchiveReader;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -28,9 +30,8 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.util.zip.GZIPInputStream;
 
-/**
- * @author Glavo
- */
+/// Owns a TAR reader and deferred directory hierarchy, including any decompressed temporary archive.
+@NotNullByDefault
 public final class TarFileTree extends ArchiveFileTree<TarArchiveReader, TarArchiveEntry> {
 
     public static TarFileTree open(Path file) throws IOException {
@@ -59,44 +60,61 @@ public final class TarFileTree extends ArchiveFileTree<TarArchiveReader, TarArch
         }
     }
 
-    private final Path tempFile;
-    private final Thread shutdownHook;
+    /// Temporary decompressed TAR, or null for an original archive.
+    private final @Nullable Path tempFile;
 
-    public TarFileTree(TarArchiveReader file, Path tempFile) throws IOException {
+    /// Registered cleanup hook only when a temporary archive is owned.
+    private final @Nullable Thread shutdownHook;
+
+    /// Whether all owned resources and the temporary archive were released.
+    private boolean released;
+
+    /// Complete hierarchy published after successful initialization.
+    private @Nullable Dir<TarArchiveEntry> root;
+
+    /// Creates an owning TAR wrapper without building directory nodes.
+    public TarFileTree(TarArchiveReader file, @Nullable Path tempFile) throws IOException {
         super(file);
         this.tempFile = tempFile;
-        try {
-            for (TarArchiveEntry entry : file.getEntries()) {
-                addEntry(entry);
-            }
-        } catch (Throwable e) {
-            try {
-                file.close();
-            } catch (Throwable e2) {
-                e.addSuppressed(e2);
-            }
-
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (Throwable e2) {
-                    e.addSuppressed(e2);
-                }
-            }
-
-            throw e;
-        }
 
         if (tempFile != null) {
             this.shutdownHook = new Thread(() -> {
                 try {
                     Files.deleteIfExists(tempFile);
-                } catch (Throwable ignored) {
+                } catch (IOException failure) {
+                    space.minecraftstl.xyml.util.logging.Logger.LOG.warning(
+                            "TAR temporary cleanup failed (" + failure.getClass().getSimpleName() + ")");
                 }
             });
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
+            try {
+                Runtime.getRuntime().addShutdownHook(shutdownHook);
+            } catch (RuntimeException | Error registrationFailure) {
+                try {
+                    file.close();
+                } catch (IOException closeFailure) {
+                    registrationFailure.addSuppressed(closeFailure);
+                }
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException deletionFailure) {
+                    registrationFailure.addSuppressed(deletionFailure);
+                }
+                throw registrationFailure;
+            }
         } else
             this.shutdownHook = null;
+    }
+
+    /// Validates and publishes the hierarchy only on first directory access.
+    @Override
+    public synchronized Dir<TarArchiveEntry> getRoot() throws IOException {
+        requireOpen();
+        if (root == null) {
+            Dir<TarArchiveEntry> built = new Dir<>("", "");
+            ArchiveEntryIndex.buildTree(reader.getEntries(), built);
+            root = built;
+        }
+        return root;
     }
 
     @Override
@@ -114,6 +132,7 @@ public final class TarFileTree extends ArchiveFileTree<TarArchiveReader, TarArch
 
     @Override
     public InputStream getInputStream(TarArchiveEntry entry) throws IOException {
+        requireOpen();
         return reader.getInputStream(entry);
     }
 
@@ -132,15 +151,33 @@ public final class TarFileTree extends ArchiveFileTree<TarArchiveReader, TarArch
         return entry.isFile() && (entry.getMode() & 0b1000000) != 0;
     }
 
+    /// Closes owned resources and permits cleanup retry after an I/O failure.
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
+        markClosed();
+        if (released) return;
+        @Nullable IOException failure = null;
         try {
             reader.close();
-        } finally {
-            if (tempFile != null) {
-                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IOException closeFailure) {
+            failure = closeFailure;
+        }
+        if (tempFile != null) {
+            try {
                 Files.deleteIfExists(tempFile);
+            } catch (IOException deletionFailure) {
+                if (failure == null) failure = deletionFailure;
+                else failure.addSuppressed(deletionFailure);
+            }
+            if (failure == null && shutdownHook != null) {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
+                } catch (IllegalStateException expected) {
+                    // Shutdown has started; the registered hook owns any remaining cleanup.
+                }
             }
         }
+        if (failure != null) throw failure;
+        released = true;
     }
 }

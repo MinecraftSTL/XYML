@@ -115,6 +115,14 @@ public final class LauncherGameDirectoryManagementService implements GameDirecto
         } else {
             addLocalDirectory(directory, allowReadOnlyOverwrite);
         }
+        GameDirectoryManager.setSelectedGameDirectory(findAddedDirectory(
+                java.util.List.copyOf(GameDirectoryManager.getGameDirectories()), directory.getId()));
+    }
+
+    /// Returns the canonical added entry, refusing selection if the store did not accept its identifier.
+    static GameDirectory findAddedDirectory(java.util.List<GameDirectory> directories, GameDirectoryID id) {
+        return directories.stream().filter(entry -> entry.getId().equals(id)).findFirst()
+                .orElseThrow(() -> new IllegalStateException("Added game directory is not in the authoritative list"));
     }
 
     /// Updates an existing directory with the manager's cross-store and protection rules.
