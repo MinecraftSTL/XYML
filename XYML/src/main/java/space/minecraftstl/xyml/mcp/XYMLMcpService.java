@@ -1743,7 +1743,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         LogAnalyzable.JavaRuntimeRepair delegate = JavaRuntimeRepairTaskFactory.createRepair(
                 repository,
                 checkedManifest,
-                () -> sourceValidator == null ? null : sourceValidator.createTask());
+                () -> sourceValidator == null ? null : sourceValidator.createTask(),
+                true);
         return new LogAnalyzable.JavaRuntimeRepair() {
             /// {@inheritDoc}
             @Override
