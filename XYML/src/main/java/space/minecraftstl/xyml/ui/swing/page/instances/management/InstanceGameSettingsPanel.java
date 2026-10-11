@@ -288,8 +288,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             inheritedControl("instanceGameSettingsUseCustomNatives", new JCheckBox());
 
     /// Native-library directory setting.
-    private final InheritedControl<JTextField> nativesDirectoryControl =
-            inheritedControl("instanceGameSettingsNativesDirectory", new JTextField());
+    private final InheritedControl<JTextField> nativesDirectoryControl = inheritedControl("instanceGameSettingsNativesDirectory", new JTextField());
+    /// Directory browser bound to the displayed snapshot and panel lifetime.
+    private final InstanceNativePathControls nativesPathControls;
 
     /// Automatic native-library patch suppression setting.
     private final InheritedControl<JCheckBox> notPatchNativesControl =
@@ -470,6 +471,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         javaPathField.setName("instanceGameSettingsJavaPath");
         detectedJavaComboBox.setName("instanceGameSettingsDetectedJava");
         javaPathControls = new InstanceJavaPathControls(javaPathField);
+        nativesPathControls = new InstanceNativePathControls(nativesDirectoryControl.editor(), () -> displayedSnapshot);
         windowSizeControls = new InstanceWindowSizeControls(
                 windowWidthControl.editor(),
                 windowHeightControl.editor());
@@ -563,7 +565,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
-                persistence.close(); footerControls.close();
+                persistence.close(); footerControls.close(); nativesPathControls.close();
                 closed = true;
                 interactionEnabled = false;
                 javaRuntimeSubscription.unsubscribe();
@@ -767,7 +769,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 section,
                 i18n("settings.advanced.natives_directory.custom.enabled"),
                 useCustomNativesControl);
-        addControlRow(section, i18n("settings.advanced.natives_directory"), nativesDirectoryControl);
+        nativesPathControls.addRow(section, i18n("settings.advanced.natives_directory"), nativesDirectoryControl.overrideBox());
         addBooleanControlRow(section, i18n("settings.advanced.dont_patch_natives"), notPatchNativesControl);
         addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw_or_sdl"), nativeGlfwControl);
         addBooleanControlRow(section, i18n("settings.advanced.use_native_openal"), nativeOpenAlControl);
@@ -1507,6 +1509,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                         snapshot.nativeLibraries().customDirectoryEnabled());
         nativesDirectoryControl.editor().setEnabled(
                 nativesDirectoryControl.editor().isEnabled() && useCustomNatives);
+        nativesPathControls.updateAvailability(nativesDirectoryControl.editor().isEnabled());
 
         footerControls.updateAvailability(writable, interactionEnabled && !closed && !persistence.isBusy());
         settingsTabs.setEnabled(interactionEnabled && !closed);

@@ -250,6 +250,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Whether all future model notifications and commands are gated.
     private boolean closed;
 
+    /// At most one owned name prompt can be active; closure cancels only its result view.
+    private @Nullable java.util.concurrent.CompletableFuture<@Nullable String> directoryPrompt;
+
     /// Whether owned Swing and model resources have been released on the EDT.
     private boolean resourcesClosed;
 
@@ -633,7 +636,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 loading ? strings.refreshingAction() : strings.refreshAction());
         refreshButton.setEnabled(!loading && !writeBusy);
         importButton.setEnabled(exactReady && !writeBusy);
-        createDirectoryButton.setEnabled(exactReady && !writeBusy);
+        createDirectoryButton.setEnabled(exactReady && !writeBusy && directoryPrompt == null);
         openFolderButton.setEnabled(!writeBusy);
         projectionModButton.setEnabled(projectionModAvailable && !writeBusy);
         retryButton.setEnabled(snapshot.status() == SchematicBrowserStatus.ERROR && !writeBusy);
@@ -731,22 +734,30 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Prompts for a child name and starts creation only if the modal result remains current.
     private void promptAndCreateDirectory() {
         EdtDispatcher.requireEventDispatchThread();
+        if (directoryPrompt != null) return;
         @Nullable SchematicBrowserSnapshot beforeDialog = currentActionSnapshot();
-        if (beforeDialog == null) {
-            return;
-        }
+        if (beforeDialog == null) return;
         Path expectedDirectory = beforeDialog.currentDirectory();
-        final @Nullable String directoryName;
         try {
-            directoryName = interactions.promptDirectoryName(this);
+            directoryPrompt = interactions.promptDirectoryName(this,
+                    name -> SchematicDirectoryNameValidation.validate(expectedDirectory, name)).toCompletableFuture();
+            updateSelectionPresentation();
+            directoryPrompt.whenComplete((@Nullable String name, @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
+                directoryPrompt = null;
+                if (closed) return;
+                updateSelectionPresentation();
+                if (!isActionDirectoryCurrent(expectedDirectory)) return;
+                if (failure != null) {
+                    showOperationFailure(failure);
+                } else if (name != null) {
+                    startWrite(() -> model.createDirectory(name));
+                }
+            }));
         } catch (RuntimeException failure) {
+            directoryPrompt = null;
+            updateSelectionPresentation();
             showOperationFailure(failure);
-            return;
         }
-        if (directoryName == null || !isActionDirectoryCurrent(expectedDirectory)) {
-            return;
-        }
-        startWrite(() -> model.createDirectory(directoryName));
     }
 
     /// Confirms deletion and submits only the path captured before opening the modal dialog.
@@ -1201,6 +1212,10 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             }
             resourcesClosed = true;
             @Nullable Throwable failure = null;
+            failure = attemptCleanup(failure, () -> {
+                if (directoryPrompt != null) directoryPrompt.cancel(false);
+                directoryPrompt = null;
+            });
             failure = attemptCleanup(failure, dropRegistration::close);
             failure = attemptCleanup(failure, modelSubscription::unsubscribe);
             failure = attemptCleanup(
