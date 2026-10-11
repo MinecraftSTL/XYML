@@ -1038,9 +1038,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
         updateCheckInProgress = false;
         if (failure != null || result == null) {
-            updateStatusLabel.setText(i18n("update.failed"));
+            updateStatusLabel.setText(failure == null ? i18n("update.failed")
+                    : space.minecraftstl.xyml.ui.swing.update.UpdateCheckFailureFormatter.format(failure));
             if (failure != null) {
-                LOG.warning("Failed to check for launcher updates from settings", failure);
+                LOG.warning("Update check failed (" + failure.getClass().getSimpleName() + ")");
             }
         } else if (result.updateAvailable()) {
             updateStatusLabel.setText(i18n("update.newest_version", result.remoteVersion().version()));
