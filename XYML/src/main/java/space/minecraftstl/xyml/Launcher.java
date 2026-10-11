@@ -59,6 +59,8 @@ import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.*;
+import space.minecraftstl.xyml.util.platform.macos.LibSystem;
+import space.minecraftstl.xyml.util.platform.windows.WinReg;
 
 import java.awt.Component;
 import java.io.File;
@@ -68,6 +70,9 @@ import java.lang.management.MemoryPoolMXBean;
 import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -611,6 +616,9 @@ public final class Launcher {
                 LOG.info("XDG Current Desktop: " + System.getenv("XDG_CURRENT_DESKTOP"));
             }
 
+            @Nullable Boolean isRoot = isRootUser();
+            LOG.info("Administrator User: " + (isRoot == null ? "Unknown" : isRoot.toString()));
+
             LOG.info("Zlib Compatible: " + ZlibUtils.IS_ZLIB_COMPATIBLE);
 
             WindowsNativeUtils.setProcessAppUserModelId();
@@ -739,6 +747,70 @@ public final class Launcher {
             throw error;
         }
         throw new IllegalStateException("Failed to stop launcher", failure);
+    }
+
+    /// Detects whether the current process runs with administrator or root privileges.
+    ///
+    /// @return true or false when the platform check succeeds, or null when unavailable
+    private static @Nullable Boolean isRootUser() {
+        switch (OperatingSystem.CURRENT_OS) {
+            case WINDOWS -> {
+                WinReg reg = WinReg.INSTANCE;
+                if (reg == null) {
+                    return null;
+                }
+                try {
+                    return reg.exists(WinReg.HKEY.HKEY_USERS, "S-1-5-19");
+                } catch (Exception e) {
+                    LOG.warning("Failed to check Windows administrator privileges", e);
+                    return null;
+                }
+            }
+            case LINUX -> {
+                Path selfStatus = Paths.get("/proc/self/status");
+                if (Files.exists(selfStatus)) {
+                    try (var reader = Files.newBufferedReader(selfStatus)) {
+                        @Nullable String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("Uid:")) {
+                                String[] parts = line.split("\\t");
+                                if (parts.length >= 3) {
+                                    return "0".equals(parts[2].trim());
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        LOG.warning("Failed to read " + selfStatus, e);
+                    }
+                }
+            }
+            case MACOS -> {
+                if (NativeUtils.USE_JNA) {
+                    LibSystem libSystem = LibSystem.INSTANCE;
+                    if (libSystem != null) {
+                        try {
+                            return libSystem.geteuid() == 0;
+                        } catch (Throwable e) {
+                            LOG.warning("Failed to check macOS root privileges", e);
+                            return null;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (OperatingSystem.CURRENT_OS.isUnixLike()) {
+            @Nullable Path id = SystemUtils.which("id");
+            if (id != null) {
+                try {
+                    return "0".equals(SystemUtils.run(id.toString(), "-u").trim());
+                } catch (Exception e) {
+                    LOG.warning("Failed to run id -u", e);
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     /// Process-wide uncaught-exception reporter used by both UI toolkits and task executors.
