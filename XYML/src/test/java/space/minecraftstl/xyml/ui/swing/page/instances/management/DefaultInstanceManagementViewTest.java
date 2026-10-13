@@ -44,6 +44,9 @@ import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadCategoryPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageRequest;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
@@ -64,6 +67,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.JScrollPane;
 import java.awt.Component;
 import java.awt.Container;
@@ -250,9 +254,9 @@ final class DefaultInstanceManagementViewTest {
         }
     }
 
-    /// Opens the Mods download center with the managed instance context.
+    /// Keeps instance-bound Mods downloads and the projection shortcut connected to their real catalog controls.
     @Test
-    void opensModsDownloadsWithManagedInstanceContext()
+    void opensModsDownloadsAndPrefillsProjectionSearch()
             throws IOException, InterruptedException, ReflectiveOperationException {
         Field launcherSettingsField = SettingsManager.class.getDeclaredField("launcherSettings");
         Field gameSettingsPresetsField = SettingsManager.class.getDeclaredField("gameSettingsPresets");
@@ -274,6 +278,8 @@ final class DefaultInstanceManagementViewTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
         List<String> requests = new ArrayList<>();
+        DownloadPageNavigation downloadsNavigation = new DownloadPageNavigation();
+        AtomicReference<@Nullable DownloadCategoryPanel> downloadsReference = new AtomicReference<>();
         try {
             initializeTestTheme();
             createInstalledInstanceFixture();
@@ -336,6 +342,13 @@ final class DefaultInstanceManagementViewTest {
                         public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID requestedInstanceId) {
                             requests.add(target.name() + ":" + requestedInstanceId.id());
                         }
+
+                        /// Delivers project queries to the lazily attached real download category panel.
+                        @Override
+                        public void openModSearch(String searchText) {
+                            downloadsNavigation.request(new DownloadPageRequest(
+                                    DownloadPageTarget.MODS, null, searchText));
+                        }
                     })));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
@@ -356,8 +369,45 @@ final class DefaultInstanceManagementViewTest {
             });
 
             assertEquals(List.of("MODS:instance"), requests);
+            EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(findNamed(
+                    view, "instanceManagementNavigation", InstanceManagementNavigationPanel.class))
+                    .button(InstanceManagementPageId.SCHEMATICS).doClick());
+            awaitExecutor(executor);
+            EdtDispatcher.executeAndWait(() -> { });
+            awaitExecutor(executor);
+            EdtDispatcher.executeAndWait(() -> {
+                JButton projection = Objects.requireNonNull(findNamed(view, "schematicsInstallMod", JButton.class));
+                assertTrue(projection.isEnabled());
+                projection.doClick();
+                DownloadCategoryPanel downloads = new DownloadCategoryPanel(presentation.taskProgress(), null, Duration.ZERO);
+                downloadsReference.set(downloads);
+                // Keep the catalog undisplayed: these UI assertions must not start the production network backend.
+                downloadsNavigation.attach(downloads::selectTarget);
+                JTextField query = Objects.requireNonNull(findNamed(downloads, "remoteAddonSearch", JTextField.class));
+                assertEquals(DownloadPageTarget.MODS.ordinal(), downloads.categoryTabs().getSelectedIndex());
+                assertEquals("Litematica", query.getText());
+                query.setText("other-mod");
+                downloads.selectTarget(DownloadPageTarget.RESOURCE_PACKS);
+                downloads.selectTarget(DownloadPageTarget.MODS);
+                assertEquals("other-mod", query.getText(), "Plain navigation preserves the current query");
+                InstanceManagementNavigationPanel navigation = Objects.requireNonNull(findNamed(
+                        view, "instanceManagementNavigation", InstanceManagementNavigationPanel.class));
+                navigation.button(InstanceManagementPageId.OVERVIEW).doClick();
+                navigation.button(InstanceManagementPageId.SCHEMATICS).doClick();
+                projection.doClick();
+                assertEquals("Litematica", query.getText());
+                projection.doClick();
+                assertEquals("Litematica", query.getText());
+                downloads.close();
+                downloadsNavigation.request(new DownloadPageRequest(DownloadPageTarget.MODS, null, "ignored-after-close"));
+                assertEquals("Litematica", query.getText());
+            });
         } finally {
             try {
+                @Nullable DownloadCategoryPanel downloads = downloadsReference.get();
+                if (downloads != null) {
+                    downloads.close();
+                }
                 @Nullable DefaultInstanceManagementView view = viewReference.get();
                 if (view != null) {
                     view.close();
