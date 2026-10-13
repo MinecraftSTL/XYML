@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallD
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
+import space.minecraftstl.xyml.ui.swing.page.tasks.TaskManagerPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
@@ -456,6 +457,22 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         pageDeck.showPage(destinationPage, true, direction);
         EdtDispatcher.executeLater(this::showInstanceManagement);
         updateSelection(page);
+    }
+
+    /// Opens the cached task manager with its running tab selected, including when it is already active.
+    ///
+    /// @throws IllegalStateException when called outside the EDT, after shell closure, or with an incompatible task page
+    public void openRunningTasks() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Application shell is closed");
+        }
+        JComponent tasksPage = pageCache.getOrCreate(ShellPageId.TASKS);
+        if (!(tasksPage instanceof TaskManagerPanel taskManagerPanel)) {
+            throw new IllegalStateException("Tasks page does not expose the task manager");
+        }
+        taskManagerPanel.showRunningTasks();
+        navigateTo(ShellPageId.TASKS);
     }
 
     /// Navigates to the download center and opens the Mods search for one dependency identifier.

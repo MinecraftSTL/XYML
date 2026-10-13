@@ -316,7 +316,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
             if (currentWindow == null) {
                 throw new IllegalStateException("Swing application window is not ready for navigation");
             }
-            currentWindow.navigateTo(page);
+            if (page == ShellPageId.TASKS) {
+                currentWindow.openRunningTasks();
+            } else {
+                currentWindow.navigateTo(page);
+            }
         };
         DownloadPageNavigation downloadsNavigation = new DownloadPageNavigation();
 
@@ -1409,6 +1413,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
             EdtDispatcher.execute(() -> {
                 if (!closed.get()) {
                     frame.shellPanel().navigateTo(page);
+                }
+            });
+        }
+
+        /// Opens the running task view through the hosted shell on the Swing EDT.
+        @Override
+        public void openRunningTasks() {
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.execute(() -> {
+                if (!closed.get()) {
+                    frame.shellPanel().openRunningTasks();
                 }
             });
         }
