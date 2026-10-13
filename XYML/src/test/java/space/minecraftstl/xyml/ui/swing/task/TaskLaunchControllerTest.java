@@ -109,6 +109,31 @@ public final class TaskLaunchControllerTest {
         });
     }
 
+    /// Navigation failures do not cancel or relaunch a task that already started successfully.
+    @Test
+    public void navigationFailurePreservesStartedTask() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<String> events = new ArrayList<>();
+            TaskLaunchController controller = new TaskLaunchController(() -> {
+                events.add("navigate");
+                throw new IllegalStateException("navigation failed");
+            });
+            controller.launch(new RecordingExecutor(events, false), "Fixture", () -> events.add("dismiss"));
+            assertEquals(List.of("start", "dismiss", "navigate"), events);
+        });
+    }
+
+    /// Already-registered tasks use the same dismissal and navigation command.
+    @Test
+    public void opensTaskManagerForAlreadyRegisteredTask() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<String> events = new ArrayList<>();
+            TaskLaunchController controller = new TaskLaunchController(() -> events.add("navigate"));
+            controller.openTaskManager(() -> events.add("dismiss"));
+            assertEquals(List.of("dismiss", "navigate"), events);
+        });
+    }
+
     /// Minimal executor fixture that records start and optionally fails it.
     @NotNullByDefault
     private static final class RecordingExecutor extends TaskExecutor {
@@ -141,9 +166,10 @@ public final class TaskLaunchControllerTest {
             return false;
         }
 
-        /// Records no cancellation command.
+        /// Records cancellation requests so navigation tests can detect unintended task cancellation.
         @Override
         public void cancel() {
+            events.add("cancel");
         }
     }
 }

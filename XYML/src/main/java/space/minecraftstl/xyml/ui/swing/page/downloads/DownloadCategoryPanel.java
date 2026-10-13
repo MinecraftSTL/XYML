@@ -260,11 +260,12 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         selectTarget(DownloadPageRequest.of(target));
     }
 
-    /// Selects one content category and applies its optional instance context.
+    /// Selects one content category and applies its optional instance context and Mods query.
     ///
-    /// A request carrying an instance ID prefills the Mods catalog from that instance without starting a query.
+    /// An instance ID prefills the Mods catalog. Only a request carrying a query starts a search;
+    /// category-only requests preserve the current search text.
     ///
-    /// @param request requested download category and optional instance context
+    /// @param request requested download category, optional instance context, and optional Mods query
     public void selectTarget(DownloadPageRequest request) {
         EdtDispatcher.requireEventDispatchThread();
         DownloadPageRequest checked = Objects.requireNonNull(request, "request");
@@ -275,6 +276,9 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         activateSelectedCategory();
         if (checked.target() == DownloadPageTarget.MODS && checked.targetInstanceId() != null) {
             modsCatalog.instanceContext().applyNavigation(checked.targetInstanceId());
+        }
+        if (checked.searchText() != null) {
+            openModSearch(checked.searchText());
         }
     }
 
