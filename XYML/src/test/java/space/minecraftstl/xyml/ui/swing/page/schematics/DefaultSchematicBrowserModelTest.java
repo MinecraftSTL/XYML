@@ -22,6 +22,7 @@ import com.google.common.jimfs.Jimfs;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -58,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1176,6 +1178,92 @@ public final class DefaultSchematicBrowserModelTest {
             model.close();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Root navigation creates a separate cancellable snapshot when the scan future is already terminal.
+    @RepeatedTest(30)
+    public void rootNavigationDoesNotReuseCompletedScanBeforeCleanup() {
+        assertCompletedScanCreatesSnapshot(true, false);
+        assertCompletedScanCreatesSnapshot(true, true);
+    }
+
+    /// Loading an already scanned root does not reuse a terminal future awaiting slot cleanup.
+    @RepeatedTest(30)
+    public void loadDoesNotReuseCompletedScanBeforeCleanup() {
+        assertCompletedScanCreatesSnapshot(false, false);
+        assertCompletedScanCreatesSnapshot(false, true);
+    }
+
+    /// Both commands reuse an unfinished root scan without scheduling duplicate directory reads.
+    @Test
+    public void unfinishedRootScanIsStillReused() {
+        QueuedExecutor executor = new QueuedExecutor();
+        DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(
+                Path.of("schematics"), executor, (ignored, cancellation) -> List.of(),
+                path -> {
+                    throw new IOException("unused metadata");
+                });
+        try {
+            CompletionStage<SchematicBrowserSnapshot> scan = model.loadIfNeeded();
+            assertSame(scan, model.loadIfNeeded());
+            assertSame(scan, model.returnToParent());
+            assertEquals(1, executor.pendingCount());
+            executor.runNext();
+            assertEquals(SchematicBrowserStatus.READY, scan.toCompletableFuture().join().status());
+            assertEquals(0, executor.pendingCount());
+        } finally {
+            model.close();
+        }
+    }
+
+    /// Runs a command synchronously inside scan completion, before the scan slot can be cleared.
+    ///
+    /// @param navigate whether to return to the parent rather than load the existing snapshot
+    /// @param refresh whether to cancel the snapshot by refresh rather than close
+    private static void assertCompletedScanCreatesSnapshot(boolean navigate, boolean refresh) {
+        QueuedExecutor executor = new QueuedExecutor();
+        AtomicInteger reads = new AtomicInteger();
+        DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(
+                Path.of("schematics"), executor,
+                (ignored, cancellation) -> {
+                    reads.incrementAndGet();
+                    return List.of();
+                }, path -> {
+                    throw new IOException("unused metadata");
+                });
+        try {
+            CompletionStage<SchematicBrowserSnapshot> scan = model.loadIfNeeded();
+            AtomicReference<@Nullable CompletionStage<SchematicBrowserSnapshot>> snapshot =
+                    new AtomicReference<>();
+            CompletionStage<Void> callback = scan.thenRun(() -> {
+                CompletionStage<SchematicBrowserSnapshot> command =
+                        navigate ? model.returnToParent() : model.loadIfNeeded();
+                snapshot.set(command);
+                assertNotSame(scan, command);
+                assertFalse(command.toCompletableFuture().isDone());
+            });
+            executor.runNext();
+            callback.toCompletableFuture().join();
+            CompletionStage<SchematicBrowserSnapshot> command = Objects.requireNonNull(snapshot.get());
+            assertEquals(1, reads.get());
+            assertEquals(1, executor.pendingCount());
+            if (refresh) {
+                CompletionStage<SchematicBrowserSnapshot> nextScan = model.refresh();
+                assertThrows(CancellationException.class, () -> command.toCompletableFuture().join());
+                executor.runNext();
+                executor.runNext();
+                assertEquals(SchematicBrowserStatus.READY, nextScan.toCompletableFuture().join().status());
+                assertEquals(2, reads.get());
+            } else {
+                model.close();
+                assertThrows(CancellationException.class, () -> command.toCompletableFuture().join());
+                executor.runNext();
+                assertEquals(1, reads.get());
+            }
+            assertEquals(0, executor.pendingCount());
+        } finally {
+            model.close();
         }
     }
 
