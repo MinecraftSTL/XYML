@@ -43,6 +43,19 @@ public interface InstanceContentNavigation {
         openDownloads(Objects.requireNonNull(target, "target"));
     }
 
+    /// Opens the Mods category with a project query.
+    ///
+    /// Implementations without search support retain the plain Mods category transition.
+    ///
+    /// @param searchText non-blank project identifier
+    /// @throws IllegalArgumentException if the query is blank
+    default void openModSearch(String searchText) {
+        if (Objects.requireNonNull(searchText, "searchText").trim().isEmpty()) {
+            throw new IllegalArgumentException("searchText must not be blank");
+        }
+        openDownloads(DownloadPageTarget.MODS);
+    }
+
     /// Returns a disabled navigation boundary for headless construction.
     ///
     /// @return navigation accepting requests without performing a shell transition

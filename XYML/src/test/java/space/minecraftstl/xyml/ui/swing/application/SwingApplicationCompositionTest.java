@@ -35,6 +35,9 @@ import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageRequest;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameInstallStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
@@ -51,6 +54,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceContentNavigation;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
@@ -98,6 +102,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,6 +110,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies composition factories and lifecycle without creating a native frame.
 @NotNullByDefault
 class SwingApplicationCompositionTest {
+    /// Production instance navigation validates the project query before selecting the lazy downloads page.
+    @Test
+    void retainsProjectionQueryInProductionNavigation() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<ShellPageId> destinations = new ArrayList<>();
+            List<DownloadPageRequest> requests = new ArrayList<>();
+            DownloadPageNavigation downloads = new DownloadPageNavigation();
+            InstanceContentNavigation navigation = SwingApplicationComposition.createInstanceContentNavigation(
+                    destinations::add, downloads);
+            assertThrows(IllegalArgumentException.class, () -> navigation.openModSearch(" "));
+            assertThrows(NullPointerException.class, () -> navigation.openModSearch(null));
+            assertTrue(destinations.isEmpty());
+            navigation.openModSearch(" Litematica ");
+            assertEquals(List.of(ShellPageId.DOWNLOADS), destinations);
+            assertTrue(requests.isEmpty());
+            downloads.attach(requests::add);
+            assertEquals(List.of(new DownloadPageRequest(DownloadPageTarget.MODS, null, "Litematica")), requests);
+            navigation.openDownloads(DownloadPageTarget.RESOURCE_PACKS);
+            assertEquals(2, requests.size());
+            assertNull(requests.get(1).searchText());
+        });
+    }
+
     /// Confirms that pages stay factory-backed and navigation resolves through the created window.
     @Test
     void keepsPagesLazyAndRoutesNavigationThroughWindowReference() {
