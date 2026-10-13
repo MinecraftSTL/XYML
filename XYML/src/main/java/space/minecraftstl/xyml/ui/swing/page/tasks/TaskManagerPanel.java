@@ -246,6 +246,18 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         this(TaskExecutionRegistry.global());
     }
 
+    /// Selects the running lifecycle tab without changing execution records or rebuilding the page.
+    ///
+    /// @throws IllegalStateException when called outside the EDT or after this page has closed
+    public void showRunningTasks() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Task manager is closed");
+        }
+        tabs.releasePainting();
+        tabs.setSelectedIndex(0);
+    }
+
     /// Releases the registry listener and clears the rendered rows.
     @Override
     public void close() {

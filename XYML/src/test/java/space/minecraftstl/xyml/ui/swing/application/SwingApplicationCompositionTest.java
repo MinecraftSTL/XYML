@@ -163,6 +163,11 @@ class SwingApplicationCompositionTest {
         assertEquals(1, window.hideCount());
         Objects.requireNonNull(navigation.get()).accept(ShellPageId.ACCOUNTS);
         assertEquals(List.of(ShellPageId.ACCOUNTS), window.navigations());
+        assertEquals(0, window.runningTasksOpenCount.get());
+        Objects.requireNonNull(navigation.get()).accept(ShellPageId.TASKS);
+        Objects.requireNonNull(navigation.get()).accept(ShellPageId.TASKS);
+        assertEquals(List.of(ShellPageId.ACCOUNTS, ShellPageId.TASKS, ShellPageId.TASKS), window.navigations());
+        assertEquals(2, window.runningTasksOpenCount.get());
 
         EdtDispatcher.executeAndWait(() -> {
             JComponent downloads = window.createPage(ShellPageId.DOWNLOADS);
@@ -1196,6 +1201,9 @@ class SwingApplicationCompositionTest {
         /// Destinations requested through the shell navigation reference.
         private final List<ShellPageId> navigations = new ArrayList<>();
 
+        /// Number of task navigation requests that explicitly select the running tab.
+        private final AtomicInteger runningTasksOpenCount = new AtomicInteger();
+
         /// Stable headless component returned as the native dialog owner.
         private final JComponent dialogOwner = new JPanel();
 
@@ -1282,6 +1290,13 @@ class SwingApplicationCompositionTest {
                 throw new IllegalStateException("window is closed");
             }
             navigations.add(Objects.requireNonNull(page, "page"));
+        }
+
+        /// Records explicit running-task navigation separately from ordinary page navigation.
+        @Override
+        public void openRunningTasks() {
+            navigateTo(ShellPageId.TASKS);
+            runningTasksOpenCount.incrementAndGet();
         }
 
         /// Closes once and reports the native-close event to the composition.
