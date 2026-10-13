@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -38,11 +39,18 @@ import java.util.TreeSet;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Describes a downloadable LiteLoader version and its catalog queries.
 @NotNullByDefault
 public final class LiteLoaderRemoteVersion extends ComponentRemoteVersion {
 
-    public static Task<ComponentRemoteVersionList<LiteLoaderRemoteVersion>> fetchAsync(GameVersionNumber gameVersion) {
+    /// Reads bundled LiteLoader metadata and filters it without filesystem writes.
+    ///
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable LiteLoader catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<LiteLoaderRemoteVersion>> fetchAsync(GameVersionNumber gameVersion) {
+        /// Parser-owned bundled version metadata; libraries are copied when building the remote version.
         @JsonSerializable
+        @NotNullByDefault
         record LiteLoaderRemoteVersionRecord(
                 String gameVersion,
                 String version,
@@ -53,7 +61,7 @@ public final class LiteLoaderRemoteVersion extends ComponentRemoteVersion {
         ) {
         }
 
-        return Task.supplyAsync(() -> {
+        Task<ComponentRemoteVersionList<LiteLoaderRemoteVersion>> parsed = Task.supplyAsync(() -> {
             List<LiteLoaderRemoteVersionRecord> records;
 
             try (var input = LiteLoaderRemoteVersion.class.getResourceAsStream("/assets/liteloader/versions.json")) {
@@ -82,6 +90,7 @@ public final class LiteLoaderRemoteVersion extends ComponentRemoteVersion {
             }
             return ComponentRemoteVersionList.of(GameComponentType.LITELOADER, versions);
         });
+        return parsed.asOrchestration();
     }
 
     private final String tweakClass;

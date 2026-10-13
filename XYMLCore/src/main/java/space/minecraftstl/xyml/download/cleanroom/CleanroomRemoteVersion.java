@@ -29,25 +29,34 @@ import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.TreeSet;
 
+/// Describes a downloadable Cleanroom version and its catalog queries.
 @NotNullByDefault
 public final class CleanroomRemoteVersion extends ComponentRemoteVersion {
     private static final GameVersionNumber GAME_VERSION_1_12_2 = GameVersionNumber.asGameVersion("1.12.2");
 
     public static final WebURL LOADER_LIST_URL = WebURL.parse("https://hmcl.glavo.site/metadata/cleanroom/index.json");
 
-    public static Task<ComponentRemoteVersionList<CleanroomRemoteVersion>> fetchAsync(
+    /// Fetches Cleanroom metadata for Minecraft 1.12.2, returning an empty catalog for other versions.
+    ///
+    /// @param downloadProvider official metadata endpoints
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable Cleanroom catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<CleanroomRemoteVersion>> fetchAsync(
             DownloadProvider downloadProvider, GameVersionNumber gameVersion) {
         if (!gameVersion.equals(GAME_VERSION_1_12_2)) {
             return Task.completed(ComponentRemoteVersionList.of(GameComponentType.CLEANROOM));
         }
 
+        /// Parser-owned Cleanroom release name and creation timestamp.
         @JsonSerializable
+        @NotNullByDefault
         record ReleaseResult(String name, @SerializedName("created_at") String createdAt) {
         }
 
@@ -62,7 +71,7 @@ public final class CleanroomRemoteVersion extends ComponentRemoteVersion {
                 ));
             }
             return ComponentRemoteVersionList.of(GameComponentType.CLEANROOM, versions);
-        });
+        }).asOrchestration();
     }
 
     public CleanroomRemoteVersion(GameVersionNumber gameVersion, String selfVersion, Instant releaseDate, List<String> url) {

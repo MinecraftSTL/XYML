@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
@@ -36,6 +37,7 @@ import java.util.*;
 
 import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 
+/// Describes a downloadable OptiFine version and its catalog queries.
 @NotNullByDefault
 public final class OptiFineRemoteVersion extends ComponentRemoteVersion {
 
@@ -55,8 +57,16 @@ public final class OptiFineRemoteVersion extends ComponentRemoteVersion {
         };
     }
 
-    public static Task<ComponentRemoteVersionList<OptiFineRemoteVersion>> fetchBMCLAsync(DownloadProvider downloadProvider, String bmclRoot, GameVersionNumber gameVersion) {
+    /// Fetches and parses mirrored OptiFine metadata without filesystem writes in the parsing phase.
+    ///
+    /// @param downloadProvider caller's download provider
+    /// @param bmclRoot mirror origin
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable OptiFine catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<OptiFineRemoteVersion>> fetchBMCLAsync(DownloadProvider downloadProvider, String bmclRoot, GameVersionNumber gameVersion) {
+        /// Parser-owned mirrored OptiFine version metadata.
         @JsonSerializable
+        @NotNullByDefault
         record OptiFineVersion(String dl, String ver,
                                String date, String type,
                                @Nullable String patch, String mirror,
@@ -83,7 +93,7 @@ public final class OptiFineRemoteVersion extends ComponentRemoteVersion {
             }
 
             return ComponentRemoteVersionList.of(GameComponentType.OPTIFINE, versions);
-        });
+        }).asOrchestration();
 
     }
 

@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
@@ -45,6 +46,7 @@ import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Describes a downloadable Forge version and its catalog queries.
 @NotNullByDefault
 public final class ForgeRemoteVersion extends ComponentRemoteVersion {
 
@@ -65,7 +67,12 @@ public final class ForgeRemoteVersion extends ComponentRemoteVersion {
         return Objects.requireNonNullElse(branch, "");
     }
 
-    public static Task<ComponentRemoteVersionList<ForgeRemoteVersion>> fetchAsync(DownloadProvider downloadProvider, GameVersionNumber gameVersion) {
+    /// Fetches and parses official Forge metadata without filesystem writes in the parsing phase.
+    ///
+    /// @param downloadProvider official metadata endpoints
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable Forge catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<ForgeRemoteVersion>> fetchAsync(DownloadProvider downloadProvider, GameVersionNumber gameVersion) {
         return new GetTask(downloadProvider.getForgeVersionListCandidates()).thenApplyAsync(result -> {
             ForgeVersionRoot root = JsonUtils.GSON.fromJson(result, ForgeVersionRoot.class);
 
@@ -77,7 +84,7 @@ public final class ForgeRemoteVersion extends ComponentRemoteVersion {
                         ForgeVersion version = root.number().get(v);
                         if (version == null)
                             continue;
-                        String jar = null;
+                        @Nullable String jar = null;
                         for (String[] file : version.getFiles())
                             if (file.length > 1 && "installer".equals(file[1])) {
                                 String classifier = version.getGameVersion() + "-" + version.getVersion()
@@ -101,15 +108,21 @@ public final class ForgeRemoteVersion extends ComponentRemoteVersion {
             }
 
             return ComponentRemoteVersionList.of(GameComponentType.FORGE, versions);
-        });
+        }).asOrchestration();
     }
 
-    public static Task<ComponentRemoteVersionList<ForgeRemoteVersion>> fetchBMCLAsync(
+    /// Fetches and parses mirrored Forge metadata without filesystem writes.
+    ///
+    /// @param downloadProvider caller's download provider
+    /// @param bmclRoot mirror origin
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<ForgeRemoteVersion>> fetchBMCLAsync(
             DownloadProvider downloadProvider, String bmclRoot, GameVersionNumber gameVersion) {
         String lookupVersion = toLookupVersion(gameVersion.toString());
 
         return new GetTask(DownloadCandidates.of(bmclRoot + "/forge/minecraft/" + lookupVersion)).thenApplyAsync(result -> {
-            List<ForgeBMCLVersion> forgeVersions = JsonUtils.fromNonNullJson(result, listTypeOf(ForgeBMCLVersion.class));
+            List<@Nullable ForgeBMCLVersion> forgeVersions = JsonUtils.fromNonNullJson(result, listTypeOf(ForgeBMCLVersion.class));
 
             TreeSet<ForgeRemoteVersion> versions = new TreeSet<>();
             for (ForgeBMCLVersion version : forgeVersions) {
@@ -139,7 +152,7 @@ public final class ForgeRemoteVersion extends ComponentRemoteVersion {
                 if (urls.isEmpty())
                     continue;
 
-                Instant releaseDate = null;
+                @Nullable Instant releaseDate = null;
                 if (version.modified() != null) {
                     try {
                         releaseDate = Instant.parse(version.modified());
@@ -152,7 +165,7 @@ public final class ForgeRemoteVersion extends ComponentRemoteVersion {
             }
 
             return ComponentRemoteVersionList.of(GameComponentType.FORGE, versions);
-        });
+        }).asOrchestration();
     }
 
     /**

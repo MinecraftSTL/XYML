@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.util.i18n.LocaleUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.*;
 
@@ -245,29 +246,41 @@ public final class LauncherDownloadProvider extends DownloadProvider {
         );
     }
 
+    /// Coordinates two stopped catalog queries, using the fallback only when the primary query fails.
     @NotNullByDefault
     private static final class FallbackTask<T> extends Task<T> {
 
+        /// Primary query retaining its own download and parsing resource declarations.
         private final Task<? extends T> task;
+        /// Secondary query executed after primary failure.
         private final Task<? extends T> fallback;
 
-        private List<Task<?>> dependencies = List.of();
+        /// Immutable successor snapshot, empty until primary failure requires the fallback.
+        private @Unmodifiable List<Task<?>> dependencies = List.of();
 
+        /// Creates a coordination-only node without replacing either concrete query's resource declarations.
+        ///
+        /// @param task primary stopped query
+        /// @param fallback secondary stopped query
         public FallbackTask(Task<? extends T> task, Task<? extends T> fallback) {
             this.task = task;
             this.fallback = fallback;
+            asOrchestration();
         }
 
+        /// Returns the immutable primary-query prerequisite.
         @Override
-        public Collection<? extends Task<?>> getDependents() {
+        public @Unmodifiable Collection<? extends Task<?>> getDependents() {
             return List.of(task);
         }
 
+        /// Allows the coordinator to select the fallback after prerequisite failure.
         @Override
         public boolean isRelyingOnDependents() {
             return false;
         }
 
+        /// Publishes the primary result or schedules the secondary query after primary failure.
         @Override
         public void execute() throws Exception {
             if (isDependentsSucceeded()) {
@@ -278,8 +291,9 @@ public final class LauncherDownloadProvider extends DownloadProvider {
             }
         }
 
+        /// Returns the immutable fallback-query successor snapshot.
         @Override
-        public List<Task<?>> getDependencies() {
+        public @Unmodifiable List<Task<?>> getDependencies() {
             return dependencies;
         }
     }
