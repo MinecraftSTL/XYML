@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -38,6 +39,7 @@ import java.util.TreeSet;
 import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Describes a downloadable NeoForge version and its catalog queries.
 @NotNullByDefault
 public final class NeoForgeRemoteVersion extends ComponentRemoteVersion {
 
@@ -62,9 +64,16 @@ public final class NeoForgeRemoteVersion extends ComponentRemoteVersion {
         }
     }
 
-    public static Task<ComponentRemoteVersionList<NeoForgeRemoteVersion>> fetchAsync(
+    /// Fetches and parses old or modern NeoForge metadata without filesystem writes in the parsing phase.
+    ///
+    /// @param downloadProvider official metadata endpoints
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable NeoForge catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<NeoForgeRemoteVersion>> fetchAsync(
             DownloadProvider downloadProvider, GameVersionNumber gameVersion) {
+        /// Parser-owned version metadata consumed within this query.
         @JsonSerializable
+        @NotNullByDefault
         record OfficialAPIResult(boolean isSnapshot, List<String> versions) {
         }
 
@@ -141,15 +150,23 @@ public final class NeoForgeRemoteVersion extends ComponentRemoteVersion {
                     }
 
                     return ComponentRemoteVersionList.of(GameComponentType.NEO_FORGE, versions);
-                });
+                }).asOrchestration();
 
     }
 
-    public static Task<ComponentRemoteVersionList<NeoForgeRemoteVersion>> fetchBMCLAsync(String bmclRoot, GameVersionNumber gameVersion) {
+    /// Fetches and parses mirrored NeoForge metadata without filesystem writes.
+    ///
+    /// @param bmclRoot mirror origin
+    /// @param gameVersion target game version
+    /// @return stopped query producing an immutable catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<NeoForgeRemoteVersion>> fetchBMCLAsync(String bmclRoot, GameVersionNumber gameVersion) {
+        /// Parser-owned version metadata consumed within this query.
         @JsonSerializable
+        @NotNullByDefault
         record NeoForgeBMCLVersion(String rawVersion,
                                    String version,
                                    @SerializedName("mcversion") String mcVersion) {
+            /// Validates the required mirror identifiers before constructing a remote version.
             public NeoForgeBMCLVersion {
                 Objects.requireNonNull(rawVersion, "rawVersion");
                 Objects.requireNonNull(version, "version");
@@ -168,7 +185,7 @@ public final class NeoForgeRemoteVersion extends ComponentRemoteVersion {
                                 List.of(bmclRoot + "/neoforge/version/" + neoForgeVersion.version + "/download/installer.jar")));
                     }
                     return ComponentRemoteVersionList.of(GameComponentType.NEO_FORGE, versions);
-                });
+                }).asOrchestration();
     }
 
     private final String fullVersion;

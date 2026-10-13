@@ -29,6 +29,8 @@ import space.minecraftstl.xyml.util.Immutable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -39,6 +41,8 @@ import java.util.TreeSet;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Describes a downloadable base-game version and its catalog query.
+///
 /// @author huangyuhui
 @Immutable
 @NotNullByDefault
@@ -46,12 +50,16 @@ public final class GameRemoteVersion extends ComponentRemoteVersion {
 
     public static final WebURL VERSION_MANIFEST_URL = WebURL.parse("https://piston-meta.mojang.com/mc/game/version_manifest.json");
 
-    public static Task<ComponentRemoteVersionList<GameRemoteVersion>> fetchAsync(DownloadProvider provider) {
+    /// Fetches the game catalog and combines it with bundled unlisted metadata without filesystem writes.
+    ///
+    /// @param provider game metadata endpoints
+    /// @return stopped query producing an immutable game catalog
+    public static Task<@Unmodifiable ComponentRemoteVersionList<GameRemoteVersion>> fetchAsync(DownloadProvider provider) {
         return new GetTask(provider.getGameVersionListCandidates())
                 .thenApplyAsync(json -> {
                     GameRemoteVersions root = JsonUtils.fromNonNullJson(json, GameRemoteVersions.class);
 
-                    GameRemoteVersions unlistedVersions = null;
+                    @Nullable GameRemoteVersions unlistedVersions = null;
 
                     //noinspection DataFlowIssue
                     try (Reader input = new InputStreamReader(
@@ -80,7 +88,7 @@ public final class GameRemoteVersion extends ComponentRemoteVersion {
                     }
 
                     return ComponentRemoteVersionList.of(GameComponentType.GAME, versions);
-                });
+                }).asOrchestration();
     }
 
     private final ReleaseType type;
