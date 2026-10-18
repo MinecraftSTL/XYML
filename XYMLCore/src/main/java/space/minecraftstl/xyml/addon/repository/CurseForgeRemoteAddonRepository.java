@@ -481,9 +481,9 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                 pair(1, RemoteAddon.DependencyType.EMBEDDED),
                 pair(2, RemoteAddon.DependencyType.OPTIONAL),
                 pair(3, RemoteAddon.DependencyType.REQUIRED),
-                pair(4, RemoteAddon.DependencyType.TOOL),
+                pair(4, RemoteAddon.DependencyType.OPTIONAL), // CF name: TOOL
                 pair(5, RemoteAddon.DependencyType.INCOMPATIBLE),
-                pair(6, RemoteAddon.DependencyType.INCLUDE)
+                pair(6, RemoteAddon.DependencyType.EMBEDDED) // CF name: INCLUDE, should never appear because CF hides this
         );
 
         @Override
@@ -570,6 +570,11 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                                  long fileFingerprint) implements RemoteAddon.IVersion {
 
             @Override
+            public RemoteAddon.Source getSource() {
+                return RemoteAddon.Source.CURSEFORGE;
+            }
+
+            @Override
             public String downloadUrl() {
                 if (downloadUrl == null) {
                     // This addon is not allowed for distribution, and downloadUrl will be null.
@@ -577,11 +582,6 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                     return String.format("https://edge.forgecdn.net/files/%d/%d/%s", id / 1000, id % 1000, fileName);
                 }
                 return downloadUrl;
-            }
-
-            @Override
-            public RemoteAddon.Source getSource() {
-                return RemoteAddon.Source.CURSEFORGE;
             }
 
             public RemoteAddon.Version toVersion() {
