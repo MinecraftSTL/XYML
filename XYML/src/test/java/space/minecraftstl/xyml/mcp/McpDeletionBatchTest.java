@@ -263,6 +263,42 @@ final class McpDeletionBatchTest {
         }
     }
 
+    /// A configured root alias is supported, but retargeting it after approval invalidates the snapshot.
+    @Test
+    void configuredRootAliasCannotBeRetargetedAfterCapture() throws Exception {
+        try (java.nio.file.FileSystem fileSystem = com.google.common.jimfs.Jimfs.newFileSystem(
+                com.google.common.jimfs.Configuration.unix())) {
+            Path target = Files.createDirectory(fileSystem.getPath("/managed"));
+            Path other = Files.createDirectory(fileSystem.getPath("/other"));
+            Files.writeString(target.resolve("one"), "original");
+            Files.writeString(other.resolve("one"), "other");
+            Path alias = Files.createSymbolicLink(fileSystem.getPath("/alias"), target);
+            McpPathSnapshot captured = McpPathSnapshot.capture(alias, alias.resolve("one"));
+            captured.verify();
+            Files.delete(alias);
+            Files.createSymbolicLink(alias, other);
+            assertThrows(IOException.class, captured::verify);
+            assertEquals("original", Files.readString(target.resolve("one")));
+            assertEquals("other", Files.readString(other.resolve("one")));
+        }
+    }
+
+    /// Links below a configured boundary cannot escape ownership or authorize deletion of an external target.
+    @Test
+    void rejectsLinkedTargetsAndLinkedDescendantDirectories() throws Exception {
+        try (java.nio.file.FileSystem fileSystem = com.google.common.jimfs.Jimfs.newFileSystem(
+                com.google.common.jimfs.Configuration.unix())) {
+            Path managed = Files.createDirectory(fileSystem.getPath("/managed"));
+            Path outside = Files.createDirectory(fileSystem.getPath("/outside"));
+            Files.writeString(outside.resolve("one"), "external");
+            Path link = Files.createSymbolicLink(managed.resolve("linked-file"), outside.resolve("one"));
+            Path directory = Files.createSymbolicLink(managed.resolve("linked-directory"), outside);
+            assertThrows(IOException.class, () -> McpPathSnapshot.capture(managed, link));
+            assertThrows(IOException.class, () -> McpPathSnapshot.capture(managed, directory.resolve("one")));
+            assertEquals("external", Files.readString(outside.resolve("one")));
+        }
+    }
+
     /// Creates one MODS batch with identities captured at construction.
     /// @param root managed root
     /// @param paths fixture targets

@@ -31,6 +31,7 @@ import java.util.Objects;
 /// No-follow ownership and object-identity snapshot captured before a destructive confirmation.
 /// @param root managed directory boundary
 /// @param path strict descendant selected for deletion
+/// @param canonicalRoot resolved identity of the configured managed root
 /// @param key provider identity, or null for keyless providers
 /// @param created creation timestamp
 /// @param modified modification timestamp
@@ -38,11 +39,13 @@ import java.util.Objects;
 /// @param directory whether the target is a directory
 @NotNullByDefault
 record McpPathSnapshot(
-        Path root, Path path, @Nullable Object key, FileTime created, FileTime modified, long size, boolean directory) {
+        Path root, Path path, Path canonicalRoot, @Nullable Object key,
+        FileTime created, FileTime modified, long size, boolean directory) {
     /// Validates immutable snapshot components.
     McpPathSnapshot {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(path, "path");
+        Objects.requireNonNull(canonicalRoot, "canonicalRoot");
         Objects.requireNonNull(created, "created");
         Objects.requireNonNull(modified, "modified");
     }
@@ -58,7 +61,7 @@ record McpPathSnapshot(
         if (!attributes.isDirectory() && !attributes.isRegularFile()) {
             throw new IOException("Target is not a regular file or directory: " + path);
         }
-        return new McpPathSnapshot(root, path, attributes.fileKey(), attributes.creationTime(),
+        return new McpPathSnapshot(root, path, root.toRealPath(), attributes.fileKey(), attributes.creationTime(),
                 attributes.lastModifiedTime(), attributes.size(), attributes.isDirectory());
     }
 
@@ -66,6 +69,9 @@ record McpPathSnapshot(
     /// @throws IOException when the original target is no longer current
     void verify() throws IOException {
         requireOwned(root, path);
+        if (!canonicalRoot.equals(root.toRealPath())) {
+            throw new IOException("Managed directory alias changed while awaiting approval: " + root);
+        }
         BasicFileAttributes current = attributes(path);
         if (!Objects.equals(key, current.fileKey()) || !created.equals(current.creationTime())
                 || directory != current.isDirectory()
@@ -75,7 +81,7 @@ record McpPathSnapshot(
         }
     }
 
-    /// Rejects lexical escape, root deletion, and links in any existing path component.
+    /// Rejects root deletion and descendant links while retaining the configured root's filesystem aliases.
     /// @param root absolute managed boundary
     /// @param path absolute candidate
     /// @throws IOException when the path is outside the boundary or traverses a link
@@ -83,9 +89,10 @@ record McpPathSnapshot(
         if (!root.isAbsolute() || !path.isAbsolute() || path.equals(root) || !path.startsWith(root)) {
             throw new IOException("Target is outside the managed directory: " + path);
         }
-        requireDirectory(root);
+        // The explicitly configured root may itself have aliases; descendants must not introduce a new link.
+        requireDirectory(root.toRealPath());
         @Nullable Path parent = path.getParent();
-        while (parent != null) {
+        while (parent != null && !parent.equals(root)) {
             requireDirectory(parent);
             parent = parent.getParent();
         }
