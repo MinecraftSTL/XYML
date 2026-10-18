@@ -214,6 +214,65 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                 "Reads status for a launch-test workflow.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
                 arguments -> service().getLaunchStatus(requiredString(arguments, "instance_id")));
+        register(definitions, handlers, "list_resource_packs", "Read-only list of managed resource packs.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
+                arguments -> Map.of("items", McpTaskExecution.execute(service().contentOperations().listResourcePacks(
+                        requiredString(arguments, "instance_id")))));
+        register(definitions, handlers, "remove_resource_packs",
+                "Removes managed resource packs with launcher confirmation and recycle-bin-first deletion.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "paths", Map.of("type", "array", "items", stringSchema("Absolute managed path"))),
+                        List.of("instance_id", "paths")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().removeResourcePacks(
+                        requiredString(arguments, "instance_id"), requiredStrings(arguments, "paths"))));
+        register(definitions, handlers, "list_worlds", "Read-only list of managed worlds.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
+                arguments -> Map.of("items", McpTaskExecution.execute(service().contentOperations().listWorlds(
+                        requiredString(arguments, "instance_id")))));
+        register(definitions, handlers, "remove_worlds",
+                "Removes managed worlds with launcher confirmation and recycle-bin-first deletion.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "paths", Map.of("type", "array", "items", stringSchema("Absolute managed path"))),
+                        List.of("instance_id", "paths")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().removeWorlds(
+                        requiredString(arguments, "instance_id"), requiredStrings(arguments, "paths"))));
+        register(definitions, handlers, "list_shader_packs", "Read-only list of managed shader packs.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
+                arguments -> Map.of("items", McpTaskExecution.execute(service().contentOperations().listShaderPacks(
+                        requiredString(arguments, "instance_id")))));
+        register(definitions, handlers, "remove_shader_packs",
+                "Removes managed shader packs with launcher confirmation and recycle-bin-first deletion.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "paths", Map.of("type", "array", "items", stringSchema("Absolute managed path"))),
+                        List.of("instance_id", "paths")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().removeShaderPacks(
+                        requiredString(arguments, "instance_id"), requiredStrings(arguments, "paths"))));
+        register(definitions, handlers, "list_servers", "Read-only saved server entries and content revision.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().listServers(
+                        requiredString(arguments, "instance_id"))));
+        register(definitions, handlers, "remove_servers",
+                "Removes saved server entries, not remote servers, only if the listed revision is unchanged.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "indices", Map.of("type", "array", "items", integerSchema("Zero-based index", 0, Integer.MAX_VALUE)),
+                        "revision", stringSchema("Revision returned by list_servers")),
+                        List.of("instance_id", "indices", "revision")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().removeServers(
+                        requiredString(arguments, "instance_id"), requiredIndices(arguments),
+                        requiredString(arguments, "revision"))));
+        register(definitions, handlers, "list_schematics", "Read-only shallow list of schematic files and folders.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "directory", nullableStringSchema("Managed absolute directory; null selects the root")),
+                        List.of("instance_id")),
+                arguments -> Map.of("items", McpTaskExecution.execute(service().contentOperations().listSchematics(
+                        requiredString(arguments, "instance_id"), optionalString(arguments, "directory")))));
+        register(definitions, handlers, "remove_schematics",
+                "Removes schematic files and folders recursively using launcher confirmation and the recycle bin.",
+                schema(Map.of("instance_id", stringSchema("Instance identifier"),
+                        "paths", Map.of("type", "array", "items", stringSchema("Absolute managed path"))),
+                        List.of("instance_id", "paths")),
+                arguments -> McpTaskExecution.execute(service().contentOperations().removeSchematics(
+                        requiredString(arguments, "instance_id"), requiredStrings(arguments, "paths"))));
         tools = List.copyOf(definitions);
         operations = Map.copyOf(handlers);
     }
@@ -238,7 +297,9 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
             return ToolCallResult.error(name, "Unknown tool: " + name);
         }
         try {
-            return ToolCallResult.success(callOnIo(() -> operation.run(arguments)));
+            Map<String, @Nullable Object> result = callOnIo(() -> operation.run(arguments));
+            boolean failed = result.get("failures") instanceof List<?> failures && !failures.isEmpty();
+            return new ToolCallResult(failed, result);
         } catch (Exception exception) {
             return ToolCallResult.error(name, exception.getMessage() == null
                     ? exception.getClass().getSimpleName() : exception.getMessage());
@@ -392,6 +453,27 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
     private static boolean optionalBoolean(Map<String, @Nullable Object> arguments, String name, boolean fallback) {
         @Nullable Boolean value = optionalBoolean(arguments, name);
         return value == null ? fallback : value;
+    }
+
+    /// Reads non-negative exact integer indices without truncating fractional or overflowing JSON numbers.
+    /// @param arguments decoded tool arguments
+    /// @return immutable entry indices
+    private static @Unmodifiable List<Integer> requiredIndices(Map<String, @Nullable Object> arguments) {
+        if (!(arguments.get("indices") instanceof List<?> values)) {
+            throw new IllegalArgumentException("indices must be an array");
+        }
+        List<Integer> result = new ArrayList<>();
+        for (@Nullable Object value : values) {
+            if (value == null) {
+                throw new IllegalArgumentException("indices must contain non-negative integers");
+            }
+            @Nullable Integer index = optionalInteger(Map.of("index", value), "index");
+            if (index == null || index < 0) {
+                throw new IllegalArgumentException("indices must contain non-negative integers");
+            }
+            result.add(index);
+        }
+        return List.copyOf(result);
     }
 
     /// Reads a required array of string arguments.
