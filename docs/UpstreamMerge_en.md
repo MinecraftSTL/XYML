@@ -17,26 +17,13 @@ points to the HMCL-dev/HMCL repository. The two trees now differ materially in
 architecture and product boundaries. Do not copy upstream files over XYML as
 if the projects were still structurally identical.
 
-The following is the divergence snapshot recorded while this guide was
-written (2026-09-12). These numbers explain how to record one synchronization;
-they are not permanent version values and must be refreshed before each real
-integration:
+For each integration, record the full local `dev`/`HEAD` and selected `upstream/main` SHAs, common ancestor, unique
+commit counts, and incoming patch statistics. Record the source and commit time of cached refs; do not describe a cached
+ref as the latest remote state.
 
-| Item | Snapshot value |
-| --- | --- |
-| Current `HEAD` | `9e48f059cf02c2ec96a071448356099840a69a9b` |
-| `upstream/main` | `df52bc6e81e2e1116c131483dfb9996fdb7b2b10` |
-| Common ancestor | `b4549b6f68b99bb5fa6d69f94fffffcee0dc36c1` |
-| Commit count for `HEAD...upstream/main` | `528` local-only, `26` upstream-only |
-| Incoming range (`git diff HEAD...upstream/main`) | 76 files changed, 1878 insertions(+), 1124 deletions(-) |
-
-The upstream ref may advance after the inspection begins; new upstream commits
-were observed while this guide was being prepared. Therefore rerun the
-commands below for every actual synchronization and record the latest output.
-The three-dot syntax identifies commits and changes from the common ancestor
-toward the upstream side. A direct comparison of the two final trees mixes
-HMCL-to-XYML renames and independent architecture changes and must not be used
-for an overwrite-style merge.
+Rerun the commands below for every integration. Three-dot diff syntax shows incoming changes from the common ancestor to
+upstream. Comparing final trees helps identify architecture, API, and product boundaries, but does not replace
+incoming-range analysis or authorize whole-file overwrites.
 
 ## Pre-Merge Checks
 
@@ -100,23 +87,17 @@ every upstream commit, together with its XYML path and reason.
 
 ## Classify Upstream Changes
 
-Classify by behavior first and by file second. The table below lists the
-important changes in the recorded divergence; re-check the classification when
-the upstream range changes.
+Classify by behavior, not filenames alone. For every actual incoming commit, record `direct review`, `manual
+adaptation`, `product decision`, or `skip`, together with its upstream SHA, local entrypoint, adaptation/skip rationale,
+and test results.
 
-| Category | Upstream change | XYML handling focus |
+| Category | Review scope | XYML handling focus |
 | --- | --- | --- |
-| Core logic, safe to evaluate first | Yggdrasil token validation (`9d9fc7838`); CurseForge retry/hash/integrity (`e287f672f`); client JAR sync (`24702dc5a`) | Map to XYMLCore tasks/repos. |
-|  | Forge/Cleanroom launch (`513f53bc0`, `0ad180c08`); task/archive/ZIP fixes (`b2d4d3685`, `9c031c5ac`, `e2d3ac847`) | Preserve locks, offline behavior, retry/cancel, and security. |
-|  | Missing-parent cleanup (`1a258a255`); mrpack/dependency updates (`1da8c8d6a`, `0f4152406`); `.gitignore` `*.jfr` (`3742be0aa`) | Add or run a targeted test for each behavior. |
-| Data model/API | `OptiFineVersion` (`0e3455434`) and `CurseMetaMod` (`1acfc5500`) become records | Check Gson annotations, old JSON/manifests, and constructors. |
-|  |  | Confirm field names, getter call sites, reflection, and compatibility; do not replace accessors mechanically. |
-| UI requiring manual adaptation | Pack icons, themes, search, loaders, names (`886a25a93`, `450504ced`, `8767cc0e9`, `7331f619c`, `7a8f93164`) | Port to Swing or neutral Core. |
-|  | Loader reset, tree cells, icon dialogs, toolbar, progress (`ce51dc4dd`, `b97e7fbd5`, `7f578be08`, `cbc6daf3d`, `ea232b097`) | No JavaFX/JFoenix/MonetFX/OpenJFX, flags, or patchers. |
-| Requires a product decision | Upstream removes MultiMC export (`df52bc6e8`) | XYML still publicly supports MultiMC, so keep it by default. |
-|  |  | If removal is approved, review Core tasks, exporter factory, UI, I18N, resources, and tests together. |
-| Branding and localization | "Hello Minecraft Launcher" -> HMCL (`1428183e3`) | Keep XYML branding, `.xyml`, `xyml.*`, and the application ID; never replace them with HMCL text. |
-|  |  | Review keys one by one; sync all three language resources, placeholders, and escaping. |
+| Core logic | Authentication, downloads, integrity, loaders, Archive/ZIP, instances, modpacks | Compare current consumers, resource declarations, error handling, and boundary tests. |
+| Data models/APIs | Records, serialization, repository/layout/snapshots, settings, accounts | Check public contracts, field names, schemas, ownership, and compatibility decisions. |
+| Manual adaptation | JavaFX controls/state, tasks, navigation, themes, update prompts | Port to local Swing, observable, task, and service entrypoints; never restore JavaFX dependencies. |
+| Product decisions | Feature removal, provider capabilities, runtimes, releases, branding | Preserve local features/channels by default; confirm external behavior changes first. |
+| Documentation/localization | Document languages, filenames, macros, links, I18N keys | Map documents to local language rules; merge resources by key and synchronize all three languages. |
 
 ## File Groups That Cannot Be Accepted Directly
 
@@ -149,13 +130,121 @@ entire directory by choosing `ours` or `theirs`.
   reintroduce JavaFX/JFoenix/MonetFX/OpenJFX dependencies, runtime downloaders,
   or patchers.
 
+### UI, Observable State, and Thread Migration
+
+- JavaFX controls, properties, bindings, and observable collections are not interchangeable with local APIs. Map
+  behavior to `XYML/src/main/java/space/minecraftstl/xyml/ui/swing` and the Core `observable` contracts; preserve
+  concrete event payloads, notification order, and subscription disposal.
+- Keep background I/O on `Schedulers.io()` and UI continuations on the installed `Schedulers.ui()` executor; verify
+  Swing EDT ownership. Do not restore `Schedulers.javafx()`, `FXUtils`, or JavaFX types.
+- Check cached pages, navigation, dialog closure, and stale asynchronous results. A deleted upstream UI file may still
+  contain portable behavior; a missing local filename is not a reason to skip its entire commit.
+- Keep toolkit-neutral Core representations and Swing boundary conversions for themes, images, and colors. See [Swing UI Migration](architecture/swing-ui-migration_en.md).
+
+### Task Execution, Resources, and Lifecycle Migration
+
+- Adapt upstream tasks and cancellation callbacks to local `Task`, `TaskExecutor`, `TaskExecutionRegistry`, and `TaskResource`; resolving signatures or restoring old task dialogs is insufficient.
+- Check read/write paths, instances, game directories, caches, and shared resources. Preserve arbitration and cleanup
+  APIs; do not hide missing precise declarations behind global resources or label unknown work as resource-free
+  orchestration.
+- `start()` neither means completion nor guarantees immediate execution. Preserve `WAITING`, running, cancellation
+  requests, and terminal states; check retry, progress, logs, subscriptions, and visible cleanup failures.
+- Route user-visible tasks through the existing `TaskLaunchController`. Automatic task navigation selects the running
+  tab; manual page entry retains the selected tab. Closing the initiating page must not cancel installations already
+  owned by the task system.
+- Test resource contention/concurrency, cancellation while waiting, exception/interruption cleanup, continued execution
+  after page closure, and state/progress publication. Submission or UI closure is not evidence of task success.
+
+### Repository, Installation, and Remote Add-on Entrypoints
+
+- Compare upstream repository, instance, layout, and snapshot APIs with `XYMLGameRepository`, `GameRepository`,
+  `GameRepositorySnapshot`, and their consumers. Identical snapshot names do not imply identical fields, ownership, or
+  refresh events.
+- `GameRepositoryDraft` covers only explicitly enlisted files and participants. Existing install, rename, delete,
+  modpack, and repair entrypoints do not automatically gain whole-operation rollback or cross-restart recovery. See
+  [Repository draft API](architecture/repository-drafts.md).
+- Map game installation to local `game/install` services and task factories, and remote content to existing `addon`
+  repositories and Swing download/update entrypoints. Preserve explicit repository, target instance, run directory,
+  loader, and resource-type context.
+- Check CurseForge/Modrinth singletons, `RemoteAddon.Type`, pagination, recommended/prerelease versions, dependency
+  selection, updates, and file-operation failure feedback. Component reuse must not invent provider capabilities or
+  discard local sorting, filtering, de-duplication, and parallel-install isolation.
+
+### Settings, Accounts, and Persistence Boundaries
+
+- Both projects separate settings/state and use JSON schemas; this does not establish identical formats or loading
+  policies. Compare `SettingsManager`, `GameSettings`, `docs/schemas`, file locations, schema versions, unknown fields,
+  and non-writable states.
+- Local account metadata and private data are stored separately. Check local/user scopes, account IDs, authentication
+  factories, token refresh, and game-profile caches. Never put private fields in ordinary settings, logs, task
+  snapshots, or exports.
+- Local instance-configuration migration uses `InstanceConfigMigrationPolicy`, owned by settings presets. It is not
+  equivalent to upstream `LegacyConfigMigrator`, `LegacyGameSettingsMigrator`, or `MigrationReceipt`; do not directly
+  introduce HMCL legacy-file scanning and automatic conversion.
+- Before changing persistent formats, public APIs, or external contracts, present standalone conversion,
+  application-boundary adaptation, and explicit incompatibility options with their impact and obtain confirmation. Do
+  not remove old readers, add migrators, or assume HMCL files are legacy XYML data without that decision.
+
+### Themes, Startup, and Self-Update
+
+- Map theme changes to local `theme` models, theme-pack repositories, and Swing appearance settings. Preserve theme
+  references, brightness preferences, backgrounds, and package-reading boundaries; do not restore JavaFX CSS, MonetFX,
+  or upstream theme managers.
+- Check Swing startup entrypoints, `UpdateApplier`, `UpdateStartupResult`, `UpdateChannel`, and `XYMLDownloadTask`
+  separately for startup, error-display, and update changes. Do not copy the upstream JavaFX-to-Swing error fallback
+  wholesale into Swing-only startup.
+- Preserve offline startup, update-artifact integrity, replacement/restart arguments, XYML download sources, application
+  IDs, `.xyml`, and `xyml.*`. Upstream versions, update endpoints, and release channels are not local defaults.
+
+### Local Features and Security Boundaries
+
+- Check existing worlds, resource packs, shader packs, schematics, mods, modpack export, and instance-configuration
+  migration entrypoints. Before accepting added, renamed, or deleted pages, check for local equivalents. MultiMC export
+  remains a local feature despite its upstream removal.
+- Crash analysis, logs, repair tasks, and Java runtime management have local services and UI. Port generic fixes to
+  those entrypoints; do not restore upstream pages or assume GUI and MCP repairs share all state and rollback
+  boundaries.
+- Core/application `mcp`, application `nbt`, `libraries/xoyz-mcp`, and `libraries/xoyz-nbt` are local boundaries.
+  Preserve authentication, redaction, deletion confirmation, path restrictions, bounded parsing, and transactional
+  writes; their absence upstream is not a reason to delete them.
+
+### Bundled Libraries, Build, and Code Contracts
+
+- Local `settings.gradle.kts` also includes `xoyz-nbt`, `xoyz-mcp`, `XYMLL`, `lwjgl-unsafe-agent`, and
+  `mesa-loader-windows`. Use `libraries/README.md` and imported libraries' `SOURCE.md` to review sources, resources,
+  licenses, pinned SHAs, and identity tests. Do not revert to upstream dependency coordinates or overwrite local
+  changes.
+- Application/Core/buildSrc use Java 17. Boot and Minecraft bootstrap production code remain Java 8;
+  `lwjgl-unsafe-agent` uses a Java 25 toolchain. Check actual `build.gradle.kts` files, Wrapper, version catalogs, fat
+  JARs, and `verifyOfflineUiArtifact`; the build JVM version does not establish target bytecode compatibility.
+- Base development on current `dev` and integrate validated work back into `dev` with `--no-ff`; releases follow `dev ->
+  alpha -> beta -> main`. Preserve `stableVersion` in `config/project.properties`, version resolution, and release
+  tasks. Upstream integration does not authorize a release.
+- Ported first-party Java declarations follow current `AGENTS.md`: full license headers, `@NotNullByDefault`, precise
+  `@Nullable`, collection-ownership annotations, and `///` documentation. Preserve embedded third-party licenses and
+  local style; do not disable quality gates.
+
+### Documentation Default Language and Macro Migration
+
+- Upstream unsuffixed documents are English and Simplified Chinese uses `_zh_Hans.md`. In XYML, unsuffixed documents are
+  Simplified Chinese, English uses `_en.md`, and Traditional Chinese uses `_zh_Hant.md`. Map by content language; never
+  overwrite a local unsuffixed file with the upstream namesake directly.
+- Map relative links, anchors, `BLOCK`, `COPY` sources, and `LANGUAGE_SWITCHER` together, not filenames alone. Check
+  `DocumentLocale`, the document tree, and generators in `buildSrc`; retain Simplified-Chinese-first ordering and
+  missing-translation fallback.
+- Unsuffixed `I18N.properties` remains the English default resource, unlike documentation. Merge resource keys,
+  placeholders, and escaping individually. See the [localization
+  guide](Localization_en.md#documentation-and-localization-resources).
+- After any `docs/**/*.md` change, run `updateDocuments` and inspect every rewritten file, language link, and copied
+  block. Do not hand-patch generated output to hide source-macro or language-mapping errors.
+
 ### Local Boundaries That Must Be Preserved
 
 - Keep the Swing-only application and the toolkit-neutral `XYMLCore`; treat
   upstream JavaFX/JFoenix code only as a behavior reference.
 - Keep `xoyz-nbt`, `xoyz-mcp`, `XYMLL`, `lwjgl-unsafe-agent`, and
-  `mesa-loader-windows`, including each library's `SOURCE.md`, license,
-  upstream SHA, and identity tests.
+  `mesa-loader-windows`, including imported libraries' `SOURCE.md`, licenses,
+  upstream SHAs, and identity tests.
 - Check `XYMLTransformerDiscoveryService`, `XYMLMultiMCBootstrap`, service
   descriptors, system properties, artifact names, and the still-used
   `HMCLMultiMCBootstrap-1.0.jar` resource reference.
@@ -200,7 +289,7 @@ delete or weaken them while resolving text conflicts:
    that the target branch is not occupied by another worktree:
 
    ~~~shell
-   git switch -c <integration-branch>
+   git switch -c <integration-branch> dev
    ~~~
 2. Select the commits to introduce using the classification above. When
    history must be preserved, run an explicit merge after the review:
@@ -255,6 +344,17 @@ Run the smallest relevant tests for the introduced change groups, including:
 - Record serialization, old-data round trips, and local-library identity tests.
 - Affected Swing UI behavior and layout on the EDT; JavaFX tests are not a
   substitute.
+
+Add verification for the boundaries actually touched; compilation is not a substitute for behavior tests:
+
+- Task resource waiting/cancellation, cleanup failure, registry publication, automatic/manual navigation,
+  and ownership after page closure.
+- Repository snapshot isolation, draft conflicts/failure recovery, and operations outside drafts;
+  instance/provider/type context for installations and remote content.
+- Settings/account schemas, unknown fields, non-writable states, private-data separation, and old-data round trips;
+  do not migrate real user data without authorization.
+- Theme-pack reading, offline startup, update integrity/replacement arguments, affected local features,
+  MCP/NBT behavior, and bundled-library identity checks.
 
 ### Repository Checks
 
