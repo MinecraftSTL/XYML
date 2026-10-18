@@ -10,17 +10,9 @@
 
 XYML 是从 HMCL 演进而来的独立项目。`origin` 指向 XYML，`upstream` 指向 HMCL-dev/HMCL。两棵树已经发生架构和产品边界分化，不能把上游文件当作同构项目直接覆盖到 XYML。
 
-计划勘察基准（2026-09-12）如下，数字只用于说明如何记录一次同步，不是永久版本号：
+每次同步都要记录本地 `dev`/`HEAD`、所用 `upstream/main` 的完整 SHA、共同祖先、双方独有提交数和待引入补丁统计。使用缓存引用时记录其提交时间和来源，不把它称为远端最新状态。
 
-| 项目 | 基准值 |
-| --- | --- |
-| 当前 `HEAD` | `9e48f059cf02c2ec96a071448356099840a69a9b` |
-| `upstream/main` | `df52bc6e81e2e1116c131483dfb9996fdb7b2b10` |
-| 共同祖先 | `b4549b6f68b99bb5fa6d69f94fffffcee0dc36c1` |
-| `HEAD...upstream/main` 提交计数 | 本地独有 `528`，上游独有 `26` |
-| 待引入差异（`git diff HEAD...upstream/main`） | 76 个文件，新增 1878 行，删除 1124 行 |
-
-上游引用可能在勘察后前移；例如本次编写时已观察到新的上游提交。因此每次实际同步都必须重新记录以下命令的输出。三点语法查看的是从共同祖先到上游的待引入补丁；直接比较两棵最终树会把历史重命名和 XYML 的独立实现混在一起，结果不能直接用于合并决策。
+下文命令应在每次实际同步时重新执行。三点语法查看的是从共同祖先到上游的待引入补丁；最终树对比只用于发现架构、API 与产品边界差异，不能代替待引入范围分析，也不能作为整文件覆盖依据。
 
 ## 合并前检查
 
@@ -74,21 +66,15 @@ git log --oneline --reverse HEAD..upstream/main
 
 ## 上游变更分类
 
-把 `git log --reverse HEAD..upstream/main` 得到的每个提交登记到下表的一类，并在登记中写出 XYML 对应路径、保留或跳过的理由以及测试。
+按行为而不是仅按文件名分类；每次同步都将实际待引入的提交登记为 `direct review`、`manual adaptation`、`product decision` 或 `skip`，记录上游 SHA、本地对应入口、适配/跳过理由和测试结果。
 
-| 类别 | 当前上游变化 | XYML 的处理重点 |
+| 类别 | 检查范围 | XYML 的处理重点 |
 | --- | --- | --- |
-| 核心逻辑，可优先评估 | Yggdrasil token 每次登录校验（`9d9fc7838`）；CurseForge 重试、哈希和完整性（`e287f672f`）；客户端 JAR 同步（`24702dc5a`） | 映射到现有 `XYMLCore` 任务、仓库和导出器。 |
-|  | Forge/Cleanroom 启动修复（`513f53bc0`、`0ad180c08`）；默认构建取消与归档/ZIP 处理（`b2d4d3685`、`9c031c5ac`、`e2d3ac847`） | 保留任务资源锁、离线行为、取消/重试和安全边界。 |
-|  | 实例父级清理（`1a258a255`）；mrpack 禁用文件和依赖更新（`1da8c8d6a`、`0f4152406`）；`.gitignore` 的 `*.jfr`（`3742be0aa`） | 为每个行为补充或运行针对性测试。 |
-| 数据模型/API | `OptiFineVersion`（`0e3455434`）和 `CurseMetaMod`（`1acfc5500`）改为 record | 检查 Gson 注解、旧 JSON/清单和构造器。 |
-|  |  | 确认序列化字段名、调用方和向后兼容，避免机械替换 getter。 |
-| 需要手工适配的 UI | 资源包图标缓存、主题、搜索排序、加载器标签和长名称（`886a25a93`、`450504ced`、`8767cc0e9`、`7331f619c`、`7a8f93164`） | 只移植行为到现有 Swing 控件或 toolkit-neutral Core。 |
-|  | 加载器重置、树单元格、图标对话框、工具栏和进度控件（`ce51dc4dd`、`b97e7fbd5`、`7f578be08`、`cbc6daf3d`、`ea232b097`） | 禁止恢复 JavaFX、JFoenix、MonetFX、OpenJFX 下载器、module flags 或运行时补丁。 |
-| 必须作产品决策 | 上游删除 MultiMC 导出（`df52bc6e8`） | XYML 当前仍公开支持 MultiMC，默认保留。 |
-|  |  | 若决定删除，必须同时评审 Core 任务、工厂、UI、I18N、资源和测试，不能只接受上游删除。 |
-| 品牌和本地化 | 上游将 Hello Minecraft Launcher 缩写为 HMCL（`1428183e3`） | 不得覆盖 XYML 品牌、`.xyml`、`xyml.*` 或应用 ID。 |
-|  |  | 语言键逐项合并并同步英文、简体中文、繁体中文，保留占位符和转义。 |
+| 核心逻辑 | 认证、下载、完整性、加载器、Archive/ZIP、实例与整合包 | 比对当前调用方、资源声明、错误处理和边界测试。 |
+| 数据模型/API | record、序列化、仓库/布局/快照、设置与账户 | 核对公开契约、字段名、schema、所有权与兼容决策。 |
+| 手工适配 | JavaFX 控件/状态、任务呈现、导航、主题、更新提示 | 移植到本地 Swing、observable、任务及服务入口，禁止恢复 JavaFX 依赖。 |
+| 产品决策 | 功能删除、供应方能力、运行时、发布与品牌 | 默认保留本地功能和渠道；涉及外部行为先确认。 |
+| 文档与本地化 | 文档语言、文件名、宏、链接、I18N 键 | 文档按本地语言规则映射，资源按键合并并保持三语同步。 |
 
 ## 不能直接接受的文件组
 
@@ -109,10 +95,65 @@ git log --oneline --reverse HEAD..upstream/main
 
 还要检查反射字符串、服务加载器文件、主类、资源目录、系统属性、序列化名称和清单。可用 `git log --follow` 追踪历史路径，但不要按路径批量移动文件。
 
+### UI、可观察状态和线程迁移
+
+- JavaFX 控件、属性、绑定和可观察集合不能直接套用。将业务行为映射到 `XYML/src/main/java/space/minecraftstl/xyml/ui/swing`，Core 状态沿用 `XYMLCore` 的 `observable` 契约；保留具体事件载荷、通知顺序和订阅释放。
+- 后台 I/O 沿用 `Schedulers.io()`，UI continuation 使用已安装的 `Schedulers.ui()`，并核实 Swing EDT 归属；不要恢复 `Schedulers.javafx()`、`FXUtils` 或 JavaFX 类型。
+- 核对页面缓存、导航、对话框关闭和异步结果失效边界。上游删除的 UI 文件仍可能包含应移植的通用逻辑，不能仅因本地没有同名文件就跳过整个提交。
+- 主题、图片和颜色沿用现有工具包中立的 Core 数据与 Swing 边界转换。架构约束见 [Swing UI 迁移](architecture/swing-ui-migration.md)。
+
+### Task 执行、资源和生命周期迁移
+
+- 上游任务和取消回调必须适配本地 `Task`、`TaskExecutor`、`TaskExecutionRegistry` 和 `TaskResource`，不能只解决签名冲突或恢复旧任务对话框。
+- 核对读写路径、实例、游戏目录、缓存与共享资源声明；沿用资源仲裁和清理 API，不用全局资源掩盖缺失的精确声明，也不把未知资源擅自标成无资源的编排阶段。
+- `start()` 不代表工作已完成，也不保证立即进入运行态。保留 `WAITING`、运行、取消请求和最终状态的区别，核对重试、进度、日志、订阅及清理失败的可见性。
+- 用户可见任务通过现有 `TaskLaunchController` 接入；自动打开任务页选择“进行中”，手动进入则保留既有选项卡。关闭发起页面不能取消已交由任务系统拥有的安装任务。
+- 补充资源冲突/并行、等待中取消、异常及中断清理、页面关闭后继续执行、状态与进度发布测试；不要以任务已提交或 UI 已关闭作为执行成功的依据。
+
+### 仓库、安装和远程附加内容入口
+
+- 上游仓库、实例、布局和快照 API 先与 `XYMLGameRepository`、`GameRepository`、`GameRepositorySnapshot` 及实际调用方逐项比对；同名快照不代表字段、所有权和刷新事件完全兼容。
+- `GameRepositoryDraft` 只覆盖显式加入草稿的文件和参与者；已有安装、重命名、删除、整合包与修复入口不会自动获得整操作回滚或跨重启恢复。约束见 [Repository draft API](architecture/repository-drafts.md)。
+- 游戏安装映射到本地 `game/install` 服务和任务工厂，远程内容映射到现有 `addon` 仓库及 Swing 下载/更新入口；保留仓库实例、目标实例、运行目录、加载器和资源类型的明确上下文。
+- 核对 CurseForge/Modrinth 单例、`RemoteAddon.Type`、分页、推荐/测试版本、依赖选择、更新和文件操作失败反馈。不要因上游复用组件而扩大供应方能力，或丢失本地排序、筛选、去重和并行安装隔离。
+
+### 设置、账户和持久化边界
+
+- 双方都使用分离的设置/状态和 JSON schema，但不能据此判定格式与加载策略一致。逐项核对 `SettingsManager`、`GameSettings`、`docs/schemas`、文件位置、schema 版本、未知字段和不可写状态。
+- 本地账户元数据与私密数据分开存储；检查本地/用户作用域、账户 ID、认证工厂、令牌刷新和游戏档案缓存。不得将私密字段写入普通配置、日志、任务快照或导出资料。
+- 本地实例配置迁移策略位于 `InstanceConfigMigrationPolicy` 并由设置预设持有；它不是上游 `LegacyConfigMigrator`、`LegacyGameSettingsMigrator` 或 `MigrationReceipt` 的等价实现，不能直接引入 HMCL 旧文件扫描和自动转换。
+- 如果确需改变持久化格式、公共 API 或外部调用契约，先列明独立转换、主程序边界适配、明确不兼容三种方案及影响，取得确认后再实施。未经确认不删除旧读取、不添加迁移器，也不默认 HMCL 文件就是 XYML 的旧数据。
+
+### 主题、启动和自更新
+
+- 主题变更映射到本地 `theme` 模型、主题包仓库及 Swing 外观设置，保留主题引用、亮度偏好、背景和包读取边界；不要恢复 JavaFX CSS、MonetFX 或上游主题管理器。
+- 启动、错误提示与更新变更分别检查 Swing 启动入口、`UpdateApplier`、`UpdateStartupResult`、`UpdateChannel` 和 `XYMLDownloadTask`；上游 JavaFX 失败时回退 Swing 的实现不能整段搬入 Swing-only 启动流程。
+- 保留离线启动、更新制品完整性、替换/重启参数以及 XYML 下载源、应用 ID、`.xyml` 和 `xyml.*`；上游版本号、更新端点与发布渠道不是本地默认值。
+
+### 本地功能和安全边界
+
+- 核对存档、资源包、光影包、原理图、模组、整合包导出和实例配置迁移的现有入口。上游新增、重命名或删除页面时，先判断本地是否已有不同实现；MultiMC 导出仍是本地功能，不能因上游删除而一并移除。
+- 崩溃分析、日志、修复任务和 Java 运行时管理有本地服务及 UI；通用修复应落到现有入口，不恢复上游页面或假设 GUI 与 MCP 修复共享所有状态和回滚范围。
+- `XYMLCore`/`XYML` 的 `mcp` 与应用 `nbt`、`libraries/xoyz-mcp`、`libraries/xoyz-nbt` 属于本地边界；保留鉴权、脱敏、删除确认、路径限制、有界解析和事务性写入，不用上游缺少这些模块作为删除理由。
+
+### 内置库、构建和代码契约
+
+- 本地 `settings.gradle.kts` 还包含 `xoyz-nbt`、`xoyz-mcp`、`XYMLL`、`lwjgl-unsafe-agent`、`mesa-loader-windows`。按 `libraries/README.md` 和导入库的 `SOURCE.md` 审查源码、资源、许可证、固定 SHA 与身份测试；不能改回上游依赖坐标或覆盖本地修改。
+- 应用/Core/buildSrc 使用 Java 17；Boot 和 Minecraft 引导库的生产代码保持 Java 8，`lwjgl-unsafe-agent` 使用 Java 25 工具链。核对实际 `build.gradle.kts`、Wrapper、版本目录、fat JAR 与 `verifyOfflineUiArtifact`，不以构建 JVM 版本替代目标字节码检查。
+- 开发变更基于当前 `dev`，验证后以 `--no-ff` 集成回 `dev`；发布遵循 `dev -> alpha -> beta -> main`。保留 `config/project.properties` 的 `stableVersion`、版本解析和发布任务；合并上游不是发布授权。
+- 移植的首方 Java 声明遵循当前 `AGENTS.md`：完整许可证头、`@NotNullByDefault`、精确 `@Nullable`、集合所有权注解和 `///` 文档。保留嵌入式第三方的许可证和局部风格，不关闭质量检查。
+
+### 文档默认语言和宏迁移
+
+- 上游无语言后缀的文档是英文，简体中文使用 `_zh_Hans.md`；XYML 无后缀文档是简体中文，英文使用 `_en.md`，繁体中文使用 `_zh_Hant.md`。应按内容语言映射，不能把上游无后缀文件直接覆盖到本地同名文件。
+- 同时映射相对链接、锚点、`BLOCK`、`COPY` 来源与 `LANGUAGE_SWITCHER`；不能只改文件名。检查 `buildSrc` 的 `DocumentLocale`、文档树和生成器，保留简体中文优先的语言顺序及缺失译文回退。
+- 无后缀的 `I18N.properties` 仍是英文默认资源，与文档规则不同；资源键、占位符和转义逐项合并。详细规则见 [本地化指南](Localization.md#文档与本地化资源)。
+- 修改任一 `docs/**/*.md` 后运行 `updateDocuments`，检查全部重写差异、各语言链接和复制块；不能手工修补生成输出来绕过源宏或语言映射错误。
+
 ### 必须保留的本地边界
 
 - `XYML` 是 Swing-only；`XYMLCore` 保持 toolkit-neutral，界面行为应落在现有 `XYML/ui/swing` 边界。上游 JavaFX/JFoenix 代码只能作为行为参考。
-- 保留 `xoyz-nbt`、`xoyz-mcp`、`XYMLL`、`lwjgl-unsafe-agent`、`mesa-loader-windows` 等本地库，以及每个库的 `SOURCE.md`、许可证、上游 SHA 和身份测试。
+- 保留 `xoyz-nbt`、`xoyz-mcp`、`XYMLL`、`lwjgl-unsafe-agent`、`mesa-loader-windows` 等本地库，以及导入库的 `SOURCE.md`、许可证、上游 SHA 和身份测试。
 - 检查 `XYMLTransformerDiscoveryService`、`XYMLMultiMCBootstrap`、服务描述符、系统属性、制品名和 `HMCLMultiMCBootstrap-1.0.jar` 资源引用。
 - 保留 XYML 的版本解析、四渠道发布流程、离线制品校验、MCP 鉴权与脱敏、stdio 边界、NBT 有界/事务性编辑、任务资源所有权和现有目录筛选。
 - 构建脚本、工作流、Jenkins、版本属性和发布配置不能整文件替换；特别检查 Java 17/25/8 工具链和 `stableVersion` 契约。
@@ -138,7 +179,7 @@ I18N 必须按键合并，并同步 `I18N.properties`、`I18N_zh_CN.properties` 
 1. 从目标快照创建并进入集成分支，并确认目标分支没有被其他工作树占用，例如：
 
    ```shell
-   git switch -c <integration-branch>
+   git switch -c <integration-branch> dev
    ```
 
 2. 记录已评估的上游提交。需要保留拓扑时，在确认分类结果后使用：
@@ -179,6 +220,13 @@ I18N 必须按键合并，并同步 `I18N.properties`、`I18N_zh_CN.properties` 
 ### 代码与资源
 
 按变更类别运行最小测试集：认证和账户登录、CurseForge 下载与完整性、游戏依赖/JAR 同步、Archive/ZIP 路径安全、实例父级和循环引用、启动器构建、modpack 导出，以及受影响的 Swing/EDT 行为。具体检查 Archive/ZIP 的重复条目、父目录、编码和大小边界；实例缺失父级与循环引用；record 序列化和旧数据 round-trip；本地库身份测试；以及受影响 Swing 控件在 EDT 上的行为和布局。修改本地库或服务组件时运行对应身份测试。
+
+还应按实际触及的差异增加以下验证，不以编译通过替代行为测试：
+
+- Task 资源等待/取消、清理失败、执行注册表发布，以及自动/手动导航和页面关闭后的所有权。
+- 仓库快照隔离、草稿冲突/失败恢复及未加入草稿的操作边界；安装和远程内容的实例/供应方/类型上下文。
+- 设置与账户 schema、未知字段、不可写状态、私密数据分离和旧数据 round-trip；未经授权不运行真实用户数据迁移。
+- 主题包读取、离线启动、更新完整性与替换参数，以及受影响的本地功能、MCP/NBT 和内置库身份检查。
 
 ### 仓库检查
 
