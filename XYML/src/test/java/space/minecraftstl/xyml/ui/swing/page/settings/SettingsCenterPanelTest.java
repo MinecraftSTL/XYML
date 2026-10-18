@@ -50,6 +50,7 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
 import java.lang.reflect.Field;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -125,6 +126,63 @@ public final class SettingsCenterPanelTest {
                                     settingsTabs.getTitleAt(warningTabIndex)),
                             () -> assertNotEquals(mcpTabIndex, warningTabIndex));
                 });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
+    /// Renders all seven independent confirmation controls and routes each new checkbox to its own store setter.
+    @Test
+    public void rendersAllDeletionConfirmationControlsAndRoutesIndependentWrites() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
+            AtomicReference<@Nullable BufferedImage> desktopImage = new AtomicReference<>();
+            try {
+                onEventDispatchThread(() -> {
+                    JTabbedPane tabs = findComponent(panel, "settingsTabs", JTabbedPane.class);
+                    int mcpTab = findTabIndex(tabs, i18n("settings.mcp.title"));
+                    if (!GraphicsEnvironment.isHeadless()) {
+                        javax.swing.JFrame frame = new javax.swing.JFrame("MCP settings smoke test");
+                        try {
+                            frame.setContentPane(panel);
+                            frame.setSize(1040, 780);
+                            tabs.setSelectedIndex(mcpTab);
+                            frame.setVisible(true);
+                            BufferedImage image = new BufferedImage(
+                                    frame.getWidth(), frame.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                            java.awt.Graphics2D graphics = image.createGraphics();
+                            try {
+                                frame.paintAll(graphics);
+                            } finally {
+                                graphics.dispose();
+                            }
+                            desktopImage.set(image);
+                        } finally {
+                            frame.dispose();
+                        }
+                    }
+                    for (String category : java.util.List.of(
+                            "Instance", "Mod", "ResourcePack", "World", "Server", "ShaderPack", "Schematic")) {
+                        JCheckBox box = findComponent(panel, "settingsMcpConfirm" + category + "Deletion", JCheckBox.class);
+                        assertEquals(mcpTab, findContainingTab(tabs, box));
+                        assertTrue(box.isEnabled());
+                        if (!"Instance".equals(category) && !"Mod".equals(category)) {
+                            assertTrue(box.isSelected());
+                            box.doClick();
+                            assertFalse(box.isSelected());
+                        }
+                    }
+                    assertEquals(java.util.List.of("ResourcePack:false", "World:false", "Server:false",
+                            "ShaderPack:false", "Schematic:false"), store.deletionWrites);
+                });
+                @Nullable BufferedImage image = desktopImage.get();
+                if (image != null) {
+                    java.nio.file.Path output = java.nio.file.Path.of("build", "reports", "mcp-ui", "settings.png");
+                    java.nio.file.Files.createDirectories(output.getParent());
+                    assertTrue(javax.imageio.ImageIO.write(image, "png", output.toFile()));
+                }
             } finally {
                 onEventDispatchThread(panel::close);
             }
@@ -645,6 +703,9 @@ public final class SettingsCenterPanelTest {
         /// Number of MCP enablement writes accepted by this fake.
         private int mcpEnablementWrites;
 
+        /// Ordered category-specific checkbox writes accepted by this fake.
+        private final java.util.List<String> deletionWrites = new java.util.ArrayList<>();
+
         /// Creates a recording store from one immutable snapshot.
         private FakeSettingsStore(SettingsCenterSnapshot initialSnapshot) {
             this.initialSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
@@ -809,6 +870,36 @@ public final class SettingsCenterPanelTest {
         /// Ignores an MCP instance-confirmation write.
         @Override
         public void setMcpConfirmInstanceDeletion(boolean required) {
+        }
+
+        /// Records the independent MCP ResourcePack confirmation preference.
+        @Override
+        public void setMcpConfirmResourcePackDeletion(boolean required) {
+            deletionWrites.add("ResourcePack:" + required);
+        }
+
+        /// Records the independent MCP World confirmation preference.
+        @Override
+        public void setMcpConfirmWorldDeletion(boolean required) {
+            deletionWrites.add("World:" + required);
+        }
+
+        /// Records the independent MCP Server confirmation preference.
+        @Override
+        public void setMcpConfirmServerDeletion(boolean required) {
+            deletionWrites.add("Server:" + required);
+        }
+
+        /// Records the independent MCP ShaderPack confirmation preference.
+        @Override
+        public void setMcpConfirmShaderPackDeletion(boolean required) {
+            deletionWrites.add("ShaderPack:" + required);
+        }
+
+        /// Records the independent MCP Schematic confirmation preference.
+        @Override
+        public void setMcpConfirmSchematicDeletion(boolean required) {
+            deletionWrites.add("Schematic:" + required);
         }
 
         /// Ignores an MCP mod-confirmation write.

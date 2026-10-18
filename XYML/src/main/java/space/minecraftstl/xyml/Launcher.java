@@ -437,12 +437,22 @@ public final class Launcher {
                                     kind -> switch (kind) {
                                         case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().get();
                                         case MODS -> settings().mcpConfirmModDeletionProperty().get();
+                                        case RESOURCE_PACKS -> settings().mcpConfirmResourcePackDeletionProperty().get();
+                                        case WORLDS -> settings().mcpConfirmWorldDeletionProperty().get();
+                                        case SERVERS -> settings().mcpConfirmServerDeletionProperty().get();
+                                        case SHADER_PACKS -> settings().mcpConfirmShaderPackDeletionProperty().get();
+                                        case SCHEMATICS -> settings().mcpConfirmSchematicDeletionProperty().get();
                                     },
                                     () -> !SettingsManager.hasReadOnlyCoreSettings(),
                                     kind -> {
                                         switch (kind) {
                                             case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().set(false);
                                             case MODS -> settings().mcpConfirmModDeletionProperty().set(false);
+                                            case RESOURCE_PACKS -> settings().mcpConfirmResourcePackDeletionProperty().set(false);
+                                            case WORLDS -> settings().mcpConfirmWorldDeletionProperty().set(false);
+                                            case SERVERS -> settings().mcpConfirmServerDeletionProperty().set(false);
+                                            case SHADER_PACKS -> settings().mcpConfirmShaderPackDeletionProperty().set(false);
+                                            case SCHEMATICS -> settings().mcpConfirmSchematicDeletionProperty().set(false);
                                         }
                                     }),
                             new SwingMcpMissingDependencySearch(

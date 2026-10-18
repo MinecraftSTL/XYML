@@ -170,17 +170,60 @@ public final class XYMLMcpToolRegistryTest {
         List<ToolDefinition> definitions = registry.toolDefinitions();
         Set<String> names = definitions.stream().map(ToolDefinition::name)
                 .collect(Collectors.toSet());
-        assertEquals(24, definitions.size());
-        assertEquals(24, names.size());
+        assertEquals(34, definitions.size());
+        assertEquals(34, names.size());
         assertEquals(Set.of("list_instances", "get_instance_settings", "rename_instance", "duplicate_instance",
                 "delete_instance", "get_mods_directory", "analyze_crash", "list_java_runtimes", "list_local_mods",
                 "set_java_version", "set_memory", "set_jvm_options", "set_window_options", "enable_mod",
                 "disable_mod", "remove_mods", "launch_game", "stop_game", "get_launch_status",
                  "plan_crash_solution", "execute_crash_solution", "retry_crash_solution", "get_crash_repair_status",
-                "cancel_crash_repair"), names);
+                "cancel_crash_repair", "list_resource_packs", "remove_resource_packs", "list_worlds", "remove_worlds",
+                "list_servers", "remove_servers", "list_shader_packs", "remove_shader_packs",
+                "list_schematics", "remove_schematics"), names);
         assertFalse(names.contains("get_logs"));
         assertFalse(names.contains("search_addons"));
         assertFalse(names.contains("create_instance"));
+    }
+
+    /// New tools dispatch through optional content capabilities without exposing client-side approval flags.
+    @Test
+    public void dispatchesEveryInstalledContentTool() {
+        List<String> calls = new java.util.concurrent.CopyOnWriteArrayList<>();
+        XYMLMcpContentOperations content = (XYMLMcpContentOperations) java.lang.reflect.Proxy.newProxyInstance(
+                XYMLMcpContentOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpContentOperations.class},
+                (proxy, method, arguments) -> {
+                    calls.add(method.getName());
+                    if ("listServers".equals(method.getName())) {
+                        return Task.completed(Map.of("items", List.of(), "revision", "r1"));
+                    }
+                    if (method.getName().startsWith("list")) {
+                        return Task.completed(List.of());
+                    }
+                    return Task.completed(Map.of("approved", true, "removed", List.of()));
+                });
+        XYMLMcpOperations service = (XYMLMcpOperations) java.lang.reflect.Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> {
+                    assertEquals("contentOperations", method.getName());
+                    return content;
+                });
+        XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(service);
+        for (String category : List.of("resource_packs", "worlds", "servers", "shader_packs", "schematics")) {
+            assertFalse(registry.call("list_" + category, Map.of("instance_id", "demo")).error());
+            Map<String, @Nullable Object> arguments = "servers".equals(category)
+                    ? Map.of("instance_id", "demo", "indices", List.of(0), "revision", "r1")
+                    : Map.of("instance_id", "demo", "paths", List.of("managed-file"));
+            assertFalse(registry.call("remove_" + category, arguments).error());
+        }
+        assertEquals(Set.of("listResourcePacks", "removeResourcePacks", "listWorlds", "removeWorlds", "listServers",
+                "removeServers", "listShaderPacks", "removeShaderPacks", "listSchematics", "removeSchematics"),
+                Set.copyOf(calls));
+        int beforeInvalid = calls.size();
+        for (Object bad : List.of(0.5, -1, 2147483648L, "0")) {
+            assertTrue(registry.call("remove_servers", Map.of(
+                    "instance_id", "demo", "revision", "r1", "indices", List.of(bad))).error());
+        }
+        assertEquals(beforeInvalid, calls.size());
     }
 
     /// Ensures no tool schema exposes the removed MCP-level confirmation parameter.

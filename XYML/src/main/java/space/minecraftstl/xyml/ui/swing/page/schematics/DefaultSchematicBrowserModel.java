@@ -1366,7 +1366,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// @param cancellation cooperative cancellation signal
     /// @return immutable direct-child descriptors
     /// @throws IOException when the directory itself cannot be read
-    private static @Unmodifiable List<DiscoveredEntry> scanDirectory(
+    static @Unmodifiable List<DiscoveredEntry> scanDirectory(
             Path rootDirectory,
             Path directory,
             LoadCancellation cancellation) throws IOException {

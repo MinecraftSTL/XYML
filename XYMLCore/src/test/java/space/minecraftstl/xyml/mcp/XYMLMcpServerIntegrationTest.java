@@ -53,6 +53,22 @@ final class XYMLMcpServerIntegrationTest {
                 XYMLMcpOperations.class.getClassLoader(),
                 new Class<?>[]{XYMLMcpOperations.class},
                 (proxy, method, arguments) -> {
+                    if ("contentOperations".equals(method.getName())) {
+                        return java.lang.reflect.Proxy.newProxyInstance(
+                                XYMLMcpContentOperations.class.getClassLoader(),
+                                new Class<?>[]{XYMLMcpContentOperations.class},
+                                (contentProxy, contentMethod, contentArguments) -> {
+                                    if ("listServers".equals(contentMethod.getName())) {
+                                        return space.minecraftstl.xyml.task.Task.completed(
+                                                Map.of("items", java.util.List.of(), "revision", "r1"));
+                                    }
+                                    if ("removeServers".equals(contentMethod.getName())) {
+                                        return space.minecraftstl.xyml.task.Task.completed(
+                                                Map.of("approved", false, "removed", java.util.List.of()));
+                                    }
+                                    throw new UnsupportedOperationException(contentMethod.getName());
+                                });
+                    }
                     if ("getCrashRepairStatus".equals(method.getName())) {
                         return Map.of("operation_id", arguments[0], "state", "RUNNING");
                     }
@@ -87,7 +103,7 @@ final class XYMLMcpServerIntegrationTest {
             JsonArray tools = result(post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", sessionId))
                     .getAsJsonArray("tools");
-            assertEquals(24, tools.size());
+            assertEquals(34, tools.size());
             assertTrue(tools.asList().stream()
                     .anyMatch(tool -> "analyze_crash".equals(tool.getAsJsonObject().get("name").getAsString())));
             assertTrue(tools.asList().stream()
@@ -102,6 +118,18 @@ final class XYMLMcpServerIntegrationTest {
             JsonObject structuredContent = callResult.getAsJsonObject("structuredContent");
             assertEquals("repair-1", structuredContent.get("operation_id").getAsString());
             assertEquals("RUNNING", structuredContent.get("state").getAsString());
+
+            JsonObject savedServers = result(post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/call\","
+                            + "\"params\":{\"name\":\"list_servers\",\"arguments\":{\"instance_id\":\"demo\"}}}", sessionId));
+            assertFalse(savedServers.get("isError").getAsBoolean());
+            assertEquals("r1", savedServers.getAsJsonObject("structuredContent").get("revision").getAsString());
+            JsonObject removal = result(post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\","
+                            + "\"params\":{\"name\":\"remove_servers\",\"arguments\":{\"instance_id\":\"demo\","
+                            + "\"indices\":[0],\"revision\":\"r1\"}}}", sessionId));
+            assertFalse(removal.get("isError").getAsBoolean());
+            assertFalse(removal.getAsJsonObject("structuredContent").get("approved").getAsBoolean());
 
             JsonArray templates = result(post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/templates/list\"}", sessionId))
