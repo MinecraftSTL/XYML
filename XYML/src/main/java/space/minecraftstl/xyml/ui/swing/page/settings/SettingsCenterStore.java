@@ -162,6 +162,36 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param required whether mod-deletion confirmation is required
     void setMcpConfirmModDeletion(boolean required);
 
+    /// Persists whether MCP resource packs deletion requires confirmation.
+    ///
+    /// @param required whether interactive confirmation is required
+    default void setMcpConfirmResourcePackDeletion(boolean required) {
+    }
+
+    /// Persists whether MCP worlds deletion requires confirmation.
+    ///
+    /// @param required whether interactive confirmation is required
+    default void setMcpConfirmWorldDeletion(boolean required) {
+    }
+
+    /// Persists whether MCP saved servers deletion requires confirmation.
+    ///
+    /// @param required whether interactive confirmation is required
+    default void setMcpConfirmServerDeletion(boolean required) {
+    }
+
+    /// Persists whether MCP shader packs deletion requires confirmation.
+    ///
+    /// @param required whether interactive confirmation is required
+    default void setMcpConfirmShaderPackDeletion(boolean required) {
+    }
+
+    /// Persists whether MCP schematic files and directories deletion requires confirmation.
+    ///
+    /// @param required whether interactive confirmation is required
+    default void setMcpConfirmSchematicDeletion(boolean required) {
+    }
+
     /// Persists whether the enablement risk warning is shown in the Swing settings page.
     ///
     /// The default implementation is a compatibility no-op for stores created before this preference existed.

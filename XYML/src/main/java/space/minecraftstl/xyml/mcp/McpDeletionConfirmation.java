@@ -32,6 +32,16 @@ public interface McpDeletionConfirmation {
     /// @return whether the deletion may proceed
     boolean confirm(DeletionRequest request);
 
+    /// Requests permission to permanently delete targets that could not enter the recycle bin.
+    /// This authorization is independent of ordinary confirmation and defaults to denial.
+    ///
+    /// @param request remaining deletion category and item count
+    /// @return whether permanent deletion was explicitly approved
+    default boolean confirmPermanent(DeletionRequest request) {
+        Objects.requireNonNull(request, "request");
+        return false;
+    }
+
     /// Describes the destructive target presented to the launcher user.
     ///
     /// @param kind deletion category
@@ -73,6 +83,21 @@ public interface McpDeletionConfirmation {
         INSTANCE,
 
         /// One or more local mod files.
-        MODS
+        MODS,
+
+        /// Local resource packs.
+        RESOURCE_PACKS,
+
+        /// Local worlds.
+        WORLDS,
+
+        /// Local saved servers.
+        SERVERS,
+
+        /// Local shader packs.
+        SHADER_PACKS,
+
+        /// Local schematic files and directories.
+        SCHEMATICS
     }
 }

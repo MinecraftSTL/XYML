@@ -708,6 +708,51 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return mcpConfirmModDeletion;
     }
 
+    /// Whether deleting resource packs through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmResourcePackDeletion")
+    private final BooleanProperty mcpConfirmResourcePackDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP resource packs deletion confirmation preference.
+    public BooleanProperty mcpConfirmResourcePackDeletionProperty() {
+        return mcpConfirmResourcePackDeletion;
+    }
+
+    /// Whether deleting worlds through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmWorldDeletion")
+    private final BooleanProperty mcpConfirmWorldDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP worlds deletion confirmation preference.
+    public BooleanProperty mcpConfirmWorldDeletionProperty() {
+        return mcpConfirmWorldDeletion;
+    }
+
+    /// Whether deleting saved servers through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmServerDeletion")
+    private final BooleanProperty mcpConfirmServerDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP saved servers deletion confirmation preference.
+    public BooleanProperty mcpConfirmServerDeletionProperty() {
+        return mcpConfirmServerDeletion;
+    }
+
+    /// Whether deleting shader packs through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmShaderPackDeletion")
+    private final BooleanProperty mcpConfirmShaderPackDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP shader packs deletion confirmation preference.
+    public BooleanProperty mcpConfirmShaderPackDeletionProperty() {
+        return mcpConfirmShaderPackDeletion;
+    }
+
+    /// Whether deleting schematic files and directories through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmSchematicDeletion")
+    private final BooleanProperty mcpConfirmSchematicDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP schematic files and directories deletion confirmation preference.
+    public BooleanProperty mcpConfirmSchematicDeletionProperty() {
+        return mcpConfirmSchematicDeletion;
+    }
+
     /// The selected game directory ID.
     ///
     /// This field is owned by [GameDirectoryManager]. Code outside [GameDirectoryManager] should not modify it directly.

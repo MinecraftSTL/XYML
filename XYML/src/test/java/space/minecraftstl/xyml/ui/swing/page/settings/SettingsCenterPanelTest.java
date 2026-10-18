@@ -131,6 +131,36 @@ public final class SettingsCenterPanelTest {
         }
     }
 
+    /// Renders all seven independent confirmation controls and routes each new checkbox to its own store setter.
+    @Test
+    public void rendersAllDeletionConfirmationControlsAndRoutesIndependentWrites() throws Exception {
+        try (SettingsFixture ignored = SettingsFixture.install()) {
+            FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
+            SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
+            try {
+                onEventDispatchThread(() -> {
+                    JTabbedPane tabs = findComponent(panel, "settingsTabs", JTabbedPane.class);
+                    int mcpTab = findTabIndex(tabs, i18n("settings.mcp.title"));
+                    for (String category : java.util.List.of(
+                            "Instance", "Mod", "ResourcePack", "World", "Server", "ShaderPack", "Schematic")) {
+                        JCheckBox box = findComponent(panel, "settingsMcpConfirm" + category + "Deletion", JCheckBox.class);
+                        assertEquals(mcpTab, findContainingTab(tabs, box));
+                        assertTrue(box.isEnabled());
+                        if (!"Instance".equals(category) && !"Mod".equals(category)) {
+                            assertTrue(box.isSelected());
+                            box.doClick();
+                            assertFalse(box.isSelected());
+                        }
+                    }
+                    assertEquals(java.util.List.of("ResourcePack:false", "World:false", "Server:false",
+                            "ShaderPack:false", "Schematic:false"), store.deletionWrites);
+                });
+            } finally {
+                onEventDispatchThread(panel::close);
+            }
+        }
+    }
+
     /// Keeps a configured out-of-matrix channel visible without adding it to the selectable list.
     @Test
     public void updateChannelModelRestrictsNewChoicesButDisplaysConfiguredOverride() {
@@ -645,6 +675,9 @@ public final class SettingsCenterPanelTest {
         /// Number of MCP enablement writes accepted by this fake.
         private int mcpEnablementWrites;
 
+        /// Ordered category-specific checkbox writes accepted by this fake.
+        private final java.util.List<String> deletionWrites = new java.util.ArrayList<>();
+
         /// Creates a recording store from one immutable snapshot.
         private FakeSettingsStore(SettingsCenterSnapshot initialSnapshot) {
             this.initialSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
@@ -809,6 +842,36 @@ public final class SettingsCenterPanelTest {
         /// Ignores an MCP instance-confirmation write.
         @Override
         public void setMcpConfirmInstanceDeletion(boolean required) {
+        }
+
+        /// Records the independent MCP ResourcePack confirmation preference.
+        @Override
+        public void setMcpConfirmResourcePackDeletion(boolean required) {
+            deletionWrites.add("ResourcePack:" + required);
+        }
+
+        /// Records the independent MCP World confirmation preference.
+        @Override
+        public void setMcpConfirmWorldDeletion(boolean required) {
+            deletionWrites.add("World:" + required);
+        }
+
+        /// Records the independent MCP Server confirmation preference.
+        @Override
+        public void setMcpConfirmServerDeletion(boolean required) {
+            deletionWrites.add("Server:" + required);
+        }
+
+        /// Records the independent MCP ShaderPack confirmation preference.
+        @Override
+        public void setMcpConfirmShaderPackDeletion(boolean required) {
+            deletionWrites.add("ShaderPack:" + required);
+        }
+
+        /// Records the independent MCP Schematic confirmation preference.
+        @Override
+        public void setMcpConfirmSchematicDeletion(boolean required) {
+            deletionWrites.add("Schematic:" + required);
         }
 
         /// Ignores an MCP mod-confirmation write.
