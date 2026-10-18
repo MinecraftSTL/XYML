@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 /// Serial recycle-bin-first deletion with category confirmation and separately authorized permanent retries.
 @NotNullByDefault
@@ -82,7 +83,9 @@ final class McpDeletionBatch {
                 target.verify();
                 mutation.delete(target.path(), DeletionMode.RECYCLE_BIN_FIRST);
                 removed.add(target.path().toString());
-            } catch (IOException | IllegalArgumentException failure) {
+            } catch (CancellationException failure) {
+                throw failure;
+            } catch (IOException | RuntimeException failure) {
                 if (Files.notExists(target.path(), LinkOption.NOFOLLOW_LINKS)) {
                     removed.add(target.path().toString());
                     failures.add(failure(target.path(), failure));
@@ -110,7 +113,9 @@ final class McpDeletionBatch {
                     target.verify();
                     mutation.delete(target.path(), DeletionMode.PERMANENT);
                     removed.add(target.path().toString());
-                } catch (IOException | IllegalArgumentException failure) {
+                } catch (CancellationException failure) {
+                    throw failure;
+                } catch (IOException | RuntimeException failure) {
                     if (Files.notExists(target.path(), LinkOption.NOFOLLOW_LINKS)) {
                         removed.add(target.path().toString());
                     } else {

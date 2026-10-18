@@ -434,24 +434,20 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     AtomicBoolean committed = new AtomicBoolean();
                     Task<@Nullable Void> mutation = Task.<@Nullable Void>composeAsync(
                             "Confirm MCP game instance deletion", () -> {
-                        McpDeletionBatch deletionBatch = contentService.instanceDeletionBatch(target);
+                        McpDeletionBatch deletionBatch = contentService.instanceDeletionBatch(target, repositoryDirectory);
                         boolean confirmed = withSettingsSaveBarrier(() -> deletionConfirmation.confirm(
                                 McpDeletionConfirmation.DeletionRequest.instance(target)));
                         if (!confirmed) {
                             return Task.<@Nullable Void>completed(null).asOrchestration();
                         }
                         approved.set(true);
-                        McpContentTask<@Nullable Void> deletion = new McpContentTask<>(checkpoint ->
-                                repository.callWithStableBaseDirectory(repositoryDirectory, () -> {
-                                    requireInstanceDirectory(target, instanceDirectory);
-                                    requireInstance(target);
-                                    requireTrackedLaunchStopped(repositoryDirectory, target, "delete");
-                                    if (contentService.deleteInstanceFiles(target, deletionBatch, checkpoint)) {
-                                        committed.set(true);
-                                        launchStates.remove(new LaunchKey(repositoryDirectory, target));
-                                    }
-                                    return null;
-                                }));
+                        McpContentTask<@Nullable Void> deletion = new McpContentTask<>(checkpoint -> {
+                            if (contentService.deleteInstanceFiles(target, deletionBatch, repositoryDirectory, checkpoint)) {
+                                committed.set(true);
+                                launchStates.remove(new LaunchKey(repositoryDirectory, target));
+                            }
+                            return null;
+                        });
                         return deletion.setName("Delete MCP game instance").setExecutor(Schedulers.io())
                                 .setResources(TaskResource.repositoryOperation(repositoryDirectory),
                                         TaskResource.gameInstance(instanceDirectory),

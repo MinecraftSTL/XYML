@@ -133,6 +133,22 @@ final class McpDeletionBatchTest {
         assertEquals(List.of(file.toString()), result.get("remaining"));
     }
 
+    /// Runtime storage failures also retain the explicit partial-success outcome instead of discarding it.
+    @Test
+    void preservesPartialProgressForRuntimeStorageFailure(@TempDir Path root) throws Exception {
+        Path one = Files.writeString(root.resolve("one"), "one");
+        Path two = Files.writeString(root.resolve("two"), "two");
+        Map<String, Object> result = batch(root, List.of(one, two), request -> true).run((path, mode) -> {
+            if (path.equals(two)) {
+                throw new IllegalStateException("storage unavailable");
+            }
+            Files.move(path, root.resolve("recycled"));
+        }, () -> { }, true);
+        assertEquals(List.of(one.toString()), result.get("removed"));
+        assertEquals(List.of(two.toString()), result.get("remaining"));
+        assertEquals(1, ((List<?>) result.get("failures")).size());
+    }
+
     /// Object replacement while a dialog is open must not authorize deletion of the replacement.
     @Test
     void rejectsReplacementDuringOrdinaryConfirmation(@TempDir Path root) throws Exception {
@@ -199,6 +215,39 @@ final class McpDeletionBatchTest {
                 throw new CancellationException();
             }
         }, true));
+        assertTrue(Files.exists(file));
+    }
+
+    /// Cancellation while the separate permanent-deletion dialog is open prevents its retry.
+    @Test
+    void cancellationDuringFallbackPreventsPermanentMutation(@TempDir Path root) throws Exception {
+        Path file = Files.writeString(root.resolve("one"), "fixture");
+        AtomicBoolean cancelled = new AtomicBoolean();
+        AtomicInteger mutations = new AtomicInteger();
+        McpDeletionConfirmation confirmation = new McpDeletionConfirmation() {
+            /// Approves ordinary deletion.
+            @Override
+            public boolean confirm(DeletionRequest request) {
+                return true;
+            }
+
+            /// Simulates executor cancellation while the permanent-deletion decision is pending.
+            @Override
+            public boolean confirmPermanent(DeletionRequest request) {
+                cancelled.set(true);
+                return true;
+            }
+        };
+        assertThrows(CancellationException.class, () -> batch(root, List.of(file), confirmation).run((path, mode) -> {
+            mutations.incrementAndGet();
+            assertEquals(DeletionMode.RECYCLE_BIN_FIRST, mode);
+            throw new TrashMoveException(List.of(path));
+        }, () -> {
+            if (cancelled.get()) {
+                throw new CancellationException();
+            }
+        }, true));
+        assertEquals(1, mutations.get());
         assertTrue(Files.exists(file));
     }
 

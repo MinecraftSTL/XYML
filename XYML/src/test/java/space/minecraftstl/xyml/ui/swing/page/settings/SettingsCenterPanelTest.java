@@ -50,6 +50,7 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
 import java.lang.reflect.Field;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -137,10 +138,31 @@ public final class SettingsCenterPanelTest {
         try (SettingsFixture ignored = SettingsFixture.install()) {
             FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
             SettingsCenterPanel panel = createPanel(store, () -> new McpEnablementResult(false, false));
+            AtomicReference<@Nullable BufferedImage> desktopImage = new AtomicReference<>();
             try {
                 onEventDispatchThread(() -> {
                     JTabbedPane tabs = findComponent(panel, "settingsTabs", JTabbedPane.class);
                     int mcpTab = findTabIndex(tabs, i18n("settings.mcp.title"));
+                    if (!GraphicsEnvironment.isHeadless()) {
+                        javax.swing.JFrame frame = new javax.swing.JFrame("MCP settings smoke test");
+                        try {
+                            frame.setContentPane(panel);
+                            frame.setSize(1040, 780);
+                            tabs.setSelectedIndex(mcpTab);
+                            frame.setVisible(true);
+                            BufferedImage image = new BufferedImage(
+                                    frame.getWidth(), frame.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                            java.awt.Graphics2D graphics = image.createGraphics();
+                            try {
+                                frame.paintAll(graphics);
+                            } finally {
+                                graphics.dispose();
+                            }
+                            desktopImage.set(image);
+                        } finally {
+                            frame.dispose();
+                        }
+                    }
                     for (String category : java.util.List.of(
                             "Instance", "Mod", "ResourcePack", "World", "Server", "ShaderPack", "Schematic")) {
                         JCheckBox box = findComponent(panel, "settingsMcpConfirm" + category + "Deletion", JCheckBox.class);
@@ -155,6 +177,12 @@ public final class SettingsCenterPanelTest {
                     assertEquals(java.util.List.of("ResourcePack:false", "World:false", "Server:false",
                             "ShaderPack:false", "Schematic:false"), store.deletionWrites);
                 });
+                @Nullable BufferedImage image = desktopImage.get();
+                if (image != null) {
+                    java.nio.file.Path output = java.nio.file.Path.of("build", "reports", "mcp-ui", "settings.png");
+                    java.nio.file.Files.createDirectories(output.getParent());
+                    assertTrue(javax.imageio.ImageIO.write(image, "png", output.toFile()));
+                }
             } finally {
                 onEventDispatchThread(panel::close);
             }

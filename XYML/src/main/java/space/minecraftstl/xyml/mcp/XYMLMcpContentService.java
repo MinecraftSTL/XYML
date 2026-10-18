@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 import static space.minecraftstl.xyml.mcp.McpDeletionConfirmation.DeletionKind;
 import static space.minecraftstl.xyml.mcp.McpDeletionConfirmation.DeletionRequest;
@@ -127,8 +128,8 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
     @Override
     public Task<@Unmodifiable Map<String, Object>> listServers(String instanceId) {
         return contentTask(instanceId, DeletionKind.SERVERS, false, (context, checkpoint) -> {
-            FileSystemServerCatalogAccess access = serverAccess(context);
-            List<ServerCatalogItem> entries = access.read();
+            FileSystemServerCatalogAccess access = io(context.repositoryRoot(), checkpoint, () -> serverAccess(context));
+            List<ServerCatalogItem> entries = io(context.repositoryRoot(), checkpoint, access::read);
             List<Map<String, Object>> items = new ArrayList<>();
             for (int index = 0; index < entries.size(); index++) {
                 ServerCatalogItem entry = entries.get(index);
@@ -145,8 +146,8 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
         Set<Integer> selected = Set.copyOf(indices);
         Objects.requireNonNull(revision, "revision");
         return contentTask(instanceId, DeletionKind.SERVERS, true, (context, checkpoint) -> {
-            FileSystemServerCatalogAccess access = serverAccess(context);
-            List<ServerCatalogItem> entries = access.read();
+            FileSystemServerCatalogAccess access = io(context.repositoryRoot(), checkpoint, () -> serverAccess(context));
+            List<ServerCatalogItem> entries = io(context.repositoryRoot(), checkpoint, access::read);
             if (!access.revision().equals(revision)) {
                 throw new IOException("Server list changed; call list_servers again before deleting");
             }
@@ -166,14 +167,17 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
                 return Map.of("approved", false, "removed", List.of());
             }
             checkpoint.run();
-            snapshot.verify();
             List<ServerCatalogItem> retained = new ArrayList<>();
             for (int index = 0; index < entries.size(); index++) {
                 if (!selected.contains(index)) {
                     retained.add(entries.get(index));
                 }
             }
-            access.writeIfUnchanged(entries, retained);
+            io(context.repositoryRoot(), checkpoint, () -> {
+                snapshot.verify();
+                access.writeIfUnchanged(entries, retained);
+                return Boolean.TRUE;
+            });
             return Map.of("approved", true, "removed", selected.stream().sorted().toList());
         });
     }
@@ -188,24 +192,37 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
 
     /// Captures instance identity before the ordinary confirmation opens.
     /// @param id installed instance identifier
+    /// @param repositoryRoot repository root captured with the instance resources
     /// @return prepared recycle-bin-first batch
     /// @throws IOException when the installed directory is unsafe
-    McpDeletionBatch instanceDeletionBatch(GameInstanceID id) throws IOException {
-        Path target = repository.getInstanceRoot(id).toAbsolutePath().normalize();
-        return new McpDeletionBatch(Objects.requireNonNull(target.getParent()), List.of(target),
-                DeletionRequest.instance(id), confirmation);
+    McpDeletionBatch instanceDeletionBatch(GameInstanceID id, Path repositoryRoot) throws IOException {
+        return io(repositoryRoot, () -> { }, () -> {
+            Path target = repository.getInstanceRoot(id).toAbsolutePath().normalize();
+            return new McpDeletionBatch(Objects.requireNonNull(target.getParent()), List.of(target),
+                    DeletionRequest.instance(id), confirmation);
+        });
     }
 
     /// Moves an approved instance using a pre-confirmation identity and executor-owned cancellation.
     /// @param id approved instance identifier
     /// @param batch identity captured before confirmation
+    /// @param repositoryRoot captured repository root
     /// @param checkpoint executor-owned cancellation check
     /// @return whether the directory was actually removed
     /// @throws Exception when validation or deletion fails
-    boolean deleteInstanceFiles(GameInstanceID id, McpDeletionBatch batch, Runnable checkpoint) throws Exception {
+    boolean deleteInstanceFiles(GameInstanceID id, McpDeletionBatch batch, Path repositoryRoot, Runnable checkpoint)
+            throws Exception {
         RepositoryInstanceLifecycleService lifecycle = new RepositoryInstanceLifecycleService(repository);
-        Map<String, Object> result = batch.run((path, mode) -> lifecycle.deleteWithoutRefresh(id, mode),
-                checkpoint, false);
+        Runnable guarded = () -> {
+            checkpoint.run();
+            owner.requireInstanceDirectory(id, XYMLMcpService.instanceDirectory(repositoryRoot, id));
+            owner.requireInstance(id);
+            owner.requireTrackedLaunchStopped(repositoryRoot, id, "delete");
+        };
+        Map<String, Object> result = batch.run((path, mode) -> io(repositoryRoot, guarded, () -> {
+            lifecycle.deleteWithoutRefresh(id, mode);
+            return Boolean.TRUE;
+        }), guarded, false);
         if (result.get("failures") instanceof List<?> failures && !failures.isEmpty()) {
             throw new IOException("Instance deletion failed: " + failures);
         }
@@ -224,7 +241,7 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
             if (!directory.equals(context.root())) {
                 McpPathSnapshot.requireOwned(context.root(), directory);
             }
-            ManagedAccess access = access(context);
+            ManagedAccess access = access(context, checkpoint);
             List<Map<String, Object>> result = new ArrayList<>();
             for (Path path : access.scan().paths(directory)) {
                 checkpoint.run();
@@ -249,7 +266,7 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
                 return Map.of("approved", true, "removed", List.of(), "remaining", List.of(),
                         "completed", true, "failures", List.of());
             }
-            ManagedAccess access = access(context);
+            ManagedAccess access = access(context, checkpoint);
             List<Path> independent = requested.stream()
                     .filter(path -> kind != DeletionKind.SCHEMATICS || requested.stream()
                             .noneMatch(parent -> !parent.equals(path) && path.startsWith(parent)))
@@ -281,27 +298,29 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
                     owner.requireInstance(id);
                     Path run = owner.resolvedRunDirectory(id);
                     Path root = root(kind, id, run);
-                    Context context = new Context(id, kind, root, run);
-                    McpContentTask<T> task = new McpContentTask<>(cancellation ->
-                            repository.callWithStableBaseDirectory(repositoryRoot, () -> {
-                                Runnable checkpoint = () -> {
-                                    cancellation.run();
-                                    owner.requireInstanceDirectory(id, instance);
-                                    owner.requireInstance(id);
-                                    if (!run.equals(repository.getRunDirectory(id).toAbsolutePath().normalize())
-                                            || !root.equals(root(kind, id, run))) {
-                                        throw new IllegalStateException("Managed content directory changed");
-                                    }
-                                    if (write) {
-                                        owner.requireTrackedLaunchStopped(repositoryRoot, id, "remove content from");
-                                    }
-                                };
-                                checkpoint.run();
-                                if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
-                                    McpPathSnapshot.requireOwned(root, root.resolve(".xyml-ownership-check"));
-                                }
-                                return action.run(context, checkpoint);
-                            }));
+                    Context context = new Context(id, kind, root, run, repositoryRoot);
+                    McpContentTask<T> task = new McpContentTask<>(cancellation -> {
+                        Runnable checkpoint = () -> {
+                            cancellation.run();
+                            if (!repositoryRoot.equals(owner.repositoryDirectory())) {
+                                throw new IllegalStateException("Game repository directory changed");
+                            }
+                            owner.requireInstanceDirectory(id, instance);
+                            owner.requireInstance(id);
+                            if (!run.equals(repository.getRunDirectory(id).toAbsolutePath().normalize())
+                                    || !root.equals(root(kind, id, run))) {
+                                throw new IllegalStateException("Managed content directory changed");
+                            }
+                            if (write) {
+                                owner.requireTrackedLaunchStopped(repositoryRoot, id, "remove content from");
+                            }
+                        };
+                        checkpoint.run();
+                        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+                            McpPathSnapshot.requireOwned(root, root.resolve(".xyml-ownership-check"));
+                        }
+                        return action.run(context, checkpoint);
+                    });
                     List<TaskResource> resources = resources(context);
                     return task.setName("MCP " + kind).setExecutor(Schedulers.io())
                             .setResources(resources.get(0), resources.subList(1, resources.size())
@@ -354,10 +373,55 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
         return List.copyOf(resources);
     }
 
+    /// Runs only one blocking storage step under the captured-root lock, never an interactive decision.
+    /// @param repositoryRoot captured repository directory
+    /// @param checkpoint cancellation and settings freshness check
+    /// @param operation storage-only action
+    /// @param <T> result type
+    /// @return storage result
+    /// @throws IOException when checked storage access fails
+    private <T> T io(Path repositoryRoot, Runnable checkpoint, Callable<T> operation) throws IOException {
+        try {
+            return repository.callWithStableBaseDirectory(repositoryRoot, () -> {
+                checkpoint.run();
+                return operation.call();
+            });
+        } catch (IOException | RuntimeException failure) {
+            throw failure;
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            java.io.InterruptedIOException interrupted = new java.io.InterruptedIOException(
+                    "Interrupted during MCP content I/O");
+            interrupted.initCause(failure);
+            throw interrupted;
+        } catch (Exception failure) {
+            throw new IOException("MCP content storage failed", failure);
+        }
+    }
+
+    /// Captures an existing adapter and checks repository ownership around each individual storage step.
+    /// @param context captured instance paths
+    /// @param checkpoint executor cancellation and settings freshness
+    /// @return headless storage functions with short critical sections
+    /// @throws IOException when adapter creation fails
+    private ManagedAccess access(Context context, Runnable checkpoint) throws IOException {
+        ManagedAccess captured = io(context.repositoryRoot(), checkpoint, () -> createAccess(context));
+        return new ManagedAccess(
+                directory -> io(context.repositoryRoot(), checkpoint, () -> captured.scan().paths(directory)),
+                path -> io(context.repositoryRoot(), checkpoint, () -> {
+                    captured.prepare().validate(path);
+                    return Boolean.TRUE;
+                }),
+                (path, mode) -> io(context.repositoryRoot(), checkpoint, () -> {
+                    captured.mutation().delete(path, mode);
+                    return Boolean.TRUE;
+                }));
+    }
+
     /// Builds a headless adapter to the same production storage boundary used by the corresponding UI.
     /// @param context resolved operation
     /// @return operation-local storage functions
-    private ManagedAccess access(Context context) {
+    private ManagedAccess createAccess(Context context) {
         return switch (context.kind()) {
             case RESOURCE_PACKS -> {
                 ResourcePackDeletionAccess packs = new ResourcePackDeletionAccess(repository, context.id());
@@ -384,7 +448,7 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
                 yield new ManagedAccess(directory -> List.of(), path ->
                         XYMLMcpService.selectedManagedMods(manager, context.root(), List.of(path)), (path, mode) -> {
                     try {
-                        LocalModFile file = XYMLMcpService.selectedManagedMods(
+                        @Nullable LocalModFile file = XYMLMcpService.selectedManagedMods(
                                 manager, context.root(), List.of(path)).get(path);
                         manager.removeMods(mode, Objects.requireNonNull(file));
                     } finally {
@@ -429,14 +493,16 @@ final class XYMLMcpContentService implements XYMLMcpContentOperations {
     /// @param kind operation category
     /// @param root managed content boundary
     /// @param run captured effective run directory
+    /// @param repositoryRoot captured repository directory
     @NotNullByDefault
-    private record Context(GameInstanceID id, DeletionKind kind, Path root, Path run) {
+    private record Context(GameInstanceID id, DeletionKind kind, Path root, Path run, Path repositoryRoot) {
         /// Validates captured operation components.
         private Context {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(root, "root");
             Objects.requireNonNull(run, "run");
+            Objects.requireNonNull(repositoryRoot, "repositoryRoot");
         }
     }
 

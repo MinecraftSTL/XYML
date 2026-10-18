@@ -182,6 +182,27 @@ final class XYMLMcpContentServiceTest {
         }
     }
 
+    /// Repository changes on the EDT remain possible while approval is pending and invalidate the deletion.
+    @Test
+    @org.junit.jupiter.api.Timeout(15)
+    void directorySwitchDuringApprovalDoesNotBlockEdtOrDeleteOldContent(@TempDir Path root) throws Exception {
+        AtomicReference<Runnable> switchDirectory = new AtomicReference<>(() -> { });
+        Fixture fixture = fixture(root.resolve("first"), request -> {
+            try {
+                javax.swing.SwingUtilities.invokeAndWait(switchDirectory.get());
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+            return true;
+        });
+        Path folder = Files.createDirectories(fixture.repository().getRunDirectory(fixture.id()).resolve("schematics"));
+        Path file = Files.writeString(folder.resolve("one.litematic"), "original");
+        switchDirectory.set(() -> fixture.repository().setBaseDirectory(root.resolve("second")));
+        assertFalse(fixture.content().removeSchematics("demo", List.of(file.toString())).executor().test());
+        assertEquals(root.resolve("second"), fixture.repository().getBaseDirectory());
+        assertEquals("original", Files.readString(file));
+    }
+
     /// Creates a minimal isolated instance whose content is restricted to the temporary fixture.
     /// @param root temporary repository root
     /// @param confirmation scripted launcher decisions
