@@ -64,4 +64,9 @@ XYML の開発には、次の方法で参加できます。
 
 ## ライセンス
 
-ライセンスについては [README.md](README_ja.md#license) をご参照ください。
+本プログラムの改変版を配布する場合、名前またはバージョン番号を合理的な方法で変更し、本プロジェクト（XYML）および上流プロジェクト（HMCL）の元のバージョンと区別できるようにする必要があります。
+
+<!-- #BEGIN BLOCK -->
+<!-- #PROPERTY PROCESS_LINK=FALSE -->
+ライセンスについては [README_en.md](README_en.md#license) をご参照ください。
+<!-- #END BLOCK -->

@@ -62,7 +62,7 @@ XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发�
 
 XYML 按照 [GNU 通用公共许可证第 3 版或更高版本](LICENSE)发布，并保留源自 HMCL 的 GPLv3 第 7 条附加要求：
 
-1. 分发本程序的修改版本时，必须以合理方式修改程序名称或版本号，使其能够与原始版本区分（依据 [GPLv3 第 7(c) 项](LICENSE#L372-L374)）。程序名称和版本号定义在 [`Metadata.java`](XYML/src/main/java/space/minecraftstl/xyml/Metadata.java) 中。
+1. 分发本程序的修改版本时，必须以合理方式修改程序名称或版本号，使其能够与本项目（XYML）及上游项目（HMCL）的原始版本区分（依据 [GPLv3 第 7(c) 项](LICENSE#L372-L374)）。程序名称和版本号定义在 [`Metadata.java`](XYML/src/main/java/space/minecraftstl/xyml/Metadata.java) 中。
 2. 不得移除程序显示的版权声明（依据 [GPLv3 第 7(b) 项](LICENSE#L368-L370)）。
 
 完整授权条件以 [LICENSE](LICENSE) 及各源文件中的版权和许可证声明为准。

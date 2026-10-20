@@ -91,7 +91,7 @@ XYML is distributed under the [GNU General Public License, version 3 or later](.
 additional requirements inherited from HMCL:
 
 1. When distributing a modified version of this program, you must reasonably change its name or version number so that
-   it can be distinguished from the original version (under
+   it can be distinguished from the original versions of both this project (XYML) and its upstream project (HMCL) (under
    [GPLv3 Section 7(c)](../LICENSE#L372-L374)). The program name and version are defined in
    [`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java).
 2. You must not remove copyright notices displayed by the program (under [GPLv3 Section 7(b)](../LICENSE#L368-L370)).

@@ -64,4 +64,10 @@ Desde 2015, más de 130 colaboradores han participado en XYML. Gracias por su tr
 
 ## Licencia
 
-Consulta [README.md](README_es.md#license).
+Al distribuir una versión modificada de este programa, debes cambiar razonablemente su nombre o número de versión
+para distinguirla de las versiones originales tanto de este proyecto (XYML) como de su proyecto de origen (HMCL).
+
+<!-- #BEGIN BLOCK -->
+<!-- #PROPERTY PROCESS_LINK=FALSE -->
+Consulta [README_en.md](README_en.md#license).
+<!-- #END BLOCK -->
