@@ -30,14 +30,17 @@ import javax.swing.AbstractButton;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.event.KeyEvent;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.net.URI;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -47,9 +50,59 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Verifies the shell's bottom navigation hierarchy and independent external actions.
 @NotNullByDefault
 public final class ShellNavigationRailTest {
+    /// The homepage precedes every side destination and shares their accessible, theme-aware icon style.
+    @Test
+    public void placesAccessibleHomepageFirstAndKeepsSelectionExclusive() {
+        AtomicInteger homeRequests = new AtomicInteger();
+        EdtDispatcher.executeAndWait(() -> {
+            ShellNavigationRail rail = new ShellNavigationRail(
+                    ShellPagePresentations.englishFallback(),
+                    homeRequests::incrementAndGet,
+                    ignored -> { },
+                    ignored -> { });
+            try {
+                rail.setSize(new Dimension(52, 560));
+                layoutTree(rail);
+                JToggleButton home = rail.homeButton();
+                ShellNavigationButton accounts = rail.button(ShellPageId.ACCOUNTS);
+                FlatSVGIcon icon = assertInstanceOf(FlatSVGIcon.class, home.getIcon());
+                assertAll(
+                        () -> assertButtonSize(home),
+                        () -> assertEquals(0, home.getParent().getComponentZOrder(home)),
+                        () -> assertTrue(home.getY() < accounts.getY()),
+                        () -> assertTrue(home.isSelected()),
+                        () -> assertTrue(home.isFocusable()),
+                        () -> assertEquals(KeyEvent.VK_H, home.getMnemonic()),
+                        () -> assertEquals(i18n("swing.shell.home"), home.getToolTipText()),
+                        () -> assertEquals(i18n("swing.shell.home"), home.getAccessibleContext().getAccessibleName()),
+                        () -> assertTrue(icon.hasFound()),
+                        () -> assertEquals(20, icon.getIconWidth()),
+                        () -> assertEquals(20, icon.getIconHeight()));
+                rail.setSelectedPage(ShellPageId.ACCOUNTS);
+                assertFalse(home.isSelected());
+                assertTrue(accounts.isSelected());
+                rail.setSelectedPage(null);
+                home.doClick(0);
+                home.doClick(0);
+                assertEquals(2, homeRequests.get());
+                assertTrue(home.isSelected());
+                for (ShellPageId page : ShellPageId.values()) {
+                    assertFalse(rail.button(page).isSelected());
+                }
+            } finally {
+                rail.disableNavigation();
+            }
+            rail.homeButton().doClick(0);
+            assertFalse(rail.homeButton().isEnabled());
+            assertEquals(2, homeRequests.get());
+        });
+    }
+
     /// Settings remains bottom-anchored while community and help actions follow it in order.
     @Test
     public void anchorsExternalActionsBelowSettings() {
@@ -57,6 +110,7 @@ public final class ShellNavigationRailTest {
         EdtDispatcher.executeAndWait(() -> {
             ShellNavigationRail rail = new ShellNavigationRail(
                     ShellPagePresentations.englishFallback(),
+                    () -> { },
                     ignored -> { },
                     openedDestination::set);
             rail.setSize(new Dimension(52, 560));
@@ -151,6 +205,7 @@ public final class ShellNavigationRailTest {
         EdtDispatcher.executeAndWait(() -> {
             ShellNavigationRail rail = new ShellNavigationRail(
                     ShellPagePresentations.englishFallback(),
+                    () -> { },
                     ignored -> { },
                     ignored -> { });
             ShellNavigationButton button = rail.button(ShellPageId.ACCOUNTS);

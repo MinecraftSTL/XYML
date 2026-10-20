@@ -69,6 +69,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
@@ -203,6 +204,108 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// The homepage target restores the cached workspace from every destination and preserves side-page state.
+    @Test
+    public void returnsHomeFromEveryDestinationWithoutRecreatingPages() {
+        EnumMap<ShellPageId, AtomicInteger> counts = creationCounts();
+        AppShellPanel panel = createPanel(counts);
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                ShellNavigationRail rail = assertInstanceOf(
+                        ShellNavigationRail.class,
+                        panel.navigationButton(ShellPageId.ACCOUNTS).getParent().getParent());
+                JToggleButton home = rail.homeButton();
+                JComponent persistentPage = Objects.requireNonNull(panel.activePage(), "persistent page");
+                assertTrue(home.isSelected());
+                for (ShellPageId page : ShellPageId.values()) {
+                    panel.navigateTo(page);
+                    JComponent cachedPage = Objects.requireNonNull(panel.activePage(), "side page");
+                    cachedPage.putClientProperty("homeNavigationState", page.name());
+                    assertFalse(home.isSelected());
+                    home.doClick(0);
+                    home.doClick(0);
+                    assertAll(
+                            () -> assertNull(panel.selectedPage()),
+                            () -> assertSame(persistentPage, panel.activePage()),
+                            () -> assertTrue(home.isSelected()),
+                            () -> assertFalse(panel.navigationButton(page).isSelected()),
+                            () -> assertFalse(panel.pageDeck().isTransitionRunning()));
+                    panel.navigateTo(page);
+                    assertAll(
+                            () -> assertSame(cachedPage, panel.activePage()),
+                            () -> assertEquals(page.name(), cachedPage.getClientProperty("homeNavigationState")),
+                            () -> assertEquals(1, counts.get(page).get()));
+                    panel.navigationButton(page).doClick(0);
+                    assertTrue(home.isSelected());
+                }
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Clicking the selected homepage leaves the live workspace and any ongoing return animation untouched.
+    @Test
+    public void ignoresHomepageClicksBeforeAndDuringTransitions() {
+        EnumMap<ShellPageId, AtomicInteger> counts = creationCounts();
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+        AppShellPanel panel = createPanel(
+                pageFactories(counts),
+                new TestHomeModel(),
+                testAccountsModel(),
+                animator,
+                Duration.ofSeconds(2L));
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                ShellNavigationRail rail = assertInstanceOf(
+                        ShellNavigationRail.class,
+                        panel.navigationButton(ShellPageId.ACCOUNTS).getParent().getParent());
+                JComponent workspace = Objects.requireNonNull(panel.activePage(), "persistent page");
+                panel.pageDeck().setSize(720, 520);
+                panel.pageDeck().doLayout();
+                AtomicInteger selectionChanges = new AtomicInteger();
+                rail.homeButton().addItemListener(event -> selectionChanges.incrementAndGet());
+                rail.homeButton().doClick(0);
+                rail.homeButton().doClick(0);
+                assertNull(panel.selectedPage());
+                assertSame(workspace, panel.activePage());
+                assertEquals(0, selectionChanges.get());
+                assertFalse(panel.pageDeck().isTransitionRunning());
+                for (ShellPageId page : ShellPageId.values()) {
+                    assertEquals(page == ShellPageId.INSTANCES ? 1 : 0, counts.get(page).get());
+                }
+                panel.navigateTo(ShellPageId.ACCOUNTS);
+                assertEquals(
+                        SwingContentTransition.Direction.VERTICAL_FORWARD,
+                        panel.pageDeck().transitionDirection());
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                animator.setMotionPolicy(MotionPolicy.FULL);
+                panel.pageDeck().doLayout();
+                rail.homeButton().doClick(0);
+                assertTrue(panel.pageDeck().isTransitionRunning());
+                int changesBeforeRepeatedClick = selectionChanges.get();
+                rail.homeButton().doClick(0);
+                assertAll(
+                        () -> assertNull(panel.selectedPage()),
+                        () -> assertSame(workspace, panel.activePage()),
+                        () -> assertTrue(rail.homeButton().isSelected()),
+                        () -> assertEquals(changesBeforeRepeatedClick, selectionChanges.get()),
+                        () -> assertTrue(panel.pageDeck().isTransitionRunning()),
+                        () -> assertEquals(
+                                SwingContentTransition.Direction.VERTICAL_BACKWARD,
+                                panel.pageDeck().transitionDirection()),
+                        () -> assertEquals(1, counts.get(ShellPageId.INSTANCES).get()),
+                        () -> assertEquals(1, counts.get(ShellPageId.ACCOUNTS).get()));
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                rail.homeButton().doClick(0);
+                assertFalse(panel.pageDeck().isTransitionRunning());
+            });
+        } finally {
+            animator.setMotionPolicy(MotionPolicy.OFF);
+            panel.close();
+        }
+    }
+
     /// Every active side button closes its page on a second click and exposes persistent instance management.
     @Test
     public void togglesEverySidePageBackToPersistentInstanceManagement() {
@@ -223,7 +326,10 @@ public final class AppShellPanelTest {
                     assertAll(
                             () -> assertNull(panel.selectedPage()),
                             () -> assertSame(persistentPage, panel.activePage()),
-                            () -> assertFalse(button.isSelected()));
+                            () -> assertFalse(button.isSelected()),
+                            () -> assertTrue(assertInstanceOf(
+                                    ShellNavigationRail.class,
+                                    button.getParent().getParent()).homeButton().isSelected()));
                 }
             });
         } finally {
@@ -768,6 +874,7 @@ public final class AppShellPanelTest {
                     accountButton.getParent().getParent());
             JButton officialGroupButton = navigationRail.officialGroupButton();
             JButton helpButton = navigationRail.helpButton();
+            int homeY = SwingUtilities.convertPoint(navigationRail.homeButton(), 0, 0, navigationRail).y;
             int accountY = SwingUtilities.convertPoint(accountButton, 0, 0, navigationRail).y;
             int instancesY = SwingUtilities.convertPoint(instancesButton, 0, 0, navigationRail).y;
             int downloadsY = SwingUtilities.convertPoint(downloadsButton, 0, 0, navigationRail).y;
@@ -783,6 +890,7 @@ public final class AppShellPanelTest {
                     0,
                     navigationRail).y;
             assertAll(
+                    () -> assertTrue(homeY < accountY),
                     () -> assertTrue(accountY < instancesY),
                     () -> assertTrue(instancesY < downloadsY),
                     () -> assertTrue(settingsY > navigationRail.getHeight() / 2),

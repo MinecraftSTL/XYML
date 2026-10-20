@@ -36,12 +36,14 @@ import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Cursor;
 import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Insets;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.net.URI;
 import java.util.EnumMap;
@@ -82,6 +84,9 @@ final class ShellNavigationRail extends JPanel {
     /// Exclusive visual selection group spanning both navigation groups.
     private final ButtonGroup buttonGroup = new ButtonGroup();
 
+    /// Topmost navigation target exposing the persistent instance-management homepage.
+    private final JToggleButton homeButton;
+
     /// Independent bottom action opening the official XYML user group.
     private final JButton officialGroupButton;
 
@@ -106,20 +111,24 @@ final class ShellNavigationRail extends JPanel {
     /// Creates the compact left-side navigation rail.
     ///
     /// @param presentations localized page labels and mnemonics
+    /// @param homeCommand callback revealing the persistent homepage
     /// @param toggleCommand callback opening or toggling one destination
     ShellNavigationRail(
             ShellPagePresentations presentations,
+            Runnable homeCommand,
             Consumer<ShellPageId> toggleCommand) {
-        this(presentations, toggleCommand, ShellNavigationRail::browse);
+        this(presentations, homeCommand, toggleCommand, ShellNavigationRail::browse);
     }
 
     /// Creates the compact rail with an injectable external-link action for focused tests.
     ///
     /// @param presentations localized page labels and mnemonics
+    /// @param homeCommand callback revealing the persistent homepage
     /// @param toggleCommand callback opening or toggling one destination
     /// @param externalLinkCommand callback opening trusted community and help destinations
     ShellNavigationRail(
             ShellPagePresentations presentations,
+            Runnable homeCommand,
             Consumer<ShellPageId> toggleCommand,
             Consumer<URI> externalLinkCommand) {
         super(new BorderLayout());
@@ -133,6 +142,9 @@ final class ShellNavigationRail extends JPanel {
         setBorder(ShellSeparatorBorder.right());
 
         JPanel primaryGroup = createGroup("insets 10 5 0 5");
+        homeButton = createHomeButton(homeCommand);
+        buttonGroup.add(homeButton);
+        primaryGroup.add(homeButton, BUTTON_CONSTRAINTS);
         for (ShellPageId page : List.of(
                 ShellPageId.ACCOUNTS,
                 ShellPageId.INSTANCES,
@@ -154,10 +166,33 @@ final class ShellNavigationRail extends JPanel {
         add(primaryGroup, BorderLayout.NORTH);
         add(auxiliaryGroup, BorderLayout.SOUTH);
 
+        setSelectedPage(null);
+
         taskRegistry = TaskExecutionRegistry.global();
         taskRegistrySubscription = taskRegistry.subscribeVersioned(this::taskSnapshotsChanged);
         TaskExecutionRegistry.Publication publication = taskRegistry.publication();
         updateTaskIndicator(publication);
+    }
+
+    /// Creates the accessible icon-only homepage target using the shared navigation style.
+    ///
+    /// @param homeCommand callback revealing the persistent homepage
+    /// @return configured homepage toggle button
+    private static JToggleButton createHomeButton(Runnable homeCommand) {
+        Runnable showHome = Objects.requireNonNull(homeCommand, "homeCommand");
+        String label = i18n("swing.shell.home");
+        JToggleButton button = new JToggleButton(
+                ShellNavigationButton.createNavigationIcon("assets/swing/icons/nav-home.svg"));
+        button.setName("homeButton");
+        configureRailButton(button);
+        button.setMnemonic(KeyEvent.VK_H);
+        button.setToolTipText(label);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        button.setFocusable(true);
+        button.setFocusPainted(true);
+        button.getAccessibleContext().setAccessibleName(label);
+        button.addActionListener(event -> showHome.run());
+        return button;
     }
 
     /// Creates the icon-only action anchored directly below Settings.
@@ -301,10 +336,17 @@ final class ShellNavigationRail extends JPanel {
     /// @param selectedPage active side destination, or `null` for persistent instance management
     void setSelectedPage(@Nullable ShellPageId selectedPage) {
         buttonGroup.clearSelection();
-        @Nullable ShellNavigationButton selected = selectedPage == null ? null : buttons.get(selectedPage);
+        @Nullable AbstractButton selected = selectedPage == null ? homeButton : buttons.get(selectedPage);
         if (selected != null) {
             selected.setSelected(true);
         }
+    }
+
+    /// Returns the persistent homepage target for focused navigation and accessibility tests.
+    ///
+    /// @return stable homepage button
+    JToggleButton homeButton() {
+        return homeButton;
     }
 
     /// Returns one navigation button for focused tests.
@@ -335,6 +377,7 @@ final class ShellNavigationRail extends JPanel {
 
     /// Disables every navigation target during shell cleanup.
     void disableNavigation() {
+        homeButton.setEnabled(false);
         for (ShellNavigationButton button : buttons.values()) {
             button.setEnabled(false);
         }
