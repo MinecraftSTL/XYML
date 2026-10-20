@@ -79,7 +79,7 @@ uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 's
 
 ʞuɐɥʇ osꞁɐ ǝM
 ǝɥ⟘ ˙[ʎɹoʇsᴉɥ sʇᴉ ʇnoɥᵷnoɹɥʇ sɹoʇnqᴉɹʇuoɔ puɐ sɹoɥʇnɐ s,ꞀƆWH](https://github.com/HMCL-dev/HMCL/graphs/contributors)
-ʞɹoʍ sɐ pǝʇuǝsǝɹdǝɹ ǝq ʇou pꞁnoɥs puɐ ʎɹoʇsᴉɥ ɯɐǝɹʇsdn ʇɐɥʇ oʇ sᵷuoꞁǝq ꞀWʎX ʎq pǝʇᴉɹǝɥuᴉ ʇuǝɯdoꞁǝʌǝp ᵷuᴉuunɹ-ᵷuoꞁ
+ʞɹoʍ ɹoɟ uǝʞɐʇsᴉɯ ǝq ʇou pꞁnoɥs puɐ ʎɹoʇsᴉɥ ɯɐǝɹʇsdn ʇɐɥʇ oʇ sᵷuoꞁǝq ꞀWʎX ʎq pǝʇᴉɹǝɥuᴉ ʇuǝɯdoꞁǝʌǝp ᵷuᴉuunɹ-ᵷuoꞁ
 ˙ʇɔǝɾoɹd ꞀWʎX ǝɥʇ ʎq ʎꞁǝꞁos pǝɔnpoɹd
 
 ## ǝsuǝɔᴉꞀ

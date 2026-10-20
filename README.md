@@ -56,7 +56,7 @@ XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发�
 
 [![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
-同时感谢 [HMCL 的作者与历代贡献者](https://github.com/HMCL-dev/HMCL/graphs/contributors)。XYML 所继承的长期开发成果属于这段上游历史，不应被误写为仅由 XYML 项目产生。
+同时感谢 [HMCL 的作者与历代贡献者](https://github.com/HMCL-dev/HMCL/graphs/contributors)。XYML 所继承的长期开发成果属于这段上游历史，不应被误认为仅由 XYML 项目产生。
 
 ## 开源协议
 

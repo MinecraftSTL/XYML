@@ -82,7 +82,7 @@ Thank you to everyone who contributes code, translations, testing, issue reports
 
 We also thank
 [HMCL's authors and contributors throughout its history](https://github.com/HMCL-dev/HMCL/graphs/contributors). The
-long-running development inherited by XYML belongs to that upstream history and should not be represented as work
+long-running development inherited by XYML belongs to that upstream history and should not be mistaken for work
 produced solely by the XYML project.
 
 ## License
