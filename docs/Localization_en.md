@@ -322,6 +322,10 @@ Run the following command in the terminal:
 
 This will automatically update all documentation content.
 
+Document links without a `#` fragment automatically select a language version using the current document locale and its
+fallback order, preserving query parameters. Section links containing a `#` fragment retain the explicitly selected file,
+query parameters, and anchor (including an empty anchor) without automatically changing the language version.
+
 For example, to create links for switching between different language versions of the same document,
 add the following content under the document title:
 

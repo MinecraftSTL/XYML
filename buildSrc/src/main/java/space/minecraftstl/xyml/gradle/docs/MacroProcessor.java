@@ -17,8 +17,13 @@
  */
 package space.minecraftstl.xyml.gradle.docs;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
 import java.io.IOException;
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /// Macro processor for automatically updating documentation.
@@ -43,7 +48,11 @@ import java.util.regex.Pattern;
 /// <!-- #END LANGUAGE_SWITCHER -->
 /// ```
 ///
+/// Links to document sections retain their explicitly selected language and fragment.
+/// Whole-document links use the current document locale and its existing fallbacks.
+///
 /// @author Glavo
+@NotNullByDefault
 public enum MacroProcessor {
     /// Does not process the content in any way.
     ///
@@ -90,7 +99,7 @@ public enum MacroProcessor {
         public void apply(Document document,
                           Document.MacroBlock macroBlock,
                           StringBuilder outputBuilder) throws IOException {
-            LocalizedDocument localized = document.directory().getFiles().get(document.name());
+            @Nullable LocalizedDocument localized = document.directory().getFiles().get(document.name());
             if (localized == null || localized.getDocuments().isEmpty())
                 throw new AssertionError("Document " + document.name() + " does not exist");
 
@@ -98,7 +107,7 @@ public enum MacroProcessor {
             if (localized.getDocuments().size() > 1) {
                 var languageToDocs = new LinkedHashMap<String, List<Document>>();
                 for (DocumentLocale locale : DocumentLocale.values()) {
-                    Document targetDoc = localized.getDocuments().get(locale);
+                    @Nullable Document targetDoc = localized.getDocuments().get(locale);
                     if (targetDoc != null) {
                         languageToDocs.computeIfAbsent(locale.getLanguageDisplayName(), name -> new ArrayList<>(1))
                                 .add(targetDoc);
@@ -183,7 +192,7 @@ public enum MacroProcessor {
         @Override
         public void apply(Document document, Document.MacroBlock macroBlock, StringBuilder outputBuilder) throws IOException {
             var mutableProperties = new LinkedHashMap<>(macroBlock.properties());
-            String blockName = MacroProcessor.removeSingleProperty(mutableProperties, "NAME");
+            @Nullable String blockName = MacroProcessor.removeSingleProperty(mutableProperties, "NAME");
             if (blockName == null)
                 throw new IllegalArgumentException("Missing property: NAME");
 
@@ -197,11 +206,11 @@ public enum MacroProcessor {
             if (!mutableProperties.isEmpty())
                 throw new IllegalArgumentException("Unsupported properties: " + mutableProperties.keySet());
 
-            LocalizedDocument localizedDocument = document.directory().getFiles().get(document.name());
+            @Nullable LocalizedDocument localizedDocument = document.directory().getFiles().get(document.name());
             if (localizedDocument == null)
                 throw new IOException("Document " + document.name() + " does not exist");
 
-            Document fromDocument = localizedDocument.getDocuments().get(DocumentLocale.ENGLISH);
+            @Nullable Document fromDocument = localizedDocument.getDocuments().get(DocumentLocale.ENGLISH);
             if (fromDocument == null)
                 fromDocument = localizedDocument.getDocuments().get(DocumentLocale.SIMPLIFIED_CHINESE);
             if (fromDocument == null)
@@ -234,8 +243,14 @@ public enum MacroProcessor {
     },
     ;
 
-    private static String removeSingleProperty(Map<String, List<String>> properties, String name) {
-        List<String> values = properties.remove(name);
+    /// Removes an optional property whose value must contain exactly one string when present.
+    ///
+    /// @param properties mutable property map from which the value is removed
+    /// @param name property name
+    /// @return the single property value, or `null` when the property is absent or empty
+    /// @throws IllegalArgumentException when the property has multiple values
+    private static @Nullable String removeSingleProperty(Map<String, List<String>> properties, String name) {
+        @Nullable List<String> values = properties.remove(name);
         if (values == null || values.isEmpty())
             return null;
 
@@ -285,63 +300,81 @@ public enum MacroProcessor {
         return parts;
     }
 
+    /// Matches relative Markdown document paths together with their optional query and fragment suffix.
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "(?<=]\\()[a-zA-Z0-9_\\-./]+\\.md(?=[?#)])"
+            "(?<=]\\()(?<path>[a-zA-Z0-9_\\-./]+\\.md)(?<suffix>(?:[?#][^)]*)?)(?=\\))"
     );
 
+    /// Appends a line with whole-document links localized and explicit section targets preserved.
+    ///
+    /// @param outputBuilder destination for the processed line and a trailing newline
+    /// @param line Markdown line containing zero or more links
+    /// @param document document providing the directory and locale context
     static void processLine(StringBuilder outputBuilder, String line, Document document) {
-        outputBuilder.append(LINK_PATTERN.matcher(line).replaceAll(matchResult -> {
-            String rawLink = matchResult.group();
-            String[] splitPath = rawLink.split("/");
+        outputBuilder.append(LINK_PATTERN.matcher(line).replaceAll(matchResult -> Matcher.quoteReplacement(
+                localizeLink(matchResult.group("path"), matchResult.group("suffix"), document)))).append('\n');
+    }
 
-            if (splitPath.length == 0)
-                return rawLink;
-
-            String fileName = splitPath[splitPath.length - 1];
-            if (!fileName.endsWith(".md"))
-                return rawLink;
-
-            DocumentFileTree current = document.directory();
-            for (int i = 0; i < splitPath.length - 1; i++) {
-                String name = splitPath[i];
-                switch (name) {
-                    case "" -> {
-                        return rawLink;
-                    }
-                    case "." -> {
-                        continue;
-                    }
-                    case ".." -> {
-                        current = current.getParent();
-                        if (current == null)
-                            return rawLink;
-                    }
-                    default -> {
-                        current = current.getChildren().get(name);
-                        if (current == null)
-                            return rawLink;
-                    }
-                }
-            }
-
-            DocumentLocale.LocaleAndName currentLocaleAndName = DocumentLocale.parseFileName(fileName.substring(0, fileName.length() - ".md".length()));
-            LocalizedDocument localizedDocument = current.getFiles().get(currentLocaleAndName.name());
-            if (localizedDocument != null) {
-                List<DocumentLocale> candidateLocales = document.locale().getCandidates();
-                for (DocumentLocale candidateLocale : candidateLocales) {
-                    if (candidateLocale == currentLocaleAndName.locale())
-                        return rawLink;
-
-                    Document targetDoc = localizedDocument.getDocuments().get(candidateLocale);
-                    if (targetDoc != null) {
-                        splitPath[splitPath.length - 1] = targetDoc.file().getFileName().toString();
-                        return String.join("/", splitPath);
-                    }
-                }
-            }
-
+    /// Selects a translated document only when the target has no fragment delimiter.
+    ///
+    /// @param path relative Markdown document path without a query or fragment
+    /// @param suffix optional query and fragment, or an empty string
+    /// @param document document providing the directory and locale context
+    /// @return the localized target, or the original target when it must remain unchanged
+    private static String localizeLink(String path, String suffix, Document document) {
+        String rawLink = path + suffix;
+        if (suffix.indexOf('#') >= 0)
             return rawLink;
-        })).append('\n');
+
+        String[] splitPath = path.split("/");
+        if (splitPath.length == 0)
+            return rawLink;
+
+        String fileName = splitPath[splitPath.length - 1];
+        if (!fileName.endsWith(".md"))
+            return rawLink;
+
+        @Nullable DocumentFileTree current = document.directory();
+        for (int i = 0; i < splitPath.length - 1; i++) {
+            String name = splitPath[i];
+            switch (name) {
+                case "" -> {
+                    return rawLink;
+                }
+                case "." -> {
+                    continue;
+                }
+                case ".." -> {
+                    current = current.getParent();
+                    if (current == null)
+                        return rawLink;
+                }
+                default -> {
+                    current = current.getChildren().get(name);
+                    if (current == null)
+                        return rawLink;
+                }
+            }
+        }
+
+        DocumentLocale.LocaleAndName currentLocaleAndName = DocumentLocale.parseFileName(
+                fileName.substring(0, fileName.length() - ".md".length()));
+        @Nullable LocalizedDocument localizedDocument = current.getFiles().get(currentLocaleAndName.name());
+        if (localizedDocument != null) {
+            @Unmodifiable List<DocumentLocale> candidateLocales = document.locale().getCandidates();
+            for (DocumentLocale candidateLocale : candidateLocales) {
+                if (candidateLocale == currentLocaleAndName.locale())
+                    return rawLink;
+
+                @Nullable Document targetDoc = localizedDocument.getDocuments().get(candidateLocale);
+                if (targetDoc != null) {
+                    splitPath[splitPath.length - 1] = targetDoc.file().getFileName().toString();
+                    return String.join("/", splitPath) + suffix;
+                }
+            }
+        }
+
+        return rawLink;
     }
 
     private static void writeBegin(StringBuilder builder, Document.MacroBlock macroBlock) throws IOException {

@@ -67,7 +67,4 @@ XYML 乃社群共驅之開源項目，迎諸君獻碼或建言。
 
 分發改本，須合理更其名或版號，以別於本項目（XYML）及上游項目（HMCL）之原本。
 
-<!-- #BEGIN BLOCK -->
-<!-- #PROPERTY PROCESS_LINK=FALSE -->
 詳見 [README_zh_Hant.md](README_zh_Hant.md#開源協議)。
-<!-- #END BLOCK -->
