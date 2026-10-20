@@ -892,7 +892,7 @@ public final class GameVersionCatalogPanelTest {
     public void derivesDefaultInstanceNameFromSelectedLoaders() {
         assertEquals(
                 "1.21.1-Forge-Fabric",
-                GameVersionCatalogPanel.defaultInstanceName(
+                GameVersionCatalogNames.defaultInstanceName(
                         "1.21.1",
                         List.of(
                                 remoteVersion("forge", "47.3.0"),

@@ -49,7 +49,6 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.game.GameComponentType;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -1297,7 +1296,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 ? nonNullSnapshot.selectedRemoteVersions()
                 : List.of();
         if (belongsToSelectedGame && mayReplaceSuggestedName && versionId != null) {
-            applyInstanceNameSuggestion(defaultInstanceName(versionId, selectedRemoteVersions));
+            applyInstanceNameSuggestion(GameVersionCatalogNames.defaultInstanceName(versionId, selectedRemoteVersions));
         } else if (!mayReplaceSuggestedName) {
             suggestedInstanceName = null;
         }
@@ -1337,37 +1336,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         if (versionId == null) {
             return;
         }
-        applyInstanceNameSuggestion(defaultInstanceName(versionId, selectedRemoteVersions));
+        applyInstanceNameSuggestion(GameVersionCatalogNames.defaultInstanceName(versionId, selectedRemoteVersions));
         updateInstallAction();
-    }
-
-    /// Builds the historical concise instance name from Minecraft and selected primary loaders.
-    ///
-    /// @param versionId exact selected Minecraft version
-    /// @param loaders immutable selected loader and companion versions
-    /// @return suggested instance name
-    static String defaultInstanceName(
-            String versionId,
-            @Unmodifiable List<ComponentRemoteVersion> loaders) {
-        StringBuilder name = new StringBuilder(Objects.requireNonNull(versionId, "versionId"));
-        for (ComponentRemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
-            GameComponentType type = loader.getComponentType();
-            @Nullable String suffix = switch (type) {
-                case FORGE -> "Forge";
-                case NEO_FORGE -> "NeoForge";
-                case CLEANROOM -> "Cleanroom";
-                case LEGACY_FABRIC -> "LegacyFabric";
-                case FABRIC -> "Fabric";
-                case LITELOADER -> "LiteLoader";
-                case QUILT -> "Quilt";
-                case OPTIFINE -> "OptiFine";
-                default -> null;
-            };
-            if (suffix != null) {
-                name.append('-').append(suffix);
-            }
-        }
-        return name.toString();
     }
 
     /// Records intentional destination edits and refreshes installation eligibility.
