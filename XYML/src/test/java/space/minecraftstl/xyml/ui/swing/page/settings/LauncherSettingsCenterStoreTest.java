@@ -39,6 +39,26 @@ public final class LauncherSettingsCenterStoreTest {
             try {
                 assertTrue(store.snapshot().mcpConfirmInstanceDeletion());
                 assertTrue(store.snapshot().mcpConfirmModDeletion());
+                assertTrue(store.snapshot().mcpConfirmResourcePackDeletion());
+                store.setMcpConfirmResourcePackDeletion(false);
+                assertFalse(settings.mcpConfirmResourcePackDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmResourcePackDeletion());
+                assertTrue(store.snapshot().mcpConfirmWorldDeletion());
+                store.setMcpConfirmWorldDeletion(false);
+                assertFalse(settings.mcpConfirmWorldDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmWorldDeletion());
+                assertTrue(store.snapshot().mcpConfirmServerDeletion());
+                store.setMcpConfirmServerDeletion(false);
+                assertFalse(settings.mcpConfirmServerDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmServerDeletion());
+                assertTrue(store.snapshot().mcpConfirmShaderPackDeletion());
+                store.setMcpConfirmShaderPackDeletion(false);
+                assertFalse(settings.mcpConfirmShaderPackDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmShaderPackDeletion());
+                assertTrue(store.snapshot().mcpConfirmSchematicDeletion());
+                store.setMcpConfirmSchematicDeletion(false);
+                assertFalse(settings.mcpConfirmSchematicDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmSchematicDeletion());
                 assertEquals("", store.snapshot().mcpBearerToken());
                 assertTrue(store.snapshot().showMcpEnablementWarning());
 
@@ -70,4 +90,33 @@ public final class LauncherSettingsCenterStoreTest {
             }
         });
     }
+
+    /// Read-only settings refuse every new confirmation preference write.
+    @Test
+    public void readOnlySettingsRetainSafeConfirmationDefaults() {
+        LauncherStateDispatcher.executeAndWait(() -> {
+            LauncherSettings settings = new LauncherSettings();
+            LauncherSettingsCenterStore store = new LauncherSettingsCenterStore(settings, () -> false);
+            try {
+                store.setMcpConfirmResourcePackDeletion(false);
+                assertTrue(store.snapshot().mcpConfirmResourcePackDeletion());
+                assertTrue(settings.mcpConfirmResourcePackDeletionProperty().get());
+                store.setMcpConfirmWorldDeletion(false);
+                assertTrue(store.snapshot().mcpConfirmWorldDeletion());
+                assertTrue(settings.mcpConfirmWorldDeletionProperty().get());
+                store.setMcpConfirmServerDeletion(false);
+                assertTrue(store.snapshot().mcpConfirmServerDeletion());
+                assertTrue(settings.mcpConfirmServerDeletionProperty().get());
+                store.setMcpConfirmShaderPackDeletion(false);
+                assertTrue(store.snapshot().mcpConfirmShaderPackDeletion());
+                assertTrue(settings.mcpConfirmShaderPackDeletionProperty().get());
+                store.setMcpConfirmSchematicDeletion(false);
+                assertTrue(store.snapshot().mcpConfirmSchematicDeletion());
+                assertTrue(settings.mcpConfirmSchematicDeletionProperty().get());
+            } finally {
+                store.close();
+            }
+        });
+    }
+
 }

@@ -115,6 +115,9 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// Existing repository lifecycle service used for staged instance mutations.
     private final RepositoryInstanceLifecycleService instanceLifecycle;
 
+    /// Headless content operations sharing the launcher-owned deletion policy.
+    private final XYMLMcpContentService contentService;
+
     /// Application-owned policy for every destructive MCP operation.
     private final McpDeletionConfirmation deletionConfirmation;
 
@@ -198,9 +201,16 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceLifecycle = new RepositoryInstanceLifecycleService(repository);
         this.deletionConfirmation = Objects.requireNonNull(deletionConfirmation, "deletionConfirmation");
+        this.contentService = new XYMLMcpContentService(this, repository, deletionConfirmation);
         this.missingDependencySearch = missingDependencySearch;
         this.repairActionsAllowed = Objects.requireNonNull(repairActionsAllowed, "repairActionsAllowed");
         this.crashRepairCoordinator = Objects.requireNonNull(crashRepairCoordinator, "crashRepairCoordinator");
+    }
+
+    /// Returns installed-content capabilities sharing this service's instance and process guards.
+    @Override
+    public XYMLMcpContentOperations contentOperations() {
+        return contentService;
     }
 
     /// Returns all installed instances and their root directories.
@@ -281,7 +291,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param id instance identifier
     /// @return normalized absolute running directory
     /// @throws InterruptedException if a scheduled settings save cannot finish
-    private Path resolvedRunDirectory(GameInstanceID id) throws InterruptedException {
+    Path resolvedRunDirectory(GameInstanceID id) throws InterruptedException {
         return withSettingsSaveBarrier(() -> repository.getRunDirectory(id).toAbsolutePath().normalize());
     }
 
@@ -424,24 +434,24 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     AtomicBoolean committed = new AtomicBoolean();
                     Task<@Nullable Void> mutation = Task.<@Nullable Void>composeAsync(
                             "Confirm MCP game instance deletion", () -> {
+                        McpDeletionBatch deletionBatch = contentService.instanceDeletionBatch(target, repositoryDirectory);
                         boolean confirmed = withSettingsSaveBarrier(() -> deletionConfirmation.confirm(
                                 McpDeletionConfirmation.DeletionRequest.instance(target)));
                         if (!confirmed) {
                             return Task.<@Nullable Void>completed(null).asOrchestration();
                         }
                         approved.set(true);
-                        return repositoryTask("Delete MCP game instance", repositoryDirectory, () -> {
-                            requireInstanceDirectory(target, instanceDirectory);
-                            requireInstance(target);
-                            requireTrackedLaunchStopped(repositoryDirectory, target, "delete");
-                            instanceLifecycle.deleteWithoutRefresh(target);
-                            committed.set(true);
-                            launchStates.remove(new LaunchKey(repositoryDirectory, target));
+                        McpContentTask<@Nullable Void> deletion = new McpContentTask<>(checkpoint -> {
+                            if (contentService.deleteInstanceFiles(target, deletionBatch, repositoryDirectory, checkpoint)) {
+                                committed.set(true);
+                                launchStates.remove(new LaunchKey(repositoryDirectory, target));
+                            }
                             return null;
-                        },
-                                TaskResource.repositoryOperation(repositoryDirectory),
-                                TaskResource.gameInstance(instanceDirectory),
-                                TaskResource.gameDirectory(removedDirectory));
+                        });
+                        return deletion.setName("Delete MCP game instance").setExecutor(Schedulers.io())
+                                .setResources(TaskResource.repositoryOperation(repositoryDirectory),
+                                        TaskResource.gameInstance(instanceDirectory),
+                                        TaskResource.gameDirectory(removedDirectory));
                     }).setExecutor(Schedulers.io()).setResources(
                             TaskResource.repositoryOperation(repositoryDirectory),
                             TaskResource.gameInstance(instanceDirectory),
@@ -1045,60 +1055,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     public Task<@Unmodifiable Map<String, Object>> removeMods(
             String instanceId,
             @Unmodifiable List<String> paths) {
-        GameInstanceID id = id(instanceId);
-        @Unmodifiable List<String> pathSnapshot = List.copyOf(paths);
-        if (pathSnapshot.isEmpty()) {
-            return Task.completed(Map.of("approved", true, "removed", List.of()));
-        }
-        @Unmodifiable List<Path> candidates = pathSnapshot.stream()
-                .map(XYMLMcpService::normalizedModCandidate)
-                .distinct()
-                .toList();
-        Path repositoryDirectory = repositoryDirectory();
-        Path instanceDirectory = instanceDirectory(repositoryDirectory, id);
-        return Task.<@Unmodifiable Map<String, Object>>composeAsync("Resolve MCP mod removal",
-                () -> repository.callWithStableBaseDirectory(repositoryDirectory, () -> {
-                    requireInstanceDirectory(id, instanceDirectory);
-                    requireInstance(id);
-                    Path modsDirectory = resolvedModsDirectory(id);
-                    return Task.<@Unmodifiable Map<String, Object>>composeAsync("Confirm MCP mod removal", () -> {
-                        requireTrackedLaunchStopped(repositoryDirectory, id, "remove mods");
-                        ModManager currentManager = new ModManager(repository, id, modsDirectory);
-                        Map<Path, LocalModFile> currentSelection =
-                                selectedManagedMods(currentManager, modsDirectory, candidates);
-                        boolean approved = withSettingsSaveBarrier(() -> deletionConfirmation.confirm(
-                                McpDeletionConfirmation.DeletionRequest.mods(id, currentSelection.size())));
-                        if (!approved) {
-                            return Task.<@Unmodifiable Map<String, Object>>completed(
-                                    Map.of("approved", false, "removed", List.of())).asOrchestration();
-                        }
-                        return repositoryTask("Remove MCP mods", repositoryDirectory, () -> {
-                            requireInstanceDirectory(id, instanceDirectory);
-                            requireInstance(id);
-                            requireTrackedLaunchStopped(repositoryDirectory, id, "remove mods");
-                            List<String> selectedPaths = currentSelection.keySet().stream()
-                                    .map(Path::toString)
-                                    .toList();
-                            try {
-                                currentManager.removeMods(currentSelection.values().toArray(LocalModFile[]::new));
-                            } finally {
-                                currentManager.invalidateCache();
-                            }
-                            return Map.of("approved", true, "removed", selectedPaths);
-                        },
-                                TaskResource.repositoryOperation(repositoryDirectory),
-                                TaskResource.gameInstance(instanceDirectory),
-                                TaskResource.gameDirectory(modsDirectory));
-                    }).setExecutor(Schedulers.io()).setResources(
-                            TaskResource.repositoryOperation(repositoryDirectory),
-                            TaskResource.gameInstance(instanceDirectory),
-                            TaskResource.gameDirectory(modsDirectory));
-                })).setExecutor(Schedulers.io()).setResources(
-                TaskResource.gameInstance(instanceDirectory),
-                TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
-                TaskResource.configuration(SettingsManager.gameSettingsLocation()),
-                TaskResource.configuration(SettingsManager.settingsLocation()))
-                .releaseResourcesBeforeDependencies();
+        return contentService.removeMods(instanceId, paths);
     }
 
     /// Starts an instance with the launcher-generated options and captures monitor state.
@@ -1285,7 +1242,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param <T> result type
     /// @return operation result
     /// @throws InterruptedException if the save barrier is interrupted after completing its drain
-    private static <T> T withSettingsSaveBarrier(Supplier<T> operation) throws InterruptedException {
+    static <T> T withSettingsSaveBarrier(Supplier<T> operation) throws InterruptedException {
         @Nullable Throwable primaryFailure = null;
         try {
             return operation.get();
@@ -1573,7 +1530,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
 
     /// Returns the normalized repository directory captured for a task declaration.
     /// @return normalized absolute repository directory
-    private Path repositoryDirectory() {
+    Path repositoryDirectory() {
         return repository.getBaseDirectory().toAbsolutePath().normalize();
     }
 
@@ -1588,7 +1545,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param repositoryDirectory normalized repository root
     /// @param id instance identifier
     /// @return normalized absolute instance directory under the captured root
-    private static Path instanceDirectory(Path repositoryDirectory, GameInstanceID id) {
+    static Path instanceDirectory(Path repositoryDirectory, GameInstanceID id) {
         return repositoryDirectory.resolve("versions").resolve(id.id()).toAbsolutePath().normalize();
     }
 
@@ -1596,7 +1553,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param repositoryDirectory normalized repository root
     /// @param id instance identifier
     /// @return normalized absolute instance-setting path
-    private static Path instanceSettingsFile(Path repositoryDirectory, GameInstanceID id) {
+    static Path instanceSettingsFile(Path repositoryDirectory, GameInstanceID id) {
         return instanceDirectory(repositoryDirectory, id)
                 .resolve(".xyml")
                 .resolve("config")
@@ -1614,7 +1571,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// Rejects a task when its instance path moved after the resource declaration was captured.
     /// @param id instance identifier
     /// @param expected captured normalized instance directory
-    private void requireInstanceDirectory(GameInstanceID id, Path expected) {
+    void requireInstanceDirectory(GameInstanceID id, Path expected) {
         requirePath(expected, repository.getInstanceRoot(id), "instance directory");
     }
 
@@ -1630,7 +1587,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves one identifier and verifies it is a valid XYML instance ID.
-    private GameInstanceID id(String raw) {
+    GameInstanceID id(String raw) {
         return new GameInstanceID(Objects.requireNonNull(raw, "instanceId"));
     }
 
@@ -1646,7 +1603,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Verifies that an instance exists before a mutating operation.
-    private void requireInstance(GameInstanceID id) {
+    void requireInstance(GameInstanceID id) {
         if (!repository.hasInstance(id)) {
             throw new IllegalArgumentException("Unknown instance: " + id.id());
         }
@@ -1656,7 +1613,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param repositoryDirectory captured repository root
     /// @param id source instance identifier
     /// @param operation requested lifecycle operation
-    private void requireTrackedLaunchStopped(
+    void requireTrackedLaunchStopped(
             Path repositoryDirectory,
             GameInstanceID id,
             String operation) {
@@ -1743,7 +1700,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         LogAnalyzable.JavaRuntimeRepair delegate = JavaRuntimeRepairTaskFactory.createRepair(
                 repository,
                 checkedManifest,
-                () -> sourceValidator == null ? null : sourceValidator.createTask());
+                () -> sourceValidator == null ? null : sourceValidator.createTask(),
+                true);
         return new LogAnalyzable.JavaRuntimeRepair() {
             /// {@inheritDoc}
             @Override
@@ -1885,7 +1843,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     /// @param candidates normalized client-supplied candidates
     /// @return immutable insertion-ordered selected mod index
     /// @throws IOException if metadata cannot be read or a candidate is not currently managed
-    private static @Unmodifiable Map<Path, LocalModFile> selectedManagedMods(
+    static @Unmodifiable Map<Path, LocalModFile> selectedManagedMods(
             ModManager manager,
             Path modsDirectory,
             @Unmodifiable List<Path> candidates) throws IOException {

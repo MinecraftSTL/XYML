@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.addon.repository;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.util.MurmurHash2;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -52,6 +53,22 @@ public final class CurseForgeRemoteAddonRepositoryTest {
                 RemoteAddonRepository.SortType.AUTHOR));
         assertEquals(6, CurseForgeRemoteAddonRepository.toModsSearchSortField(
                 RemoteAddonRepository.SortType.TOTAL_DOWNLOADS));
+    }
+
+    /// Verifies that the CurseForge API key is resolved from the build-provided property.
+    @Test
+    public void resolvesApiKeyFromBuildProperty() {
+        @Nullable String previous = System.getProperty("xyml.curseforge.apikey");
+        try {
+            System.setProperty("xyml.curseforge.apikey", "test-api-key");
+            assertEquals("test-api-key", CurseForgeRemoteAddonRepository.resolveApiKey());
+        } finally {
+            if (previous == null) {
+                System.clearProperty("xyml.curseforge.apikey");
+            } else {
+                System.setProperty("xyml.curseforge.apikey", previous);
+            }
+        }
     }
 
     /// Verifies that streaming calculation remains identical to the previous in-memory algorithm.

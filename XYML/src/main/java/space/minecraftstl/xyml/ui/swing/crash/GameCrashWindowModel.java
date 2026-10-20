@@ -226,7 +226,9 @@ final class GameCrashWindowModel {
         if (repository instanceof XYMLGameRepository xymlRepository) {
             logAnalyzable = logAnalyzable.withJavaRuntimeRepair(JavaRuntimeRepairTaskFactory.createRepair(
                     xymlRepository,
-                    manifest));
+                    manifest,
+                    () -> null,
+                    true));
         }
         Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
         return new GameCrashWindowModel(

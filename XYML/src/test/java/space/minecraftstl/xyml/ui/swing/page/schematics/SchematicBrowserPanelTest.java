@@ -1186,6 +1186,15 @@ public final class SchematicBrowserPanelTest {
             return directoryName;
         }
 
+        /// Completes the injected prompt against this fixture's virtual directory model.
+        /// Filesystem validation is exercised separately with actual temporary directories.
+        @Override
+        public CompletionStage<@Nullable String> promptDirectoryName(Component owner,
+                java.util.function.Function<String, CompletionStage<@Nullable String>> validator) {
+            Objects.requireNonNull(validator, "validator");
+            return CompletableFuture.completedFuture(promptDirectoryName(owner));
+        }
+
         /// Returns the configured confirmation after running the modal hook.
         @Override
         public boolean confirmDelete(Component owner, SchematicBrowserItem target) {

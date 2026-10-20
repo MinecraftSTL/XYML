@@ -93,6 +93,15 @@ public class DefaultGameRepository implements GameRepository {
                 && Files.exists(bin.resolve("lwjgl_util.jar"));
     }
 
+    /// Serializes final commit phases while allowing unrelated draft preparation.
+    private final java.util.concurrent.locks.ReentrantLock draftCommitLock = new java.util.concurrent.locks.ReentrantLock();
+
+    /// In-process recovery quarantine survives repository-root switches.
+    private final Set<String> recoveryRequired = ConcurrentHashMap.newKeySet();
+
+    /// Revision advanced by complete metadata publications.
+    private long publicationRevision;
+
     private volatile Status status;
     private volatile boolean loaded;
     private final ConcurrentHashMap<Path, Optional<String>> gameVersions = new ConcurrentHashMap<>();
@@ -149,7 +158,8 @@ public class DefaultGameRepository implements GameRepository {
         }).setResources(TaskResource.gameDirectory(expectedDirectory));
     }
 
-    protected void refreshImpl() {
+    /// Reloads the index while excluding detached snapshot capture during publication.
+    protected synchronized void refreshImpl() {
         Status newStatus = new Status(status.baseDirectory);
 
         if (hasClassicVersion(newStatus.baseDirectory)) {
@@ -305,6 +315,7 @@ public class DefaultGameRepository implements GameRepository {
 
     @Override
     public GameInstanceManifest.Resolved getResolvedInstanceManifest(GameInstanceID instanceId) throws NoSuchGameInstanceException {
+        checkDraftInstanceAvailable(instanceId);
         Status currentStatus = status;
 
         InstanceHolder instanceHolder = currentStatus.instances.get(instanceId);
@@ -374,8 +385,9 @@ public class DefaultGameRepository implements GameRepository {
         return getInstanceRoot(id).resolve(id + ".jar");
     }
 
+    /// Renames files and publishes their references while excluding detached snapshot capture.
     @Override
-    public boolean renameInstance(GameInstanceID from, GameInstanceID to) {
+    public synchronized boolean renameInstance(GameInstanceID from, GameInstanceID to) {
         if (EventBus.EVENT_BUS.fireEvent(new RenameInstanceEvent(this, from, to)) == Event.Result.DENY) {
             return false;
         }
@@ -461,7 +473,7 @@ public class DefaultGameRepository implements GameRepository {
     /// @param id instance identifier to remove
     /// @param mode requested deletion behavior
     /// @throws IOException when the event is denied or the selected operation fails
-    private void removeInstanceWithMode(GameInstanceID id, DeletionMode mode) throws IOException {
+    private synchronized void removeInstanceWithMode(GameInstanceID id, DeletionMode mode) throws IOException {
         if (EventBus.EVENT_BUS.fireEvent(new RemoveInstanceEvent(this, id)) == Event.Result.DENY) {
             throw new IOException("Instance removal was denied");
         }
@@ -495,7 +507,7 @@ public class DefaultGameRepository implements GameRepository {
     /// @param id instance identifier to remove
     /// @param refreshAfterDeletion whether an asynchronous refresh should follow a directory deletion attempt
     /// @return whether the instance was absent or its directory was moved out of the repository
-    private boolean removeInstanceFromDisk(GameInstanceID id, boolean refreshAfterDeletion) {
+    private synchronized boolean removeInstanceFromDisk(GameInstanceID id, boolean refreshAfterDeletion) {
         if (EventBus.EVENT_BUS.fireEvent(new RemoveInstanceEvent(this, id)) == Event.Result.DENY) {
             return false;
         }
@@ -753,6 +765,7 @@ public class DefaultGameRepository implements GameRepository {
 
     @Override
     public GameInstanceManifest.Resolved resolve(GameInstanceManifest manifest) throws NoSuchGameInstanceException {
+        checkDraftInstanceAvailable(manifest.id());
         return status.resolve(manifest, new HashSet<>());
     }
 
@@ -853,6 +866,161 @@ public class DefaultGameRepository implements GameRepository {
             return manifest.withPatches(patches);
         }
 
+    }
+
+    /// Captures committed manifests without leaking mutable JSON payloads.
+    @Override
+    public synchronized GameRepositorySnapshot getSnapshot() {
+        Map<GameInstanceID, GameInstanceManifest> values = new TreeMap<>();
+        status.instances.forEach((id, holder) -> values.put(id, holder.manifest));
+        return new GameRepositorySnapshot(status.baseDirectory, publicationRevision, values);
+    }
+
+    /// Opens an independent draft; callers own its terminal close.
+    @Override
+    public GameRepositoryDraft openDraft() throws IOException {
+        return new GameRepositoryDraft(this);
+    }
+
+    /// Creates a stopped root transaction and closes it after every terminal task outcome.
+    @Override
+    public <T> Task<T> runDraftAsync(java.util.function.Function<GameRepositoryDraft, Task<T>> factory) {
+        Objects.requireNonNull(factory, "factory");
+        Path root = getBaseDirectory().toAbsolutePath().normalize();
+        java.util.concurrent.atomic.AtomicReference<@Nullable GameRepositoryDraft> active =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Task<T> prepared = Task.composeAsync(() -> {
+            GameRepositoryDraft draft = openDraft();
+            active.set(draft);
+            try {
+                return Objects.requireNonNull(factory.apply(draft), "Draft factory task");
+            } catch (RuntimeException | Error failure) {
+                try {
+                    draft.close();
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        }).setResources(TaskResource.repositoryOperation(root)).asOrchestration();
+        Task<T> committed = prepared.thenComposeAsync(value -> {
+            GameRepositoryDraft draft = Objects.requireNonNull(active.get(), "Active draft");
+            java.util.List<TaskResource> resources = draft.getCommitResources();
+            return Task.supplyAsync(() -> {
+                draft.commit();
+                return value;
+            }).setResources(resources.get(0), resources.subList(1, resources.size()).toArray(TaskResource[]::new));
+        }).asOrchestration();
+        return committed.whenTerminalWithResources(space.minecraftstl.xyml.task.Schedulers.defaultScheduler(), failure -> {
+            @Nullable GameRepositoryDraft draft = active.get();
+            if (draft != null) {
+                if (failure != null) draft.requestCancellation();
+                try {
+                    draft.close();
+                } catch (IOException cleanup) {
+                    if (failure == null) throw cleanup;
+                    failure.addSuppressed(cleanup);
+                }
+            }
+        }, TaskResource.repositoryOperation(root)).thenApplyAsync(ignored -> committed.getResult());
+    }
+
+    /// Serializes only final application and publication, not independent draft preparation.
+    void lockDraftCommit() {
+        draftCommitLock.lock();
+    }
+
+    /// Releases the commit permit after rollback or publication.
+    void unlockDraftCommit() {
+        draftCommitLock.unlock();
+    }
+
+    /// Blocks a recovery-required instance from further mutation or launch resolution.
+    void checkDraftInstanceAvailable(GameInstanceID id) {
+        if (recoveryRequired.contains(getBaseDirectory().toAbsolutePath().normalize() + ":" + id.id())) {
+            throw new IllegalStateException("Instance requires recovery: " + id.id());
+        }
+    }
+
+    /// Retains a runtime quarantine when automatic rollback could not restore all owned data.
+    void markDraftRecoveryRequired(Set<GameInstanceID> ids) {
+        ids.forEach(id -> recoveryRequired.add(getBaseDirectory().toAbsolutePath().normalize() + ":" + id.id()));
+    }
+
+    /// Rebases staged metadata over the latest index and publishes it exactly once.
+    synchronized GameRepositorySnapshot publishDraft(GameRepositoryDraft draft) throws IOException {
+        draft.validatePublication(getSnapshot());
+        Status next = new Status(status.baseDirectory);
+        status.instances.forEach((id, holder) -> next.instances.put(id, new InstanceHolder(next, id, holder.manifest)));
+        draft.removedIds().forEach(next.instances::remove);
+        draft.stagedManifests().forEach((id, manifest) -> next.instances.put(id, new InstanceHolder(next, id, manifest)));
+        long nextRevision = Math.incrementExact(publicationRevision);
+        Map<GameInstanceID, GameInstanceManifest> values = new TreeMap<>();
+        next.instances.forEach((id, holder) -> values.put(id, holder.manifest));
+        GameRepositorySnapshot published = new GameRepositorySnapshot(next.baseDirectory, nextRevision, values);
+        gameVersions.clear();
+        publicationRevision = nextRevision;
+        status = next;
+        return published;
+    }
+
+    /// Uses the established resolver against an isolated snapshot rather than a live mutable catalog.
+    static GameInstanceManifest.Resolved resolveSnapshot(GameRepositorySnapshot snapshot, GameInstanceManifest manifest,
+                                                    Set<GameInstanceID> resolvedSoFar) throws NoSuchGameInstanceException {
+        GameInstanceManifest launchManifest;
+        GameInstanceManifest standaloneManifest = manifest.isRoot()
+                ? manifest
+                : Status.addPatches(
+                Status.addPatches(new GameInstanceManifest(manifest.id()), List.of(manifest.toPatch())),
+                manifest.patches());
+
+        if (manifest.inheritsFrom() == null) {
+            if (manifest.isRoot()) {
+                // TODO: Breaking change; test instances installed by external installers and other launchers.
+                launchManifest = manifest.patches() != null ? new GameInstanceManifest(manifest.id()).withPatches(manifest.patches()) : manifest;
+            } else {
+                launchManifest = manifest;
+            }
+            launchManifest = launchManifest.withJar(manifest.jar() == null ? manifest.id() : manifest.jar());
+        } else {
+            // To maximize the compatibility.
+            if (!resolvedSoFar.add(manifest.id())) {
+                LOG.warning("Found circular instance dependencies: " + resolvedSoFar);
+                launchManifest = (manifest.jar() == null ? manifest.withJar(manifest.id()) : manifest)
+                        .withInheritsFrom(null);
+            } else {
+                @Nullable GameInstanceManifest parentInstance = snapshot.hasInstance(manifest.inheritsFrom())
+                        ? snapshot.getInstanceManifest(manifest.inheritsFrom()) : null;
+                if (parentInstance == null) {
+                    throw new NoSuchGameInstanceException(manifest.inheritsFrom());
+                }
+
+                // The missing parent instance is expected to be installed before resolution.
+                GameInstanceManifest.Resolved parentResolved = resolveSnapshot(snapshot, parentInstance, resolvedSoFar);
+                launchManifest = manifest.merge(parentResolved.launchManifest());
+                standaloneManifest = Status.addPatches(
+                        Status.addPatches(parentResolved.standaloneManifest(), Collections.singleton(manifest.toPatch())),
+                        manifest.patches());
+            }
+        }
+
+        if (manifest.patches() != null && !manifest.patches().isEmpty()) {
+            // Assume patches themselves do not have patches recursively.
+            List<GameInstancePatch> sortedPatches = manifest.patches().stream()
+                    .sorted(Comparator.comparing(GameInstancePatch::getPriority))
+                    .toList();
+            for (GameInstancePatch patch : sortedPatches) {
+                launchManifest = patch.merge(launchManifest);
+            }
+        }
+
+        launchManifest = launchManifest.withId(manifest.id()).withPatches(null);
+        standaloneManifest = standaloneManifest.withId(manifest.id());
+        if (launchManifest.jar() != null) {
+            standaloneManifest = standaloneManifest.withJar(launchManifest.jar());
+        }
+
+        return new GameInstanceManifest.Resolved(manifest, launchManifest, standaloneManifest);
     }
 
     protected static class InstanceHolder {

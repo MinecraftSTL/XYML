@@ -31,6 +31,12 @@ import java.util.Map;
 /// repository types that intentionally remain outside XYMLCore.
 @NotNullByDefault
 public interface XYMLMcpOperations {
+    /// Returns optional installed-content management capabilities.
+    /// @return installed-content operation provider
+    /// @throws UnsupportedOperationException when the provider does not support content management
+    default XYMLMcpContentOperations contentOperations() {
+        throw new UnsupportedOperationException("This MCP provider does not support content management");
+    }
 
     /// Lists installed game instances.
     ///

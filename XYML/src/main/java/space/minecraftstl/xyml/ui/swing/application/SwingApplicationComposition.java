@@ -316,7 +316,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
             if (currentWindow == null) {
                 throw new IllegalStateException("Swing application window is not ready for navigation");
             }
-            currentWindow.navigateTo(page);
+            if (page == ShellPageId.TASKS) {
+                currentWindow.openRunningTasks();
+            } else {
+                currentWindow.navigateTo(page);
+            }
         };
         DownloadPageNavigation downloadsNavigation = new DownloadPageNavigation();
 
@@ -581,6 +585,44 @@ public final class SwingApplicationComposition implements AutoCloseable {
         return account == null ? null : account.getProfileName();
     }
 
+    /// Creates the instance-content boundary backed by lazy download-page navigation.
+    ///
+    /// @param navigateCommand shell-owned destination switch
+    /// @param downloadsNavigation EDT-owned pending download request channel
+    /// @return navigation retaining project queries until the downloads page attaches
+    static InstanceContentNavigation createInstanceContentNavigation(
+            Consumer<ShellPageId> navigateCommand,
+            DownloadPageNavigation downloadsNavigation) {
+        Objects.requireNonNull(navigateCommand, "navigateCommand");
+        Objects.requireNonNull(downloadsNavigation, "downloadsNavigation");
+        return new InstanceContentNavigation() {
+            /// Opens one plain download category request.
+            @Override
+            public void openDownloads(DownloadPageTarget target) {
+                requestDownloads(DownloadPageRequest.of(target));
+            }
+
+            /// Opens one download category request bound to an explicit instance context.
+            @Override
+            public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID instanceId) {
+                requestDownloads(new DownloadPageRequest(target, instanceId));
+            }
+
+            /// Opens the Mods category with a retained project query.
+            @Override
+            public void openModSearch(String searchText) {
+                requestDownloads(new DownloadPageRequest(
+                        DownloadPageTarget.MODS, null, Objects.requireNonNull(searchText, "searchText")));
+            }
+
+            /// Selects the downloads destination before its lazily created page applies the request.
+            private void requestDownloads(DownloadPageRequest request) {
+                navigateCommand.accept(ShellPageId.DOWNLOADS);
+                downloadsNavigation.request(request);
+            }
+        };
+    }
+
     /// Creates production collaborators and records service-before-model-before-store cleanup order.
     ///
     /// @param bindings captured state-store bindings and selected repository
@@ -625,25 +667,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
                 presentation.modsActions(),
                 Schedulers.io());
-        InstanceContentNavigation contentNavigation = new InstanceContentNavigation() {
-            /// Opens one plain download category request.
-            @Override
-            public void openDownloads(DownloadPageTarget target) {
-                requestDownloads(DownloadPageRequest.of(target));
-            }
-
-            /// Opens one download category request bound to an explicit instance context.
-            @Override
-            public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID instanceId) {
-                requestDownloads(new DownloadPageRequest(target, instanceId));
-            }
-
-            /// Selects the downloads destination before its lazily created page applies the request.
-            private void requestDownloads(DownloadPageRequest request) {
-                navigateCommand.accept(ShellPageId.DOWNLOADS);
-                downloadsNavigation.request(request);
-            }
-        };
+        InstanceContentNavigation contentNavigation = createInstanceContentNavigation(
+                navigateCommand, downloadsNavigation);
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
                         bindings.homeStore(),
@@ -1409,6 +1434,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
             EdtDispatcher.execute(() -> {
                 if (!closed.get()) {
                     frame.shellPanel().navigateTo(page);
+                }
+            });
+        }
+
+        /// Opens the running task view through the hosted shell on the Swing EDT.
+        @Override
+        public void openRunningTasks() {
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.execute(() -> {
+                if (!closed.get()) {
+                    frame.shellPanel().openRunningTasks();
                 }
             });
         }

@@ -184,6 +184,7 @@ final class SwingMcpDeletionConfirmationTest {
                 kind -> switch (kind) {
                     case INSTANCE -> instanceRequired.get();
                     case MODS -> modsRequired.get();
+                    default -> true;
                 },
                 () -> true,
                 kind -> {
@@ -210,4 +211,40 @@ final class SwingMcpDeletionConfirmationTest {
         assertTrue(confirmation.confirm(mods));
         assertEquals(2, dialogCalls.get());
     }
+
+    /// Every category can opt out independently while permanent deletion always requires another decision.
+    @Test
+    void allSevenCategoriesRetainIndependentOptOutAndMandatoryFallback() {
+        java.util.EnumSet<DeletionKind> required = java.util.EnumSet.allOf(DeletionKind.class);
+        AtomicInteger dialogs = new AtomicInteger();
+        SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
+                required::contains, () -> true, required::remove,
+                (owner, message, optOut, title, writable) -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    assertTrue(message.contains("demo"));
+                    assertFalse(message.contains("mcp.deletion_confirmation"));
+                    assertEquals(writable, !optOut.isEmpty());
+                    dialogs.incrementAndGet();
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(true, true);
+                });
+        for (DeletionKind kind : DeletionKind.values()) {
+            McpDeletionConfirmation.DeletionRequest request = new McpDeletionConfirmation.DeletionRequest(
+                    kind, new GameInstanceID("demo"), 2);
+            assertTrue(confirmation.confirm(request));
+            assertFalse(required.contains(kind));
+            assertTrue(confirmation.confirm(request));
+            assertTrue(confirmation.confirmPermanent(request));
+        }
+        assertEquals(7, DeletionKind.values().length);
+        assertEquals(14, dialogs.get());
+    }
+
+    /// Legacy confirmation implementations cannot implicitly authorize permanent deletion.
+    @Test
+    void permanentDeletionDefaultsToDenial() {
+        McpDeletionConfirmation confirmation = request -> true;
+        assertFalse(confirmation.confirmPermanent(McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"))));
+    }
+
 }

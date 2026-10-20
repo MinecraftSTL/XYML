@@ -49,6 +49,17 @@ public interface SchematicBrowserInteractions extends RetryableFailureInteractio
     /// @return entered text, or null after cancellation
     @Nullable String promptDirectoryName(Component owner);
 
+    /// Validates the chosen name asynchronously; production implementations provide inline editable feedback.
+    default CompletionStage<@Nullable String> promptDirectoryName(Component owner,
+            java.util.function.Function<String, CompletionStage<@Nullable String>> validator) {
+        @Nullable String name = promptDirectoryName(owner);
+        if (name == null) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        return validator.apply(name).thenApply(error -> {
+            if (error != null) throw new IllegalArgumentException(error);
+            return name;
+        });
+    }
+
     /// Confirms deletion of one browser row on the event-dispatch thread.
     ///
     /// @param owner dialog owner

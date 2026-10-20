@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.download;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameRepositoryDraft;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -87,7 +88,15 @@ public class DefaultGameBuilder extends GameBuilder {
 
         boolean isUpdate = repository.hasInstance(instanceId);
 
-        return libraryTask.thenComposeAsync(repository::saveAsync)
+        Task<GameInstanceManifest> persisted = libraryTask.thenComposeAsync(manifest ->
+                Task.supplyAsync(() -> {
+                    try (GameRepositoryDraft draft = repository.openDraft()) {
+                        draft.put(manifest);
+                        draft.commit();
+                    }
+                    return manifest;
+                }).setResources(operationResource, instanceResource));
+        return persisted
                 .setResources(operationResource, instanceResource)
                 .whenCompleteWithResources(Schedulers.defaultScheduler(), exception -> {
                     if (exception != null && !isUpdate) {

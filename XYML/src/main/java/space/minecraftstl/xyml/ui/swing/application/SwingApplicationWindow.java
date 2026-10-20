@@ -55,6 +55,9 @@ public interface SwingApplicationWindow extends AutoCloseable {
     /// @param page destination selected by a page command
     void navigateTo(ShellPageId page);
 
+    /// Opens the hosted task manager with its running tab selected, even when the page is already active.
+    void openRunningTasks();
+
     /// Opens the Mods catalog, pre-fills one dependency query, and starts its result search.
     ///
     /// The default keeps lightweight test windows source-compatible; production windows override it with the

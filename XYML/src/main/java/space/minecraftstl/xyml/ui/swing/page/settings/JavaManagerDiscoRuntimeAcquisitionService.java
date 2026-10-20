@@ -472,6 +472,24 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
                 Objects.requireNonNull(name, "name"));
     }
 
+    /// Assigns the managed-runtime boundary to a task that otherwise uses the conservative global fallback.
+    ///
+    /// Explicit cache or archive resources remain unchanged so the task resource manager can retain their independent
+    /// locking semantics while conservative test and composition tasks are scoped to this acquisition.
+    ///
+    /// @param task task whose conservative declaration may need narrowing
+    /// @param platformRoot managed runtime root used as the acquisition boundary
+    /// @param <T> task result type
+    /// @return the same task after resource normalization
+    private static <T> Task<T> scopeToManagedRuntime(Task<T> task, Path platformRoot) {
+        Objects.requireNonNull(task, "task");
+        Path normalizedRoot = Objects.requireNonNull(platformRoot, "platformRoot");
+        if (task.getResources().contains(TaskResource.conservative())) {
+            task.setResources(TaskResource.javaRuntime(normalizedRoot));
+        }
+        return task;
+    }
+
     /// Builds a fully deferred package-metadata, checksum, download, archive-preflight, and publication chain.
     ///
     /// @param distribution explicitly selected distribution
@@ -506,24 +524,37 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
             String packageInformationUri = requireHttpUri(
                     Objects.requireNonNull(selectedVersion.getLinks(), "version.links").pkgInfoUri(),
                     "package information URI");
-            Task<JavaRuntime> pipeline = backend.fetchText(
+            Task<String> packageInformationTask = scopeToManagedRuntime(
+                    backend.fetchText(
                             packageInformationUri,
-                            MAXIMUM_PACKAGE_INFORMATION_RESPONSE_BYTES)
-                    .thenApplyAsync(json -> parseFileInformation(
+                            MAXIMUM_PACKAGE_INFORMATION_RESPONSE_BYTES),
+                    platformRoot);
+            Task<VerifiedFileInformation> fileInformationTask = scopeToManagedRuntime(
+                    packageInformationTask.thenApplyAsync(json -> parseFileInformation(
                             Objects.requireNonNull(json, "package information response"),
-                            selectedVersion))
-                    .thenComposeAsync(fileInformation -> checksumTask(
-                            Objects.requireNonNull(fileInformation, "fileInformation")))
-                    .thenComposeAsync(download -> downloadTask(
+                            selectedVersion)),
+                    platformRoot);
+            Task<VerifiedDownload> checksumTask = scopeToManagedRuntime(
+                    fileInformationTask.thenComposeAsync(fileInformation -> checksumTask(
+                            platformRoot,
+                            Objects.requireNonNull(fileInformation, "fileInformation"))),
+                    platformRoot);
+            Task<Path> downloadTask = scopeToManagedRuntime(
+                    checksumTask.thenComposeAsync(download -> downloadTask(
+                            platformRoot,
                             selectedVersion,
                             Objects.requireNonNull(download, "download"),
-                            tracker))
-                    .thenComposeAsync(downloadedArchive -> prepareAndInstallTask(
+                            tracker)),
+                    platformRoot);
+            Task<JavaRuntime> pipeline = scopeToManagedRuntime(
+                    downloadTask.thenComposeAsync(downloadedArchive -> prepareAndInstallTask(
+                            platformRoot,
                             installationPlatform,
                             selectedVersion,
                             selectedInstallName,
                             Objects.requireNonNull(downloadedArchive, "downloadedArchive"),
-                            tracker));
+                            tracker)),
+                    platformRoot);
 
             return pipeline;
         }, () -> tracker.cleanup(backend)).setResources(TaskResource.javaRuntime(platformRoot));
@@ -535,25 +566,32 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
     /// @return stopped checksum resolution task
     /// @throws IOException when checksum metadata is absent or unsupported
     private Task<VerifiedDownload> checksumTask(
+            Path platformRoot,
             VerifiedFileInformation fileInformation) throws IOException {
         DiscoRemoteFileInfo metadata = fileInformation.metadata();
         String algorithm = normalizeChecksumAlgorithm(metadata.checksumType());
         @Nullable String directChecksum = metadata.checksum();
         if (directChecksum != null && !directChecksum.isBlank()) {
-            return Task.completed(new VerifiedDownload(
-                    fileInformation.downloadUri(),
-                    verifyChecksumToken(algorithm, directChecksum)));
+            return scopeToManagedRuntime(
+                    Task.completed(new VerifiedDownload(
+                            fileInformation.downloadUri(),
+                            verifyChecksumToken(algorithm, directChecksum))),
+                    platformRoot);
         }
 
         String checksumUri = requireHttpUri(metadata.checksumUri(), "checksum URI");
-        return backend.fetchText(checksumUri, MAXIMUM_CHECKSUM_RESPONSE_BYTES)
-                .thenApplyAsync(response -> new VerifiedDownload(
+        Task<String> checksumResponseTask = scopeToManagedRuntime(
+                backend.fetchText(checksumUri, MAXIMUM_CHECKSUM_RESPONSE_BYTES),
+                platformRoot);
+        return scopeToManagedRuntime(
+                checksumResponseTask.thenApplyAsync(response -> new VerifiedDownload(
                         fileInformation.downloadUri(),
                         verifyChecksumToken(
                                 algorithm,
                                 firstChecksumToken(Objects.requireNonNull(
                                         response,
-                                        "checksum response")))));
+                                        "checksum response"))))),
+                platformRoot);
     }
 
     /// Creates the bounded download task and records its successful managed temporary result.
@@ -563,22 +601,26 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
     /// @param tracker acquisition-owned temporary archive tracker
     /// @return stopped download and tracking task
     private Task<Path> downloadTask(
+            Path platformRoot,
             DiscoJavaRemoteVersion version,
             VerifiedDownload download,
             TemporaryArchiveTracker tracker) {
         String archiveSuffix = "." + Objects.requireNonNull(version.getArchiveType(), "version.archiveType");
-        Task<Path> task = backend.downloadArchive(
-                download.downloadUri(),
-                archiveSuffix,
-                download.checksum().algorithm(),
-                download.checksum().hexadecimal());
+        Task<Path> task = scopeToManagedRuntime(
+                backend.downloadArchive(
+                        download.downloadUri(),
+                        archiveSuffix,
+                        download.checksum().algorithm(),
+                        download.checksum().hexadecimal()),
+                platformRoot);
         tracker.downloading(task);
-        return task
+        return scopeToManagedRuntime(task
                 .thenApplyAsync(path -> {
                     Path archive = Objects.requireNonNull(path, "downloaded archive");
                     tracker.downloaded(archive);
                     return archive;
-                });
+                }),
+                platformRoot);
     }
 
     /// Creates the cancellable archive preflight and normalized publication task.
@@ -590,6 +632,7 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
     /// @param tracker acquisition-owned temporary archive tracker
     /// @return stopped preparation and installation task
     private Task<JavaRuntime> prepareAndInstallTask(
+            Path platformRoot,
             Platform expectedPlatform,
             DiscoJavaRemoteVersion version,
             String installName,
@@ -598,24 +641,31 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
         @Unmodifiable Map<String, Object> updateMetadata = Map.of(
                 "type", "disco",
                 "info", version);
-        return new CancellableValueTask<>("Validate third-party Java archive", cancellationCheck -> {
-            LocalJavaArchiveInspection downloadedInspection = backend.inspectArchive(
-                    downloadedArchive,
-                    cancellationCheck);
-            requireDownloadedRuntimeIdentity(expectedPlatform, version, downloadedInspection.javaInfo());
-            LocalJavaArchiveInspection preparedInspection = backend.prepareInstallArchive(
-                    downloadedInspection,
-                    cancellationCheck);
-            tracker.prepared(preparedInspection.archiveFile());
-            requireDownloadedRuntimeIdentity(expectedPlatform, version, preparedInspection.javaInfo());
-            requireValidInstallName(
-                    backend.validateInstallName(expectedPlatform, installName),
-                    installName);
-            return preparedInspection;
-        }).thenComposeAsync(preparedInspection -> backend.installArchive(
-                Objects.requireNonNull(preparedInspection, "preparedInspection"),
-                installName,
-                updateMetadata));
+        Task<LocalJavaArchiveInspection> preparationTask = scopeToManagedRuntime(
+                new CancellableValueTask<>("Validate third-party Java archive", cancellationCheck -> {
+                    LocalJavaArchiveInspection downloadedInspection = backend.inspectArchive(
+                            downloadedArchive,
+                            cancellationCheck);
+                    requireDownloadedRuntimeIdentity(expectedPlatform, version, downloadedInspection.javaInfo());
+                    LocalJavaArchiveInspection preparedInspection = backend.prepareInstallArchive(
+                            downloadedInspection,
+                            cancellationCheck);
+                    tracker.prepared(preparedInspection.archiveFile());
+                    requireDownloadedRuntimeIdentity(expectedPlatform, version, preparedInspection.javaInfo());
+                    requireValidInstallName(
+                            backend.validateInstallName(expectedPlatform, installName),
+                            installName);
+                    return preparedInspection;
+                }),
+                platformRoot);
+        return scopeToManagedRuntime(
+                preparationTask.thenComposeAsync(preparedInspection -> scopeToManagedRuntime(
+                        backend.installArchive(
+                                Objects.requireNonNull(preparedInspection, "preparedInspection"),
+                                installName,
+                                updateMetadata),
+                        platformRoot)),
+                platformRoot);
     }
 
     /// Parses one exact Disco package-information result and validates its selected package identity.

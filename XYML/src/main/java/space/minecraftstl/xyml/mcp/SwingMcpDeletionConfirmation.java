@@ -24,7 +24,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
-import javax.swing.JLabel;
+import javax.swing.JTextArea;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import java.awt.Component;
@@ -113,6 +113,20 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
         return decision.get().approved();
     }
 
+    /// Always requests permanent-deletion permission on the EDT without an opt-out control.
+    @Override
+    public boolean confirmPermanent(DeletionRequest request) {
+        Objects.requireNonNull(request, "request");
+        AtomicReference<ConfirmationDecision> decision = new AtomicReference<>(ConfirmationDecision.cancelled());
+        EdtDispatcher.executeAndWait(() -> decision.set(dialog.confirm(
+                activeWindow(),
+                i18n("mcp.deletion_confirmation.permanent", request.itemCount(), request.instanceId().id()),
+                "",
+                i18n("mcp.deletion_confirmation.permanent_title"),
+                false)));
+        return decision.get().approved();
+    }
+
     /// Formats the localized message for one deletion category.
     ///
     /// @param request deletion being presented
@@ -124,6 +138,16 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
                     "mcp.deletion_confirmation.mods",
                     request.itemCount(),
                     request.instanceId().id());
+            case RESOURCE_PACKS -> i18n("mcp.deletion_confirmation.resource_packs",
+                    request.itemCount(), request.instanceId().id());
+            case WORLDS -> i18n("mcp.deletion_confirmation.worlds",
+                    request.itemCount(), request.instanceId().id());
+            case SERVERS -> i18n("mcp.deletion_confirmation.servers",
+                    request.itemCount(), request.instanceId().id());
+            case SHADER_PACKS -> i18n("mcp.deletion_confirmation.shader_packs",
+                    request.itemCount(), request.instanceId().id());
+            case SCHEMATICS -> i18n("mcp.deletion_confirmation.schematics",
+                    request.itemCount(), request.instanceId().id());
         };
     }
 
@@ -135,6 +159,11 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
         return switch (kind) {
             case INSTANCE -> i18n("mcp.deletion_confirmation.disable_instance");
             case MODS -> i18n("mcp.deletion_confirmation.disable_mods");
+            case RESOURCE_PACKS -> i18n("mcp.deletion_confirmation.disable_resource_packs");
+            case WORLDS -> i18n("mcp.deletion_confirmation.disable_worlds");
+            case SERVERS -> i18n("mcp.deletion_confirmation.disable_servers");
+            case SHADER_PACKS -> i18n("mcp.deletion_confirmation.disable_shader_packs");
+            case SCHEMATICS -> i18n("mcp.deletion_confirmation.disable_schematics");
         };
     }
 
@@ -168,7 +197,13 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
             String disableConfirmationMessage,
             String title,
             boolean confirmationWritable) {
-        JLabel warningLabel = new JLabel(message);
+        JTextArea warningLabel = new JTextArea(message, 5, 48);
+        warningLabel.setLineWrap(true);
+        warningLabel.setWrapStyleWord(true);
+        warningLabel.setEditable(false);
+        warningLabel.setFocusable(false);
+        warningLabel.setOpaque(false);
+        warningLabel.setFont(javax.swing.UIManager.getFont("Label.font"));
         warningLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         JCheckBox disableConfirmationBox = new JCheckBox(disableConfirmationMessage);
         disableConfirmationBox.setName("mcpDeletionDisableConfirmation");

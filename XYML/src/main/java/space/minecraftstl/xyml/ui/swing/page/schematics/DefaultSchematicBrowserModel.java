@@ -271,7 +271,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         return operation.result();
     }
 
-    /// Schedules the initial scan or asynchronously returns the already attempted state.
+    /// Schedules the initial scan, reuses an unfinished scan, or asynchronously returns the attempted state.
     @Override
     public CompletionStage<SchematicBrowserSnapshot> loadIfNeeded() {
         @Nullable ScanPreparation preparation;
@@ -286,7 +286,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                 activeResult = write.result();
             } else if (state.snapshot().status() == SchematicBrowserStatus.IDLE) {
                 preparation = prepareScanLocked(state.snapshot().currentDirectory());
-            } else if (activeScan != null) {
+            } else if (activeScan != null && !activeScan.result().isDone()) {
                 preparation = null;
                 activeResult = activeScan.result();
             } else {
@@ -343,7 +343,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         return failOnExecutor(Objects.requireNonNull(failure));
     }
 
-    /// Navigates to the parent, or asynchronously retains the root snapshot at the boundary.
+    /// Navigates to the parent, reusing only unfinished scans or asynchronously retaining the root snapshot.
     @Override
     public CompletionStage<SchematicBrowserSnapshot> returnToParent() {
         @Nullable ScanPreparation preparation;
@@ -357,10 +357,11 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             }
             Path current = state.snapshot().currentDirectory();
             if (current.equals(rootDirectory)) {
-                if (activeScan != null && activeScan.targetDirectory().equals(rootDirectory)) {
+                if (activeScan != null && !activeScan.result().isDone()
+                        && activeScan.targetDirectory().equals(rootDirectory)) {
                     preparation = null;
                     activeResult = activeScan.result();
-                } else if (activeScan != null) {
+                } else if (activeScan != null && !activeScan.result().isDone()) {
                     preparation = prepareScanLocked(rootDirectory);
                 } else {
                     preparation = null;
@@ -1365,7 +1366,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// @param cancellation cooperative cancellation signal
     /// @return immutable direct-child descriptors
     /// @throws IOException when the directory itself cannot be read
-    private static @Unmodifiable List<DiscoveredEntry> scanDirectory(
+    static @Unmodifiable List<DiscoveredEntry> scanDirectory(
             Path rootDirectory,
             Path directory,
             LoadCancellation cancellation) throws IOException {

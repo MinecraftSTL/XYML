@@ -229,6 +229,26 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Requires interactive confirmation before MCP mod deletion.
     private final JCheckBox mcpConfirmModDeletionBox = new JCheckBox(i18n("settings.mcp.confirm_mod_deletion"));
 
+    /// Requires confirmation before MCP deletes resource packs.
+    private final JCheckBox mcpConfirmResourcePackDeletionBox =
+            new JCheckBox(i18n("settings.mcp.confirm_resource_pack_deletion"));
+
+    /// Requires confirmation before MCP deletes worlds.
+    private final JCheckBox mcpConfirmWorldDeletionBox =
+            new JCheckBox(i18n("settings.mcp.confirm_world_deletion"));
+
+    /// Requires confirmation before MCP deletes saved servers.
+    private final JCheckBox mcpConfirmServerDeletionBox =
+            new JCheckBox(i18n("settings.mcp.confirm_server_deletion"));
+
+    /// Requires confirmation before MCP deletes shader packs.
+    private final JCheckBox mcpConfirmShaderPackDeletionBox =
+            new JCheckBox(i18n("settings.mcp.confirm_shader_pack_deletion"));
+
+    /// Requires confirmation before MCP deletes schematic files and directories.
+    private final JCheckBox mcpConfirmSchematicDeletionBox =
+            new JCheckBox(i18n("settings.mcp.confirm_schematic_deletion"));
+
     /// Shows validation and persistence feedback for MCP settings.
     private final JLabel mcpValidationLabel = new JLabel();
 
@@ -644,6 +664,36 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 store.setMcpConfirmModDeletion(mcpConfirmModDeletionBox.isSelected());
             }
         });
+        mcpConfirmResourcePackDeletionBox.setName("settingsMcpConfirmResourcePackDeletion");
+        mcpConfirmResourcePackDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmResourcePackDeletion(mcpConfirmResourcePackDeletionBox.isSelected());
+            }
+        });
+        mcpConfirmWorldDeletionBox.setName("settingsMcpConfirmWorldDeletion");
+        mcpConfirmWorldDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmWorldDeletion(mcpConfirmWorldDeletionBox.isSelected());
+            }
+        });
+        mcpConfirmServerDeletionBox.setName("settingsMcpConfirmServerDeletion");
+        mcpConfirmServerDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmServerDeletion(mcpConfirmServerDeletionBox.isSelected());
+            }
+        });
+        mcpConfirmShaderPackDeletionBox.setName("settingsMcpConfirmShaderPackDeletion");
+        mcpConfirmShaderPackDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmShaderPackDeletion(mcpConfirmShaderPackDeletionBox.isSelected());
+            }
+        });
+        mcpConfirmSchematicDeletionBox.setName("settingsMcpConfirmSchematicDeletion");
+        mcpConfirmSchematicDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmSchematicDeletion(mcpConfirmSchematicDeletionBox.isSelected());
+            }
+        });
         mcpPortField.setName("settingsMcpPort");
         mcpPortField.addActionListener(event -> persistMcpPort());
         mcpPortField.addFocusListener(new FocusAdapter() {
@@ -714,6 +764,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
         page.add(mcpConfirmInstanceDeletionBox, "growx");
         page.add(mcpConfirmModDeletionBox, "growx");
+        page.add(mcpConfirmResourcePackDeletionBox, "growx");
+        page.add(mcpConfirmWorldDeletionBox, "growx");
+        page.add(mcpConfirmServerDeletionBox, "growx");
+        page.add(mcpConfirmShaderPackDeletionBox, "growx");
+        page.add(mcpConfirmSchematicDeletionBox, "growx");
         page.add(mcpRestartPanel, "growx");
         page.add(mcpValidationLabel, "growx");
         return page;
@@ -1038,9 +1093,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
         updateCheckInProgress = false;
         if (failure != null || result == null) {
-            updateStatusLabel.setText(i18n("update.failed"));
+            updateStatusLabel.setText(failure == null ? i18n("update.failed")
+                    : space.minecraftstl.xyml.ui.swing.update.UpdateCheckFailureFormatter.format(failure));
             if (failure != null) {
-                LOG.warning("Failed to check for launcher updates from settings", failure);
+                LOG.warning("Update check failed (" + failure.getClass().getSimpleName() + ")");
             }
         } else if (result.updateAvailable()) {
             updateStatusLabel.setText(i18n("update.newest_version", result.remoteVersion().version()));
@@ -1477,6 +1533,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
             mcpConfirmInstanceDeletionBox.setSelected(snapshot.mcpConfirmInstanceDeletion());
             mcpConfirmModDeletionBox.setSelected(snapshot.mcpConfirmModDeletion());
+            mcpConfirmResourcePackDeletionBox.setSelected(snapshot.mcpConfirmResourcePackDeletion());
+            mcpConfirmWorldDeletionBox.setSelected(snapshot.mcpConfirmWorldDeletion());
+            mcpConfirmServerDeletionBox.setSelected(snapshot.mcpConfirmServerDeletion());
+            mcpConfirmShaderPackDeletionBox.setSelected(snapshot.mcpConfirmShaderPackDeletion());
+            mcpConfirmSchematicDeletionBox.setSelected(snapshot.mcpConfirmSchematicDeletion());
             mcpValidationLabel.setText("");
             mcpRestartPanel.updateMcpSettings(
                     snapshot.mcpEnabled(),
@@ -1523,6 +1584,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         mcpPortField.setEnabled(interactive);
         mcpConfirmInstanceDeletionBox.setEnabled(interactive);
         mcpConfirmModDeletionBox.setEnabled(interactive);
+        mcpConfirmResourcePackDeletionBox.setEnabled(interactive);
+        mcpConfirmWorldDeletionBox.setEnabled(interactive);
+        mcpConfirmServerDeletionBox.setEnabled(interactive);
+        mcpConfirmShaderPackDeletionBox.setEnabled(interactive);
+        mcpConfirmSchematicDeletionBox.setEnabled(interactive);
         mcpValidationLabel.setEnabled(interactive);
         updateStatusLabel.setEnabled(!closed);
         cacheStatusLabel.setEnabled(!closed);

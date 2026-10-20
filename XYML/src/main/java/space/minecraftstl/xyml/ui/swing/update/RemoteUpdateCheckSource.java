@@ -83,7 +83,7 @@ public final class RemoteUpdateCheckSource implements UpdateCheckSource {
     public RemoteVersion fetch(UpdateCheckRequest request) throws IOException {
         Objects.requireNonNull(request, "request");
         if (integrityCheckRequired && !selfVerifier.getAsBoolean()) {
-            throw new IOException("Self verification failed");
+            throw new space.minecraftstl.xyml.upgrade.SelfVerificationException();
         }
 
         return RemoteVersion.fetch(request.channel(), false, buildRequestUrl(request));

@@ -474,7 +474,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     () -> { },
                     false);
             panel.setOpenProjectionModCommand(
-                    () -> contentNavigation.openDownloads(DownloadPageTarget.MODS));
+                    () -> contentNavigation.openModSearch("Litematica"));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.BACKUPS, () -> {

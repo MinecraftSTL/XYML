@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.GameRepositoryDraft;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -213,7 +214,15 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
         operationResources.add(instanceResource(instanceId));
         operationResources.addAll(List.of(Objects.requireNonNull(additionalResources, "additionalResources")));
         Task<GameInstanceManifest> persisted = Objects.requireNonNull(mutation, "mutation")
-                .thenComposeAsync(ioExecutor, repository::saveAsync)
+                .thenComposeAsync(ioExecutor, manifest -> Task.supplyAsync(ioExecutor, () -> {
+                    try (GameRepositoryDraft draft = repository.openDraft()) {
+                        draft.put(manifest);
+                        draft.commit();
+                    }
+                    return manifest;
+                }).setResources(
+                        TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                        operationResources.toArray(TaskResource[]::new)))
                 .setResources(
                         TaskResource.repositoryOperation(repository.getBaseDirectory()),
                         operationResources.toArray(TaskResource[]::new));

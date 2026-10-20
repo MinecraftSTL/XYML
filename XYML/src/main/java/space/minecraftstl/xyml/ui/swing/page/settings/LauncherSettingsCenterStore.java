@@ -303,6 +303,36 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.mcpConfirmModDeletionProperty().set(required));
     }
 
+    /// Persists the MCP resource packs deletion confirmation preference.
+    @Override
+    public void setMcpConfirmResourcePackDeletion(boolean required) {
+        write(() -> settings.mcpConfirmResourcePackDeletionProperty().set(required));
+    }
+
+    /// Persists the MCP worlds deletion confirmation preference.
+    @Override
+    public void setMcpConfirmWorldDeletion(boolean required) {
+        write(() -> settings.mcpConfirmWorldDeletionProperty().set(required));
+    }
+
+    /// Persists the MCP saved servers deletion confirmation preference.
+    @Override
+    public void setMcpConfirmServerDeletion(boolean required) {
+        write(() -> settings.mcpConfirmServerDeletionProperty().set(required));
+    }
+
+    /// Persists the MCP shader packs deletion confirmation preference.
+    @Override
+    public void setMcpConfirmShaderPackDeletion(boolean required) {
+        write(() -> settings.mcpConfirmShaderPackDeletionProperty().set(required));
+    }
+
+    /// Persists the MCP schematic files and directories deletion confirmation preference.
+    @Override
+    public void setMcpConfirmSchematicDeletion(boolean required) {
+        write(() -> settings.mcpConfirmSchematicDeletionProperty().set(required));
+    }
+
     /// Queues the MCP enablement-warning preference write.
     ///
     /// @param show whether the warning should be shown before enabling MCP
@@ -348,6 +378,16 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         propertySubscriptions.add(
                 settings.mcpConfirmInstanceDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpConfirmModDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmResourcePackDeletionProperty()
+                .subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmWorldDeletionProperty()
+                .subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmServerDeletionProperty()
+                .subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmShaderPackDeletionProperty()
+                .subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmSchematicDeletionProperty()
+                .subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(
                 settings.showMcpEnablementWarningProperty().subscribe(change -> scheduleRefreshSnapshot()));
     }
@@ -410,7 +450,12 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
                 settings.mcpConfirmInstanceDeletionProperty().get(),
                 settings.mcpConfirmModDeletionProperty().get(),
                 settings.showMcpEnablementWarningProperty().get(),
-                writableSupplier.getAsBoolean());
+                writableSupplier.getAsBoolean(),
+                settings.mcpConfirmResourcePackDeletionProperty().get(),
+                settings.mcpConfirmWorldDeletionProperty().get(),
+                settings.mcpConfirmServerDeletionProperty().get(),
+                settings.mcpConfirmShaderPackDeletionProperty().get(),
+                settings.mcpConfirmSchematicDeletionProperty().get());
     }
 
     /// Normalizes persisted manual download concurrency without mutating user state during a read.

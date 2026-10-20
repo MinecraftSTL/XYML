@@ -152,4 +152,31 @@ public final class LauncherSettingsTest {
                 serialized.get(JsonSchema.PROPERTY_SCHEMA).getAsString());
         assertTrue(serialized.get("futureField").getAsBoolean());
     }
+
+    /// New categories use safe defaults independently of the legacy combined confirmation setting.
+    @Test
+    void roundTripsAdditionalMcpDeletionPreferences() {
+        LauncherSettings settings = LauncherSettings.fromJson(
+                JsonParser.parseString("{\"mcpConfirmDeletion\":false}").getAsJsonObject());
+        assertTrue(settings.mcpConfirmResourcePackDeletionProperty().get());
+        settings.mcpConfirmResourcePackDeletionProperty().set(false);
+        assertTrue(settings.mcpConfirmWorldDeletionProperty().get());
+        settings.mcpConfirmWorldDeletionProperty().set(false);
+        assertTrue(settings.mcpConfirmServerDeletionProperty().get());
+        settings.mcpConfirmServerDeletionProperty().set(false);
+        assertTrue(settings.mcpConfirmShaderPackDeletionProperty().get());
+        settings.mcpConfirmShaderPackDeletionProperty().set(false);
+        assertTrue(settings.mcpConfirmSchematicDeletionProperty().get());
+        settings.mcpConfirmSchematicDeletionProperty().set(false);
+        LauncherSettings restored = LauncherSettings.fromJson(
+                JsonParser.parseString(settings.toJson()).getAsJsonObject());
+        assertFalse(restored.mcpConfirmResourcePackDeletionProperty().get());
+        assertFalse(restored.mcpConfirmWorldDeletionProperty().get());
+        assertFalse(restored.mcpConfirmServerDeletionProperty().get());
+        assertFalse(restored.mcpConfirmShaderPackDeletionProperty().get());
+        assertFalse(restored.mcpConfirmSchematicDeletionProperty().get());
+        assertFalse(restored.mcpConfirmInstanceDeletionProperty().get());
+        assertFalse(restored.mcpConfirmModDeletionProperty().get());
+    }
+
 }

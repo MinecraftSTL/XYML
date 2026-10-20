@@ -55,6 +55,7 @@ import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 
+/// Provides component catalogs, synchronized in-memory catalog caching, and download candidates.
 @NotNullByDefault
 public class DownloadProvider {
 
@@ -68,7 +69,16 @@ public class DownloadProvider {
         };
     }
 
-    public @Unmodifiable Task<ComponentRemoteVersionList<?>> getVersionsAsync(
+    /// Returns a stopped catalog query, reusing the in-memory snapshot unless refresh is requested.
+    ///
+    /// The cache update is internally synchronized and has no filesystem side effects. The concrete fetch task
+    /// retains its own resource declarations, including any HTTP cache writes.
+    ///
+    /// @param type component catalog to query
+    /// @param gameVersion target game version, or null only for the base-game catalog
+    /// @param refresh whether to fetch a replacement snapshot even when one is cached
+    /// @return stopped query producing an immutable catalog
+    public Task<@Unmodifiable ComponentRemoteVersionList<?>> getVersionsAsync(
             GameComponentType type,
             @Nullable GameVersionNumber gameVersion,
             boolean refresh) {
@@ -79,7 +89,7 @@ public class DownloadProvider {
         if (!refresh) {
             state.lock.readLock().lock();
             try {
-                @Unmodifiable ComponentRemoteVersionList<?> result = state.tryGet(gameVersion);
+                @Nullable @Unmodifiable ComponentRemoteVersionList<?> result = state.tryGet(gameVersion);
                 if (result != null) {
                     return Task.completed(result);
                 }
@@ -90,7 +100,7 @@ public class DownloadProvider {
 
         var task = fetchVersionsAsync(type, gameVersion);
 
-        return task.thenApplyAsync(result -> {
+        Task<ComponentRemoteVersionList<?>> cached = task.thenApplyAsync(result -> {
             state.lock.writeLock().lockInterruptibly();
             try {
                 state.put(gameVersion, result);
@@ -99,6 +109,7 @@ public class DownloadProvider {
             }
             return result;
         });
+        return cached.asOrchestration();
     }
 
     private VersionListState getState(GameComponentType type) {
@@ -117,18 +128,32 @@ public class DownloadProvider {
         }
     }
 
-    private <V extends ComponentRemoteVersion> Task<ComponentRemoteVersionList<V>> fetchFabricVersionsAsync(
+    /// Fetches and joins loader and compatible-game metadata without filesystem writes in the parsing phase.
+    ///
+    /// @param type Fabric-like component type
+    /// @param gameVersion target game version
+    /// @param candidates loader and game metadata endpoints
+    /// @param function remote-version constructor
+    /// @param <V> remote-version subtype
+    /// @return stopped query producing an immutable catalog
+    private <V extends ComponentRemoteVersion> Task<@Unmodifiable ComponentRemoteVersionList<V>> fetchFabricVersionsAsync(
             GameComponentType type,
             GameVersionNumber gameVersion,
             FabricLikeVersionListCandidates candidates,
             BiFunction<String, String, V> function
     ) {
-        return Task.combine(
+        Task<ComponentRemoteVersionList<V>> parsed = Task.combine(
                 new GetTask(candidates.loaderMetaCandidates),
                 new GetTask(candidates.gameMetaCandidates)
-        ).thenApplyAsync(pair -> {
+        ).asOrchestration().thenApplyAsync(pair -> {
+            /// Parser-owned loader or compatible-game metadata entry.
+            ///
+            /// @param version version identifier
+            /// @param maven Maven artifact identifier
+            /// @param stable whether the version is stable
             @JsonSerializable
-            record GameVersion(String version, String maven, boolean stable) {
+            @NotNullByDefault
+            record GameVersion(String version, @Nullable String maven, boolean stable) {
             }
 
             TypeToken<List<GameVersion>> gameVersionsType = listTypeOf(GameVersion.class);
@@ -150,9 +175,18 @@ public class DownloadProvider {
 
             return ComponentRemoteVersionList.of(type, versions);
         });
+        return parsed.asOrchestration();
     }
 
-    private <V extends ComponentRemoteVersion> Task<ComponentRemoteVersionList<V>> fetchModrinthVersionsAsync(
+    /// Fetches and filters Modrinth metadata using network I/O and in-memory computation only.
+    ///
+    /// @param type API component type
+    /// @param modId Modrinth project identifier
+    /// @param gameVersion target game version
+    /// @param mapper remote-version constructor
+    /// @param <V> remote-version subtype
+    /// @return stopped query producing an immutable catalog
+    private <V extends ComponentRemoteVersion> Task<@Unmodifiable ComponentRemoteVersionList<V>> fetchModrinthVersionsAsync(
             GameComponentType type,
             String modId,
             GameVersionNumber gameVersion,
@@ -168,10 +202,15 @@ public class DownloadProvider {
                     return false;
                 })
                 .map(mapper)
-                .collect(Collectors.toCollection(() -> (SortedSet<V>) new TreeSet<V>()))));
+                .collect(Collectors.toCollection(() -> (SortedSet<V>) new TreeSet<V>())))).asOrchestration();
     }
 
-    protected Task<? extends ComponentRemoteVersionList<?>> fetchVersionsAsync(
+    /// Creates a concrete catalog fetch while retaining the resource contract of its download and parsing phases.
+    ///
+    /// @param type component catalog to query
+    /// @param gameVersion target game version, or null only for the base-game catalog
+    /// @return stopped query producing an immutable catalog
+    protected Task<? extends @Unmodifiable ComponentRemoteVersionList<?>> fetchVersionsAsync(
             GameComponentType type, @Nullable GameVersionNumber gameVersion
     ) {
         assert (type == GameComponentType.GAME) == (gameVersion == null);
@@ -242,9 +281,9 @@ public class DownloadProvider {
             case NEO_FORGE -> NeoForgeRemoteVersion.fetchAsync(this, gameVersion);
             case CLEANROOM -> CleanroomRemoteVersion.fetchAsync(this, gameVersion);
             case LITELOADER -> LiteLoaderRemoteVersion.fetchAsync(gameVersion);
-            case OPTIFINE -> Task.supplyAsync(() -> {
+            case OPTIFINE -> Task.<ComponentRemoteVersionList<?>>supplyAsync(() -> {
                 throw new UnsupportedOperationException("OptiFine version list fetching is not supported in this DownloadProvider.");
-            });
+            }).asOrchestration();
         };
     }
 
