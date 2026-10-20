@@ -21,11 +21,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.DefaultGameLoaderCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogSource;
@@ -62,12 +63,27 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies lazy installer-state activation, safe local actions, and exact remote-version task handoff.
 @NotNullByDefault
 final class InstanceInstallerPanelTest {
     /// The common instance identifier supplied by all focused panel scenarios.
     private static final GameInstanceID INSTANCE_ID = new GameInstanceID("instance");
+
+    /// The visible installer heading identifies the instance whose components will change.
+    @Test
+    void titleIncludesTargetInstanceIdentifier() {
+        InstanceInstallerPanel panel = createPanel(
+                new RecordingInstallerService(),
+                wizardWith(List.of()),
+                new RecordingInteractions());
+
+        EdtDispatcher.executeAndWait(() -> {
+            assertEquals(i18n("install.change_version.title", INSTANCE_ID.id()), panel.title());
+            panel.close();
+        });
+    }
 
     /// Activation alone starts exactly one asynchronous snapshot read and seeds retained loader state locally.
     @Test
@@ -79,7 +95,7 @@ final class InstanceInstallerPanelTest {
                 List.of(new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC,
                         "0.16.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR)),
+                        InstallerStructureStatus.CLEAR)),
                 List.of());
 
         InstanceInstallerPanel panel = createPanel(service, wizard, interactions);
@@ -120,6 +136,9 @@ final class InstanceInstallerPanelTest {
                 InstanceOtherLibraryEntry.StructureState.CLEAR);
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of(uncertain, clear)));
+        EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
 
         EdtDispatcher.executeAndWait(() -> {
             JList<?> otherLibraries = findNamed(panel, "instanceInstallerOtherLibraryList", JList.class);
@@ -150,13 +169,16 @@ final class InstanceInstallerPanelTest {
         InstanceInstallerEntry uncertain = new InstanceInstallerEntry(
                 GameLoaderKind.FORGE,
                 "47.2.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.UNSURE);
+                InstallerStructureStatus.UNSURE);
         InstanceInstallerEntry clear = new InstanceInstallerEntry(
                 GameLoaderKind.FABRIC,
                 "0.16.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR);
+                InstallerStructureStatus.CLEAR);
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
         activateWithSnapshot(panel, service, snapshot(List.of(uncertain, clear), List.of()));
+        EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
 
         EdtDispatcher.executeAndWait(() -> {
             JList<?> installedLoaders = findNamed(panel, "instanceInstallerInstalledLoaderList", JList.class);
@@ -181,7 +203,10 @@ final class InstanceInstallerPanelTest {
         RecordingInteractions interactions = new RecordingInteractions();
         Path chosenInstaller = Path.of("C:/offline/forge-installer.jar");
         interactions.chosenInstaller = chosenInstaller;
+        AtomicInteger navigationCount = new AtomicInteger();
         InstanceInstallerPanel panel = createPanel(service, wizardWith(List.of()), interactions);
+        EdtDispatcher.executeAndWait(() ->
+                panel.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet)));
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of()));
 
         EdtDispatcher.executeAndWait(() -> {
@@ -190,6 +215,7 @@ final class InstanceInstallerPanelTest {
             offline.doClick();
             assertEquals(1, service.offlineCalls.get());
             assertEquals(chosenInstaller, service.offlineInstaller);
+            assertEquals(1, navigationCount.get());
             panel.close();
         });
     }
@@ -224,12 +250,15 @@ final class InstanceInstallerPanelTest {
     /// Online installation receives the original remote-version object selected by the embedded shared wizard.
     @Test
     void onlineInstallationPreservesOriginalRemoteVersionObjects() {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
         RecordingInstallerService service = new RecordingInstallerService();
         RecordingInteractions interactions = new RecordingInteractions();
         LoaderSelectionWizardPanel wizard = wizardWith(List.of(
                 new GameLoaderCatalogItem(GameLoaderKind.FABRIC, fabric)));
+        AtomicInteger navigationCount = new AtomicInteger();
         InstanceInstallerPanel panel = createPanel(service, wizard, interactions);
+        EdtDispatcher.executeAndWait(() ->
+                panel.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet)));
         activateWithSnapshot(panel, service, snapshot(List.of(), List.of()));
 
         EdtDispatcher.executeAndWait(() -> {
@@ -251,6 +280,7 @@ final class InstanceInstallerPanelTest {
             assertEquals(1, service.remoteInstallCalls.get());
             assertEquals(1, service.installedRemoteVersions.size());
             assertSame(fabric, service.installedRemoteVersions.get(0));
+            assertEquals(1, navigationCount.get());
             panel.close();
         });
     }
@@ -286,7 +316,7 @@ final class InstanceInstallerPanelTest {
     /// A mutation remains single-flight while its worker is pending, and closing rejects its eventual late completion.
     @Test
     void activeMutationIsSingleFlightAndCloseSuppressesItsDelayedCompletion() {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
         RecordingInstallerService service = new RecordingInstallerService();
         QueuedExecutor queuedMutationExecutor = new QueuedExecutor();
         service.mutationExecutor = queuedMutationExecutor;
@@ -431,8 +461,8 @@ final class InstanceInstallerPanelTest {
     /// @param gameVersion target Minecraft version
     /// @param selfVersion concrete loader version
     /// @return exact Core remote version
-    private static RemoteVersion remoteVersion(String libraryId, String gameVersion, String selfVersion) {
-        return new RemoteVersion(
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String gameVersion, String selfVersion) {
+        return new TestComponentRemoteVersion(
                 Objects.requireNonNull(libraryId, "libraryId"),
                 Objects.requireNonNull(gameVersion, "gameVersion"),
                 Objects.requireNonNull(selfVersion, "selfVersion"),
@@ -502,7 +532,7 @@ final class InstanceInstallerPanelTest {
         private final AtomicInteger offlineCalls = new AtomicInteger();
 
         /// Exact original remote versions supplied by the panel, or an empty list before installation.
-        private List<RemoteVersion> installedRemoteVersions = List.of();
+        private List<ComponentRemoteVersion> installedRemoteVersions = List.of();
 
         /// Exact third-party library requested for removal, or null before a confirmed removal.
         private @Nullable String removedLibraryId;
@@ -535,7 +565,7 @@ final class InstanceInstallerPanelTest {
         @Override
         public Task<InstanceInstallerSnapshot> installRemoteVersions(
                 GameInstanceID instanceId,
-                Collection<? extends RemoteVersion> remoteVersions) {
+                Collection<? extends ComponentRemoteVersion> remoteVersions) {
             assertEquals(INSTANCE_ID, instanceId);
             remoteInstallCalls.incrementAndGet();
             installedRemoteVersions = List.copyOf(remoteVersions);

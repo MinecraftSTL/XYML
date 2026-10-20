@@ -22,7 +22,13 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.task.TaskExecutionRegistry;
+import space.minecraftstl.xyml.task.TaskExecutionSnapshot;
+import space.minecraftstl.xyml.task.TaskExecutionStatus;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.AbstractButton;
 import javax.swing.ButtonGroup;
@@ -39,9 +45,14 @@ import java.awt.Insets;
 import java.io.IOException;
 import java.net.URI;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalDouble;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -77,6 +88,21 @@ final class ShellNavigationRail extends JPanel {
     /// Independent bottom action opening the XYML help destination.
     private final JButton helpButton;
 
+    /// Registry subscription driving the task count and aggregate fill.
+    private final Subscription taskRegistrySubscription;
+
+    /// Registry supplying the application-wide execution state.
+    private final TaskExecutionRegistry taskRegistry;
+
+    /// Contribution values retained for the current active-task aggregate epoch.
+    private final Map<UUID, ProgressContribution> taskProgressContributions = new HashMap<>();
+
+    /// Active IDs observed in the previous aggregate publication, used to detect a skipped empty boundary.
+    private @Unmodifiable Set<UUID> previousProgressActiveIds = Set.of();
+
+    /// Last registry publication revision rendered on the event dispatch thread.
+    private long taskIndicatorRevision = -1L;
+
     /// Creates the compact left-side navigation rail.
     ///
     /// @param presentations localized page labels and mnemonics
@@ -110,7 +136,8 @@ final class ShellNavigationRail extends JPanel {
         for (ShellPageId page : List.of(
                 ShellPageId.ACCOUNTS,
                 ShellPageId.INSTANCES,
-                ShellPageId.DOWNLOADS)) {
+                ShellPageId.DOWNLOADS,
+                ShellPageId.TASKS)) {
             addNavigationButton(primaryGroup, page, presentations.get(page), toggle);
         }
 
@@ -126,6 +153,11 @@ final class ShellNavigationRail extends JPanel {
         auxiliaryGroup.add(helpButton, BUTTON_CONSTRAINTS);
         add(primaryGroup, BorderLayout.NORTH);
         add(auxiliaryGroup, BorderLayout.SOUTH);
+
+        taskRegistry = TaskExecutionRegistry.global();
+        taskRegistrySubscription = taskRegistry.subscribeVersioned(this::taskSnapshotsChanged);
+        TaskExecutionRegistry.Publication publication = taskRegistry.publication();
+        updateTaskIndicator(publication);
     }
 
     /// Creates the icon-only action anchored directly below Settings.
@@ -275,9 +307,9 @@ final class ShellNavigationRail extends JPanel {
         }
     }
 
-    /// Returns one overlay navigation button for focused tests.
+    /// Returns one navigation button for focused tests.
     ///
-    /// @param page represented overlay destination
+    /// @param page represented application-page destination
     /// @return matching stable button
     ShellNavigationButton button(ShellPageId page) {
         @Nullable ShellNavigationButton button = buttons.get(Objects.requireNonNull(page, "page"));
@@ -308,5 +340,119 @@ final class ShellNavigationRail extends JPanel {
         }
         officialGroupButton.setEnabled(false);
         helpButton.setEnabled(false);
+        taskRegistrySubscription.unsubscribe();
+    }
+
+    /// Routes registry publications to the Swing event dispatch thread.
+    ///
+    /// @param publication complete immutable execution snapshot set and its registry revision
+    private void taskSnapshotsChanged(TaskExecutionRegistry.Publication publication) {
+        Objects.requireNonNull(publication, "publication");
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> updateTaskIndicator(publication));
+    }
+
+    /// Updates the task badge and the epoch-based aggregate fill on the task navigation button.
+    ///
+    /// Contributions remain in the current epoch after a workflow reaches a terminal state. They are cleared only
+    /// when no visible workflow remains active, so a successful workflow does not disappear from the aggregate while
+    /// another workflow is still running.
+    ///
+    /// @param publication complete immutable execution snapshot set and its registry revision
+    private void updateTaskIndicator(TaskExecutionRegistry.Publication publication) {
+        if (!SwingUiDispatcher.INSTANCE.isDispatchThread()) {
+            SwingUiDispatcher.INSTANCE.dispatch(() -> updateTaskIndicator(publication));
+            return;
+        }
+        if (publication.revision() < taskIndicatorRevision) {
+            return;
+        }
+        taskIndicatorRevision = publication.revision();
+        @Unmodifiable List<TaskExecutionSnapshot> snapshots = publication.snapshots();
+        ShellNavigationButton taskButton = buttons.get(ShellPageId.TASKS);
+        if (taskButton == null) {
+            return;
+        }
+        List<TaskExecutionSnapshot> visibleActive = snapshots.stream()
+                .filter(snapshot -> snapshot.userVisible() && !snapshot.status().isTerminal())
+                .toList();
+        List<TaskExecutionSnapshot> progressActive = visibleActive.stream()
+                .filter(snapshot -> snapshot.status() == TaskExecutionStatus.RUNNING
+                        || (snapshot.status() == TaskExecutionStatus.CANCELLING
+                        && snapshot.everRunning()))
+                .toList();
+        if (progressActive.isEmpty()) {
+            taskProgressContributions.clear();
+            previousProgressActiveIds = Set.of();
+            taskButton.setTaskIndicator(visibleActive.size(), OptionalDouble.empty());
+            return;
+        }
+
+        Set<UUID> currentProgressActiveIds = new HashSet<>();
+        for (TaskExecutionSnapshot snapshot : progressActive) {
+            currentProgressActiveIds.add(snapshot.id());
+        }
+        if (!previousProgressActiveIds.isEmpty()
+                && currentProgressActiveIds.stream().noneMatch(previousProgressActiveIds::contains)) {
+            // The registry may publish the terminal and next-start snapshots before the EDT drains its queue. A
+            // disjoint active-ID set proves that the previous aggregate epoch ended even if its empty publication was
+            // not rendered separately.
+            taskProgressContributions.clear();
+        }
+        previousProgressActiveIds = Set.copyOf(currentProgressActiveIds);
+
+        for (TaskExecutionSnapshot snapshot : progressActive) {
+            taskProgressContributions.put(snapshot.id(), contributionOf(snapshot));
+        }
+        for (TaskExecutionSnapshot snapshot : snapshots) {
+            if (!taskProgressContributions.containsKey(snapshot.id())) {
+                continue;
+            }
+            if (snapshot.status() == TaskExecutionStatus.SUCCEEDED) {
+                taskProgressContributions.put(snapshot.id(), completedContribution(snapshot));
+            } else if (!snapshot.status().isTerminal()) {
+                taskProgressContributions.put(snapshot.id(), contributionOf(snapshot));
+            }
+        }
+        double completed = taskProgressContributions.values().stream()
+                .mapToDouble(ProgressContribution::completedWeight)
+                .sum();
+        double total = taskProgressContributions.values().stream()
+                .mapToDouble(ProgressContribution::totalWeight)
+                .sum();
+        OptionalDouble aggregate = total <= 0.0D
+                ? OptionalDouble.empty()
+                : OptionalDouble.of(Math.max(0.0D, Math.min(1.0D, completed / total)));
+        taskButton.setTaskIndicator(visibleActive.size(), aggregate);
+    }
+
+    /// Converts one execution snapshot into its stable weighted contribution.
+    private static ProgressContribution contributionOf(TaskExecutionSnapshot snapshot) {
+        double total = snapshot.totalProgressWeight();
+        if (total > 0.0D) {
+            return new ProgressContribution(snapshot.completedProgressWeight(), total);
+        }
+        return snapshot.progress().isPresent()
+                ? new ProgressContribution(snapshot.progress().getAsDouble(), 1.0D)
+                : new ProgressContribution(0.0D, 1.0D);
+    }
+
+    /// Converts a successful terminal snapshot into a fully completed contribution.
+    private static ProgressContribution completedContribution(TaskExecutionSnapshot snapshot) {
+        ProgressContribution contribution = contributionOf(snapshot);
+        return new ProgressContribution(contribution.totalWeight(), contribution.totalWeight());
+    }
+
+    /// Immutable weighted progress contribution retained during one aggregate epoch.
+    private record ProgressContribution(double completedWeight, double totalWeight) {
+        /// Validates one weighted contribution.
+        private ProgressContribution {
+            if (!Double.isFinite(completedWeight)
+                    || !Double.isFinite(totalWeight)
+                    || completedWeight < 0.0D
+                    || totalWeight <= 0.0D
+                    || completedWeight > totalWeight) {
+                throw new IllegalArgumentException("invalid task progress contribution");
+            }
+        }
     }
 }

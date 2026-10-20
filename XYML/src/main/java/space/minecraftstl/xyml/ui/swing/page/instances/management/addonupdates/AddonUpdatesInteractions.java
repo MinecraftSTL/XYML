@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 
 import java.awt.Component;
 import java.net.URI;
@@ -29,7 +30,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Owns native desktop effects outside installed add-on update scan logic.
 @NotNullByDefault
-interface AddonUpdatesInteractions {
+interface AddonUpdatesInteractions extends RetryableFailureInteraction {
     /// Lets the user choose an exact new CSV destination with an editable directory path.
     ///
     /// @param owner dialog owner

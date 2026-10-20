@@ -89,6 +89,22 @@ public final class TaskExecutorSubscriptionTest {
         assertTrue(executor.isCancelled());
     }
 
+    /// Verifies a cancelled executor clears its legacy aggregate flag before a later repeated start.
+    @Test
+    public void repeatedStartAfterCancellationClearsLegacyCancellationFlag() {
+        Task<@Nullable Void> task = Task.runAsync(Runnable::run, () -> {
+        });
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task);
+        Subscription cancellation = executor.subscribeTaskListener(new StartTaskListener(executor::cancel));
+
+        assertFalse(executor.test());
+        assertTrue(executor.isCancelled());
+        cancellation.unsubscribe();
+
+        assertTrue(executor.test());
+        assertFalse(executor.isCancelled());
+    }
+
     /// Verifies a task error produces one failed stop notification for every normal terminal listener.
     @Test
     public void taskErrorPublishesFailedStopExactlyOnce() {

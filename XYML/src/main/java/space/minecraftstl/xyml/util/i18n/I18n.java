@@ -17,7 +17,7 @@
  */
 package space.minecraftstl.xyml.util.i18n;
 
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.download.game.GameRemoteVersion;
 import space.minecraftstl.xyml.util.i18n.translator.Translator;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
@@ -77,7 +77,7 @@ public final class I18n {
         return getTranslator().formatSpeed(bytes);
     }
 
-    public static String getDisplayVersion(RemoteVersion version) {
+    public static String getDisplayVersion(ComponentRemoteVersion version) {
         return getTranslator().getDisplayVersion(version);
     }
 

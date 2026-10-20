@@ -18,11 +18,20 @@
 package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.util.tree.ZipFileTree;
 
+import kala.compress.archivers.zip.ZipArchiveEntry;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -39,6 +48,7 @@ import java.util.Objects;
 /// @param loaderType detected loader type
 /// @param fileName exact current file name
 /// @param searchText precomputed normalized metadata search text
+/// @param logoBase64 immutable encoded archive logo, or `null` when unavailable
 /// @param enabled actual suffix-derived state
 @NotNullByDefault
 record ModCatalogEntry(
@@ -53,7 +63,11 @@ record ModCatalogEntry(
         ModLoaderType loaderType,
         String fileName,
         String searchText,
+        @Nullable String logoBase64,
         boolean enabled) {
+    /// Maximum archive-logo payload retained in one catalog entry.
+    private static final int MAX_LOGO_BYTES = 4 * 1024 * 1024;
+
     /// Normalizes one captured index entry.
     ModCatalogEntry {
         localKey = Objects.requireNonNull(localKey, "localKey");
@@ -67,6 +81,9 @@ record ModCatalogEntry(
         Objects.requireNonNull(loaderType, "loaderType");
         fileName = Objects.requireNonNull(fileName, "fileName");
         searchText = Objects.requireNonNull(searchText, "searchText").toLowerCase(Locale.ROOT);
+        if (logoBase64 != null && logoBase64.isBlank()) {
+            logoBase64 = null;
+        }
     }
 
     /// Creates an entry while precomputing normalized metadata search text once.
@@ -115,6 +132,7 @@ record ModCatalogEntry(
                         gameVersion,
                         loaderType.name(),
                         fileName),
+                null,
                 enabled);
     }
 
@@ -137,7 +155,82 @@ record ModCatalogEntry(
                 file.getGameVersion(),
                 file.getModLoaderType(),
                 namePath.toString(),
+                String.join("\n",
+                        file.getFileName(),
+                        file.getId(),
+                        file.getName(),
+                        file.getDescription().toString(),
+                        file.getAuthors(),
+                        file.getVersion(),
+                        file.getGameVersion(),
+                        file.getModLoaderType().name(),
+                        namePath.toString()),
+                readLogoBase64(file),
                 !manager.isDisabled(path));
+    }
+
+    /// Reads the declared logo from the local archive without exposing mutable bytes to Swing.
+    ///
+    /// The read is bounded because a malformed archive must not make a catalog refresh allocate
+    /// unbounded memory. Any unreadable, missing, or oversized logo falls back to the generic row
+    /// icon at presentation time.
+    ///
+    /// @param file Core local Mod file
+    /// @return Base64-encoded logo bytes, or `null` when unavailable
+    private static @Nullable String readLogoBase64(LocalModFile file) {
+        @Nullable String entryPath = normalizeLogoPath(file.getLogoPath());
+        if (entryPath == null) {
+            return null;
+        }
+        try (ZipFileTree tree = CompressingUtils.openZipTree(file.getFile())) {
+            @Nullable ZipArchiveEntry entry = tree.getEntry(entryPath);
+            if (entry == null || entry.isDirectory()) {
+                return null;
+            }
+            try (InputStream input = tree.getInputStream(entry);
+                    ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int total = 0;
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    if (read == 0) {
+                        continue;
+                    }
+                    if (MAX_LOGO_BYTES - total < read) {
+                        return null;
+                    }
+                    output.write(buffer, 0, read);
+                    total += read;
+                }
+                return total == 0
+                        ? null
+                        : Base64.getEncoder().encodeToString(output.toByteArray());
+            }
+        } catch (IOException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /// Normalizes an archive-relative logo path and rejects traversal segments.
+    ///
+    /// @param logoPath metadata-provided archive path
+    /// @return normalized relative path, or `null` when invalid or blank
+    private static @Nullable String normalizeLogoPath(String logoPath) {
+        String[] segments = logoPath.replace('\\', '/').split("/");
+        StringBuilder normalized = new StringBuilder();
+        for (String segment : segments) {
+            if (segment.isBlank() || segment.equals(".")) {
+                continue;
+            }
+            if (segment.equals("..")) {
+                return null;
+            }
+            if (normalized.length() > 0) {
+                normalized.append('/');
+            }
+            normalized.append(segment);
+        }
+        return normalized.length() == 0 ? null : normalized.toString();
     }
 
     /// Returns whether this entry satisfies one normalized query and enabled-state filter.
@@ -170,6 +263,7 @@ record ModCatalogEntry(
                 gameVersion,
                 loaderType,
                 fileName,
+                logoBase64,
                 enabled);
     }
 }

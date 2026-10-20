@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
@@ -301,6 +302,14 @@ public final class LocalModFile extends LocalAddonFile implements Comparable<Loc
         Files.deleteIfExists(file);
     }
 
+    /// Deletes the current file through the requested recycle-bin or permanent mode.
+    ///
+    /// @param mode selected deletion behavior
+    /// @throws IOException when the selected deletion fails
+    public void delete(DeletionMode mode) throws IOException {
+        FileUtils.deleteWithMode(file, mode);
+    }
+
     /// Finds the newest compatible remote version newer than the installed file.
     ///
     /// @param downloadProvider provider used for remote metadata requests
@@ -310,8 +319,7 @@ public final class LocalModFile extends LocalAddonFile implements Comparable<Loc
     /// @throws IOException if remote metadata cannot be loaded
     @Override
     public @Nullable AddonUpdate checkUpdates(DownloadProvider downloadProvider, String gameVersion, RemoteAddon.Source source) throws IOException {
-        @Nullable RemoteAddonRepository repository = source.getRepoForType(RemoteAddon.Type.MOD);
-        if (repository == null) return null;
+        RemoteAddonRepository repository = source.getRepository();
         Optional<RemoteAddon.Version> currentVersion = repository.getRemoteVersionByLocalFile(file);
         if (currentVersion.isEmpty()) return null;
         @Unmodifiable List<RemoteAddon.Version> remoteVersions = repository.getRemoteVersionsById(

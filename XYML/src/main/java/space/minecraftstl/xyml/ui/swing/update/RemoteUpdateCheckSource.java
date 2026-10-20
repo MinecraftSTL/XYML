@@ -86,7 +86,7 @@ public final class RemoteUpdateCheckSource implements UpdateCheckSource {
             throw new IOException("Self verification failed");
         }
 
-        return RemoteVersion.fetch(request.channel(), request.preview(), buildRequestUrl(request));
+        return RemoteVersion.fetch(request.channel(), false, buildRequestUrl(request));
     }
 
     /// Resolves the channel placeholder and appends the deterministic update query.
@@ -99,11 +99,7 @@ public final class RemoteUpdateCheckSource implements UpdateCheckSource {
         String resolvedEndpoint = endpoint.replace("{channel}", channelName);
         LinkedHashMap<String, String> query = new LinkedHashMap<>();
         query.put("version", currentVersion);
-        query.put(
-                "channel",
-                request.preview()
-                        ? channelName + "-preview"
-                        : channelName);
+        query.put("channel", channelName);
         return NetworkUtils.withQuery(resolvedEndpoint, query);
     }
 }

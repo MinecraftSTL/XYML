@@ -19,14 +19,15 @@ package space.minecraftstl.xyml.download.game;
 
 import com.google.gson.JsonParseException;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -49,20 +50,24 @@ public final class GameAssetDownloadTask extends Task<Void> {
     private final List<Task<?>> dependents = new ArrayList<>(1);
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager that can provides {@link GameRepository}
-     * @param manifest the game version
-     */
+    /// Constructor.
+    ///
+    /// @param dependencyManager the dependency manager that can provides [GameRepository]
+    /// @param manifest the game version
     public GameAssetDownloadTask(AbstractDependencyManager dependencyManager, GameInstanceManifest manifest, boolean forceDownloadingIndex, boolean integrityCheck) {
         this.dependencyManager = dependencyManager;
-        this.manifest = manifest.resolve(dependencyManager.getGameRepository());
+        this.manifest = manifest;
         this.assetIndexInfo = this.manifest.getAssetIndex();
-        this.assetIndexFile = dependencyManager.getGameRepository().getIndexFile(manifest.id(), assetIndexInfo.getId());
+        GameRepository gameRepository = dependencyManager.getGameRepository();
+        String assetId = assetIndexInfo.getId();
+        this.assetIndexFile = gameRepository.getIndexFile(manifest.id(), assetId);
         this.integrityCheck = integrityCheck;
 
         setStage("xyml.install.assets");
+        setResources(TaskResource.gameDirectory(gameRepository.getAssetDirectory(manifest.id(), assetId)));
+        // Keep the shared asset-directory lease through index parsing and direct cache writes, then let each
+        // generated object download acquire its exact target independently.
+        releaseResourcesBeforeDependencies();
         dependents.add(new GameAssetIndexDownloadTask(dependencyManager, this.manifest, forceDownloadingIndex));
     }
 
@@ -90,7 +95,8 @@ public final class GameAssetDownloadTask extends Task<Void> {
             if (isCancelled())
                 throw new InterruptedException();
 
-            Path file = dependencyManager.getGameRepository().getAssetObject(manifest.id(), assetIndexInfo.getId(), assetObject);
+            GameRepository gameRepository = dependencyManager.getGameRepository();
+            Path file = gameRepository.getAssetObject(manifest.id(), assetIndexInfo.getId(), assetObject);
             boolean download = !Files.isRegularFile(file);
             try {
                 if (!download && integrityCheck && !assetObject.validateChecksum(file, true))
@@ -99,9 +105,8 @@ public final class GameAssetDownloadTask extends Task<Void> {
                 LOG.warning("Unable to calc hash value of file " + file, e);
             }
             if (download) {
-                List<URI> uris = dependencyManager.getDownloadProvider().getAssetObjectCandidates(assetObject.getLocation());
-
-                var task = new FileDownloadTask(uris, file, new FileDownloadTask.IntegrityCheck("SHA-1", assetObject.hash()));
+                DownloadCandidates candidates = dependencyManager.getDownloadProvider().getAssetObjectCandidates(assetObject);
+                var task = new FileDownloadTask(candidates, file, new FileDownloadTask.IntegrityCheck("SHA-1", assetObject.hash()));
                 task.setName(assetObject.hash());
                 task.setCandidate(dependencyManager.getCacheRepository().getCommonDirectory()
                         .resolve("assets").resolve("objects").resolve(assetObject.getLocation()));

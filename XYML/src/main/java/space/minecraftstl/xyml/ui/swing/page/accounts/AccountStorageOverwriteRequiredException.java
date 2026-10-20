@@ -21,7 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Signals that deleting one account requires explicit backup-and-overwrite consent.
+/// Signals that modifying one account requires explicit backup-and-overwrite consent.
 @NotNullByDefault
 public final class AccountStorageOverwriteRequiredException extends IllegalStateException {
     /// Stable identifier of the account whose storage is read-only.

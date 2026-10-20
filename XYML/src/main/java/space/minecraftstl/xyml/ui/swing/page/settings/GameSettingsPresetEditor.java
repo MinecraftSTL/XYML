@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot;
 
 import java.util.List;
@@ -191,10 +192,12 @@ public record GameSettingsPresetEditor(
     /// @param original original direct preset values
     /// @param defaultIsolationType selected default isolation strategy
     /// @param snapshot validated complete editor values
+    /// @param instanceConfigMigrationPolicy edited migration strategy owned by this preset
     /// @return complete preset update command
     public static GameSettingsPresetEditor fromEditorSnapshot(
             GameSettingsPresetEditor original,
             DefaultIsolationType defaultIsolationType,
+            InstanceConfigMigrationPolicy instanceConfigMigrationPolicy,
             InstanceGameSettingsSnapshot snapshot) {
         GameSettingsPresetEditor source = Objects.requireNonNull(original, "original");
         Objects.requireNonNull(snapshot, "snapshot");
@@ -236,7 +239,8 @@ public record GameSettingsPresetEditor(
                         snapshot.launcher().disableAutoGameOptions(),
                         snapshot.launcher().showLogs(),
                         snapshot.launcher().debugLog(),
-                        snapshot.launcher().notCheckGame()),
+                        snapshot.launcher().notCheckGame(),
+                        instanceConfigMigrationPolicy),
                 new QuickPlaySettings(
                         snapshot.quickPlay().type(),
                         snapshot.quickPlay().multiplayer(),
@@ -349,6 +353,7 @@ public record GameSettingsPresetEditor(
     /// @param showLogs whether the game log window opens on launch
     /// @param debugLog whether debug log output is enabled
     /// @param notCheckGame whether game completeness validation is skipped
+    /// @param migrationPolicy automatic configuration migration owned by this preset
     @NotNullByDefault
     public record LauncherSettings(
             LauncherVisibility visibility,
@@ -356,10 +361,12 @@ public record GameSettingsPresetEditor(
             boolean disableAutoGameOptions,
             boolean showLogs,
             boolean debugLog,
-            boolean notCheckGame) {
+            boolean notCheckGame,
+            InstanceConfigMigrationPolicy migrationPolicy) {
         /// Rejects a missing launcher visibility value.
         public LauncherSettings {
             Objects.requireNonNull(visibility, "visibility");
+            Objects.requireNonNull(migrationPolicy, "migrationPolicy");
         }
     }
 

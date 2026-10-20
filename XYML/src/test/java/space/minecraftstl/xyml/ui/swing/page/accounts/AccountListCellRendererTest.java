@@ -140,6 +140,53 @@ public final class AccountListCellRendererTest {
                 () -> assertTrue(countPixelsDifferentFrom(rendered, avatarBounds, background) > 300));
     }
 
+    /// A right-side drag handle is enabled only for loaded account rows.
+    @Test
+    public void rendersEnabledDragHandleOnlyForLoadedRows() {
+        AccountListCellRenderer renderer = onEdt(AccountListCellRenderer::new);
+        JList<ChoiceListEntry<AccountListItem>> list = onEdt(JList::new);
+        AccountListItem item = new AccountListItem(
+                "account-0",
+                "Test Player",
+                "Microsoft - Global",
+                "00000000-0000-0000-0000-000000000009");
+
+        runOnEdt(() -> {
+            renderer.getListCellRendererComponent(
+                    list, ChoiceListEntry.loaded(0, item), 0, false, false);
+            JLabel loadedHandle = findLabel(renderer, "accountListDragHandle");
+            boolean loadedEnabled = loadedHandle.isEnabled();
+            Icon loadedIcon = loadedHandle.getIcon();
+            Dimension loadedPreferred = loadedHandle.getPreferredSize();
+
+            renderer.getListCellRendererComponent(list, ChoiceListEntry.loading(0), 0, false, false);
+            JLabel loadingHandle = findLabel(renderer, "accountListDragHandle");
+            Rectangle hitBounds = AccountListCellRenderer.dragHandleBounds(
+                    new Rectangle(0, 0, 360, AccountListCellRenderer.ROW_HEIGHT));
+
+            assertAll(
+                    () -> assertTrue(loadedEnabled),
+                    () -> assertTrue(loadedIcon != null),
+                    () -> assertEquals(28, loadedPreferred.width),
+                    () -> assertEquals(32, loadedPreferred.height),
+                    () -> assertTrue(hitBounds.x > 300),
+                    () -> assertFalse(loadingHandle.isEnabled()));
+        });
+    }
+
+    /// A renderer used for selection-only surfaces omits the reordering affordance.
+    @Test
+    public void hidesDragHandleWhenReorderingIsUnavailable() {
+        AccountListCellRenderer renderer = onEdt(() -> new AccountListCellRenderer(false));
+        JList<ChoiceListEntry<AccountListItem>> list = onEdt(JList::new);
+
+        runOnEdt(() -> {
+            renderer.getListCellRendererComponent(
+                    list, ChoiceListEntry.loading(0), 0, false, false);
+            assertFalse(findLabel(renderer, "accountListDragHandle").isVisible());
+        });
+    }
+
     /// Selection and keyboard focus share a rounded full-row outline without a traditional radio marker.
     @Test
     public void highlightsSelectedAccountWithoutRadioMarker() {

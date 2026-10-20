@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.nbt.NBTFileType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.JRootPane;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Frame;
@@ -38,6 +39,9 @@ import java.util.function.Consumer;
 /// editor window is required. One editor window is reused until that window closes.
 @NotNullByDefault
 public final class SwingNBTEditorLauncher implements AutoCloseable {
+    /// Root-pane client-property key for the sole editor lifecycle owned by one application window.
+    private static final Object SHARED_LAUNCHER_KEY = new Object();
+
     /// Native or injected file chooser invoked only from the EDT.
     private final FileChooser fileChooser;
 
@@ -46,6 +50,9 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
 
     /// Current modeless editor window, or null before opening and after disposal.
     private @Nullable EditorWindow editorWindow;
+
+    /// Root pane owning this shared launcher, or null for isolated test launchers.
+    private @Nullable JRootPane sharedRootPane;
 
     /// Whether the owning settings tool has permanently disabled this launcher.
     private boolean closed;
@@ -74,6 +81,54 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
                             ? null
                             : new SwingNBTEditorDialog(owner, executor, strings, closedObserver);
                 });
+    }
+
+    /// Installs or returns the sole NBT editor launcher owned by one application root pane.
+    ///
+    /// @param chooserOwner stable component inside the application window
+    /// @param ioExecutor caller-owned executor for document and bundled-icon I/O
+    /// @return shared launcher registered for the containing root pane
+    /// @throws IllegalStateException if the component is not attached to a root pane
+    static SwingNBTEditorLauncher installShared(Component chooserOwner, Executor ioExecutor) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component component = Objects.requireNonNull(chooserOwner, "chooserOwner");
+        @Nullable JRootPane rootPane = SwingUtilities.getRootPane(component);
+        if (rootPane == null) {
+            throw new IllegalStateException("NBT editor owner is not attached to an application root pane");
+        }
+        @Nullable Object registered = rootPane.getClientProperty(SHARED_LAUNCHER_KEY);
+        if (registered instanceof SwingNBTEditorLauncher launcher && !launcher.closed) {
+            return launcher;
+        }
+        if (registered != null) {
+            throw new IllegalStateException("Application root pane contains an incompatible NBT editor host");
+        }
+        SwingNBTEditorLauncher launcher = create(
+                component,
+                () -> {
+                    @Nullable Window window = SwingUtilities.getWindowAncestor(component);
+                    return window instanceof Frame frame ? frame : null;
+                },
+                Objects.requireNonNull(ioExecutor, "ioExecutor"));
+        launcher.sharedRootPane = rootPane;
+        rootPane.putClientProperty(SHARED_LAUNCHER_KEY, launcher);
+        return launcher;
+    }
+
+    /// Finds the live shared editor launcher registered for a component's application window.
+    ///
+    /// @param component component currently attached below the application root pane
+    /// @return shared launcher, or null while detached or after application shutdown
+    public static @Nullable SwingNBTEditorLauncher sharedFor(Component component) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JRootPane rootPane = SwingUtilities.getRootPane(Objects.requireNonNull(component, "component"));
+        if (rootPane == null) {
+            return null;
+        }
+        @Nullable Object registered = rootPane.getClientProperty(SHARED_LAUNCHER_KEY);
+        return registered instanceof SwingNBTEditorLauncher launcher && !launcher.closed
+                ? launcher
+                : null;
     }
 
     /// Creates a launcher for callers that already own the exact NBT source path.
@@ -130,6 +185,11 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
                 return;
             }
             closed = true;
+            @Nullable JRootPane rootPane = sharedRootPane;
+            sharedRootPane = null;
+            if (rootPane != null && rootPane.getClientProperty(SHARED_LAUNCHER_KEY) == this) {
+                rootPane.putClientProperty(SHARED_LAUNCHER_KEY, null);
+            }
             @Nullable EditorWindow currentWindow = editorWindow;
             editorWindow = null;
             if (currentWindow != null) {

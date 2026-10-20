@@ -32,13 +32,16 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.settings.InstanceConfigMigrationPolicyPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
@@ -65,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSection.sectionPanel;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.enumKey;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.installRenderer;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -301,7 +305,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Status, persistence, reload, and read-only recovery footer.
     private final InstanceGameSettingsFooterControls footerControls;
-
+    /// Resource-aware asynchronous settings persistence.
+    private final InstanceGameSettingsPersistence persistence;
     /// Snapshot currently represented by the controls, or `null` during construction only.
     private @Nullable InstanceGameSettingsSnapshot displayedSnapshot;
 
@@ -362,7 +367,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             Executor executor,
             Runnable workingDirectoryChanged) {
         this(
-                new RepositoryInstanceGameSettingsStore(repository, instanceId),
+                new RepositoryInstanceGameSettingsStore(
+                        repository,
+                        instanceId,
+                        new LauncherAutomaticInstanceConfigMigrationTaskFactory(executor)),
                 new JavaManagerRuntimeManagementService(),
                 loadGameVersion(repository, instanceId, executor),
                 GameSettingsEditorPresentation.INSTANCE,
@@ -370,7 +378,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
-    ///
     /// Global-preset callers own persistence and therefore use [#editedSnapshot()] with a store whose snapshot can
     /// be replaced before [#reloadFromStore()] is invoked.
     ///
@@ -480,6 +487,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 store,
                 this::saveEditedSnapshot,
                 this::reloadSnapshot);
+        persistence = new InstanceGameSettingsPersistence(store, this::completeSave);
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
         this.workingDirectoryChanged = Objects.requireNonNull(
                 workingDirectoryChanged,
@@ -511,34 +519,51 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Returns the snapshot currently represented by the UI controls.
-    ///
-    /// @return displayed settings snapshot
     public InstanceGameSettingsSnapshot displayedSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         return Objects.requireNonNull(displayedSnapshot, "initial game settings snapshot was not applied");
     }
 
-    /// Replaces the rendered controls with the latest snapshot supplied by the backing store.
-    ///
-    /// Embedded global-preset editors call this after changing which preset their store represents.
+    /// Replaces controls with the latest snapshot supplied by the backing store.
     public void reloadFromStore() {
         reloadSnapshot();
     }
 
-    /// Enables or freezes every editor control while preserving the current draft values.
+    /// Adds the selected preset's migration policy to the existing launcher settings tab.
     ///
-    /// @param enabled whether users may interact with the editor
+    /// @param policyPanel policy controls bound to the selected preset
+    public void addGlobalMigrationPolicyPanel(InstanceConfigMigrationPolicyPanel policyPanel) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (presentation != GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            throw new IllegalStateException("Migration policy belongs only to global presets");
+        }
+        JScrollPane launcherScroll = (JScrollPane) settingsTabs.getComponentAt(1);
+        JPanel launcherContent = (JPanel) launcherScroll.getViewport().getView();
+        launcherContent.add(new JSeparator(), "growx");
+        launcherContent.add(Objects.requireNonNull(policyPanel, "policyPanel"), "growx");
+        launcherContent.revalidate();
+        launcherContent.repaint();
+    }
+
+    /// Enables or freezes every editor control while preserving draft values.
     public void setInteractionEnabled(boolean enabled) {
         EdtDispatcher.requireEventDispatchThread();
         interactionEnabled = enabled && !closed;
         updateEditingAvailability();
     }
 
-    /// Releases this panel and prevents further persistence requests.
+    /// Installs the shared task navigation controller.
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        footerControls.setTaskLaunchController(controller);
+    }
+
+    /// Releases this panel.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
+                persistence.close(); footerControls.close();
                 closed = true;
                 interactionEnabled = false;
                 javaRuntimeSubscription.unsubscribe();
@@ -574,7 +599,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Creates the page heading.
     /// @return unframed heading panel
-    private static JPanel createHeader() {
+    private JPanel createHeader() {
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
         header.setBorder(BorderFactory.createEmptyBorder(18, 20, 8, 20));
@@ -657,7 +682,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return content;
     }
 
-    /// Creates launcher behavior and diagnostics controls.
+    /// Creates launcher behavior, diagnostics, and global-preset migration policy controls.
     /// @return launcher settings content
     private JPanel createLauncherSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsLauncherTab");
@@ -744,7 +769,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 useCustomNativesControl);
         addControlRow(section, i18n("settings.advanced.natives_directory"), nativesDirectoryControl);
         addBooleanControlRow(section, i18n("settings.advanced.dont_patch_natives"), notPatchNativesControl);
-        addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw"), nativeGlfwControl);
+        addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw_or_sdl"), nativeGlfwControl);
         addBooleanControlRow(section, i18n("settings.advanced.use_native_openal"), nativeOpenAlControl);
         content.add(section, "growx");
         return content;
@@ -816,19 +841,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Persists the currently edited values or presents one concise validation failure.
     private void saveEditedSnapshot() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
+        if (closed || persistence.isBusy()) {
             return;
         }
         try {
             InstanceGameSettingsSnapshot previous = displayedSnapshot();
-            store.save(editedSnapshot());
-            InstanceGameSettingsSnapshot saved = store.snapshot();
-            applySnapshot(saved);
-            footerControls.setStatus(i18n("message.success"));
-            if (workingDirectoryChanged(previous, saved)) {
-                workingDirectoryChanged.run();
-            }
+            InstanceGameSettingsSnapshot candidate = editedSnapshot();
+            footerControls.setStatus(i18n("message.doing"));
+            persistence.start(previous, candidate);
+            updateEditingAvailability();
         } catch (IllegalArgumentException | IllegalStateException exception) {
             footerControls.setStatus(i18n(
                     "swing.instance_settings.save_failed",
@@ -836,6 +857,33 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                             exception.getMessage(),
                             i18n("swing.instance_settings.invalid"))));
         }
+    }
+
+    /// Completes one asynchronous settings save on the event-dispatch thread.
+    private void completeSave(InstanceGameSettingsSnapshot previous, TaskExecutor executor, boolean successful) {
+        if (successful) {
+            try {
+                InstanceGameSettingsSnapshot saved = store.snapshot();
+                applySnapshot(saved); footerControls.setStatus(i18n("message.success"));
+                if (workingDirectoryChanged(previous, saved)) workingDirectoryChanged.run();
+            } catch (IllegalArgumentException | IllegalStateException exception) {
+                footerControls.setStatus(i18n(
+                        "swing.instance_settings.save_failed",
+                        Objects.requireNonNullElse(
+                                exception.getMessage(),
+                                i18n("swing.instance_settings.invalid"))));
+            }
+        } else if (executor.isCancelled()) {
+            footerControls.setStatus(i18n("message.cancelled"));
+        } else {
+            Throwable failure = executor.getFailure();
+            footerControls.setStatus(i18n(
+                    "swing.instance_settings.save_failed",
+                    Objects.requireNonNullElse(
+                            failure == null ? null : failure.getMessage(),
+                            i18n("swing.instance_settings.invalid"))));
+        }
+        updateEditingAvailability();
     }
 
     /// Returns whether saved settings resolve instance content from a different working-directory configuration.
@@ -870,19 +918,13 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
     }
 
-    /// Reads every editor and validates user-controlled values before storage.
-    ///
-    /// This is the persistence boundary used by embedded global-preset presentation; it never mutates the backing
-    /// store by itself.
-    ///
-    /// @return complete edited snapshot
+    /// Reads every editor and validates values without mutating the backing store.
     public InstanceGameSettingsSnapshot editedSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
             throw new IllegalStateException("Game settings editor is closed");
         }
         InstanceGameSettingsSnapshot current = displayedSnapshot();
-
         boolean memoryModeOverridden = !memoryModeSelector.isInherited();
         boolean automaticMemory = memoryModeOverridden
                 ? memoryModeSelector.isAutomatic()
@@ -918,7 +960,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     javaPathField.getText(),
                     "custom Java path");
         }
-
         double windowWidth = editedRequiredDouble(
                 windowWidthControl,
                 current.window().width(),
@@ -948,7 +989,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 quickPlay.multiplayer(),
                 quickPlay.singleplayerOverridden(),
                 quickPlay.singleplayer());
-
         @Nullable Integer minimumMemory = editedOptionalInteger(
                 minimumMemoryControl,
                 current.jvm().minimumMemoryMiB(),
@@ -964,7 +1004,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 && !normalizedPermanentGeneration.chars().allMatch(Character::isDigit)) {
             throw new IllegalArgumentException("Permanent generation size must be a whole number of MiB");
         }
-
         return new InstanceGameSettingsSnapshot(
                 current.writable(),
                 parentPresetControls.edited(current.parentPreset()),
@@ -1270,7 +1309,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             javaVersionField.setText(snapshot.javaRuntime().customVersion());
             javaPathField.setText(snapshot.javaRuntime().customPath());
             applyDetectedJavaSnapshotValue(snapshot.javaRuntime().detectedJava());
-
             applyChoice(windowTypeControl, snapshot.window().typeOverridden(), snapshot.window().type());
             applyText(
                     windowWidthControl,
@@ -1418,7 +1456,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private void updateEditingAvailability() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable InstanceGameSettingsSnapshot snapshot = displayedSnapshot;
-        boolean writable = interactionEnabled && !closed && snapshot != null && snapshot.writable();
+        boolean writable = interactionEnabled && !closed && !persistence.isBusy() && snapshot != null
+                && snapshot.writable();
         for (InheritedControl<? extends JComponent> control : allControls()) {
             control.overrideBox().setEnabled(
                     writable && presentation == GameSettingsEditorPresentation.INSTANCE);
@@ -1469,7 +1508,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         nativesDirectoryControl.editor().setEnabled(
                 nativesDirectoryControl.editor().isEnabled() && useCustomNatives);
 
-        footerControls.updateAvailability(writable, interactionEnabled && !closed);
+        footerControls.updateAvailability(writable, interactionEnabled && !closed && !persistence.isBusy());
         settingsTabs.setEnabled(interactionEnabled && !closed);
         if (!applyingSnapshot && snapshot != null && !snapshot.writable()) {
             footerControls.setStatus(i18n("settings.game.instance_settings.unsupported"));
@@ -1785,22 +1824,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         scrollPane.getVerticalScrollBar().setUnitIncrement(18);
         SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
-    }
-
-    /// Creates one unframed three-column section.
-    ///
-    /// @param name stable component name
-    /// @param title localized section title
-    /// @return configured section panel
-    private static JPanel sectionPanel(String name, String title) {
-        JPanel section = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3", "[26!,center]8[280!,fill]16[grow,fill]", "[]10[]"));
-        section.setName(Objects.requireNonNull(name, "name"));
-        section.setOpaque(false);
-        JLabel heading = new JLabel(Objects.requireNonNull(title, "title"));
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 15.0F));
-        section.add(heading, "span 3, growx");
-        return section;
     }
 
     /// Creates one transparent inherited-control row that can be version-gated as a unit.

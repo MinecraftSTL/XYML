@@ -325,6 +325,7 @@ function Invoke-GradleWrapper {
             $jvmArguments += $option
         }
     }
+    $GradleArguments += '-Djava.net.useSystemProxies=true'
 
     $javaAppHome = ConvertTo-JavaPath -Path $appHome
     $javaSourceFile = ConvertTo-JavaPath -Path $sourceFile

@@ -78,6 +78,15 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
         return archiveBackend.currentPlatform();
     }
 
+    /// Returns the exact managed Java platform root used by the publication backend.
+    ///
+    /// @param platform target platform
+    /// @return managed platform root
+    @Override
+    public Path managedPlatformRoot(Platform platform) {
+        return archiveBackend.managedPlatformRoot(platform);
+    }
+
     /// Creates the established Core Disco query for one explicit distribution and platform.
     ///
     /// @param distribution explicitly selected distribution
@@ -98,7 +107,7 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
     @Override
     public Task<String> fetchText(String uri, long maximumBytes) {
         return new BoundedTextFetchTask(
-                downloadProvider.injectURLWithCandidates(uri),
+                downloadProvider.getDownloadCandidates(uri),
                 maximumBytes);
     }
 
@@ -116,7 +125,7 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
             String checksumAlgorithm,
             String checksum) {
         return archiveBackend.downloadManagedTemporaryArchive(
-                downloadProvider.injectURLWithCandidates(uri),
+                downloadProvider.getDownloadCandidates(uri),
                 archiveSuffix,
                 checksumAlgorithm,
                 checksum);

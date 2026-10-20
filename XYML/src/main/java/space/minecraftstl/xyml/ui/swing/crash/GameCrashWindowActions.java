@@ -25,7 +25,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Isolates crash-log export, desktop integration, and log-window presentation from Swing components.
 @NotNullByDefault
-interface GameCrashWindowActions {
+interface GameCrashWindowActions extends AutoCloseable {
     /// Exports a filtered crash bundle containing process, launcher, version, and recent game logs.
     ///
     /// @return asynchronous absolute zip-file path
@@ -45,4 +45,11 @@ interface GameCrashWindowActions {
     /// @param destination link destination
     /// @throws Exception when desktop browsing is unavailable
     void openLink(URI destination) throws Exception;
+
+    /// Releases any window-owned secondary surfaces or resources.
+    ///
+    /// Stateless action implementations require no cleanup.
+    @Override
+    default void close() {
+    }
 }

@@ -16,19 +16,26 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
+
 import java.io.EOFException;
 import java.io.IOException;
 
+/// Bounded reader that exposes an uncompressed raw payload directly.
+@NotNullByDefault
 public final class UncompressedDataReader extends BoundedDataReader {
+    /// Raw source position at construction, used for decoded-byte accounting.
+    private final long startPosition;
 
     public UncompressedDataReader(RawDataReader rawReader, long limit) {
         super(rawReader, rawReader.getBuffer(), limit);
+        startPosition = rawReader.position();
     }
 
     @Override
     public void ensureBufferRemaining(int required) throws IOException {
         if (endPosition >= 0) {
-            long remainingInput = endPosition - getRawReader().position();
+            long remainingInput = remainingRawBytes();
 
             if (remainingInput < required) {
                 throw new EOFException("Not enough data to read, required: " + required + ", remaining: " + remainingInput);
@@ -36,5 +43,15 @@ public final class UncompressedDataReader extends BoundedDataReader {
         }
 
         getRawReader().ensureBufferRemaining(required);
+    }
+
+    /// {@inheritDoc}
+    @Override
+    long decodedBytes() {
+        try {
+            return Math.subtractExact(getRawReader().position(), startPosition);
+        } catch (ArithmeticException overflow) {
+            return Long.MAX_VALUE;
+        }
     }
 }

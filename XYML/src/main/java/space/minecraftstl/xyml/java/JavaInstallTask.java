@@ -18,7 +18,10 @@
 package space.minecraftstl.xyml.java;
 
 import kala.compress.archivers.ArchiveEntry;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.IOUtils;
@@ -36,27 +39,46 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
-/**
- * @author Glavo
- */
+/// Extracts one local Java archive into a stable managed runtime directory.
+@NotNullByDefault
 public final class JavaInstallTask extends Task<JavaManifest> {
 
+    /// Final managed runtime directory.
     private final Path targetDir;
-    private final Map<String, Object> update;
+
+    /// Immutable manifest update metadata.
+    private final @Unmodifiable Map<String, Object> update;
+
+    /// Input Java archive.
     private final Path archiveFile;
 
+    /// Manifest entries built while extracting the archive.
     private final Map<String, JavaLocalFiles.Local> files = new LinkedHashMap<>();
+
+    /// Archive-relative path segments for the current recursive entry.
     private final ArrayList<String> nameStack = new ArrayList<>();
+
+    /// Reusable archive copy buffer.
     private final byte[] buffer = new byte[IOUtils.DEFAULT_BUFFER_SIZE];
+
+    /// SHA-1 digest required by the managed Java manifest format.
     private final MessageDigest messageDigest = DigestUtils.getDigest("SHA-1");
 
-    public JavaInstallTask(Path targetDir, Map<String, Object> update, Path archiveFile) {
-        this.targetDir = targetDir;
-        this.update = update;
-        this.archiveFile = archiveFile;
+    /// Creates a stopped local Java archive extraction task.
+    ///
+    /// @param targetDir final managed runtime directory
+    /// @param update immutable manifest update metadata
+    /// @param archiveFile input Java archive
+    public JavaInstallTask(Path targetDir, @Unmodifiable Map<String, Object> update, Path archiveFile) {
+        this.targetDir = Objects.requireNonNull(targetDir, "targetDir").toAbsolutePath().normalize();
+        this.update = Map.copyOf(Objects.requireNonNull(update, "update"));
+        this.archiveFile = Objects.requireNonNull(archiveFile, "archiveFile").toAbsolutePath().normalize();
+        setResources(TaskResource.javaRuntime(this.targetDir), TaskResource.archive(this.archiveFile));
     }
 
+    /// Extracts the archive and records its Java metadata and file manifest.
     @Override
     public void execute() throws Exception {
         JavaInfo info;
@@ -69,11 +91,31 @@ public final class JavaInstallTask extends Task<JavaManifest> {
         setResult(new JavaManifest(info, update, files));
     }
 
-    private <F, E extends ArchiveEntry> void copyDirContent(ArchiveFileTree<F, E> tree, Path targetDir) throws IOException {
+    /// Copies the sole Java Home directory from an opened archive.
+    ///
+    /// @param tree opened Java archive tree
+    /// @param targetDir extraction destination
+    /// @param <F> archive format type
+    /// @param <E> archive entry type
+    /// @throws IOException when archive contents cannot be copied
+    private <F, E extends ArchiveEntry> void copyDirContent(
+            ArchiveFileTree<F, E> tree,
+            Path targetDir) throws IOException {
         copyDirContent(tree, tree.getRoot().getSubDirs().values().iterator().next(), targetDir);
     }
 
-    private <F, E extends ArchiveEntry> void copyDirContent(ArchiveFileTree<F, E> tree, ArchiveFileTree.Dir<E> dir, Path targetDir) throws IOException {
+    /// Recursively copies one archive directory and records each manifest entry.
+    ///
+    /// @param tree opened Java archive tree
+    /// @param dir current archive directory
+    /// @param targetDir current extraction destination
+    /// @param <F> archive format type
+    /// @param <E> archive entry type
+    /// @throws IOException when archive contents cannot be copied
+    private <F, E extends ArchiveEntry> void copyDirContent(
+            ArchiveFileTree<F, E> tree,
+            ArchiveFileTree.Dir<E> dir,
+            Path targetDir) throws IOException {
         Files.createDirectories(targetDir);
 
         for (Map.Entry<String, E> pair : dir.getFiles().entrySet()) {
@@ -89,7 +131,10 @@ public final class JavaInstallTask extends Task<JavaManifest> {
                 long size = 0L;
 
                 try (InputStream input = tree.getInputStream(entry);
-                     OutputStream output = Files.newOutputStream(path, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                     OutputStream output = Files.newOutputStream(
+                             path,
+                             StandardOpenOption.CREATE,
+                             StandardOpenOption.TRUNCATE_EXISTING)) {
                     messageDigest.reset();
 
                     int c;
@@ -103,7 +148,11 @@ public final class JavaInstallTask extends Task<JavaManifest> {
                 if (tree.isExecutable(entry))
                     FileUtils.setExecutable(path);
 
-                files.put(String.join("/", nameStack), new JavaLocalFiles.LocalFile(HexFormat.of().formatHex(messageDigest.digest()), size));
+                files.put(
+                        String.join("/", nameStack),
+                        new JavaLocalFiles.LocalFile(
+                                HexFormat.of().formatHex(messageDigest.digest()),
+                                size));
             }
             nameStack.remove(nameStack.size() - 1);
         }

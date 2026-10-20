@@ -19,17 +19,19 @@ package space.minecraftstl.xyml.download.game;
 
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.download.DefaultCacheRepository;
+import space.minecraftstl.xyml.download.DownloadCandidates;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.DownloadException;
-import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.FileDownloadTask.IntegrityCheck;
+import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,6 +50,8 @@ public class LibraryDownloadTask extends Task<Void> {
     protected final Library library;
     protected final String url;
     private final Library originalLibrary;
+    /// Cache directory captured when the task resource declaration was created.
+    private final Path cacheDirectorySnapshot;
     private boolean cached = false;
 
     public LibraryDownloadTask(AbstractDependencyManager dependencyManager, Path file, Library library) {
@@ -61,9 +65,13 @@ public class LibraryDownloadTask extends Task<Void> {
 
         this.library = library;
         this.cacheRepository = dependencyManager.getCacheRepository();
+        cacheDirectorySnapshot = Objects.requireNonNull(
+                cacheRepository.getCacheDirectory(),
+                "cache directory").toAbsolutePath().normalize();
 
         url = library.getDownload().getUrl();
         jar = file;
+        setResources(TaskResource.downloadTarget(file));
     }
 
     @Override
@@ -101,6 +109,13 @@ public class LibraryDownloadTask extends Task<Void> {
 
     @Override
     public void preExecute() {
+        Path currentCacheDirectory = Objects.requireNonNull(
+                cacheRepository.getCacheDirectory(),
+                "cache directory").toAbsolutePath().normalize();
+        if (!cacheDirectorySnapshot.equals(currentCacheDirectory)) {
+            throw new IllegalStateException("Cache directory changed after task resource declaration");
+        }
+
         Optional<Path> libPath = cacheRepository.getLibrary(originalLibrary);
         if (libPath.isPresent()) {
             try {
@@ -115,8 +130,9 @@ public class LibraryDownloadTask extends Task<Void> {
         }
 
 
-        List<URI> uris = dependencyManager.getDownloadProvider().injectURLWithCandidates(url);
-        task = new FileDownloadTask(uris, jar,
+        DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
+        DownloadCandidates urls = downloadProvider.getDownloadCandidates(url);
+        task = new FileDownloadTask(urls, jar,
                 library.getDownload().getSha1() != null ? new IntegrityCheck("SHA-1", library.getDownload().getSha1()) : null);
         task.setCacheRepository(cacheRepository);
         task.setCaching(true);

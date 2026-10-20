@@ -24,7 +24,11 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -53,22 +57,50 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// are scheduled through the caller-owned executor and reject accidental execution on the EDT.
 @NotNullByDefault
 public final class DefaultWorldCatalogInteractions implements WorldCatalogInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Visible fallback text used by every native dialog and tooltip.
     private final WorldCatalogStrings strings;
 
     /// Caller-owned executor for filesystem and platform desktop work.
     private final Executor executor;
 
-    /// Lazily created modeless editor dedicated to direct world level-data paths.
-    private @Nullable SwingNBTEditorLauncher levelDataEditor;
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
 
     /// Creates the production interaction implementation.
     ///
     /// @param strings stable visible text
     /// @param executor caller-owned background executor
     public DefaultWorldCatalogInteractions(WorldCatalogStrings strings, Executor executor) {
+        this(strings, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings stable visible text
+    /// @param executor caller-owned background executor
+    /// @param trashOperations recycle-bin implementation
+    DefaultWorldCatalogInteractions(
+            WorldCatalogStrings strings,
+            Executor executor,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Shows a ZIP-only single-file chooser on the EDT.
@@ -131,6 +163,25 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 strings.deleteDialogTitle(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(world, "world");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, world) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, world);
     }
 
     /// Prompts for one sibling copy name on the EDT.
@@ -232,10 +283,10 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     public void openLevelData(Component owner, Path levelDataPath) {
         EdtDispatcher.requireEventDispatchThread();
         Component checkedOwner = Objects.requireNonNull(owner, "owner");
-        if (levelDataEditor == null) {
-            levelDataEditor = SwingNBTEditorLauncher.createForDirectPaths(checkedOwner, executor);
+        @Nullable SwingNBTEditorLauncher editor = SwingNBTEditorLauncher.sharedFor(checkedOwner);
+        if (editor != null) {
+            editor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
         }
-        levelDataEditor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
     }
 
     /// Copies one world-detail value on the EDT.
@@ -338,16 +389,6 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 Objects.requireNonNull(detail, "detail"),
                 Objects.requireNonNull(title, "title"),
                 JOptionPane.ERROR_MESSAGE);
-    }
-
-    /// Closes the lazily owned modeless level-data editor, if any.
-    @Override
-    public void close() {
-        @Nullable SwingNBTEditorLauncher editor = levelDataEditor;
-        levelDataEditor = null;
-        if (editor != null) {
-            editor.close();
-        }
     }
 
     /// Opens one directory outside the EDT and completes the caller future.

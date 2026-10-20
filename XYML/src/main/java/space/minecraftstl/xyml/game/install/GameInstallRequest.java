@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.game.install;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 
 import java.util.List;
 import java.util.Objects;
@@ -28,7 +28,7 @@ import java.util.Objects;
 ///
 /// Values are validated but never trimmed, rewritten, or given generated suffixes. Remote installers
 /// are snapshotted in their supplied order so a user-selected loader combination reaches the core task
-/// without accidental deduplication by [RemoteVersion#equals(Object)].
+/// without accidental deduplication by [ComponentRemoteVersion#equals(Object)].
 ///
 /// @param instanceName exact new instance identifier entered or accepted by the user
 /// @param versionId exact stable game-version identifier selected from the catalog
@@ -37,7 +37,7 @@ import java.util.Objects;
 public record GameInstallRequest(
         String instanceName,
         String versionId,
-        @Unmodifiable List<RemoteVersion> selectedRemoteVersions) {
+        @Unmodifiable List<ComponentRemoteVersion> selectedRemoteVersions) {
     /// Rejects missing or blank text and snapshots the selected installer order.
     public GameInstallRequest {
         requireText(instanceName, "instanceName");

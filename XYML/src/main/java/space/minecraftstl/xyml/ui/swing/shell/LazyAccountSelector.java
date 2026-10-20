@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.OrderedChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListItem;
@@ -176,7 +177,10 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         this.recentSelections = Objects.requireNonNull(recentSelections, "recentSelections");
         this.navigateCommand = Objects.requireNonNull(navigateCommand, "navigateCommand");
         orderedSource = new OrderedChoiceDataSource<>(model);
-        choiceList = new ViewportChoiceList<>(orderedSource, new AccountListCellRenderer());
+        choiceList = new ViewportChoiceList<>(
+                orderedSource,
+                new AccountListCellRenderer(false),
+                RowBoundsCheckedList.BlankClickPolicy.RETAIN);
         displayedSnapshot = model.snapshot();
         addButton = new PopupCommandButton(
                 Objects.requireNonNull(addLabel, "addLabel"),
@@ -348,6 +352,8 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         JList<ChoiceListEntry<AccountListItem>> list = choiceList.getList();
         list.setName("shellAccountPopupList");
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setDragEnabled(false);
+        list.setTransferHandler(null);
         list.addListSelectionListener(event -> {
             if (!closed && !applyingSnapshot && !event.getValueIsAdjusting()) {
                 pendingSelectionIndex = list.getSelectedIndex();

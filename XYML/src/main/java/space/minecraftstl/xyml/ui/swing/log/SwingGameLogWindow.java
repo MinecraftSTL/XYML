@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.log;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameLogSettings;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.CircularArrayList;
@@ -89,7 +90,7 @@ public final class SwingGameLogWindow implements AutoCloseable {
     /// @param process managed game process
     /// @param logs shared mutable bounded history used by crash diagnostics
     public SwingGameLogWindow(ManagedProcess process, CircularArrayList<Log> logs) {
-        this(process, logs, Log.getLogLines(), ignored -> {
+        this(process, logs, GameLogSettings.getLogLines(), ignored -> {
         });
     }
 

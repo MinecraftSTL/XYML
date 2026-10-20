@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.library.nbt.internal.input.DataReader;
 import space.minecraftstl.xyml.library.nbt.internal.output.DataWriter;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import java.io.IOException;
 import java.nio.LongBuffer;
@@ -36,6 +37,7 @@ import java.util.stream.LongStream;
 /// @see ParentTag
 /// @see ArrayTag
 /// @see LongTag
+@NotNullByDefault
 public final class LongArrayTag extends ArrayTag<Long, LongTag, long[], LongBuffer> {
 
     /// Creates a new LongArrayTag with an empty name and an empty array.
@@ -134,6 +136,16 @@ public final class LongArrayTag extends ArrayTag<Long, LongTag, long[], LongBuff
         return this;
     }
 
+    /// Inserts a long at an exact index.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param value value to insert
+    /// @return this array
+    public LongArrayTag insert(int index, long value) {
+        super.insert(index, value);
+        return this;
+    }
+
     /// {@inheritDoc}
     ///
     /// @see #add(long)
@@ -194,6 +206,7 @@ public final class LongArrayTag extends ArrayTag<Long, LongTag, long[], LongBuff
         writer.writeLongArrayDirect(values, 0, size);
     }
 
+    /// Returns a detached copy with the same name and logical array contents.
     @Override
     @Contract(value = "-> new", pure = true)
     public LongArrayTag clone() {
@@ -201,6 +214,7 @@ public final class LongArrayTag extends ArrayTag<Long, LongTag, long[], LongBuff
         tag.setName0(name);
         if (size > 0) {
             tag.values = Arrays.copyOf(values, size);
+            tag.size = size;
         }
         return tag;
     }

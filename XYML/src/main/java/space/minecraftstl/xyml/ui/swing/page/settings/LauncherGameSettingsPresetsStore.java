@@ -260,9 +260,10 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             preset.useCustomNativesProperty().setValue(values.nativeLibraries().customDirectoryEnabled());
             preset.nativesDirectoryProperty().setValue(values.nativeLibraries().directory());
             preset.notPatchNativesProperty().setValue(values.nativeLibraries().patchingDisabled());
-            preset.useNativeGLFWProperty().setValue(values.nativeLibraries().nativeGlfw());
+            preset.useNativeGLFWorSDLProperty().setValue(values.nativeLibraries().nativeGlfw());
             preset.useNativeOpenALProperty().setValue(values.nativeLibraries().nativeOpenAl());
             preset.defaultIsolationTypeProperty().setValue(values.defaultIsolationType());
+            preset.instanceConfigMigrationPolicyProperty().setValue(values.launcher().migrationPolicy());
             return snapshot();
         });
     }
@@ -445,7 +446,8 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                                 source.disableAutoGameOptionsProperty().getValue(),
                                 source.showLogsProperty().getValue(),
                                 source.enableDebugLogOutputProperty().getValue(),
-                                source.notCheckGameProperty().getValue()),
+                                source.notCheckGameProperty().getValue(),
+                                source.instanceConfigMigrationPolicyProperty().getValue()),
                         new GameSettingsPresetEditor.QuickPlaySettings(
                                 source.quickPlayProperty().getValue(),
                                 source.quickPlayMultiplayerProperty().getValue(),
@@ -476,7 +478,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                                 source.useCustomNativesProperty().getValue(),
                                 source.nativesDirectoryProperty().getValue(),
                                 source.notPatchNativesProperty().getValue(),
-                                source.useNativeGLFWProperty().getValue(),
+                                source.useNativeGLFWorSDLProperty().getValue(),
                                 source.useNativeOpenALProperty().getValue()),
                         source.defaultIsolationTypeProperty().getValue()));
     }

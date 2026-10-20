@@ -17,7 +17,7 @@
  */
 package space.minecraftstl.xyml.util.i18n.translator;
 
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import java.io.IOException;
@@ -73,7 +73,7 @@ public class Translator_en_Qabs extends Translator {
     }
 
     @Override
-    public String getDisplayVersion(RemoteVersion remoteVersion) {
+    public String getDisplayVersion(ComponentRemoteVersion remoteVersion) {
         return translate(remoteVersion.getSelfVersion());
     }
 

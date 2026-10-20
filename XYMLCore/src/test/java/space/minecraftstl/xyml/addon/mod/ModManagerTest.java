@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.addon.mod;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +30,7 @@ import java.nio.file.Path;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies supported mod archive extensions and metadata probes.
@@ -49,5 +52,19 @@ public final class ModManagerTest {
 
         assertTrue(ModManager.isFileNameMod(modArchive));
         assertTrue(ModManager.isFileMod(modArchive));
+    }
+
+    /// A snapshot-bound manager does not follow later repository root changes.
+    ///
+    /// @param temporaryDirectory temporary repository and captured-directory roots
+    @Test
+    public void retainsCapturedDirectory(@TempDir Path temporaryDirectory) {
+        DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("first-repository"));
+        Path capturedDirectory = temporaryDirectory.resolve("captured-mods").toAbsolutePath().normalize();
+        ModManager manager = new ModManager(repository, new GameInstanceID("instance"), capturedDirectory);
+
+        repository.setBaseDirectory(temporaryDirectory.resolve("second-repository"));
+
+        assertEquals(capturedDirectory, manager.getDirectory());
     }
 }

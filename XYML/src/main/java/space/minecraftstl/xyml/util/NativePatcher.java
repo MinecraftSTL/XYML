@@ -17,45 +17,64 @@
  */
 package space.minecraftstl.xyml.util;
 
-import space.minecraftstl.xyml.game.*;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.game.Artifact;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.Library;
+import space.minecraftstl.xyml.game.Renderer;
+import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.platform.Architecture;
-import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.platform.OSVersion;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.gson.JsonUtils.mapTypeOf;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author Glavo
- */
+/// Applies platform-specific native-library substitutions and launch compatibility checks.
+///
+/// @author Glavo
+@NotNullByDefault
 public final class NativePatcher {
-
+    /// Sentinel distinguishing a missing replacement entry from an intentionally removed library.
     private static final Library NONEXISTENT_LIBRARY = new Library(new Artifact("com.example", "nonexistent", "0.0.0"));
 
-    private static final Map<Platform, Map<String, Library>> natives = new HashMap<>();
+    /// Lazily loaded native replacement tables keyed by target platform.
+    private static final Map<Platform, Map<String, @Nullable Library>> NATIVES = new HashMap<>();
 
-    private static Map<String, Library> getNatives(Platform platform) {
-        return natives.computeIfAbsent(platform, p -> {
+    /// Loads and caches the native replacement table for one platform.
+    ///
+    /// @param platform target Java runtime platform
+    /// @return platform replacement table, or an empty map when no table is available
+    private static Map<String, @Nullable Library> getNatives(Platform platform) {
+        return NATIVES.computeIfAbsent(platform, p -> {
             //noinspection ConstantConditions
-            try (Reader reader = new InputStreamReader(NativePatcher.class.getResourceAsStream("/assets/natives.json"), StandardCharsets.UTF_8)) {
-                Map<String, Map<String, Library>> natives = JsonUtils.GSON.fromJson(reader, mapTypeOf(String.class, mapTypeOf(String.class, Library.class)));
-                return natives.getOrDefault(p.toString(), Collections.emptyMap());
+            try (Reader reader = new InputStreamReader(
+                    NativePatcher.class.getResourceAsStream("/assets/natives.json"),
+                    StandardCharsets.UTF_8)) {
+                Map<String, Map<String, @Nullable Library>> replacements = JsonUtils.GSON.fromJson(
+                        reader,
+                        mapTypeOf(String.class, mapTypeOf(String.class, Library.class)));
+                return replacements.getOrDefault(p.toString(), Collections.emptyMap());
             } catch (IOException e) {
                 LOG.warning("Failed to load native library list", e);
                 return Collections.emptyMap();
@@ -64,6 +83,11 @@ public final class NativePatcher {
     }
 
     // https://github.com/LWJGL/lwjgl3/issues/1111
+    /// Returns whether LWJGL 3.4.1 requires the MemoryUtil compatibility patch on the selected Java runtime.
+    ///
+    /// @param manifest resolved game manifest
+    /// @param javaVersion Java feature version
+    /// @return whether the compatibility patch is required
     public static boolean needPatchMemoryUtil(GameInstanceManifest manifest, int javaVersion) {
         return javaVersion >= 25 && javaVersion <= 26 && manifest.getLibraries().stream().anyMatch(library ->
                 "org.lwjgl".equals(library.groupId())
@@ -73,11 +97,21 @@ public final class NativePatcher {
         );
     }
 
+    /// Applies native-library filtering and platform substitutions to one resolved manifest.
+    ///
+    /// @param repository repository owning the launched instance
+    /// @param manifest resolved launch manifest
+    /// @param gameVersion resolved Minecraft version, or `null` when unavailable
+    /// @param javaVersion selected Java runtime
+    /// @param settings effective launch settings
+    /// @param javaArguments mutable Java argument list receiving required compatibility flags
+    /// @return manifest containing the selected native libraries
     public static GameInstanceManifest patchNative(DefaultGameRepository repository,
-                                                   GameInstanceManifest manifest, String gameVersion,
-                                                   JavaRuntime javaVersion,
-                                                   GameSettings.Effective settings,
-                                                   List<String> javaArguments) {
+                                                    GameInstanceManifest manifest,
+                                                    @Nullable String gameVersion,
+                                                    JavaRuntime javaVersion,
+                                                    GameSettings.Effective settings,
+                                                    List<String> javaArguments) {
         if (settings.getInheritable(GameSettings::useCustomNativesProperty)) {
             if (gameVersion != null && GameVersionNumber.compare(gameVersion, "1.19") < 0)
                 return manifest;
@@ -96,23 +130,18 @@ public final class NativePatcher {
             return manifest.withLibraries(newLibraries);
         }
 
-        final boolean useNativeGLFW = settings.getInheritable(GameSettings::useNativeGLFWProperty);
+        final boolean useNativeGLFWorSDL = settings.getInheritable(GameSettings::useNativeGLFWorSDLProperty);
         final boolean useNativeOpenAL = settings.getInheritable(GameSettings::useNativeOpenALProperty);
 
-        if (OperatingSystem.CURRENT_OS.isLinuxOrBSD() && (useNativeGLFW || useNativeOpenAL)
+        if (OperatingSystem.CURRENT_OS.isLinuxOrBSD() && (useNativeGLFWorSDL || useNativeOpenAL)
                 && gameVersion != null && GameVersionNumber.compare(gameVersion, "1.19") >= 0) {
 
             manifest = manifest.withLibraries(manifest.getLibraries().stream()
                     .filter(library -> {
-                        if (library.classifier() != null && library.classifier().startsWith("natives")
-                                && "org.lwjgl".equals(library.groupId())) {
-                            if ((useNativeGLFW && "lwjgl-glfw".equals(library.artifactId()))
-                                    || (useNativeOpenAL && "lwjgl-openal".equals(library.artifactId()))) {
-                                LOG.info("Filter out " + library.name());
-                                return false;
-                            }
+                        if (shouldFilterBundledNative(library, useNativeGLFWorSDL, useNativeOpenAL)) {
+                            LOG.info("Filter out " + library.name());
+                            return false;
                         }
-
                         return true;
                     })
                     .collect(Collectors.toList()));
@@ -122,7 +151,8 @@ public final class NativePatcher {
 
         OperatingSystem os = javaVersion.getPlatform().getOperatingSystem();
         Architecture arch = javaVersion.getArchitecture();
-        GameVersionNumber gameVersionNumber = gameVersion != null ? GameVersionNumber.asGameVersion(gameVersion) : null;
+        @Nullable GameVersionNumber gameVersionNumber =
+                gameVersion != null ? GameVersionNumber.asGameVersion(gameVersion) : null;
 
         if (settings.getInheritable(GameSettings::notPatchNativesProperty))
             return manifest;
@@ -135,7 +165,7 @@ public final class NativePatcher {
                 && gameVersionNumber.compareTo("1.19") >= 0)
             return manifest;
 
-        Map<String, Library> replacements = getNatives(javaVersion.getPlatform());
+        Map<String, @Nullable Library> replacements = getNatives(javaVersion.getPlatform());
         if (replacements.isEmpty()) {
             LOG.warning("No alternative native library provided for platform " + javaVersion.getPlatform());
             return manifest;
@@ -148,7 +178,8 @@ public final class NativePatcher {
                 continue;
 
             if (library.isNative()) {
-                Library replacement = replacements.getOrDefault(library.name() + ":natives", NONEXISTENT_LIBRARY);
+                @Nullable Library replacement =
+                        replacements.getOrDefault(library.name() + ":natives", NONEXISTENT_LIBRARY);
                 if (replacement == NONEXISTENT_LIBRARY) {
                     LOG.warning("No alternative native library " + library.name() + ":natives provided for platform " + javaVersion.getPlatform());
                     newLibraries.add(library);
@@ -157,7 +188,7 @@ public final class NativePatcher {
                     newLibraries.add(replacement);
                 }
             } else {
-                Library replacement = replacements.getOrDefault(library.name(), NONEXISTENT_LIBRARY);
+                @Nullable Library replacement = replacements.getOrDefault(library.name(), NONEXISTENT_LIBRARY);
                 if (replacement == NONEXISTENT_LIBRARY) {
                     newLibraries.add(library);
                 } else if (replacement != null) {
@@ -181,7 +212,7 @@ public final class NativePatcher {
                         break;
                     }
                 }
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 LOG.warning("Failed to get mods", e);
             }
         }
@@ -189,8 +220,17 @@ public final class NativePatcher {
         return manifest.withLibraries(newLibraries);
     }
 
+    /// Returns the Windows Mesa loader required by a non-default renderer.
+    ///
+    /// @param java selected Java runtime
+    /// @param renderer requested renderer
+    /// @param windowsVersion detected Windows version
+    /// @return matching loader, or `null` when no loader is required or supported
     /// @see <a href="https://github.com/HMCL-dev/mesa-loader-windows">Java Mesa Loader for Windows</a>
-    public static @Nullable Library getWindowsMesaLoader(@NotNull JavaRuntime java, @NotNull Renderer renderer, @NotNull OSVersion windowsVersion) {
+    public static @Nullable Library getWindowsMesaLoader(
+            JavaRuntime java,
+            Renderer renderer,
+            OSVersion windowsVersion) {
         if (renderer == Renderer.DEFAULT)
             return null;
 
@@ -206,8 +246,16 @@ public final class NativePatcher {
         }
     }
 
-    public static SupportStatus checkSupportedStatus(GameVersionNumber gameVersion, Platform platform,
-                                                     OSVersion systemVersion) {
+    /// Classifies native-launch support for one game version and runtime platform.
+    ///
+    /// @param gameVersion parsed Minecraft version
+    /// @param platform selected Java runtime platform
+    /// @param systemVersion detected operating-system version
+    /// @return support classification
+    public static SupportStatus checkSupportedStatus(
+            GameVersionNumber gameVersion,
+            Platform platform,
+            OSVersion systemVersion) {
         if (platform.equals(Platform.WINDOWS_X86_64)) {
             if (!systemVersion.isAtLeast(OSVersion.WINDOWS_7) && gameVersion.isAtLeast("1.20.5", "24w14a"))
                 return SupportStatus.UNSUPPORTED;
@@ -238,8 +286,8 @@ public final class NativePatcher {
                     : SupportStatus.TRANSLATION_SUPPORTED;
         }
 
-        String minVersion = null;
-        String maxVersion = null;
+        @Nullable String minVersion = null;
+        @Nullable String maxVersion = null;
 
         if (platform.equals(Platform.FREEBSD_X86_64)) {
             minVersion = "1.13";
@@ -280,14 +328,45 @@ public final class NativePatcher {
         return SupportStatus.UNTESTED;
     }
 
-    public enum SupportStatus {
-        OFFICIAL_SUPPORTED,
-        LAUNCHER_SUPPORTED,
-        TRANSLATION_SUPPORTED,
-        UNTESTED,
-        UNSUPPORTED,
+    /// Determines whether a bundled LWJGL native conflicts with enabled system-native settings.
+    ///
+    /// @param library candidate manifest library
+    /// @param useNativeGLFWorSDL whether the system GLFW or SDL library is enabled
+    /// @param useNativeOpenAL whether the system OpenAL library is enabled
+    /// @return whether the bundled native should be removed
+    static boolean shouldFilterBundledNative(
+            Library library,
+            boolean useNativeGLFWorSDL,
+            boolean useNativeOpenAL) {
+        @Nullable String classifier = Objects.requireNonNull(library, "library").classifier();
+        if (classifier == null || !classifier.startsWith("natives") || !"org.lwjgl".equals(library.groupId())) {
+            return false;
+        }
+        return (useNativeGLFWorSDL
+                && ("lwjgl-glfw".equals(library.artifactId()) || library.artifactId().contains("sdl")))
+                || (useNativeOpenAL && "lwjgl-openal".equals(library.artifactId()));
     }
 
+    /// Native-launch support classification for the selected platform and game version.
+    @NotNullByDefault
+    public enum SupportStatus {
+        /// Mojang directly supports this platform and version.
+        OFFICIAL_SUPPORTED,
+
+        /// XYML supplies the required native substitutions.
+        LAUNCHER_SUPPORTED,
+
+        /// A translation layer can provide runtime support.
+        TRANSLATION_SUPPORTED,
+
+        /// No definitive compatibility classification is available.
+        UNTESTED,
+
+        /// The selected platform and game version combination is unsupported.
+        UNSUPPORTED
+    }
+
+    /// Prevents instantiation of this static utility class.
     private NativePatcher() {
     }
 }

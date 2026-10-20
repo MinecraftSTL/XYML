@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | **русский** | [українська](README_uk.md)
+中文 ([简体](README.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | **русский** | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## Введение
@@ -32,7 +32,7 @@ XYML — это открытый, кроссплатформенный лаун�
 
 XYML обладает отличной кроссплатформенностью. Он работает не только на различных операционных системах, таких как Windows, Linux, macOS и FreeBSD, но и поддерживает различные архитектуры процессоров: x86, ARM, RISC-V, MIPS и LoongArch. Благодаря XYML вы можете легко наслаждаться Minecraft на разных платформах.
 
-Список поддерживаемых систем и архитектур процессоров XYML смотрите в [этой таблице](PLATFORM.md).
+Список поддерживаемых систем и архитектур процессоров XYML смотрите в [этой таблице](PLATFORM_en.md).
 
 ## Загрузка
 
@@ -51,17 +51,17 @@ XYML — это открытый проект, развиваемый сообщ
 - Сообщайте об ошибках или предлагайте новые функции, [создав issue](https://github.com/MinecraftSTL/XYML/issues/new/choose) на GitHub.
 - Вносите код, сделав fork репозитория на GitHub и [отправив pull request](https://github.com/MinecraftSTL/XYML/compare).
 
-Перед участием прочитайте [руководство для участников](./Contributing.md), в котором описано следующее:
+Перед участием прочитайте [руководство для участников](./Contributing_en.md), в котором описано следующее:
 
-- [Как собрать и запустить XYML из исходного кода](./Contributing.md#build-xyml)
-- [Как изменять поведение XYML с помощью параметров отладки](./Contributing.md#debug-options)
+- [Как собрать и запустить XYML из исходного кода](./Contributing_en.md#build-xyml)
+- [Как изменять поведение XYML с помощью параметров отладки](./Contributing_en.md#debug-options)
 
 ## Участники
 
-С 2015 года в разработке XYML участвовали более 120 человек. Спасибо за ваш труд!
+С 2015 года в разработке XYML участвовали более 130 человек. Спасибо за ваш труд!
 
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 ## Лицензия
 
-См. [README.md](README.md#license).
+См. [README.md](README_ru.md#license).

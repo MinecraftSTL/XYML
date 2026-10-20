@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.upgrade;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -35,6 +37,19 @@ final class UpdateChannelTest {
         assertEquals(UpdateChannel.DEV, UpdateChannel.fromName("dev"));
         assertThrows(IllegalArgumentException.class, () -> UpdateChannel.fromName("nightly"));
         assertThrows(IllegalArgumentException.class, () -> UpdateChannel.fromName("DEVELOPMENT"));
+    }
+
+    /// Exposes the complete explicit update-source selection matrix.
+    @Test
+    void exposesSelectableUpdateSources() {
+        assertEquals(List.of(UpdateChannel.STABLE, UpdateChannel.BETA),
+                UpdateChannel.STABLE.selectableUpdateSources());
+        assertEquals(List.of(UpdateChannel.STABLE, UpdateChannel.BETA),
+                UpdateChannel.BETA.selectableUpdateSources());
+        assertEquals(List.of(UpdateChannel.STABLE, UpdateChannel.BETA, UpdateChannel.ALPHA),
+                UpdateChannel.ALPHA.selectableUpdateSources());
+        assertEquals(List.of(UpdateChannel.STABLE, UpdateChannel.BETA, UpdateChannel.ALPHA, UpdateChannel.DEV),
+                UpdateChannel.DEV.selectableUpdateSources());
     }
 
     /// Assigns exactly one additional decimal component at each less-stable channel.

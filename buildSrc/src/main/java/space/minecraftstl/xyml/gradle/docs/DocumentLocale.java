@@ -28,7 +28,14 @@ import java.util.Locale;
 @NotNullByDefault
 public enum DocumentLocale {
     /// Simplified Chinese documentation.
-    SIMPLIFIED_CHINESE(Locale.forLanguageTag("zh-Hans"), "zh"),
+    ///
+    /// This is the default when a file has no language suffix.
+    SIMPLIFIED_CHINESE(Locale.forLanguageTag("zh-Hans"), "") {
+        @Override
+        public List<DocumentLocale> getCandidates() {
+            return List.of(SIMPLIFIED_CHINESE, ENGLISH);
+        }
+    },
 
     /// Traditional Chinese documentation.
     TRADITIONAL_CHINESE("zh-Hant") {
@@ -57,7 +64,9 @@ public enum DocumentLocale {
     },
 
     /// Standard English documentation.
-    ENGLISH(Locale.ENGLISH, "") {
+    ///
+    /// It is identified by the `_en` file name suffix.
+    ENGLISH(Locale.ENGLISH, "en") {
         @Override
         public String getSubLanguageDisplayName() {
             return "Standard";
@@ -65,7 +74,7 @@ public enum DocumentLocale {
 
         @Override
         public List<DocumentLocale> getCandidates() {
-            return List.of(ENGLISH);
+            return List.of(ENGLISH, SIMPLIFIED_CHINESE);
         }
     },
 
@@ -102,7 +111,7 @@ public enum DocumentLocale {
             if (fileNameWithoutExtension.endsWith(suffix))
                 return new LocaleAndName(locale, fileNameWithoutExtension.substring(0, fileNameWithoutExtension.length() - locale.getFileNameSuffix().length()));
         }
-        return new LocaleAndName(ENGLISH, fileNameWithoutExtension);
+        return new LocaleAndName(SIMPLIFIED_CHINESE, fileNameWithoutExtension);
     }
 
     private final Locale locale;
@@ -146,6 +155,6 @@ public enum DocumentLocale {
     }
 
     public List<DocumentLocale> getCandidates() {
-        return List.of(this, ENGLISH);
+        return List.of(this, ENGLISH, SIMPLIFIED_CHINESE);
     }
 }

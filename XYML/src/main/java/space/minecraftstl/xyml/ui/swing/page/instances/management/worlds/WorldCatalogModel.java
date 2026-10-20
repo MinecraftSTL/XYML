@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -92,6 +93,17 @@ public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalog
     /// @param world exact current materialized row
     /// @return terminal catalog state
     CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world);
+
+    /// Deletes one current world using the selected recycle-bin or permanent mode.
+    ///
+    /// @param world exact materialized current row
+    /// @param mode selected deletion behavior
+    /// @return terminal catalog snapshot
+    default CompletionStage<WorldCatalogSnapshot> deleteWorld(
+            WorldCatalogItem world,
+            DeletionMode mode) {
+        return deleteWorld(world);
+    }
 
     /// Writes one selected world's supported detail fields and refreshes the catalog afterward.
     ///

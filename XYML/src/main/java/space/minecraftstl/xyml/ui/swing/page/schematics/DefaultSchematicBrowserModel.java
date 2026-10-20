@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.schematics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -444,7 +445,14 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// Starts recursive no-follow deletion of one exact current listing entry.
     @Override
     public CompletionStage<SchematicBrowserSnapshot> delete(Path target) {
+        return delete(target, DeletionMode.PERMANENT);
+    }
+
+    /// Starts deletion of one exact current listing entry using the selected mode.
+    @Override
+    public CompletionStage<SchematicBrowserSnapshot> delete(Path target, DeletionMode mode) {
         Objects.requireNonNull(target, "target");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         Path normalized = target.toAbsolutePath().normalize();
         @Nullable WritePreparation preparation = null;
         @Nullable RuntimeException failure;
@@ -458,7 +466,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                             "Unknown schematic entry in the current listing: " + normalized);
                 } else {
                     preparation = prepareWriteLocked((currentDirectory, cancellation) ->
-                            mutationIo.delete(currentDirectory, entry, cancellation));
+                            mutationIo.delete(currentDirectory, entry, requestedMode, cancellation));
                 }
             }
         }
@@ -1554,6 +1562,21 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                 Path currentDirectory,
                 DiscoveredEntry entry,
                 LoadCancellation cancellation) throws IOException;
+
+        /// Deletes one exact direct child using the selected recycle-bin or permanent mode.
+        ///
+        /// @param currentDirectory stable parent directory
+        /// @param entry exact descriptor captured from the stable listing
+        /// @param mode selected deletion behavior
+        /// @param cancellation cooperative model cancellation
+        /// @throws IOException when validation, traversal, or deletion fails
+        default void delete(
+                Path currentDirectory,
+                DiscoveredEntry entry,
+                DeletionMode mode,
+                LoadCancellation cancellation) throws IOException {
+            delete(currentDirectory, entry, cancellation);
+        }
     }
 
     /// Runs one captured mutation against its stable directory.

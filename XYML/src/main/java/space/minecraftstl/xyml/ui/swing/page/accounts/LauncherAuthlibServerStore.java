@@ -203,6 +203,7 @@ final class LauncherAuthlibServerStore implements AuthlibServerStore, AutoClosea
             servers.add(new AuthlibServerOption(
                     server.getUrl(),
                     server.getName(),
+                    server.getDisplayHostUrl(),
                     !server.isNonEmailLogin()));
         }
         return new AuthlibServerSnapshot(List.copyOf(servers));
@@ -239,6 +240,7 @@ final class LauncherAuthlibServerStore implements AuthlibServerStore, AutoClosea
                     new AuthlibServerOption(
                             server.getUrl(),
                             server.getName(),
+                            server.getDisplayHostUrl(),
                             !server.isNonEmailLogin()));
         }
     }

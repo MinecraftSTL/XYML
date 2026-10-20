@@ -17,7 +17,11 @@
  */
 package space.minecraftstl.xyml.modpack;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.io.Unzipper;
 
@@ -27,16 +31,29 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Predicate;
 
+/// Extracts selected archive subdirectories into one modpack run directory while preserving user overrides.
+@NotNullByDefault
 public class ModpackInstallTask<T> extends Task<Void> {
 
+    /// Input modpack archive.
     private final Path modpackFile;
+
+    /// Destination directory receiving extracted overrides.
     private final Path dest;
+
+    /// Archive entry-name charset.
     private final Charset charset;
-    private final List<String> subDirectories;
-    private final List<ModpackConfiguration.FileInformation> overrides;
+
+    /// Immutable archive subdirectory snapshot.
+    private final @Unmodifiable List<String> subDirectories;
+
+    /// Immutable previous override metadata snapshot.
+    private final @Unmodifiable List<ModpackConfiguration.FileInformation> overrides;
+
+    /// Filter deciding which normalized archive entries may be extracted.
     private final Predicate<String> callback;
 
-    /// Constructor
+    /// Creates an archive extraction task with explicit input and destination resources.
     ///
     /// @param modpackFile      a zip file
     /// @param dest             destination to store unpacked files
@@ -44,17 +61,25 @@ public class ModpackInstallTask<T> extends Task<Void> {
     /// @param subDirectories   the subdirectory of zip file to unpack
     /// @param callback         test whether the file (given full path) in zip file should be unpacked or not
     /// @param oldConfiguration old modpack information if upgrade
-    public ModpackInstallTask(Path modpackFile, Path dest, Charset charset, List<String> subDirectories, Predicate<String> callback, ModpackConfiguration<T> oldConfiguration) {
+    public ModpackInstallTask(
+            Path modpackFile,
+            Path dest,
+            Charset charset,
+            List<String> subDirectories,
+            Predicate<String> callback,
+            @Nullable ModpackConfiguration<T> oldConfiguration) {
         this.modpackFile = modpackFile;
         this.dest = dest;
         this.charset = charset;
-        this.subDirectories = subDirectories;
+        this.subDirectories = List.copyOf(subDirectories);
         this.callback = callback;
 
         if (oldConfiguration == null)
-            overrides = Collections.emptyList();
+            overrides = List.of();
         else
-            overrides = oldConfiguration.getOverrides();
+            overrides = List.copyOf(oldConfiguration.getOverrides());
+
+        setResources(TaskResource.gameDirectory(dest), TaskResource.archive(modpackFile));
     }
 
     @Override

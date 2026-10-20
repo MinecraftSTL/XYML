@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.AbstractButton;
@@ -93,7 +94,7 @@ final class DiscoJavaAcquisitionPanel extends JPanel implements AutoCloseable {
 
     /// Viewport-driven single-select remote version list.
     private final ViewportChoiceList<DiscoJavaRemoteVersion> versionChoice =
-            new ViewportChoiceList<>(versionDataSource, DiscoJavaAcquisitionPanel::versionText);
+            new ViewportChoiceList<>(versionDataSource, DiscoJavaAcquisitionPanel::versionText, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
 
     /// Inline loading, empty, failure, or selection guidance.
     private final JLabel loadStatusLabel = new JLabel(" ");

@@ -18,16 +18,22 @@
 package space.minecraftstl.xyml.download.forge;
 
 import space.minecraftstl.xyml.download.*;
+import space.minecraftstl.xyml.download.game.GameDownloadTask;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
-import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -35,7 +41,7 @@ import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 
 import static space.minecraftstl.xyml.download.UnsupportedInstallationException.UNSUPPORTED_LAUNCH_WRAPPER;
 import static space.minecraftstl.xyml.util.StringUtils.removePrefix;
@@ -53,11 +59,19 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
     private final ForgeRemoteVersion remote;
     private @Nullable FileDownloadTask dependent;
     private @Nullable Task<GameInstancePatch> dependency;
+    /// Completion wrapper that removes a downloaded installer under its exact temporary-file resource.
+    private @Nullable Task<?> completionTask;
 
     public ForgeInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, ForgeRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
+        DefaultGameRepository gameRepository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(gameRepository.getBaseDirectory().resolve("lib")));
+        releaseResourcesBeforeDependencies();
         setSignificance(TaskSignificance.MODERATE);
     }
 
@@ -68,10 +82,15 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void preExecute() throws Exception {
-        installer = Files.createTempFile("forge-installer", ".jar");
+        DefaultGameRepository gameRepository = dependencyManager.getGameRepository();
+        Path stagingDirectory = gameRepository.getInstanceRoot(manifest.id()).resolve(".xyml-installers");
+        Files.createDirectories(stagingDirectory);
+        installer = Files.createTempFile(stagingDirectory, "forge-installer-", ".jar")
+                .toAbsolutePath()
+                .normalize();
 
         dependent = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLsWithCandidates(remote.getUrls()),
+                dependencyManager.getDownloadProvider().getDownloadCandidates(remote.getUrls()),
                 installer, null);
         dependent.setCacheRepository(dependencyManager.getCacheRepository());
         dependent.setCaching(true);
@@ -85,8 +104,7 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void postExecute() throws Exception {
-        Files.deleteIfExists(installer);
-        setResult(dependency.getResult());
+        setResult(Objects.requireNonNull(dependency, "installation task").getResult());
     }
 
     @Override
@@ -96,22 +114,38 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public Collection<Task<?>> getDependencies() {
-        return Collections.singleton(dependency);
+        @Nullable Task<?> currentCompletionTask = completionTask;
+        return currentCompletionTask == null
+                ? Collections.emptySet()
+                : Collections.singleton(currentCompletionTask);
     }
 
     @Override
     public void execute() throws IOException, VersionMismatchException, UnsupportedInstallationException {
         String originalMainClass = manifest.resolve(dependencyManager.getGameRepository()).mainClass();
-        if (GameVersionNumber.compare("1.13", remote.getGameVersion()) <= 0) {
+        if (GameVersionNumber.asGameVersion("1.13").compareTo(remote.getGameVersion()) <= 0) {
             // Forge 1.13 is not compatible with fabric.
-            if (!LibraryAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
+            if (!GameComponentAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
                 throw new UnsupportedInstallationException(UNSUPPORTED_LAUNCH_WRAPPER);
         }
 
-        if (detectForgeInstallerType(dependencyManager, manifest, installer))
-            dependency = new ForgeNewInstallTask(dependencyManager, manifest, remote.getSelfVersion(), installer);
+        Path installerPath = Objects.requireNonNull(installer, "installer");
+        Task<GameInstancePatch> installationTask;
+        if (detectForgeInstallerType(dependencyManager, manifest, installerPath))
+            installationTask = new GameDownloadTask(dependencyManager, remote.getGameVersion().toString(), manifest)
+                    .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                            dependencyManager,
+                            manifest,
+                            minecraftJar,
+                            remote.getSelfVersion(),
+                            installerPath));
         else
-            dependency = new ForgeOldInstallTask(dependencyManager, manifest, remote.getSelfVersion(), installer);
+            installationTask = new ForgeOldInstallTask(dependencyManager, manifest, remote.getSelfVersion(), installerPath);
+        dependency = installationTask;
+        completionTask = installationTask.whenCompleteWithResources(
+                getExecutor(),
+                failure -> Files.deleteIfExists(installerPath),
+                TaskResource.downloadTarget(installerPath)).asOrchestration();
     }
 
     /**
@@ -171,7 +205,18 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
-                return new ForgeNewInstallTask(dependencyManager, manifest, modifyVersion(gameVersion.get(), profile.getVersion()), installer);
+                return new GameDownloadTask(dependencyManager, gameVersion.get(), manifest)
+                        .thenComposeAsync(minecraftJar -> new ForgeNewInstallTask(
+                                dependencyManager,
+                                manifest,
+                                minecraftJar,
+                                modifyVersion(gameVersion.get(), profile.getVersion()),
+                                installer))
+                        .setResources(
+                                TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())),
+                                TaskResource.gameDirectory(dependencyManager.getGameRepository().getLibrariesDirectory(manifest)),
+                                TaskResource.gameDirectory(dependencyManager.getGameRepository().getBaseDirectory().resolve("lib")),
+                                TaskResource.archive(installer));
             } else if (installProfile.containsKey("install") && installProfile.containsKey("versionInfo")) {
                 checkCleanroomCompatibility(
                         dependencyManager.getGameRepository().resolve(manifest),
@@ -179,7 +224,15 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
                 ForgeInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getInstall().getMinecraft()))
                     throw new VersionMismatchException(profile.getInstall().getMinecraft(), gameVersion.get());
-                return new ForgeOldInstallTask(dependencyManager, manifest, modifyVersion(gameVersion.get(), profile.getInstall().getPath().getVersion().replaceAll("(?i)forge", "")), installer);
+                return new ForgeOldInstallTask(
+                        dependencyManager,
+                        manifest,
+                        modifyVersion(gameVersion.get(), profile.getInstall().getPath().getVersion().replaceAll("(?i)forge", "")),
+                        installer).setResources(
+                                TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())),
+                                TaskResource.gameDirectory(dependencyManager.getGameRepository().getLibrariesDirectory(manifest)),
+                                TaskResource.gameDirectory(dependencyManager.getGameRepository().getBaseDirectory().resolve("lib")),
+                                TaskResource.archive(installer));
             } else {
                 throw new IOException();
             }
@@ -194,8 +247,8 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
     static void checkCleanroomCompatibility(
             GameInstanceManifest.Resolved resolved,
             String gameVersion) throws UnsupportedInstallationException {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolved, gameVersion);
-        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(resolved, GameVersionNumber.asGameVersion(gameVersion));
+        if (analyzer.has(GameComponentType.CLEANROOM)) {
             throw new UnsupportedInstallationException(
                     UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE);
         }

@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.task;
 
 import com.google.gson.reflect.TypeToken;
+import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
@@ -25,30 +27,39 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/**
- * @author huangyuhui
- */
+/// Downloads text, decoding HTTP responses using their declared charset or UTF-8.
 public final class GetTask extends FetchTask<String> {
 
-    public GetTask(String uri) {
-        this(NetworkUtils.toURI(uri));
+    /// Creates a text download task for an absolute URL string.
+    ///
+    /// @param url absolute URL text
+    public GetTask(String url) {
+        this(WebURL.parse(url));
     }
 
-    public GetTask(URI url) {
+    /// Creates a text download task for one URL.
+    public GetTask(WebURL url) {
         this(List.of(url));
         setName(url.toString());
     }
 
-    public GetTask(List<URI> url) {
-        super(url);
+    /// Creates a text download task with a snapshot of nonempty candidate URLs in attempt order.
+    public GetTask(List<WebURL> url) {
+        super(DownloadCandidates.ofUrls(url));
         setName(url.get(0).toString());
+        useCacheOperationResource();
+    }
+
+    public GetTask(DownloadCandidates candidates) {
+        super(candidates);
+        setName(candidates.getPrimaryCandidate().displayUrl());
+        useCacheOperationResource();
     }
 
     @Override
@@ -102,6 +113,6 @@ public final class GetTask extends FetchTask<String> {
     }
 
     public <T> Task<T> thenGetJsonAsync(TypeToken<T> type) {
-        return thenApplyAsync(jsonString -> JsonUtils.fromNonNullJson(jsonString, type));
+        return thenApplyAsync(jsonString -> JsonUtils.fromNonNullJson(jsonString, type)).asOrchestration();
     }
 }

@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -315,9 +316,15 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
     /// Starts one serialized permanent Core deletion.
     @Override
     public CompletionStage<ModCatalogSnapshot> deleteMod(String localKey) {
+        return deleteMod(localKey, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one serialized Core deletion using the selected mode and one follow-up refresh.
+    @Override
+    public CompletionStage<ModCatalogSnapshot> deleteMod(String localKey, DeletionMode mode) {
         ModCatalogMutation mutation;
         try {
-            mutation = new ModCatalogMutation.Delete(localKey);
+            mutation = new ModCatalogMutation.Delete(localKey, mode);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
@@ -327,9 +334,17 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
     /// Starts one serialized permanent Core batch deletion and one follow-up refresh.
     @Override
     public CompletionStage<ModCatalogSnapshot> deleteMods(@Unmodifiable List<String> localKeys) {
+        return deleteMods(localKeys, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one serialized Core batch deletion using the selected mode and one follow-up refresh.
+    @Override
+    public CompletionStage<ModCatalogSnapshot> deleteMods(
+            @Unmodifiable List<String> localKeys,
+            DeletionMode mode) {
         ModCatalogMutation mutation;
         try {
-            mutation = new ModCatalogMutation.DeleteBatch(localKeys);
+            mutation = new ModCatalogMutation.DeleteBatch(localKeys, mode);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }

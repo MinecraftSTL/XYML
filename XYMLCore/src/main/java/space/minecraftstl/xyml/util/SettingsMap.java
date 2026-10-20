@@ -17,8 +17,8 @@
  */
 package space.minecraftstl.xyml.util;
 
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -91,10 +91,10 @@ public final class SettingsMap {
 
     /// Returns whether the selected installation includes any non-vanilla component.
     public boolean isInstallingModdedVersion() {
-        for (LibraryAnalyzer.LibraryType value : LibraryAnalyzer.LibraryType.values()) {
-            if (value != LibraryAnalyzer.LibraryType.MINECRAFT
+        for (GameComponentType value : GameComponentType.values()) {
+            if (value != GameComponentType.GAME
                     && value.isModLoader()
-                    && get(value.getPatchId()) instanceof RemoteVersion) {
+                    && get(value.getPatchId()) instanceof ComponentRemoteVersion) {
                 return true;
             }
         }

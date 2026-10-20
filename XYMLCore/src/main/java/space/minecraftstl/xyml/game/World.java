@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.util.io.*;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.AlphaComposite;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -39,6 +41,7 @@ import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
@@ -54,6 +57,12 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public final class World {
     /// Fixed edge length used for normalized world icons.
     private static final int ICON_SIZE = 64;
+
+    /// Maximum source width or height accepted before decoding a world icon.
+    private static final int MAXIMUM_ICON_EDGE = 8_192;
+
+    /// Maximum source pixel count accepted before decoding a world icon.
+    private static final long MAXIMUM_ICON_PIXELS = 16L * 1024L * 1024L;
 
     /// Original world directory or archive path.
     private final Path file;
@@ -154,15 +163,56 @@ public final class World {
     /// @param iconFile readable icon path, including paths inside an archive file system
     /// @return normalized icon, or `null` when decoding or scaling fails
     private static @Nullable BufferedImage loadIcon(Path iconFile) {
-        try (InputStream inputStream = Files.newInputStream(iconFile)) {
-            @Nullable BufferedImage source = ImageIO.read(inputStream);
-            if (source == null) {
-                throw new IOException("Unsupported or empty world icon " + iconFile);
+        try (InputStream inputStream = Files.newInputStream(iconFile);
+             @Nullable ImageInputStream imageInput = ImageIO.createImageInputStream(inputStream)) {
+            if (imageInput == null) {
+                throw new IOException("Unsupported world icon format " + iconFile);
             }
-            return normalizeIcon(source);
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+            if (!readers.hasNext()) {
+                throw new IOException("Unsupported world icon format " + iconFile);
+            }
+
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(imageInput, true, true);
+                int sourceWidth = reader.getWidth(0);
+                int sourceHeight = reader.getHeight(0);
+                validateIconDimensions(sourceWidth, sourceHeight);
+
+                @Nullable BufferedImage source = reader.read(0);
+                if (source == null) {
+                    throw new IOException("Unsupported or empty world icon " + iconFile);
+                }
+                try {
+                    validateIconDimensions(source.getWidth(), source.getHeight());
+                    return normalizeIcon(source);
+                } finally {
+                    source.flush();
+                }
+            } finally {
+                reader.dispose();
+            }
         } catch (Exception e) {
             LOG.warning("Failed to load world icon", e);
             return null;
+        }
+    }
+
+    /// Rejects invalid or excessively large world-icon dimensions before pixel allocation.
+    ///
+    /// @param width source width reported by ImageIO
+    /// @param height source height reported by ImageIO
+    /// @throws IOException when dimensions are invalid or exceed the safety limits
+    private static void validateIconDimensions(int width, int height) throws IOException {
+        if (width <= 0 || height <= 0) {
+            throw new IOException("World icon has invalid dimensions");
+        }
+        if (width > MAXIMUM_ICON_EDGE || height > MAXIMUM_ICON_EDGE) {
+            throw new IOException("World icon exceeds its dimension limit");
+        }
+        if ((long) width * height > MAXIMUM_ICON_PIXELS) {
+            throw new IOException("World icon exceeds its pixel limit");
         }
     }
 

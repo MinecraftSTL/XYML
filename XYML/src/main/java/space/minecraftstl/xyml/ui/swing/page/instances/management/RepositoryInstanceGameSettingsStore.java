@@ -21,14 +21,19 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.migration.AutomaticInstanceConfigMigrationTaskFactory;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -41,13 +46,29 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     /// Stable non-blank instance identifier represented by this store.
     private final GameInstanceID instanceId;
 
+    /// Creates non-replacing migration tasks for the first isolation transition.
+    private final AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory;
+
     /// Creates an adapter for one instance in the given repository.
     ///
     /// @param repository repository containing the managed instance
     /// @param instanceId stable non-blank instance identifier
     public RepositoryInstanceGameSettingsStore(XYMLGameRepository repository, GameInstanceID instanceId) {
+        this(repository, instanceId, AutomaticInstanceConfigMigrationTaskFactory.disabled());
+    }
+
+    /// Creates an adapter with automatic migration for the first isolation transition.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param migrationTaskFactory automatic migration task factory
+    public RepositoryInstanceGameSettingsStore(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.migrationTaskFactory = Objects.requireNonNull(migrationTaskFactory, "migrationTaskFactory");
     }
 
     /// Returns the instance root when an installed modpack requires an isolated working directory.
@@ -100,7 +121,58 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     /// @throws IllegalStateException when this instance is unknown or its settings file is read-only
     @Override
     public void save(InstanceGameSettingsSnapshot snapshot) {
-        Objects.requireNonNull(snapshot, "snapshot");
+        applySnapshot(Objects.requireNonNull(snapshot, "snapshot"));
+        repository.saveGameSettings(instanceId);
+    }
+
+    /// Creates the resource-aware task that applies and synchronously persists a complete snapshot.
+    ///
+    /// The task waits for legacy observable-setting writes queued before its body completes, so the resource lease is
+    /// not released while an older asynchronous write can still touch the same configuration file.
+    ///
+    /// @param snapshot validated values and inheritance choices to persist
+    /// @param executor executor used for repository and file work
+    /// @return unstarted instance-scoped persistence task
+    @Override
+    public Task<@Nullable Void> saveTask(InstanceGameSettingsSnapshot snapshot, Executor executor) {
+        InstanceGameSettingsSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
+        Executor checkedExecutor = Objects.requireNonNull(executor, "executor");
+        boolean enablingIsolation = !snapshot().launchOptions().runningDirectoryOverridden()
+                && checkedSnapshot.launchOptions().runningDirectoryOverridden();
+        Task<@Nullable Void> saveTask = createSaveTask(checkedSnapshot, checkedExecutor);
+        if (!enablingIsolation) {
+            return saveTask;
+        }
+
+        GameSettings.Instance candidate = new GameSettings.Instance();
+        InstanceGameSettingsMapper.apply(candidate, checkedSnapshot);
+        return migrationTaskFactory.createBeforeIsolation(
+                        repository,
+                        instanceId,
+                        repository.resolveRunDirectory(instanceId, candidate),
+                        candidate.parentProperty().getValue())
+                .thenComposeAsync(checkedExecutor, () -> saveTask)
+                .asOrchestration();
+    }
+
+    /// Creates the resource-scoped durable save performed after any required migration succeeds.
+    private Task<@Nullable Void> createSaveTask(
+            InstanceGameSettingsSnapshot snapshot,
+            Executor executor) {
+        return Task.runAsync("Save instance game settings", executor, () -> {
+            applySnapshot(snapshot);
+            repository.saveGameSettingsSync(instanceId);
+            FileSaver.waitForAllSaves();
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)));
+    }
+
+    /// Applies one validated snapshot to the repository-owned observable settings object.
+    ///
+    /// @param snapshot values and inheritance choices to apply
+    /// @throws IllegalStateException when this instance is unknown or its settings file is read-only
+    private void applySnapshot(InstanceGameSettingsSnapshot snapshot) {
         if (!snapshot.writable() || repository.isInstanceGameSettingsReadOnly(instanceId)) {
             throw new IllegalStateException("Instance game settings are read-only");
         }
@@ -110,7 +182,6 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
         }
 
         InstanceGameSettingsMapper.apply(settings, snapshot);
-        repository.saveGameSettings(instanceId);
     }
 
     /// Returns whether the represented instance has a loaded settings object that can be recovered.
@@ -128,6 +199,24 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
             throw new IllegalStateException("Instance game settings are unavailable");
         }
         repository.forceOverwriteInstanceGameSettings(instanceId);
+    }
+
+    /// Creates the resource-aware task that backs up and synchronously overwrites a read-only settings file.
+    ///
+    /// @param executor executor used for repository and file work
+    /// @return unstarted instance-scoped recovery task
+    @Override
+    public Task<@Nullable Void> forceOverwriteTask(Executor executor) {
+        Executor checkedExecutor = Objects.requireNonNull(executor, "executor");
+        return Task.runAsync("Force overwrite instance game settings", checkedExecutor, () -> {
+            if (!canForceOverwrite()) {
+                throw new IllegalStateException("Instance game settings are unavailable");
+            }
+            repository.forceOverwriteInstanceGameSettingsSync(instanceId);
+            FileSaver.waitForAllSaves();
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)));
     }
 
     /// Builds the durable parent-preset state for one loaded instance settings object.

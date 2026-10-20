@@ -255,7 +255,10 @@ public class LaunchOptions implements Serializable {
         return renderer;
     }
 
-    public boolean isUseNativeGLFW() {
+    /// Returns whether bundled GLFW and SDL natives should be replaced by system libraries.
+    ///
+    /// @return whether system GLFW or SDL is enabled
+    public boolean isUseNativeGLFWorSDL() {
         return useNativeGLFW;
     }
 
@@ -466,8 +469,12 @@ public class LaunchOptions implements Serializable {
             return this;
         }
 
-        public Builder setUseNativeGLFW(boolean useNativeGLFW) {
-            options.useNativeGLFW = useNativeGLFW;
+        /// Selects whether bundled GLFW and SDL natives should be replaced by system libraries.
+        ///
+        /// @param useNativeGLFWorSDL whether system GLFW or SDL is enabled
+        /// @return this builder
+        public Builder setUseNativeGLFWorSDL(boolean useNativeGLFWorSDL) {
+            options.useNativeGLFW = useNativeGLFWorSDL;
             return this;
         }
 

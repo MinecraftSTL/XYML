@@ -22,6 +22,7 @@ import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JFileChooser;
@@ -66,6 +67,19 @@ public final class SwingRemoteWorldSaveTargetResolver implements RemoteAddonInst
         return Optional.empty();
     }
 
+    /// Returns no target because remote worlds always require an explicit save-as destination.
+    ///
+    /// @param kind requested category
+    /// @param targetInstanceId explicit instance, which remote world downloads do not accept
+    /// @return always empty; callers must use [#resolveSelection]
+    @Override
+    public Optional<RemoteAddonInstallTarget> resolve(
+            RemoteAddonCatalogKind kind,
+            @Nullable GameInstanceID targetInstanceId) {
+        Objects.requireNonNull(kind, "kind");
+        return Optional.empty();
+    }
+
     /// Reports that an explicit world selection can open the save-as chooser without opening it now.
     ///
     /// @param kind requested category
@@ -73,6 +87,19 @@ public final class SwingRemoteWorldSaveTargetResolver implements RemoteAddonInst
     @Override
     public boolean isSelectionAvailable(RemoteAddonCatalogKind kind) {
         return Objects.requireNonNull(kind, "kind") == RemoteAddonCatalogKind.WORLD;
+    }
+
+    /// Reports that only a world request without an installed-instance target can open the save-as chooser.
+    ///
+    /// @param kind requested category
+    /// @param targetInstanceId explicit instance, or null for the required save-as workflow
+    /// @return true only for a remote world save-as request
+    @Override
+    public boolean isSelectionAvailable(
+            RemoteAddonCatalogKind kind,
+            @Nullable GameInstanceID targetInstanceId) {
+        return Objects.requireNonNull(kind, "kind") == RemoteAddonCatalogKind.WORLD
+                && targetInstanceId == null;
     }
 
     /// Opens the world save-as chooser and snapshots its exact normalized destination.
@@ -88,12 +115,32 @@ public final class SwingRemoteWorldSaveTargetResolver implements RemoteAddonInst
             RemoteAddonCatalogItem item,
             RemoteAddon.Version version,
             Component owner) {
+        return resolveSelection(kind, null, item, version, owner);
+    }
+
+    /// Opens the world save-as chooser only when no installed-instance target was supplied.
+    ///
+    /// @param kind selected catalog category
+    /// @param targetInstanceId explicit instance, or null for the required save-as workflow
+    /// @param item selected remote world project
+    /// @param version exact selected remote world version
+    /// @param owner component owning the modal save chooser
+    /// @return exact world archive target, or empty for an invalid selection or cancellation
+    @Override
+    public Optional<RemoteAddonInstallTarget> resolveSelection(
+            RemoteAddonCatalogKind kind,
+            @Nullable GameInstanceID targetInstanceId,
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Version version,
+            Component owner) {
         EdtDispatcher.requireEventDispatchThread();
         RemoteAddonCatalogKind selectedKind = Objects.requireNonNull(kind, "kind");
         RemoteAddonCatalogItem selectedItem = Objects.requireNonNull(item, "item");
         RemoteAddon.Version selectedVersion = Objects.requireNonNull(version, "version");
         Component dialogOwner = Objects.requireNonNull(owner, "owner");
-        if (selectedKind != RemoteAddonCatalogKind.WORLD || selectedItem.kind() != selectedKind) {
+        if (targetInstanceId != null
+                || selectedKind != RemoteAddonCatalogKind.WORLD
+                || selectedItem.kind() != selectedKind) {
             return Optional.empty();
         }
         Optional<Path> destination = Objects.requireNonNull(

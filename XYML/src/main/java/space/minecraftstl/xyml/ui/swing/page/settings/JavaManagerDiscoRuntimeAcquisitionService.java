@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.download.java.disco.DiscoResult;
 import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
@@ -428,8 +429,8 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
                                 currentPlatform,
                                 selectedDistribution,
                                 selectedPackageType);
-                    });
-        });
+                    }).asOrchestration();
+        }).asOrchestration();
     }
 
     /// Derives the prior launcher's stable distribution-version-package naming convention without selecting it.
@@ -488,13 +489,16 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
         JavaPackageType selectedPackageType = Objects.requireNonNull(packageType, "packageType");
         DiscoJavaRemoteVersion selectedVersion = Objects.requireNonNull(version, "version");
         String selectedInstallName = Objects.requireNonNull(installName, "installName");
+        Platform installationPlatform = backend.currentPlatform();
+        Path platformRoot = backend.managedPlatformRoot(installationPlatform)
+                .toAbsolutePath()
+                .normalize();
         TemporaryArchiveTracker tracker = new TemporaryArchiveTracker();
 
         return new CleanupComposedTask<>("Install third-party Java runtime", () -> {
-            Platform currentPlatform = backend.currentPlatform();
-            requireSupportedSelection(currentPlatform, selectedDistribution, selectedPackageType);
+            requireSupportedSelection(installationPlatform, selectedDistribution, selectedPackageType);
             requireSelectedVersion(
-                    currentPlatform,
+                    installationPlatform,
                     selectedDistribution,
                     selectedPackageType,
                     selectedVersion);
@@ -515,14 +519,14 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
                             Objects.requireNonNull(download, "download"),
                             tracker))
                     .thenComposeAsync(downloadedArchive -> prepareAndInstallTask(
-                            currentPlatform,
+                            installationPlatform,
                             selectedVersion,
                             selectedInstallName,
                             Objects.requireNonNull(downloadedArchive, "downloadedArchive"),
                             tracker));
 
             return pipeline;
-        }, () -> tracker.cleanup(backend));
+        }, () -> tracker.cleanup(backend)).setResources(TaskResource.javaRuntime(platformRoot));
     }
 
     /// Creates the direct or checksum-URI resolution task after package metadata has been validated.

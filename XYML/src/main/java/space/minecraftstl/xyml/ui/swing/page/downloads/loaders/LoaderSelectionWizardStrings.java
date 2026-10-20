@@ -167,7 +167,7 @@ public record LoaderSelectionWizardStrings(
                 i18n("install.select"),
                 i18n("install.installer.choose", ""),
                 i18n("message.doing"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("install.installer.choose", ""),
                 i18n("install.installer.not_installed"),
                 i18n("install.installer.incompatible", ""),
@@ -175,7 +175,7 @@ public record LoaderSelectionWizardStrings(
                 i18n("message.success"),
                 i18n("button.delete"),
                 i18n("install.installer.depend", ""),
-                i18n("download.failed.refresh"),
+                i18n("swing.download.retry"),
                 i18n("install.installer.not_installed"),
                 launcherLoaderNames());
     }

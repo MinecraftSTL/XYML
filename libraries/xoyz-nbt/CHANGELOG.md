@@ -4,6 +4,10 @@
 
 - New API `NBTSchema#beginCompound()` for creating a schema for validating compound tags.
 - Relax type bounds of the `NBTSchema#typeIs` method.
+- Add transactional `NBTEditor`, revision-bound `NBTNode`, and structural `NBTAddress` APIs.
+- Add strict codecs and iterative structural validation before serialization.
+- Add conflict-detecting `NBTFile` sessions for RAW, GZIP, ZLIB, LZ4, and Region files.
+- Add copy-on-write `NBTRegionFile` updates with partial-save and uncertain-commit reporting.
 
 ### Breaking Changes
 

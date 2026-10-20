@@ -1,0 +1,1488 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package space.minecraftstl.xyml.mcp;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
+import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
+
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/// Verifies source-bound planning, independent execution, and retryable XYAT repair actions.
+@NotNullByDefault
+final class XYMLMcpCrashRepairCoordinatorTest {
+    /// Minimal verified Fabric missing-dependency failure.
+    private static final String FABRIC_MISSING_DEPENDENCY_LOG =
+            "net.fabricmc.loader.discovery.ModResolutionException: Could not find required mod: "
+                    + "pca requires {fabric-api @ [>=0.39.2]}";
+
+    /// Maximum asynchronous operation wait.
+    private static final Duration OPERATION_TIMEOUT = Duration.ofSeconds(5);
+
+    /// Confirms a launcher-owned dependency diagnosis can be planned and executed once successfully.
+    @Test
+    void plansAndExecutesLauncherOwnedSearch() throws Exception {
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger taskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(validations::incrementAndGet));
+            Map<String, Object> diagnosis = firstDiagnosis(analysis);
+            Map<String, Object> solution = solution(diagnosis);
+
+            assertEquals("FABRIC_MISSING_DEPENDENCY", diagnosis.get("result_id"));
+            assertEquals("OPEN_MOD_SEARCH", solution.get("action_type"));
+            assertEquals(List.of("fabric-api"), solution.get("dependency_ids"));
+            assertEquals(true, solution.get("mcp_executable"));
+            assertEquals(0, taskCreations.get());
+
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            assertEquals(true, plan.get("planned"));
+            assertEquals(true, plan.get("executable"));
+            assertEquals(false, plan.get("single_use"));
+            assertEquals(true, plan.get("retry_after_failure"));
+            assertEquals("AVAILABLE", plan.get("plan_state"));
+            assertEquals(false, plan.get("retryable"));
+            assertEquals(0, taskCreations.get());
+            Map<String, Object> repeatedPlan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            assertEquals(plan.get("plan_id"), repeatedPlan.get("plan_id"));
+            assertEquals(plan.get("created_at"), repeatedPlan.get("created_at"));
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.retry(String.valueOf(plan.get("plan_id"))));
+
+            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            Map<String, Object> terminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id")));
+            assertEquals("SUCCEEDED", terminal.get("status"));
+            assertEquals(false, terminal.get("retryable"));
+            assertEquals(1, validations.get());
+            assertEquals(1, taskCreations.get());
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+            Map<String, Object> completedPlan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            assertEquals(plan.get("plan_id"), completedPlan.get("plan_id"));
+            assertEquals("SUCCEEDED", completedPlan.get("plan_state"));
+            assertEquals(false, completedPlan.get("executable"));
+            assertEquals(false, completedPlan.get("retryable"));
+        }
+    }
+
+    /// Publishes immutable per-cause evidence, superseded legacy matches, and the initial repair state.
+    @Test
+    @SuppressWarnings("unchecked")
+    void publishesImmutableCauseEvidenceSnapshot() {
+        String log = "Native memory allocation (mmap) failed to commit 1048576 bytes\n"
+                + "java.lang.OutOfMemoryError: Java heap space";
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:evidence-snapshot",
+                    baseInput(log, 17, 17),
+                    () -> validationTask(() -> {
+                    }));
+            Map<String, Object> diagnosis = firstDiagnosis(analysis);
+            Map<String, Object> cause = (Map<String, Object>) diagnosis.get("cause_snapshot");
+            List<String> evidence = (List<String>) diagnosis.get("evidence");
+            List<String> evidenceSources = (List<String>) diagnosis.get("evidence_sources");
+            List<Map<String, Object>> suppressed = (List<Map<String, Object>>) diagnosis.get("suppressed_evidence");
+            Map<String, Object> solution = solution(diagnosis);
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+
+            assertEquals("VIRTUAL_MEMORY", diagnosis.get("result_id"));
+            assertEquals("BLOCKED", diagnosis.get("repair_state"));
+            assertEquals(List.of("Native memory allocation (mmap) failed to commit"), evidence);
+            assertEquals(evidence, cause.get("evidence"));
+            assertEquals(evidence, solution.get("evidence"));
+            assertEquals(evidence, plan.get("evidence"));
+            assertEquals(List.of("launcher_latest_log"), evidenceSources);
+            assertEquals(evidenceSources, cause.get("evidence_sources"));
+            assertEquals("BLOCKED", cause.get("repair_state"));
+            assertEquals(
+                    List.of("MEMORY_EXCEEDED", "OUT_OF_MEMORY"),
+                    suppressed.stream().map(entry -> entry.get("result_id")).toList());
+            assertEquals("VIRTUAL_MEMORY", suppressed.get(0).get("suppressed_by"));
+            assertTrue(String.valueOf(suppressed.get(0).get("matched_text"))
+                    .contains("Native memory allocation"));
+
+            assertThrows(UnsupportedOperationException.class, () -> evidence.add("unexpected"));
+            assertThrows(UnsupportedOperationException.class, () -> evidenceSources.add("unexpected"));
+            assertThrows(UnsupportedOperationException.class, () -> suppressed.add(Map.of()));
+            assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> suppressed.get(0).put("result_id", "unexpected"));
+            assertThrows(UnsupportedOperationException.class, () -> cause.put("repair_state", "unexpected"));
+            assertThrows(UnsupportedOperationException.class, () -> diagnosis.put("repair_state", "unexpected"));
+        }
+    }
+
+    /// Normalizes, bounds, and deduplicates typed evidence before exposing it to MCP clients.
+    @Test
+    @SuppressWarnings("unchecked")
+    void boundsAndDeduplicatesTypedCauseEvidence() {
+        String longEvidence = "- Mod 'Example' (requester) "
+                + "x".repeat(600)
+                + " requires mod fabric_api, which is missing!";
+        String log = "net.fabricmc.loader.impl.FormattedException: Incompatible mod set!\n"
+                + "  " + longEvidence + "\n"
+                + "\t" + longEvidence;
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.PROVIDED_LOG,
+                    "sha256:bounded-evidence",
+                    baseInput(log, 17, 17),
+                    null);
+            Map<String, Object> diagnosis = firstDiagnosis(analysis);
+            Map<String, Object> cause = (Map<String, Object>) diagnosis.get("cause_snapshot");
+            List<String> evidence = (List<String>) cause.get("evidence");
+
+            assertEquals("FABRIC_MISSING_DEPENDENCY", diagnosis.get("result_id"));
+            assertEquals(List.of(longEvidence.substring(0, 512)), evidence);
+            assertThrows(UnsupportedOperationException.class, () -> evidence.add("unexpected"));
+        }
+    }
+
+    /// Confirms caller-supplied logs remain analysis-only even when an input happens to carry a task boundary.
+    @Test
+    void blocksRepairPlanningForProvidedLogText() {
+        AtomicInteger taskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.PROVIDED_LOG,
+                    "sha256:external",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    null);
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+
+            assertEquals(false, solution.get("mcp_executable"));
+            assertEquals(XYMLMcpCrashRepairCoordinator.EXTERNAL_LOG_NOT_EXECUTABLE,
+                    solution.get("blocked_reason"));
+            assertEquals(false, plan.get("planned"));
+            assertEquals(false, plan.get("executable"));
+            assertEquals(XYMLMcpCrashRepairCoordinator.EXTERNAL_LOG_NOT_EXECUTABLE,
+                    plan.get("blocked_reason"));
+            assertFalse(plan.containsKey("plan_id"));
+            assertEquals(0, taskCreations.get());
+        }
+    }
+
+    /// Confirms a source validation failure leaves the plan retryable without starting its repair task.
+    @Test
+    void keepsPlanRetryableWhenLatestLogChanged() throws Exception {
+        AtomicInteger taskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:old",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(() -> {
+                        throw new IllegalStateException(
+                                "Crash analysis source could not be revalidated",
+                                new IOException("latest log changed"));
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> operation = coordinator.execute(planId);
+            Map<String, Object> terminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id")));
+            assertEquals("FAILED", terminal.get("status"));
+            assertEquals(IllegalStateException.class.getName(), terminal.get("failure_type"));
+            assertEquals("Crash analysis source could not be revalidated", terminal.get("failure_message"));
+            assertEquals("FAILED_RETRYABLE", terminal.get("plan_state"));
+            assertEquals(true, terminal.get("retryable"));
+            assertEquals(0, taskCreations.get());
+            assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
+
+            Map<String, Object> retry = coordinator.retry(planId);
+            assertTrue(!String.valueOf(retry.get("operation_id")).equals(
+                    String.valueOf(operation.get("operation_id"))));
+            Map<String, Object> retryTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retry.get("operation_id")));
+            assertEquals("FAILED", retryTerminal.get("status"));
+            assertEquals("FAILED_RETRYABLE", retryTerminal.get("plan_state"));
+            assertEquals(0, taskCreations.get());
+        }
+    }
+
+    /// Confirms a task-factory failure leaves the plan retryable and the retry creates a fresh task instance.
+    @Test
+    void retriesAfterTaskFactoryFailureWithFreshTask() throws Exception {
+        AtomicInteger taskCreations = new AtomicInteger();
+        LogAnalyzable input = missingDependencyInput(ignoredIds -> {
+            if (taskCreations.incrementAndGet() == 1) {
+                throw new IllegalStateException("first repair task unavailable");
+            }
+            return Task.completed(null);
+        });
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:factory-retry",
+                    input,
+                    () -> validationTask(() -> {
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            Map<String, Object> firstTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(firstOperation.get("operation_id")));
+            assertEquals("FAILED", firstTerminal.get("status"));
+            assertEquals("FAILED_RETRYABLE", firstTerminal.get("plan_state"));
+            assertEquals(1, taskCreations.get());
+            @SuppressWarnings("unchecked")
+            List<String> completedBeforeRetry = (List<String>) firstTerminal.get("completed_steps");
+            assertFalse(completedBeforeRetry.isEmpty());
+
+            Map<String, Object> retryOperation = coordinator.retry(planId);
+            assertTrue(!String.valueOf(firstOperation.get("operation_id")).equals(
+                    String.valueOf(retryOperation.get("operation_id"))));
+            assertEquals(completedBeforeRetry, retryOperation.get("retained_completed_steps"));
+            Map<String, Object> retryTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retryOperation.get("operation_id")));
+            assertEquals("SUCCEEDED", retryTerminal.get("status"));
+            assertEquals("SUCCEEDED", retryTerminal.get("plan_state"));
+            assertEquals(2, taskCreations.get());
+
+            Map<String, Object> staleOperation = coordinator.status(
+                    String.valueOf(firstOperation.get("operation_id")));
+            assertEquals(firstOperation.get("operation_id"), staleOperation.get("operation_id"));
+            assertEquals(retryOperation.get("operation_id"), staleOperation.get("current_operation_id"));
+            assertEquals("FAILED", staleOperation.get("status"));
+            assertEquals("SUCCEEDED", staleOperation.get("plan_state"));
+        }
+    }
+
+    /// Keeps an executor-start failure queryable and retries it with a fresh task and executor.
+    @Test
+    void retriesAfterExecutorStartFailureWithFreshTask() throws Exception {
+        AtomicInteger executorCreations = new AtomicInteger();
+        AtomicInteger validationTaskCreations = new AtomicInteger();
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger repairTaskCreations = new AtomicInteger();
+        McpTaskOperationRegistry operations = new McpTaskOperationRegistry(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                4,
+                task -> executorCreations.incrementAndGet() == 1
+                        ? new StartFailureExecutor(task)
+                        : task.executor());
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(10),
+                4,
+                4,
+                operations)) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:executor-start-retry",
+                    missingDependencyInput(ignoredIds -> {
+                        repairTaskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> {
+                        validationTaskCreations.incrementAndGet();
+                        return validationTask(validations::incrementAndGet);
+                    });
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution(firstDiagnosis(analysis)).get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> failed = coordinator.execute(planId);
+            String failedOperationId = String.valueOf(failed.get("operation_id"));
+            assertEquals("FAILED", failed.get("status"));
+            assertEquals("FAILED_RETRYABLE", failed.get("plan_state"));
+            assertEquals(true, failed.get("retryable"));
+            assertEquals("synthetic executor start failure", failed.get("failure_message"));
+            assertEquals(failedOperationId, coordinator.status(failedOperationId).get("operation_id"));
+            assertEquals(1, validationTaskCreations.get());
+            assertEquals(0, validations.get());
+            assertEquals(0, repairTaskCreations.get());
+
+            Map<String, Object> retry = coordinator.retry(planId);
+            assertNotEquals(failedOperationId, retry.get("operation_id"));
+            Map<String, Object> terminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retry.get("operation_id")));
+            assertEquals("SUCCEEDED", terminal.get("status"));
+            assertEquals("SUCCEEDED", terminal.get("plan_state"));
+            assertEquals(2, executorCreations.get());
+            assertEquals(2, validationTaskCreations.get());
+            assertEquals(1, validations.get());
+            assertEquals(1, repairTaskCreations.get());
+        }
+    }
+
+    /// Forwards the retained checkpoint to both source validation and the selected solver boundary on retry.
+    @Test
+    void forwardsRepairCheckpointToValidatorAndSolverFactories() throws Exception {
+        AtomicReference<@Nullable RepairCheckpoint> validatorCheckpoint = new AtomicReference<>();
+        AtomicReference<@Nullable RepairCheckpoint> solverCheckpoint = new AtomicReference<>();
+        AtomicInteger solverAttempts = new AtomicInteger();
+        String log = "java.lang.UnsupportedClassVersionError: example.Main has been compiled by a more recent "
+                + "version of the Java Runtime (class file version 61.0), this version of the Java Runtime only "
+                + "recognizes class file versions up to 52.0";
+        LogAnalyzable.JavaRuntimeRepair javaRepair = new LogAnalyzable.JavaRuntimeRepair() {
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask() {
+                return Task.runAsync(() -> {
+                });
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId) {
+                return createTask();
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(
+                    @Nullable String candidateId,
+                    RepairCheckpoint checkpoint) {
+                solverCheckpoint.set(checkpoint);
+                if (solverAttempts.incrementAndGet() == 1) {
+                    throw new IllegalStateException("solver factory unavailable");
+                }
+                return Task.runAsync(() -> {
+                });
+            }
+        };
+        XYMLMcpCrashRepairCoordinator.SourceValidator validator =
+                new XYMLMcpCrashRepairCoordinator.SourceValidator() {
+                    /// {@inheritDoc}
+                    @Override
+                    public Task<?> createTask() {
+                        return validationTask(() -> {
+                        });
+                    }
+
+                    /// {@inheritDoc}
+                    @Override
+                    public Task<?> createTask(RepairCheckpoint checkpoint) {
+                        validatorCheckpoint.set(checkpoint);
+                        return validationTask(() -> {
+                        });
+                    }
+                };
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:checkpoint-forwarding",
+                    baseInput(log, 17, 8).withJavaRuntimeRepair(javaRepair),
+                    validator);
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            Map<String, Object> firstTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(firstOperation.get("operation_id")));
+            assertEquals("FAILED", firstTerminal.get("status"));
+            assertEquals(List.of(), java.util.Objects.requireNonNull(validatorCheckpoint.get()).completedSteps());
+            assertEquals(List.of(), java.util.Objects.requireNonNull(solverCheckpoint.get()).completedSteps());
+
+            Map<String, Object> retryOperation = coordinator.retry(planId);
+            Map<String, Object> retryTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retryOperation.get("operation_id")));
+            assertEquals("SUCCEEDED", retryTerminal.get("status"));
+            RepairCheckpoint retryValidatorCheckpoint = java.util.Objects.requireNonNull(validatorCheckpoint.get());
+            RepairCheckpoint retrySolverCheckpoint = java.util.Objects.requireNonNull(solverCheckpoint.get());
+            assertFalse(retryValidatorCheckpoint.completedSteps().isEmpty());
+            assertEquals(retryValidatorCheckpoint, retrySolverCheckpoint);
+            assertEquals(2, solverAttempts.get());
+        }
+    }
+
+    /// Confirms a source-validator factory failure is retryable and the retry builds a fresh validation task.
+    @Test
+    void retriesAfterSourceValidatorFactoryFailureWithFreshTask() throws Exception {
+        AtomicInteger validationTaskCreations = new AtomicInteger();
+        AtomicInteger repairTaskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:validator-factory-retry",
+                    missingDependencyInput(ignoredIds -> {
+                        repairTaskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> {
+                        if (validationTaskCreations.incrementAndGet() == 1) {
+                            throw new IllegalStateException("first source validation task unavailable");
+                        }
+                        return validationTask(() -> {
+                        });
+                    });
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            Map<String, Object> firstTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(firstOperation.get("operation_id")));
+            assertEquals("FAILED", firstTerminal.get("status"));
+            assertEquals("FAILED_RETRYABLE", firstTerminal.get("plan_state"));
+            assertEquals(1, validationTaskCreations.get());
+            assertEquals(0, repairTaskCreations.get());
+
+            Map<String, Object> retryOperation = coordinator.retry(planId);
+            assertNotEquals(firstOperation.get("operation_id"), retryOperation.get("operation_id"));
+            Map<String, Object> retryTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(retryOperation.get("operation_id")));
+            assertEquals("SUCCEEDED", retryTerminal.get("status"));
+            assertEquals("SUCCEEDED", retryTerminal.get("plan_state"));
+            assertEquals(2, validationTaskCreations.get());
+            assertEquals(1, repairTaskCreations.get());
+        }
+    }
+
+    /// Confirms one retry reservation rejects a concurrent retry until the fresh operation is registered.
+    @Test
+    void serializesConcurrentRetriesWhileCreatingTheFreshOperation() throws Exception {
+        CountDownLatch retryFactoryEntered = new CountDownLatch(1);
+        CountDownLatch releaseRetryFactory = new CountDownLatch(1);
+        AtomicInteger validationTaskCreations = new AtomicInteger();
+        AtomicInteger repairTaskCreations = new AtomicInteger();
+        AtomicReference<@Nullable Map<String, Object>> retryOperation = new AtomicReference<>();
+        AtomicReference<@Nullable Throwable> retryFailure = new AtomicReference<>();
+        LogAnalyzable input = missingDependencyInput(ignoredIds -> {
+            repairTaskCreations.incrementAndGet();
+            return Task.completed(null);
+        });
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:concurrent-retry",
+                    input,
+                    () -> {
+                        int creation = validationTaskCreations.incrementAndGet();
+                        if (creation == 1) {
+                            throw new IllegalStateException("initial validation task unavailable");
+                        }
+                        retryFactoryEntered.countDown();
+                        try {
+                            if (!releaseRetryFactory.await(OPERATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                                throw new IllegalStateException("Timed out while holding the retry task factory");
+                            }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Retry task factory was interrupted", interrupted);
+                        }
+                        return validationTask(() -> {
+                        });
+                    });
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> failedOperation = coordinator.execute(planId);
+            Map<String, Object> failedTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(failedOperation.get("operation_id")));
+            assertEquals("FAILED", failedTerminal.get("status"));
+            assertEquals("FAILED_RETRYABLE", failedTerminal.get("plan_state"));
+
+            Thread retryThread = new Thread(() -> {
+                try {
+                    retryOperation.set(coordinator.retry(planId));
+                } catch (Throwable failure) {
+                    retryFailure.set(failure);
+                }
+            }, "mcp-crash-retry-reservation-test");
+            retryThread.start();
+            try {
+                assertTrue(retryFactoryEntered.await(OPERATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+                Map<String, Object> staleStatus = coordinator.status(
+                        String.valueOf(failedOperation.get("operation_id")));
+                assertEquals("FAILED", staleStatus.get("status"));
+                assertEquals("RUNNING", staleStatus.get("plan_state"));
+                IllegalStateException competingFailure = assertThrows(
+                        IllegalStateException.class,
+                        () -> coordinator.retry(planId));
+                assertTrue(competingFailure.getMessage().contains("retry is already in progress"));
+            } finally {
+                releaseRetryFactory.countDown();
+            }
+            retryThread.join(OPERATION_TIMEOUT.toMillis());
+
+            assertFalse(retryThread.isAlive());
+            assertNull(retryFailure.get());
+            Map<String, Object> createdOperation = java.util.Objects.requireNonNull(retryOperation.get());
+            assertNotEquals(failedOperation.get("operation_id"), createdOperation.get("operation_id"));
+            Map<String, Object> succeededTerminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(createdOperation.get("operation_id")));
+            assertEquals("SUCCEEDED", succeededTerminal.get("status"));
+            assertEquals("SUCCEEDED", succeededTerminal.get("plan_state"));
+            assertEquals(2, validationTaskCreations.get());
+            assertEquals(1, repairTaskCreations.get());
+        } finally {
+            releaseRetryFactory.countDown();
+        }
+    }
+
+    /// Confirms successful residual cleanup restores the original operation instead of replaying its repair task.
+    @Test
+    void doesNotReplaySuccessfulOperationAfterResidualCleanup() throws Exception {
+        AtomicInteger executorCreations = new AtomicInteger();
+        AtomicInteger validationTaskCreations = new AtomicInteger();
+        McpTaskOperationRegistry operations = new McpTaskOperationRegistry(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                8,
+                task -> {
+                    executorCreations.incrementAndGet();
+                    return new ResidualCleanupExecutor(task);
+                });
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(10),
+                8,
+                8,
+                operations)) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:residual-success",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> {
+                        validationTaskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    });
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            String operationId = String.valueOf(firstOperation.get("operation_id"));
+            Map<String, Object> blocked = awaitTerminal(coordinator, operationId);
+            assertEquals("BLOCKED_RESIDUAL", blocked.get("status"));
+            assertEquals("BLOCKED_RESIDUAL", blocked.get("plan_state"));
+            assertEquals(List.of("synthetic residual"), blocked.get("residual_resources"));
+            assertEquals(1, executorCreations.get());
+            assertEquals(1, validationTaskCreations.get());
+
+            Map<String, Object> cleaned = coordinator.retry(planId);
+            assertEquals(operationId, cleaned.get("operation_id"));
+            assertEquals("SUCCEEDED", cleaned.get("status"));
+            assertEquals("SUCCEEDED", cleaned.get("plan_state"));
+            assertEquals(List.of(), cleaned.get("residual_resources"));
+            assertEquals(List.of(), cleaned.get("failed_steps"));
+            assertEquals(1, executorCreations.get());
+            assertEquals(1, validationTaskCreations.get());
+            assertThrows(IllegalStateException.class, () -> coordinator.retry(planId));
+        }
+    }
+
+    /// Keeps cancellation terminal after its task-owned residual resource is released.
+    @Test
+    void doesNotReplayCancelledOperationAfterResidualCleanup() {
+        AtomicInteger executorCreations = new AtomicInteger();
+        AtomicInteger validationTaskCreations = new AtomicInteger();
+        AtomicInteger repairTaskCreations = new AtomicInteger();
+        McpTaskOperationRegistry operations = new McpTaskOperationRegistry(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                8,
+                task -> {
+                    executorCreations.incrementAndGet();
+                    return new CancelledResidualExecutor(task);
+                });
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                Clock.systemUTC(),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(10),
+                8,
+                8,
+                operations)) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:cancelled-residual",
+                    missingDependencyInput(ignoredIds -> {
+                        repairTaskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> {
+                        validationTaskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    });
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution(firstDiagnosis(analysis)).get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> operation = coordinator.execute(planId);
+            String operationId = String.valueOf(operation.get("operation_id"));
+            Map<String, Object> blocked = coordinator.cancel(operationId);
+            assertEquals(true, blocked.get("cancellation_accepted"));
+            assertEquals("BLOCKED_RESIDUAL", blocked.get("status"));
+            assertEquals("BLOCKED_RESIDUAL", blocked.get("plan_state"));
+            assertEquals(List.of("synthetic cancelled residual"), blocked.get("residual_resources"));
+
+            Map<String, Object> cleaned = coordinator.retry(planId);
+            assertEquals(operationId, cleaned.get("operation_id"));
+            assertEquals("CANCELLED", cleaned.get("status"));
+            assertEquals("CANCELLED", cleaned.get("plan_state"));
+            assertEquals(false, cleaned.get("retryable"));
+            assertEquals(List.of(), cleaned.get("residual_resources"));
+            assertEquals(1, executorCreations.get());
+            assertEquals(1, validationTaskCreations.get());
+            assertEquals(0, repairTaskCreations.get());
+            assertThrows(IllegalStateException.class, () -> coordinator.retry(planId));
+            assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
+        }
+    }
+
+    /// Retains a cleanup executor when a failed retry temporarily reports no residual descriptions.
+    @Test
+    void retainsCleanupHandleWhenFailedRetryReportsNoResidualDescription() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-03T00:00:00Z"));
+        AtomicInteger cleanupAttempts = new AtomicInteger();
+        McpTaskOperationRegistry operations = new McpTaskOperationRegistry(
+                clock,
+                Duration.ofMinutes(1),
+                8,
+                task -> new EmptyResidualFailureExecutor(task, cleanupAttempts));
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                clock,
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(10),
+                8,
+                8,
+                operations)) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:residual-empty-description",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> Task.completed(null));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            String operationId = String.valueOf(firstOperation.get("operation_id"));
+            assertEquals("BLOCKED_RESIDUAL", awaitTerminal(coordinator, operationId).get("status"));
+
+            clock.advance(Duration.ofMinutes(2));
+            Map<String, Object> failedCleanup = coordinator.retry(planId);
+            assertEquals(operationId, failedCleanup.get("operation_id"));
+            assertEquals("BLOCKED_RESIDUAL", failedCleanup.get("plan_state"));
+            assertEquals(false, failedCleanup.get("cleanup_succeeded"));
+            assertEquals(List.of(), failedCleanup.get("residual_resources"));
+
+            Map<String, Object> cleaned = coordinator.retry(planId);
+            assertEquals(operationId, cleaned.get("operation_id"));
+            assertEquals("SUCCEEDED", cleaned.get("plan_state"));
+            assertEquals(true, cleaned.get("cleanup_succeeded"));
+            assertEquals(2, cleanupAttempts.get());
+        }
+    }
+
+    /// Confirms a lost residual-cleanup handle never masquerades as a current operation identifier.
+    @Test
+    void hidesUnavailableResidualOperationIdentifier() throws Exception {
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:residual-unavailable",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> Task.completed(null));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution(firstDiagnosis(analysis)).get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Object retainedPlan = reflectedPlan(coordinator, planId);
+            Field stateField = retainedPlan.getClass().getDeclaredField("state");
+            stateField.setAccessible(true);
+            @Nullable Object blockedState = null;
+            for (Object state : stateField.getType().getEnumConstants()) {
+                if (state instanceof Enum<?> enumState && "BLOCKED_RESIDUAL".equals(enumState.name())) {
+                    blockedState = state;
+                    break;
+                }
+            }
+            stateField.set(retainedPlan, java.util.Objects.requireNonNull(blockedState));
+            setPlanField(retainedPlan, "lastOperationId", "expired-operation");
+            setPlanField(retainedPlan, "residualCleanupOperationId", "expired-operation");
+
+            Map<String, Object> unavailable = coordinator.retry(planId);
+            assertEquals("BLOCKED_RESIDUAL", unavailable.get("plan_state"));
+            assertEquals(true, unavailable.get("cleanup_unavailable"));
+            assertEquals(true, unavailable.get("retryable"));
+            assertFalse(unavailable.containsKey("operation_id"));
+            assertFalse(unavailable.containsKey("current_operation_id"));
+        }
+    }
+
+    /// Confirms Java selection is exposed as one confirmed, executable repair solution.
+    @Test
+    void plansAndExecutesNonDestructiveJavaRepair() throws Exception {
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger taskCreations = new AtomicInteger();
+        String log = "java.lang.UnsupportedClassVersionError: example.Main has been compiled by a more recent "
+                + "version of the Java Runtime (class file version 61.0), this version of the Java Runtime only "
+                + "recognizes class file versions up to 52.0";
+        LogAnalyzable input = baseInput(log, 17, 8)
+                .withJavaRuntimeRepair(() -> {
+                    taskCreations.incrementAndGet();
+                    return Task.completed(null);
+                });
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:java",
+                    input,
+                    () -> validationTask(validations::incrementAndGet));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+
+            assertEquals("REPLACE_JAVA_RUNTIME", solution.get("action_type"));
+            assertEquals("REQUIRED", solution.get("confirmation_requirement"));
+            assertEquals(true, solution.get("mcp_executable"));
+            assertEquals(
+                    List.of("OPEN_MOD_SEARCH", "REPLACE_JAVA_RUNTIME"),
+                    repairExecutionPolicy(analysis).get("supported_action_types"));
+            assertEquals(true, plan.get("planned"));
+            assertEquals(true, plan.get("executable"));
+            assertEquals(false, plan.get("single_use"));
+            assertEquals(true, plan.get("retry_after_failure"));
+            assertEquals(0, taskCreations.get());
+
+            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            assertEquals(false, operation.get("cancellable"));
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id"))).get("status"));
+            assertEquals(1, validations.get());
+            assertEquals(1, taskCreations.get());
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+        }
+    }
+
+    /// Requires an explicit choice for multiple Java candidates without consuming the cause plan on omission.
+    @Test
+    void selectsJavaCandidateDuringPlanningOrExecution() throws Exception {
+        AtomicInteger plannedTaskCreations = new AtomicInteger();
+        AtomicReference<@Nullable String> plannedCandidate = new AtomicReference<>();
+        AtomicInteger executedTaskCreations = new AtomicInteger();
+        AtomicReference<@Nullable String> executedCandidate = new AtomicReference<>();
+        String log = "java.lang.UnsupportedClassVersionError: example.Main has been compiled by a more recent "
+                + "version of the Java Runtime (class file version 61.0), this version of the Java Runtime only "
+                + "recognizes class file versions up to 52.0";
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> plannedAnalysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:java-plan-selection",
+                    baseInput(log, 17, 8).withJavaRuntimeRepair(
+                            new CandidateJavaRuntimeRepair(plannedTaskCreations, plannedCandidate)),
+                    () -> validationTask(() -> {
+                    }));
+            Map<String, Object> plannedSolution = solution(firstDiagnosis(plannedAnalysis));
+            Map<String, Object> deferredPlan = coordinator.plan(
+                    String.valueOf(plannedAnalysis.get("analysis_id")),
+                    String.valueOf(plannedSolution.get("solution_id")));
+            String deferredPlanId = String.valueOf(deferredPlan.get("plan_id"));
+
+            assertEquals("AWAITING_SELECTION", deferredPlan.get("repair_state"));
+            assertEquals("AVAILABLE", deferredPlan.get("plan_state"));
+            assertEquals(false, deferredPlan.get("retryable"));
+            assertThrows(IllegalStateException.class, () -> coordinator.execute(deferredPlanId));
+            assertEquals(0, plannedTaskCreations.get());
+
+            Map<String, Object> selectedPlan = coordinator.plan(
+                    String.valueOf(plannedAnalysis.get("analysis_id")),
+                    String.valueOf(plannedSolution.get("solution_id")),
+                    "runtime-b");
+            assertEquals(deferredPlanId, selectedPlan.get("plan_id"));
+            assertEquals("runtime-b", selectedPlan.get("selected_candidate_id"));
+            Map<String, Object> plannedOperation = coordinator.execute(deferredPlanId);
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(plannedOperation.get("operation_id"))).get("status"));
+            assertEquals("runtime-b", plannedCandidate.get());
+            assertEquals(1, plannedTaskCreations.get());
+
+            Map<String, Object> executedAnalysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:java-execute-selection",
+                    baseInput(log, 17, 8).withJavaRuntimeRepair(
+                            new CandidateJavaRuntimeRepair(executedTaskCreations, executedCandidate)),
+                    () -> validationTask(() -> {
+                    }));
+            Map<String, Object> executedSolution = solution(firstDiagnosis(executedAnalysis));
+            Map<String, Object> executedPlan = coordinator.plan(
+                    String.valueOf(executedAnalysis.get("analysis_id")),
+                    String.valueOf(executedSolution.get("solution_id")));
+            Map<String, Object> executedOperation = coordinator.execute(
+                    String.valueOf(executedPlan.get("plan_id")),
+                    "runtime-a");
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(executedOperation.get("operation_id"))).get("status"));
+            assertEquals("runtime-a", executedCandidate.get());
+            assertEquals(1, executedTaskCreations.get());
+        }
+    }
+
+    /// Starts source validation asynchronously instead of blocking the MCP execute call.
+    ///
+    /// @throws Exception when bounded synchronization or operation completion fails
+    @Test
+    void executesSourceValidationInsideTheAsynchronousOperation() throws Exception {
+        CountDownLatch validationEntered = new CountDownLatch(1);
+        CountDownLatch releaseValidation = new CountDownLatch(1);
+        AtomicInteger taskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(() -> {
+                        validationEntered.countDown();
+                        if (!releaseValidation.await(5, TimeUnit.SECONDS)) {
+                            throw new AssertionError("Timed out while holding source validation");
+                        }
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            Map<String, Object> repeatedPlan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            assertEquals(plan.get("plan_id"), repeatedPlan.get("plan_id"));
+
+            Map<String, Object> operation = assertTimeoutPreemptively(
+                    Duration.ofSeconds(1),
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+            assertTrue(validationEntered.await(5, TimeUnit.SECONDS));
+            assertEquals(0, taskCreations.get());
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.execute(String.valueOf(repeatedPlan.get("plan_id"))));
+
+            releaseValidation.countDown();
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id"))).get("status"));
+            assertEquals(1, taskCreations.get());
+        } finally {
+            releaseValidation.countDown();
+        }
+    }
+
+    /// Cancels a source validator waiting on a conflicting resource without creating or running the repair task.
+    ///
+    /// @throws Exception when bounded synchronization or operation completion fails
+    @Test
+    void cancelsSourceValidationWhileWaitingForItsResource() throws Exception {
+        TaskResource resource = TaskResource.gameInstance(Path.of("C:/Games/cancelled-validation"));
+        CountDownLatch holderEntered = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger taskCreations = new AtomicInteger();
+        Task<?> holder = validationTask(resource, () -> {
+            holderEntered.countDown();
+            if (!releaseHolder.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out while holding validation resource");
+            }
+        });
+        TaskExecutor holderExecutor = holder.executor();
+        holderExecutor.start();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            assertTrue(holderEntered.await(5, TimeUnit.SECONDS));
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(resource, validations::incrementAndGet));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+            Map<String, Object> operation = coordinator.execute(planId);
+            String operationId = String.valueOf(operation.get("operation_id"));
+
+            Map<String, Object> cancellation = coordinator.cancel(operationId);
+            assertEquals(true, cancellation.get("cancellation_accepted"));
+            Map<String, Object> cancelled = awaitTerminal(coordinator, operationId);
+            assertEquals("CANCELLED", cancelled.get("status"));
+            assertEquals("CANCELLED", cancelled.get("plan_state"));
+            assertEquals(false, cancelled.get("retryable"));
+            assertThrows(IllegalStateException.class, () -> coordinator.retry(planId));
+            assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
+            assertEquals(0, validations.get());
+            assertEquals(0, taskCreations.get());
+        } finally {
+            releaseHolder.countDown();
+            awaitTaskTerminal(holder);
+        }
+    }
+
+    /// Confirms plans expire independently of their longer-lived analysis.
+    @Test
+    void expiresRepairPlans() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-03T00:00:00Z"));
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                clock,
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(1),
+                2,
+                2,
+                new McpTaskOperationRegistry(clock, Duration.ofMinutes(10), 2))) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> validationTask(() -> {
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+
+            clock.advance(Duration.ofMinutes(2));
+            assertThrows(IllegalArgumentException.class,
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+        }
+    }
+
+    /// Keeps a running plan and its operation link reachable when both retention clocks cross the plan deadline.
+    ///
+    /// @throws Exception when bounded task synchronization or completion fails
+    @Test
+    void retainsRunningPlanPastExpiry() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-03T00:00:00Z"));
+        CountDownLatch validationEntered = new CountDownLatch(1);
+        CountDownLatch releaseValidation = new CountDownLatch(1);
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                clock,
+                Duration.ofMinutes(1),
+                Duration.ofMinutes(1),
+                2,
+                2,
+                new McpTaskOperationRegistry(clock, Duration.ofMinutes(10), 2))) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:running-expiry",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> validationTask(() -> {
+                        validationEntered.countDown();
+                        if (!releaseValidation.await(5, TimeUnit.SECONDS)) {
+                            throw new AssertionError("Timed out while holding running expiry validation");
+                        }
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            String operationId = String.valueOf(operation.get("operation_id"));
+            assertTrue(validationEntered.await(5, TimeUnit.SECONDS));
+
+            clock.advance(Duration.ofMinutes(2));
+            Map<String, Object> running = coordinator.status(operationId);
+            assertEquals("RUNNING", running.get("status"));
+            assertEquals("RUNNING", running.get("plan_state"));
+            assertEquals(operationId, running.get("current_operation_id"));
+
+            releaseValidation.countDown();
+            assertEquals("SUCCEEDED", awaitTerminal(coordinator, operationId).get("status"));
+        } finally {
+            releaseValidation.countDown();
+        }
+    }
+
+    /// Creates a Fabric input with a fresh missing-dependency task factory.
+    private static LogAnalyzable missingDependencyInput(
+            LogAnalyzable.MissingDependencySearch search) {
+        return baseInput(FABRIC_MISSING_DEPENDENCY_LOG, 17, 17)
+                .withMissingDependencySearch(search);
+    }
+
+    /// Creates a contextual Windows analysis input.
+    private static LogAnalyzable baseInput(String log, int requiredJava, int currentJava) {
+        return new LogAnalyzable(
+                "1.20.1",
+                "net.minecraft.client.main.Main",
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.WINDOWS,
+                936,
+                Path.of("C:/Games/demo"),
+                Path.of("C:/Java/bin/java.exe"),
+                requiredJava,
+                currentJava,
+                Bits.BIT_64,
+                4096,
+                log.lines().toList());
+    }
+
+    /// Creates one concrete-resource source-validation task.
+    ///
+    /// @param action validation action
+    /// @return fresh stopped validation task
+    private static Task<?> validationTask(ExceptionalRunnable<?> action) {
+        return validationTask(TaskResource.gameInstance(Path.of("C:/Games/validation-demo")), action);
+    }
+
+    /// Creates one source-validation task for the supplied resource.
+    ///
+    /// @param resource concrete resource occupied by validation
+    /// @param action validation action
+    /// @return fresh stopped validation task
+    private static Task<?> validationTask(TaskResource resource, ExceptionalRunnable<?> action) {
+        return Task.runAsync("Validate crash source", Runnable::run, action).setResources(resource);
+    }
+
+    /// Extracts the first structured diagnosis.
+    @SuppressWarnings("unchecked")
+    private static @Unmodifiable Map<String, Object> firstDiagnosis(Map<String, Object> analysis) {
+        List<Map<String, Object>> diagnoses = (List<Map<String, Object>>) analysis.get("diagnoses");
+        assertEquals(1, diagnoses.size());
+        return diagnoses.get(0);
+    }
+
+    /// Reads one retained repair plan for a test that simulates an unavailable registry handle.
+    private static Object reflectedPlan(
+            XYMLMcpCrashRepairCoordinator coordinator,
+            String planId) throws ReflectiveOperationException {
+        Field plansField = XYMLMcpCrashRepairCoordinator.class.getDeclaredField("plans");
+        plansField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> plans = (Map<String, Object>) plansField.get(coordinator);
+        return java.util.Objects.requireNonNull(plans.get(planId));
+    }
+
+    /// Sets one private plan field for a narrowly scoped lifecycle-boundary fixture.
+    private static void setPlanField(
+            Object plan,
+            String fieldName,
+            @Nullable Object value) throws ReflectiveOperationException {
+        Field field = plan.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(plan, value);
+    }
+
+    /// Extracts the structured solution from one diagnosis.
+    @SuppressWarnings("unchecked")
+    private static @Unmodifiable Map<String, Object> solution(Map<String, Object> diagnosis) {
+        return (Map<String, Object>) diagnosis.get("solution");
+    }
+
+    /// Extracts the advertised MCP repair execution policy.
+    @SuppressWarnings("unchecked")
+    private static @Unmodifiable Map<String, Object> repairExecutionPolicy(Map<String, Object> analysis) {
+        return (Map<String, Object>) analysis.get("repair_execution_policy");
+    }
+
+    /// Polls one repair operation until its terminal state is visible.
+    private static @Unmodifiable Map<String, Object> awaitTerminal(
+            XYMLMcpCrashRepairCoordinator coordinator,
+            String operationId) throws InterruptedException {
+        Instant deadline = Instant.now().plus(OPERATION_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            Map<String, Object> status = coordinator.status(operationId);
+            if (switch (String.valueOf(status.get("status"))) {
+                    case "SUCCEEDED", "FAILED", "BLOCKED_RESIDUAL", "CANCELLED" -> true;
+                    default -> false;
+                }) {
+                return status;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Crash repair operation did not finish before timeout");
+    }
+
+    /// Waits for an independently started task to reach a terminal state.
+    ///
+    /// @param task task whose terminal state is required
+    /// @throws InterruptedException when polling is interrupted
+    private static void awaitTaskTerminal(Task<?> task) throws InterruptedException {
+        Instant deadline = Instant.now().plus(OPERATION_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            if (task.getState() == Task.TaskState.SUCCEEDED || task.getState() == Task.TaskState.FAILED) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Task did not finish before timeout");
+    }
+
+    /// Executor fixture that fails synchronously before publishing its first lifecycle event.
+    @NotNullByDefault
+    private static final class StartFailureExecutor extends TaskExecutor {
+        /// Creates a failing executor around the supplied fresh task.
+        private StartFailureExecutor(Task<?> task) {
+            super(task);
+        }
+
+        /// Fails startup deterministically.
+        @Override
+        public TaskExecutor start() {
+            throw new IllegalStateException("synthetic executor start failure");
+        }
+
+        /// Fails the equivalent synchronous startup deterministically.
+        @Override
+        public boolean test() {
+            throw new IllegalStateException("synthetic executor start failure");
+        }
+
+        /// Records cancellation without any running task work.
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+    }
+
+    /// Java repair fixture exposing two stable runtime choices and recording the selected candidate.
+    @NotNullByDefault
+    private static final class CandidateJavaRuntimeRepair implements LogAnalyzable.JavaRuntimeRepair {
+        /// Number of fresh repair tasks created by this fixture.
+        private final AtomicInteger taskCreations;
+
+        /// Most recently selected candidate, or null when the automatic path was used.
+        private final AtomicReference<@Nullable String> selectedCandidate;
+
+        /// Creates a candidate-aware repair fixture.
+        private CandidateJavaRuntimeRepair(
+                AtomicInteger taskCreations,
+                AtomicReference<@Nullable String> selectedCandidate) {
+            this.taskCreations = taskCreations;
+            this.selectedCandidate = selectedCandidate;
+        }
+
+        /// Creates the automatic repair task while recording the absent selection.
+        @Override
+        public Task<?> createTask() {
+            return createTask(null);
+        }
+
+        /// Returns two choices in stable recommendation order.
+        @Override
+        public @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates() {
+            return List.of(
+                    new LogAnalyzable.JavaRuntimeCandidate("runtime-a", "Runtime A", true),
+                    new LogAnalyzable.JavaRuntimeCandidate("runtime-b", "Runtime B", false));
+        }
+
+        /// Creates one task bound to the explicit candidate.
+        @Override
+        public Task<?> createTask(@Nullable String candidateId) {
+            selectedCandidate.set(candidateId);
+            taskCreations.incrementAndGet();
+            return Task.completed(null);
+        }
+    }
+
+    /// Executor fixture that reports one residual lease before succeeding on its first cleanup retry.
+    @NotNullByDefault
+    private static final class ResidualCleanupExecutor extends TaskExecutor {
+        /// Whether the synthetic residual is still present.
+        private volatile boolean residual = true;
+
+        /// Creates a fixture rooted at the supplied task.
+        private ResidualCleanupExecutor(Task<?> task) {
+            super(task);
+        }
+
+        /// Publishes one successful task completion while retaining a synthetic residual resource.
+        @Override
+        public TaskExecutor start() {
+            notifyTaskListeners(TaskListener::onStart);
+            notifyTaskListeners(listener -> listener.onStop(true, this));
+            return this;
+        }
+
+        /// Runs the same deterministic completion path synchronously.
+        @Override
+        public boolean test() {
+            start();
+            return true;
+        }
+
+        /// This fixture has no active work to cancel.
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+
+        /// Returns the synthetic residual until cleanup succeeds.
+        @Override
+        public @Unmodifiable List<String> getResidualResources() {
+            return residual ? List.of("synthetic residual") : List.of();
+        }
+
+        /// Clears the synthetic residual on the first retry.
+        @Override
+        public boolean retryResourceCleanup() {
+            residual = false;
+            return true;
+        }
+    }
+
+    /// Executor fixture that retains a synthetic resource after cooperative cancellation.
+    @NotNullByDefault
+    private static final class CancelledResidualExecutor extends TaskExecutor {
+        /// Whether the synthetic residual is still present.
+        private volatile boolean residual = true;
+
+        /// Creates a cancellable fixture rooted at the supplied task.
+        private CancelledResidualExecutor(Task<?> task) {
+            super(task);
+        }
+
+        /// Publishes startup and waits for the explicit cancellation request.
+        @Override
+        public TaskExecutor start() {
+            notifyTaskListeners(TaskListener::onStart);
+            return this;
+        }
+
+        /// Runs the startup path without manufacturing a terminal result.
+        @Override
+        public boolean test() {
+            start();
+            return false;
+        }
+
+        /// Publishes cooperative cancellation while retaining one synthetic resource.
+        @Override
+        public void cancel() {
+            if (cancelled) {
+                return;
+            }
+            cancelled = true;
+            failure = new CancellationException("synthetic cancellation");
+            notifyTaskListeners(listener -> listener.onStop(false, this));
+        }
+
+        /// Returns the synthetic residual until cleanup succeeds.
+        @Override
+        public @Unmodifiable List<String> getResidualResources() {
+            return residual ? List.of("synthetic cancelled residual") : List.of();
+        }
+
+        /// Clears the synthetic residual on the first retry.
+        @Override
+        public boolean retryResourceCleanup() {
+            residual = false;
+            return true;
+        }
+    }
+
+    /// Reports a residual lease, then fails once after clearing its description before succeeding on retry.
+    @NotNullByDefault
+    private static final class EmptyResidualFailureExecutor extends TaskExecutor {
+        /// Shared cleanup-attempt counter used by the deterministic test.
+        private final AtomicInteger cleanupAttempts;
+
+        /// Creates the executor around a shared cleanup-attempt counter.
+        private EmptyResidualFailureExecutor(Task<?> task, AtomicInteger cleanupAttempts) {
+            super(task);
+            this.cleanupAttempts = cleanupAttempts;
+        }
+
+        /// Publishes one successful task completion while retaining a synthetic residual lease.
+        @Override
+        public TaskExecutor start() {
+            notifyTaskListeners(TaskListener::onStart);
+            notifyTaskListeners(listener -> listener.onStop(true, this));
+            return this;
+        }
+
+        /// Runs the same deterministic completion path synchronously.
+        @Override
+        public boolean test() {
+            start();
+            return true;
+        }
+
+        /// This fixture has no active work to cancel.
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+
+        /// Clears the description on the first cleanup attempt even though that attempt fails.
+        @Override
+        public @Unmodifiable List<String> getResidualResources() {
+            return cleanupAttempts.get() == 0 ? List.of("synthetic residual") : List.of();
+        }
+
+        /// Fails once so the registry must retain the executor despite an empty description list.
+        @Override
+        public boolean retryResourceCleanup() {
+            return cleanupAttempts.incrementAndGet() > 1;
+        }
+    }
+
+    /// Mutable UTC clock used to cross plan-expiry boundaries deterministically.
+    @NotNullByDefault
+    private static final class MutableClock extends Clock {
+        /// Current synthetic instant.
+        private Instant instant;
+
+        /// Creates a clock at one fixed instant.
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        /// Returns UTC as the fixed test zone.
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        /// Returns this UTC-only clock for the supported zone.
+        @Override
+        public Clock withZone(ZoneId zone) {
+            if (!ZoneOffset.UTC.equals(zone)) {
+                throw new IllegalArgumentException("Only UTC is supported");
+            }
+            return this;
+        }
+
+        /// Returns the current synthetic instant.
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+
+        /// Advances the synthetic instant.
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+    }
+}

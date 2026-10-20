@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /// Verifies channel-specific release metadata URLs without performing network access.
 @NotNullByDefault
 final class RemoteUpdateCheckSourceTest {
-    /// Resolves the beta descriptor and preserves the preview request marker in its query.
+    /// Resolves the beta descriptor and sends the exact selected channel in its query.
     @Test
     void resolvesChannelDescriptorTemplate() {
         RemoteUpdateCheckSource source = new RemoteUpdateCheckSource(
@@ -37,7 +37,7 @@ final class RemoteUpdateCheckSourceTest {
 
         assertEquals(
                 "https://example.test/releases/download/release-channels/xyml-update-beta.json"
-                        + "?version=1.0.0&channel=beta-preview",
-                source.buildRequestUrl(new UpdateCheckRequest(UpdateChannel.BETA, true)));
+                        + "?version=1.0.0&channel=beta",
+                source.buildRequestUrl(new UpdateCheckRequest(UpdateChannel.BETA)));
     }
 }

@@ -22,6 +22,7 @@ import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -29,6 +30,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -44,6 +46,24 @@ final class WorldArchiveImporterTest {
     /// Temporary root used for archives, source worlds, and target saves directories.
     @TempDir
     private Path temporaryDirectory;
+
+    /// The task snapshots both the effective instance directory and input archive as precise resources.
+    @Test
+    void declaresStableWorldImportResources() {
+        Path gameDirectory = temporaryDirectory.resolve("game");
+        Path archive = temporaryDirectory.resolve("world.zip");
+        WorldArchiveImportTask task = new WorldArchiveImportTask(
+                new DefaultGameRepository(gameDirectory),
+                new GameInstanceID("example"),
+                archive,
+                "Imported World");
+
+        assertEquals(
+                Set.of(
+                        TaskResource.gameInstance(gameDirectory),
+                        TaskResource.archive(archive)),
+                task.getResources());
+    }
 
     /// A single-root archive is stripped, renamed, and published as one direct saves child.
     @Test
@@ -127,6 +147,18 @@ final class WorldArchiveImporterTest {
                 .importArchive(archive, savesDirectory, "Existing"));
 
         assertEquals("keep", Files.readString(existing.resolve("marker.txt")));
+        assertNoStagingDirectories(savesDirectory);
+    }
+
+    /// Temporary importer directories cannot be exposed as user-visible world names.
+    @Test
+    void rejectsReservedStagingWorldName() throws IOException {
+        Path archive = createWorldArchive("source-world", List.of());
+        Path savesDirectory = Files.createDirectories(temporaryDirectory.resolve("saves"));
+
+        assertThrows(IOException.class, () -> new WorldArchiveImporter(testLimits())
+                .importArchive(archive, savesDirectory, ".XYML-WORLD-STAGE-user"));
+
         assertNoStagingDirectories(savesDirectory);
     }
 

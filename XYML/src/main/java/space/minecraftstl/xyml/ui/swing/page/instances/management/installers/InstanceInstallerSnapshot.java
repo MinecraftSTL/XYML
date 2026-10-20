@@ -20,8 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
+import space.minecraftstl.xyml.game.GameComponentType;
 
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -74,7 +74,7 @@ public record InstanceInstallerSnapshot(
                         "otherRemovableLibraries contains duplicate library ID: " + libraryId);
             }
             if ("mcbbs".equals(libraryId)
-                    || LibraryAnalyzer.LibraryType.fromPatchId(libraryId) != null) {
+                    || GameComponentType.fromPatchId(libraryId) != null) {
                 throw new IllegalArgumentException(
                         "otherRemovableLibraries contains a protected or recognized library ID: " + libraryId);
             }

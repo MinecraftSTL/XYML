@@ -35,5 +35,6 @@ module space.minecraftstl.xyml.library.nbt {
     exports space.minecraftstl.xyml.library.nbt.chunk;
     exports space.minecraftstl.xyml.library.nbt.tag;
     exports space.minecraftstl.xyml.library.nbt.io;
+    exports space.minecraftstl.xyml.library.nbt.edit;
     exports space.minecraftstl.xyml.library.nbt.validation;
 }

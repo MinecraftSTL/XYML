@@ -75,7 +75,7 @@ class SwingUpdateCheckServiceTest {
                 statuses.add(snapshot.status());
             }
         })) {
-            UpdateCheckRequest request = new UpdateCheckRequest(UpdateChannel.STABLE, false);
+            UpdateCheckRequest request = new UpdateCheckRequest(UpdateChannel.STABLE);
             CompletionStage<UpdateCheckResult> first = service.check(request);
             assertTrue(sourceEntered.await(5, TimeUnit.SECONDS));
             CompletionStage<UpdateCheckResult> duplicate = service.check(request);
@@ -125,15 +125,15 @@ class SwingUpdateCheckServiceTest {
                 worker);
         try {
             CompletionStage<UpdateCheckResult> stable = service.check(
-                    new UpdateCheckRequest(UpdateChannel.STABLE, false));
+                    new UpdateCheckRequest(UpdateChannel.STABLE));
             assertTrue(firstEntered.await(5, TimeUnit.SECONDS));
-            CompletionStage<UpdateCheckResult> preview = service.check(
-                    new UpdateCheckRequest(UpdateChannel.STABLE, true));
+            CompletionStage<UpdateCheckResult> beta = service.check(
+                    new UpdateCheckRequest(UpdateChannel.BETA));
 
             assertEquals(1, sourceCalls.get());
             releaseFirst.countDown();
             stable.toCompletableFuture().get(5, TimeUnit.SECONDS);
-            preview.toCompletableFuture().get(5, TimeUnit.SECONDS);
+            beta.toCompletableFuture().get(5, TimeUnit.SECONDS);
 
             assertEquals(2, sourceCalls.get());
             assertEquals(1, maximumConcurrentSources.get());
@@ -164,11 +164,11 @@ class SwingUpdateCheckServiceTest {
                 });
         try {
             UpdateCheckResult successful = service.check(
-                    new UpdateCheckRequest(UpdateChannel.STABLE, false))
+                    new UpdateCheckRequest(UpdateChannel.STABLE))
                     .toCompletableFuture()
                     .join();
             CompletionStage<UpdateCheckResult> failed = service.check(
-                    new UpdateCheckRequest(UpdateChannel.STABLE, true));
+                    new UpdateCheckRequest(UpdateChannel.STABLE));
 
             CompletionException completionFailure = assertThrows(
                     CompletionException.class,
@@ -202,7 +202,7 @@ class SwingUpdateCheckServiceTest {
                 remoteVersion -> true,
                 worker);
         CompletionStage<UpdateCheckResult> completion = service.check(
-                new UpdateCheckRequest(UpdateChannel.STABLE, false));
+                new UpdateCheckRequest(UpdateChannel.STABLE));
         assertTrue(sourceEntered.await(5, TimeUnit.SECONDS));
 
         service.close();
@@ -212,7 +212,7 @@ class SwingUpdateCheckServiceTest {
         assertEquals(UpdateCheckSnapshot.Status.CLOSED, service.snapshot().status());
         assertThrows(
                 IllegalStateException.class,
-                () -> service.check(new UpdateCheckRequest(UpdateChannel.STABLE, false)));
+                () -> service.check(new UpdateCheckRequest(UpdateChannel.STABLE)));
         worker.shutdownNow();
     }
 

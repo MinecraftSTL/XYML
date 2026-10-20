@@ -81,9 +81,10 @@ public final class DiscoFetchJavaListTask extends Task<EnumMap<JavaPackageType, 
             params.put("lib_c_type", "glibc");
 
         this.fetchPackagesTask = new BoundedTextFetchTask(
-                downloadProvider.injectURLWithCandidates(
+                downloadProvider.getDownloadCandidates(
                         NetworkUtils.withQuery(API_ROOT + "/packages", params)),
                 MAXIMUM_DIRECTORY_RESPONSE_BYTES);
+        asOrchestration();
     }
 
     /// Returns the sole bounded directory request prerequisite.

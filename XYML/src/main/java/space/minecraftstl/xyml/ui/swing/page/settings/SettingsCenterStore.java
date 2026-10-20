@@ -23,7 +23,10 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
+
+import java.util.Objects;
 
 /// Owns toolkit-neutral reads and writes for the general and network settings center.
 ///
@@ -47,10 +50,10 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param language requested display language
     void setLanguage(SupportedLocale language);
 
-    /// Persists whether preview updates may be offered.
+    /// Persists the update source shared by automatic and manual launcher checks.
     ///
-    /// @param accepted whether preview updates are eligible
-    void setAcceptPreviewUpdates(boolean accepted);
+    /// @param channel selected update source channel
+    void setUpdateChannel(UpdateChannel channel);
 
     /// Persists whether automatic update dialogs are suppressed.
     ///
@@ -126,6 +129,48 @@ public interface SettingsCenterStore extends AutoCloseable {
     ///
     /// @param password configured password, which may be empty
     void setProxyPassword(String password);
+
+    /// Persists whether the local MCP server is enabled.
+    ///
+    /// @param enabled whether the MCP entry point may serve requests
+    void setMcpEnabled(boolean enabled);
+
+    /// Persists the bearer token used by the local MCP HTTP listener.
+    ///
+    /// An empty token disables transport authentication for backwards-compatible local use.
+    ///
+    /// The default implementation validates the value and otherwise leaves it unchanged so legacy lightweight
+    /// stores remain source-compatible. Stores with MCP persistence should override this method.
+    ///
+    /// @param token bearer token, which may be empty
+    default void setMcpBearerToken(String token) {
+        Objects.requireNonNull(token, "token");
+    }
+
+    /// Persists the local MCP server loopback port.
+    ///
+    /// @param port loopback TCP port in the range 1..65535
+    void setMcpPort(int port);
+
+    /// Persists whether MCP instance deletion requires interactive confirmation.
+    ///
+    /// @param required whether instance-deletion confirmation is required
+    void setMcpConfirmInstanceDeletion(boolean required);
+
+    /// Persists whether MCP mod deletion requires interactive confirmation.
+    ///
+    /// @param required whether mod-deletion confirmation is required
+    void setMcpConfirmModDeletion(boolean required);
+
+    /// Persists whether the enablement risk warning is shown in the Swing settings page.
+    ///
+    /// The default implementation is a compatibility no-op for stores created before this preference existed.
+    /// Stores with MCP persistence should override this method.
+    ///
+    /// @param show whether to show the warning before enabling MCP
+    default void setShowMcpEnablementWarning(boolean show) {
+        // Compatibility default for read-only or legacy settings-center stores.
+    }
 
     /// Releases every store-owned listener.
     @Override

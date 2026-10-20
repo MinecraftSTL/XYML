@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.Modpack;
@@ -33,8 +34,9 @@ import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
+import static space.minecraftstl.xyml.game.GameComponentType.GAME;
 
 public class ServerModpackManifest implements ModpackManifest, Validation {
     private final String name;
@@ -123,11 +125,16 @@ public class ServerModpackManifest implements ModpackManifest, Validation {
     }
 
     public Modpack toModpack(Charset encoding) throws IOException {
-        String gameVersion = addons.stream().filter(x -> MINECRAFT.getPatchId().equals(x.id)).findAny()
+        String gameVersion = addons.stream().filter(x -> GAME.getPatchId().equals(x.id)).findAny()
                 .orElseThrow(() -> new IOException("Cannot find game version")).getVersion();
         return new Modpack(name, author, version, gameVersion, description, encoding, this) {
             @Override
-            public Task<?> getInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, GameInstanceID instanceId, String iconUrl) {
+            public Task<?> getInstallTask(
+                    DefaultDependencyManager dependencyManager,
+                    Path zipFile,
+                    GameInstanceID instanceId,
+                    String iconUrl,
+                    @Nullable Set<String> excludedFiles) {
                 return new ServerModpackLocalInstallTask(dependencyManager, zipFile, this, ServerModpackManifest.this, instanceId);
             }
         };

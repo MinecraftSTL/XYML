@@ -26,7 +26,9 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceConfigManualMigrationDialog;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
@@ -37,6 +39,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -59,6 +62,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents test launch, script export, dependency repair, and destructive cleanup for one instance.
 ///
@@ -84,11 +89,17 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// Opens the repository catalog fixed to this existing instance.
     private final Consumer<Component> repositoryUpdateCommand;
 
+    /// Opens manual configuration migration for this existing instance.
+    private final Consumer<Component> manualMigrationCommand;
+
     /// Immutable visible text.
     private final InstanceMaintenanceStrings strings;
 
     /// Task-progress host shared by Core repair tasks and test-launch sessions.
     private final TaskProgressHostPanel progressHost;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private TaskLaunchController taskLaunchController;
 
     /// Starts one diagnostic game launch.
     private final JButton testLaunchButton = new JButton();
@@ -116,6 +127,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Removes generated logs and crash reports after confirmation.
     private final JButton cleanGeneratedFilesButton = new JButton();
+
+    /// Opens manual configuration migration for this instance.
+    private final JButton migrateConfigurationButton = new JButton();
 
     /// Retains the latest concise lifecycle result.
     private final JLabel statusLabel = new JLabel();
@@ -184,10 +198,17 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         instanceId,
                         taskProgressStrings,
                         animator,
-                        progressAnimationDuration),
+                        progressAnimationDuration,
+                        new TaskLaunchController(() -> { })),
+                owner -> InstanceConfigManualMigrationDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        Schedulers.io()),
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
     }
 
     /// Creates a production maintenance page around an already bound application launch command adapter.
@@ -206,6 +227,33 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         this(
+                repository,
+                instanceId,
+                launchActions,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates a production maintenance page whose confirmed operations open the shared task manager.
+    ///
+    /// @param repository repository containing the fixed instance
+    /// @param instanceId stable fixed instance identifier
+    /// @param launchActions test-launch and script commands bound to this exact instance
+    /// @param taskProgressStrings localized task progress text
+    /// @param animator optional shared motion-aware animator
+    /// @param progressAnimationDuration non-negative determinate progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public InstanceMaintenancePanel(
+            XYMLGameRepository repository,
+            GameInstanceID instanceId,
+            InstanceMaintenanceLaunchActions launchActions,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
                 instanceId,
                 Objects.requireNonNull(repository, "repository").getRunDirectory(instanceId),
                 new RepositoryInstanceMaintenanceService(repository, instanceId),
@@ -218,10 +266,17 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         instanceId,
                         taskProgressStrings,
                         animator,
-                        progressAnimationDuration),
+                        progressAnimationDuration,
+                        taskLaunchController),
+                owner -> InstanceConfigManualMigrationDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        Schedulers.io()),
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                taskLaunchController);
     }
 
     /// Creates a maintenance page around explicit deterministic collaborators.
@@ -253,9 +308,11 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 strings,
                 interactions,
                 owner -> { },
+                owner -> { },
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
     }
 
     /// Creates a maintenance page with an explicit repository-update catalog command.
@@ -267,9 +324,11 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param strings immutable visible text
     /// @param interactions native interaction boundary
     /// @param repositoryUpdateCommand repository-catalog command bound to the fixed instance
+    /// @param manualMigrationCommand manual configuration migration command bound to the fixed instance
     /// @param taskProgressStrings localized task progress text
     /// @param animator optional shared animator
     /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     private InstanceMaintenancePanel(
             GameInstanceID instanceId,
             Path runDirectory,
@@ -278,9 +337,11 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             InstanceMaintenanceStrings strings,
             InstanceMaintenanceInteractions interactions,
             Consumer<Component> repositoryUpdateCommand,
+            Consumer<Component> manualMigrationCommand,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
-            Duration progressAnimationDuration) {
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
@@ -292,6 +353,10 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         this.repositoryUpdateCommand = Objects.requireNonNull(
                 repositoryUpdateCommand,
                 "repositoryUpdateCommand");
+        this.manualMigrationCommand = Objects.requireNonNull(
+                manualMigrationCommand,
+                "manualMigrationCommand");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         Duration animationDuration = Objects.requireNonNull(
                 progressAnimationDuration,
                 "progressAnimationDuration");
@@ -310,6 +375,14 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @return non-blank page title
     public String title() {
         return strings.title();
+    }
+
+    /// Installs the shared task navigation controller used by production container wiring.
+    ///
+    /// @param controller shared confirmed-task submission controller
+    public void setTaskLaunchController(TaskLaunchController controller) {
+        EdtDispatcher.requireEventDispatchThread();
+        taskLaunchController = Objects.requireNonNull(controller, "controller");
     }
 
     /// Returns the latest successful local snapshot, or null before activation succeeds.
@@ -416,6 +489,16 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         "assets/swing/icons/refresh.svg",
                         strings.redownloadAssetsAction(),
                         () -> startTask(service::redownloadAssets, strings.redownloadAssetsAction()))),
+                "growx");
+
+        content.add(createSection(
+                i18n("settings.instance_config_migration.manual.title"),
+                configureAction(
+                        migrateConfigurationButton,
+                        "instanceMaintenanceMigrateConfiguration",
+                        "assets/swing/icons/content-copy.svg",
+                        i18n("settings.instance_config_migration.manual.open"),
+                        () -> manualMigrationCommand.accept(this))),
                 "growx");
 
         content.add(createSection(
@@ -622,7 +705,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     private void removeAssets() {
         EdtDispatcher.requireEventDispatchThread();
         if (isReady() && interactions.confirmDestructive(this, strings.removeAssetsAction(), true)) {
-            startTask(service::removeAssets, strings.removeAssetsAction());
+            startLocalTask(service::removeAssets, strings.removeAssetsAction());
         }
     }
 
@@ -630,7 +713,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     private void removeLibraries() {
         EdtDispatcher.requireEventDispatchThread();
         if (isReady() && interactions.confirmDestructive(this, strings.removeLibrariesAction(), true)) {
-            startTask(service::removeLibraries, strings.removeLibrariesAction());
+            startLocalTask(service::removeLibraries, strings.removeLibrariesAction());
         }
     }
 
@@ -641,7 +724,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 this,
                 strings.cleanGeneratedFilesAction(),
                 false)) {
-            startTask(service::cleanGeneratedFiles, strings.cleanGeneratedFilesAction());
+            startLocalTask(service::cleanGeneratedFiles, strings.cleanGeneratedFilesAction());
         }
     }
 
@@ -766,11 +849,31 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateControls();
     }
 
-    /// Creates and starts one stopped Core maintenance task.
+    /// Creates and starts one local Core maintenance task without opening the task manager.
+    ///
+    /// @param taskSupplier deferred task construction boundary
+    /// @param title visible operation title
+    private void startLocalTask(MaintenanceTaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, false);
+    }
+
+    /// Creates and starts one stopped Core maintenance task and opens the task manager.
     ///
     /// @param taskSupplier deferred task construction boundary
     /// @param title visible operation title
     private void startTask(MaintenanceTaskSupplier taskSupplier, String title) {
+        startTask(taskSupplier, title, true);
+    }
+
+    /// Creates and starts one stopped Core maintenance task.
+    ///
+    /// @param taskSupplier deferred task construction boundary
+    /// @param title visible operation title
+    /// @param navigateToTaskManager whether successful startup should open the task manager
+    private void startTask(
+            MaintenanceTaskSupplier taskSupplier,
+            String title,
+            boolean navigateToTaskManager) {
         EdtDispatcher.requireEventDispatchThread();
         if (!isReady()) {
             return;
@@ -798,8 +901,14 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         statusLabel.setText(strings.workingStatus());
         updateControls();
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            if (navigateToTaskManager) {
+                taskLaunchController.launch(executor, requireNonBlank(title, "title"), () -> { });
+            } else {
+                taskLaunchController.launchWithoutNavigation(
+                        executor,
+                        requireNonBlank(title, "title"),
+                        () -> { });
+            }
         } catch (RuntimeException startFailure) {
             cleanupFailedTaskStart(presentation, completionSubscription);
             presentFailure(title, startFailure);
@@ -923,6 +1032,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateModpackUrlButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         updateModpackRepositoryButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         redownloadAssetsButton.setEnabled(ready);
+        migrateConfigurationButton.setEnabled(ready);
         removeAssetsButton.setEnabled(ready && snapshot != null && snapshot.assetsPresent());
         removeLibrariesButton.setEnabled(ready && snapshot != null && snapshot.librariesPresent());
         cleanGeneratedFilesButton.setEnabled(ready && snapshot != null && snapshot.generatedFilesPresent());

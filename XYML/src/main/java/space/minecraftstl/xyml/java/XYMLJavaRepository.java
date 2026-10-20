@@ -17,17 +17,20 @@
  */
 package space.minecraftstl.xyml.java;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.java.mojang.MojangJavaDownloadTask;
 import space.minecraftstl.xyml.download.java.mojang.MojangJavaRemoteFiles;
 import space.minecraftstl.xyml.game.DownloadInfo;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -37,16 +40,20 @@ import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author Glavo
- */
+/// Stores launcher-managed Java runtimes and their manifests below one repository root.
+@NotNullByDefault
 public final class XYMLJavaRepository implements JavaRepository {
+    /// Prefix used for Mojang-managed runtime names.
     public static final String MOJANG_JAVA_PREFIX = "mojang-";
 
+    /// Managed Java repository root.
     private final Path root;
 
+    /// Creates a managed Java repository rooted at a stable absolute path.
+    ///
+    /// @param root managed Java repository root
     public XYMLJavaRepository(Path root) {
-        this.root = root;
+        this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
     }
 
     public Path getPlatformRoot(Platform platform) {
@@ -129,8 +136,12 @@ public final class XYMLJavaRepository implements JavaRepository {
         }
     }
 
+    /// Returns an immutable snapshot of executable paths for installed runtimes on one platform.
+    ///
+    /// @param platform selected managed platform
+    /// @return immutable installed executable snapshot
     @Override
-    public Collection<Path> getAllJava(Platform platform) {
+    public @Unmodifiable Collection<Path> getAllJava(Platform platform) {
         Path platformRoot = getPlatformRoot(platform);
         if (!Files.isDirectory(platformRoot))
             return Collections.emptyList();
@@ -138,15 +149,30 @@ public final class XYMLJavaRepository implements JavaRepository {
         ArrayList<Path> list = new ArrayList<>();
 
         getAllJava(list, platform, platformRoot);
-        return list;
+        return List.copyOf(list);
     }
 
+    /// Creates a Mojang runtime download chain with precise runtime, staging, and manifest resources.
+    ///
+    /// @param downloadProvider provider used for metadata and runtime files
+    /// @param platform target managed platform
+    /// @param gameJavaVersion selected Mojang runtime component
+    /// @return stopped managed runtime installation task
     @Override
-    public Task<JavaRuntime> getDownloadJavaTask(DownloadProvider downloadProvider, Platform platform, GameJavaVersion gameJavaVersion) {
+    public Task<JavaRuntime> getDownloadJavaTask(
+            DownloadProvider downloadProvider,
+            Platform platform,
+            GameJavaVersion gameJavaVersion) {
         Path javaDir = getJavaDir(platform, gameJavaVersion);
         Path tempDir = getPlatformRoot(platform).resolve(".tmp").resolve(javaDir.getFileName());
+        Path manifestFile = getManifestFile(platform, gameJavaVersion);
 
-        return new MojangJavaDownloadTask(downloadProvider, javaDir, tempDir, gameJavaVersion, JavaManager.getMojangJavaPlatform(platform)).thenApplyAsync(result -> {
+        Task<JavaRuntime> task = new MojangJavaDownloadTask(
+                downloadProvider,
+                javaDir,
+                tempDir,
+                gameJavaVersion,
+                JavaManager.getMojangJavaPlatform(platform)).thenApplyAsync(result -> {
             Path executable;
             try {
                 executable = JavaManager.getExecutable(javaDir).toRealPath();
@@ -177,47 +203,88 @@ public final class XYMLJavaRepository implements JavaRepository {
                 } else if (file instanceof MojangJavaRemoteFiles.RemoteDirectory) {
                     files.put(path, new JavaLocalFiles.LocalDirectory());
                 } else if (file instanceof MojangJavaRemoteFiles.RemoteLink) {
-                    files.put(path, new JavaLocalFiles.LocalLink(((MojangJavaRemoteFiles.RemoteLink) file).getTarget()));
+                    files.put(
+                            path,
+                            new JavaLocalFiles.LocalLink(
+                                    ((MojangJavaRemoteFiles.RemoteLink) file).getTarget()));
                 }
             });
 
             JavaManifest manifest = new JavaManifest(info, update, files);
-            JsonUtils.writeToJsonFile(getManifestFile(platform, gameJavaVersion), manifest);
+            JsonUtils.writeToJsonFile(manifestFile, manifest);
             return JavaRuntime.of(executable, info, true);
         });
+        return task.setResources(
+                TaskResource.javaRuntime(javaDir),
+                TaskResource.javaRuntime(tempDir),
+                TaskResource.configuration(manifestFile));
     }
 
-    public Task<JavaRuntime> getInstallJavaTask(Platform platform, String name, Map<String, Object> update, Path archiveFile) {
+    /// Creates a local Java archive installation chain with stable output and input resources.
+    ///
+    /// @param platform target managed platform
+    /// @param name managed runtime name
+    /// @param update immutable manifest update metadata
+    /// @param archiveFile input Java archive
+    /// @return stopped managed runtime installation task
+    public Task<JavaRuntime> getInstallJavaTask(
+            Platform platform,
+            String name,
+            @Unmodifiable Map<String, Object> update,
+            Path archiveFile) {
         Path javaDir = getJavaDir(platform, name);
-        return new JavaInstallTask(javaDir, update, archiveFile).thenApplyAsync(result -> {
-            if (!result.info().getPlatform().equals(platform))
-                throw new IOException("Platform is mismatch: expected " + platform + " but got " + result.info().getPlatform());
+        Path manifestFile = getManifestFile(platform, name);
+        Task<JavaRuntime> task = new JavaInstallTask(javaDir, update, archiveFile).thenApplyAsync(result -> {
+            if (!result.info().getPlatform().equals(platform)) {
+                throw new IOException(
+                        "Platform is mismatch: expected " + platform
+                                + " but got " + result.info().getPlatform());
+            }
 
-            Path executable = javaDir.resolve("bin").resolve(platform.getOperatingSystem().getJavaExecutable()).toRealPath();
-            JsonUtils.writeToJsonFile(getManifestFile(platform, name), result);
+            Path executable = javaDir.resolve("bin")
+                    .resolve(platform.getOperatingSystem().getJavaExecutable())
+                    .toRealPath();
+            JsonUtils.writeToJsonFile(manifestFile, result);
             return JavaRuntime.of(executable, result.info(), true);
         });
+        return task.setResources(
+                TaskResource.javaRuntime(javaDir),
+                TaskResource.archive(archiveFile),
+                TaskResource.configuration(manifestFile));
     }
 
+    /// Creates a task deleting one named runtime and its manifest.
+    ///
+    /// @param platform managed runtime platform
+    /// @param name managed runtime name
+    /// @return stopped deletion task
     @Override
     public Task<Void> getUninstallJavaTask(Platform platform, String name) {
+        Path manifestFile = getManifestFile(platform, name);
+        Path javaDir = getJavaDir(platform, name);
         return Task.runAsync(() -> {
-            Files.deleteIfExists(getManifestFile(platform, name));
-            FileUtils.deleteDirectory(getJavaDir(platform, name));
-        });
+            Files.deleteIfExists(manifestFile);
+            FileUtils.deleteDirectory(javaDir);
+        }).setResources(
+                TaskResource.javaRuntime(javaDir),
+                TaskResource.configuration(manifestFile));
     }
 
+    /// Creates a task deleting the managed runtime containing one executable.
+    ///
+    /// @param java managed runtime descriptor
+    /// @return stopped deletion task
     @Override
     public Task<Void> getUninstallJavaTask(JavaRuntime java) {
+        Path platformRoot = getPlatformRoot(java.getPlatform());
         return Task.runAsync(() -> {
-            Path root = getPlatformRoot(java.getPlatform());
-            Path relativized = root.relativize(java.getBinary());
+            Path relativized = platformRoot.relativize(java.getBinary());
 
             if (relativized.getNameCount() > 1) {
                 String name = relativized.getName(0).toString();
                 Files.deleteIfExists(getManifestFile(java.getPlatform(), name));
                 FileUtils.deleteDirectory(getJavaDir(java.getPlatform(), name));
             }
-        });
+        }).setResources(TaskResource.javaRuntime(platformRoot));
     }
 }

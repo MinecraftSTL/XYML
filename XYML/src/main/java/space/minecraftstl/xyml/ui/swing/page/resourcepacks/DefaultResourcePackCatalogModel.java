@@ -22,18 +22,19 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.Lang;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -60,9 +61,6 @@ import java.util.concurrent.Executor;
 /// shallow index after the source mutation finishes.
 @NotNullByDefault
 public final class DefaultResourcePackCatalogModel implements ResourcePackCatalogModel {
-    /// Deterministic file-name order used by every completed candidate index.
-    private static final Comparator<Path> PATH_ORDER = Comparator.comparing(
-            DefaultResourcePackCatalogModel::fileName);
 
     /// Lock protecting index state, operation ownership, selection, sequence, and closure.
     private final Object stateLock = new Object();
@@ -211,7 +209,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         this.afterRangeTerminalDecision = Objects.requireNonNull(
                 afterRangeTerminalDecision,
                 "afterRangeTerminalDecision");
-        CatalogContent initialContent = new CatalogContent(0L, false, List.of());
+        CatalogContent initialContent = new CatalogContent(0L, false, List.of(), 0);
         state = new ModelState(initialContent, new ResourcePackCatalogSnapshot(
                 OptionalInt.empty(),
                 OptionalInt.empty(),
@@ -366,7 +364,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             }
             selectedPath = normalizedPath;
             ResourcePackCatalogSnapshot previous = current.snapshot();
-            ResourcePackCatalogSnapshot replacement = copySnapshot(
+            ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                     previous,
                     selectedIndex(current.content().paths()),
                     previous.itemCount(),
@@ -397,7 +395,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             selectedPath = null;
             ModelState current = state;
             ResourcePackCatalogSnapshot previous = current.snapshot();
-            ResourcePackCatalogSnapshot replacement = copySnapshot(
+            ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                     previous,
                     OptionalInt.empty(),
                     previous.itemCount(),
@@ -411,6 +409,24 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             transition = replaceStateLocked(current.content(), replacement);
         }
         publish(transition);
+    }
+
+    /// Loads one icon through the serialized source boundary without touching the Swing thread.
+    @Override
+    public CompletionStage<@Nullable EncodedImage> loadIcon(Path path) {
+        Path normalizedPath = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+        return CompletableFuture.supplyAsync(() -> {
+            synchronized (sourceInvocationLock) {
+                if (closed) {
+                    throw new CancellationException("Resource-pack catalog is closed");
+                }
+                try {
+                    return catalogAccess.loadIcon(normalizedPath);
+                } catch (IOException failure) {
+                    throw new CompletionException(failure);
+                }
+            }
+        }, backgroundExecutor);
     }
 
     /// Imports multiple source packs through one serialized write and one follow-up index scan.
@@ -453,13 +469,33 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         return startMutation(new ResourcePackEnabledMutation(normalizeMutationPath(path), false));
     }
 
+    /// Persistently reorders one enabled pack to a final display index.
+    ///
+    /// @param path current indexed resource-pack path
+    /// @param targetIndex zero-based final enabled display index
+    /// @return asynchronous terminal completion
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex) {
+        if (targetIndex < 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("targetIndex must not be negative"));
+        }
+        return startMutation(new ResourcePackReorderMutation(normalizeMutationPath(path), targetIndex));
+    }
+
     /// Persistently disables and then deletes one stable current path.
     ///
     /// @param path current indexed resource-pack path
     /// @return asynchronous terminal completion
     @Override
     public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path) {
-        return startMutation(new ResourcePackDeleteMutation(normalizeMutationPath(path)));
+        return deleteResourcePack(path, DeletionMode.PERMANENT);
+    }
+
+    /// Starts one deletion using the selected recycle-bin or permanent mode.
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path, DeletionMode mode) {
+        return startMutation(new ResourcePackDeleteMutation(normalizeMutationPath(path), mode));
     }
 
     /// Cancels index, range, and pre-commit write work, then terminates every subscription.
@@ -493,7 +529,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 selectedPath = null;
                 ModelState current = state;
                 ResourcePackCatalogSnapshot previous = current.snapshot();
-                ResourcePackCatalogSnapshot terminal = copySnapshot(
+                ResourcePackCatalogSnapshot terminal = ResourcePackCatalogSnapshots.copy(
                         previous,
                         OptionalInt.empty(),
                         previous.itemCount(),
@@ -559,9 +595,10 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             CatalogContent busyContent = new CatalogContent(
                     nextGeneration,
                     true,
-                    current.content().paths());
+                    current.content().paths(),
+                    current.content().enabledPathCount());
             ResourcePackCatalogSnapshot previous = current.snapshot();
-            ResourcePackCatalogSnapshot busy = copySnapshot(
+            ResourcePackCatalogSnapshot busy = ResourcePackCatalogSnapshots.copy(
                     previous,
                     selectedIndex(busyContent.paths()),
                     previous.itemCount(),
@@ -629,7 +666,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             ResourcePackCatalogIndex sourceIndex = result.refreshedIndex();
             ResourcePackCatalogIndex immutableIndex = new ResourcePackCatalogIndex(
                     sourceIndex.supported(),
-                    immutableIndexPaths(sourceIndex.paths()));
+                    immutableIndexPaths(sourceIndex.paths()),
+                    sourceIndex.enabledPathCount());
             completeMutationResult(operation, immutableIndex, result.mutationFailure());
         } catch (CancellationException failure) {
             if (operation.committed()) {
@@ -686,7 +724,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 CatalogContent refreshedContent = new CatalogContent(
                         operation.generation(),
                         true,
-                        paths);
+                        paths,
+                        loadedIndex.enabledPathCount());
                 ResourcePackCatalogStatus catalogStatus = loadedIndex.supported()
                         ? ResourcePackCatalogStatus.READY
                         : ResourcePackCatalogStatus.UNSUPPORTED;
@@ -699,17 +738,19 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 String writeStatusText = mutationFailure == null
                         ? ""
                         : writeFailedStatus(mutationFailure);
-                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                long contentRevision = Math.addExact(current.snapshot().contentRevision(), 1L);
+                ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                         current.snapshot(),
                         selectedIndex(paths),
                         OptionalInt.of(paths.size()),
-                        Math.addExact(current.snapshot().contentRevision(), 1L),
+                        contentRevision,
                         catalogStatus,
                         catalogStatusText,
                         writeStatus,
                         writeStatusText,
                         loadedIndex.supported() && !paths.isEmpty(),
-                        true);
+                        true,
+                        loadedIndex.enabledPathCount());
                 transition = replaceStateLocked(refreshedContent, replacement);
             }
             terminalSnapshot = state.snapshot();
@@ -741,8 +782,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 CatalogContent unknownContent = new CatalogContent(
                         operation.generation(),
                         false,
-                        List.of());
-                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                        List.of(),
+                        0);
+                ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                         current.snapshot(),
                         OptionalInt.empty(),
                         OptionalInt.empty(),
@@ -777,7 +819,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             if (!closed) {
                 ModelState current = state;
                 ResourcePackCatalogSnapshot previous = current.snapshot();
-                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                ResourcePackCatalogSnapshot replacement = ResourcePackCatalogSnapshots.copy(
                         previous,
                         selectedIndex(current.content().paths()),
                         previous.itemCount(),
@@ -902,8 +944,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             long contentRevision = onlyIfIdle
                     ? current.snapshot().contentRevision()
                     : Math.addExact(current.snapshot().contentRevision(), 1L);
-            CatalogContent loadingContent = new CatalogContent(nextGeneration, false, List.of());
-            ResourcePackCatalogSnapshot loading = copySnapshot(
+            CatalogContent loadingContent = new CatalogContent(nextGeneration, false, List.of(), 0);
+            ResourcePackCatalogSnapshot loading = ResourcePackCatalogSnapshots.copy(
                     current.snapshot(),
                     OptionalInt.empty(),
                     OptionalInt.empty(),
@@ -962,7 +1004,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             ensureIndexCurrent(operation);
             ResourcePackCatalogIndex immutableIndex = new ResourcePackCatalogIndex(
                     sourceIndex.supported(),
-                    immutableIndexPaths(sourceIndex.paths()));
+                    immutableIndexPaths(sourceIndex.paths()),
+                    sourceIndex.enabledPathCount());
             ensureIndexCurrent(operation);
             completeIndexSuccess(operation, immutableIndex);
         } catch (CancellationException failure) {
@@ -996,14 +1039,15 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 CatalogContent readyContent = new CatalogContent(
                         operation.generation(),
                         true,
-                        paths);
+                        paths,
+                        loadedIndex.enabledPathCount());
                 ResourcePackCatalogStatus status = loadedIndex.supported()
                         ? ResourcePackCatalogStatus.READY
                         : ResourcePackCatalogStatus.UNSUPPORTED;
                 String statusText = loadedIndex.supported()
                         ? readyStatus(paths.size())
                         : statusStrings.unsupportedStatus();
-                ResourcePackCatalogSnapshot ready = copySnapshot(
+                ResourcePackCatalogSnapshot ready = ResourcePackCatalogSnapshots.copy(
                         current.snapshot(),
                         selectedIndex(paths),
                         OptionalInt.of(paths.size()),
@@ -1013,7 +1057,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                         current.snapshot().writeStatus(),
                         current.snapshot().writeStatusText(),
                         loadedIndex.supported() && !paths.isEmpty(),
-                        true);
+                        true,
+                        loadedIndex.enabledPathCount());
                 transition = replaceStateLocked(readyContent, ready);
             }
         }
@@ -1030,7 +1075,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             if (isIndexCurrentLocked(operation)) {
                 activeIndex = null;
                 ModelState current = state;
-                ResourcePackCatalogSnapshot failed = copySnapshot(
+                ResourcePackCatalogSnapshot failed = ResourcePackCatalogSnapshots.copy(
                         current.snapshot(),
                         OptionalInt.empty(),
                         OptionalInt.empty(),
@@ -1284,7 +1329,6 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         List<Path> normalized = sourcePaths.stream()
                 .map(path -> Objects.requireNonNull(path, "index contains null path"))
                 .map(path -> path.toAbsolutePath().normalize())
-                .sorted(PATH_ORDER)
                 .toList();
         Set<Path> unique = new HashSet<>();
         for (Path path : normalized) {
@@ -1424,43 +1468,6 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         listeners.remove(slot);
     }
 
-    /// Builds one immutable snapshot while keeping transition calls explicit.
-    ///
-    /// @param ignoredPrevious previous snapshot documenting this copy
-    /// @param selectedIndex replacement selection
-    /// @param itemCount replacement exact count or unknown
-    /// @param contentRevision replacement content revision
-    /// @param status replacement lifecycle
-    /// @param statusText replacement localized status
-    /// @param writeStatus replacement serialized-write lifecycle
-    /// @param writeStatusText replacement write lifecycle text
-    /// @param listEnabled replacement list enabled flag
-    /// @param refreshEnabled replacement refresh enabled flag
-    /// @return replacement snapshot
-    private static ResourcePackCatalogSnapshot copySnapshot(
-            ResourcePackCatalogSnapshot ignoredPrevious,
-            OptionalInt selectedIndex,
-            OptionalInt itemCount,
-            long contentRevision,
-            ResourcePackCatalogStatus status,
-            String statusText,
-            ResourcePackCatalogWriteStatus writeStatus,
-            String writeStatusText,
-            boolean listEnabled,
-            boolean refreshEnabled) {
-        Objects.requireNonNull(ignoredPrevious, "ignoredPrevious");
-        return new ResourcePackCatalogSnapshot(
-                selectedIndex,
-                itemCount,
-                contentRevision,
-                status,
-                statusText,
-                writeStatus,
-                writeStatusText,
-                listEnabled,
-                refreshEnabled);
-    }
-
     /// Returns localized successful text for one exact count.
     ///
     /// @param itemCount exact indexed path count
@@ -1511,6 +1518,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         if (mutation instanceof ResourcePackEnabledMutation enabledMutation) {
             return enabledMutation.path();
         }
+        if (mutation instanceof ResourcePackReorderMutation reorderMutation) {
+            return reorderMutation.path();
+        }
         if (mutation instanceof ResourcePackDeleteMutation deleteMutation) {
             return deleteMutation.path();
         }
@@ -1560,20 +1570,25 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     ///
     /// @param generation generation owning the content
     /// @param indexReady whether paths represent a completed exact index
-    /// @param paths normalized sorted exact candidate paths
+    /// @param paths normalized sorted exact candidate paths in display order
+    /// @param enabledPathCount number of leading enabled paths
     @NotNullByDefault
     private record CatalogContent(
             long generation,
             boolean indexReady,
-            @Unmodifiable List<Path> paths) {
+            @Unmodifiable List<Path> paths,
+            int enabledPathCount) {
         /// Freezes paths and validates generation state.
         private CatalogContent {
             if (generation < 0L) {
                 throw new IllegalArgumentException("generation must not be negative");
             }
             paths = List.copyOf(paths);
-            if (!indexReady && !paths.isEmpty()) {
-                throw new IllegalArgumentException("Unknown index cannot contain paths");
+            if (enabledPathCount < 0 || enabledPathCount > paths.size()) {
+                throw new IllegalArgumentException("enabledPathCount must be inside paths");
+            }
+            if (!indexReady && (!paths.isEmpty() || enabledPathCount != 0)) {
+                throw new IllegalArgumentException("Unknown index cannot contain paths or enabled entries");
             }
         }
     }
@@ -1593,6 +1608,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                     : OptionalInt.empty();
             if (!expected.equals(snapshot.itemCount())) {
                 throw new IllegalArgumentException("Snapshot item count must match index readiness");
+            }
+            if (content.enabledPathCount() != snapshot.enabledItemCount()) {
+                throw new IllegalArgumentException("Snapshot enabled count must match index content");
             }
         }
     }

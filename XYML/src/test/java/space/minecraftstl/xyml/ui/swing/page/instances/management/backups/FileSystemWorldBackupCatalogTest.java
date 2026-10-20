@@ -23,6 +23,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.World;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -33,6 +36,7 @@ import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies real local world archive lifecycle behavior without parsing worlds during shallow index.
@@ -79,6 +83,88 @@ final class FileSystemWorldBackupCatalogTest {
 
         assertTrue(afterDelete.archives().isEmpty());
         assertFalse(Files.exists(archive.archive()));
+    }
+
+    /// A backup is moved to the selected recycle-bin boundary without permanent deletion.
+    @Test
+    void deletesBackupThroughRecycleBinBoundary() throws IOException {
+        Path runDirectory = Files.createDirectories(temporaryDirectory.resolve("recycle-run"));
+        Path backupsDirectory = Files.createDirectories(runDirectory.resolve("backups"));
+        Path archiveFile = Files.writeString(backupsDirectory.resolve("backup.zip"), "archive");
+        Path trash = temporaryDirectory.resolve("trash");
+        FileSystemWorldBackupCatalog catalog = new FileSystemWorldBackupCatalog(
+                runDirectory,
+                DIRECT_WORKER,
+                new RecordingTrashOperations(trash, false));
+        WorldBackupArchive archive = catalog.load().toCompletableFuture().join().archives().get(0);
+
+        catalog.deleteBackup(archive, DeletionMode.RECYCLE_BIN_FIRST).toCompletableFuture().join();
+
+        assertFalse(Files.exists(archiveFile));
+        assertTrue(Files.exists(trash.resolve("backup.zip")));
+    }
+
+    /// A refused recycle-bin move leaves the backup intact and reports the exact failed path.
+    @Test
+    void preservesBackupWhenRecycleBinMoveFails() throws IOException {
+        Path runDirectory = Files.createDirectories(temporaryDirectory.resolve("failed-run"));
+        Path backupsDirectory = Files.createDirectories(runDirectory.resolve("backups"));
+        Path archiveFile = Files.writeString(backupsDirectory.resolve("backup.zip"), "archive");
+        FileSystemWorldBackupCatalog catalog = new FileSystemWorldBackupCatalog(
+                runDirectory,
+                DIRECT_WORKER,
+                new RecordingTrashOperations(temporaryDirectory.resolve("trash"), true));
+        WorldBackupArchive archive = catalog.load().toCompletableFuture().join().archives().get(0);
+
+        java.util.concurrent.CompletionException completion = assertThrows(
+                java.util.concurrent.CompletionException.class,
+                () -> catalog.deleteBackup(archive, DeletionMode.RECYCLE_BIN_FIRST).toCompletableFuture().join());
+        TrashMoveException failure = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                TrashMoveException.class,
+                completion.getCause());
+
+        assertEquals(archiveFile.toAbsolutePath().normalize(), failure.failedPaths().get(0));
+        assertTrue(Files.exists(archiveFile));
+    }
+
+    /// Moves archives into a temporary recycle-bin destination or refuses every move.
+    @NotNullByDefault
+    private static final class RecordingTrashOperations implements TrashOperations {
+        /// Temporary recycle-bin destination.
+        private final Path trashDirectory;
+
+        /// Whether every move should be refused.
+        private final boolean refuseMoves;
+
+        /// Creates one deterministic recycle-bin substitute.
+        ///
+        /// @param trashDirectory temporary recycle-bin destination
+        /// @param refuseMoves whether all moves should fail
+        private RecordingTrashOperations(Path trashDirectory, boolean refuseMoves) {
+            this.trashDirectory = trashDirectory;
+            this.refuseMoves = refuseMoves;
+        }
+
+        /// Reports a supported recycle-bin boundary.
+        @Override
+        public boolean isSupported() {
+            return true;
+        }
+
+        /// Moves one archive unless configured to refuse all moves.
+        @Override
+        public boolean moveToTrash(Path path) {
+            if (refuseMoves) {
+                return false;
+            }
+            try {
+                Files.createDirectories(trashDirectory);
+                Files.move(path, trashDirectory.resolve(path.getFileName()));
+                return true;
+            } catch (IOException exception) {
+                return false;
+            }
+        }
     }
 
     /// Creates a direct child world directory with the minimum Core-readable NBT layout.

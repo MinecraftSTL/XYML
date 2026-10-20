@@ -110,6 +110,30 @@ public final class SwingButtonRippleSupportTest {
         });
     }
 
+    /// Controls that rebuild their component tree during a press can opt out of root-level captured feedback.
+    @Test
+    public void disabledRipplePropertySuppressesCapturedFeedback() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+
+        EdtDispatcher.executeAndWait(() -> {
+            JPanel root = new JPanel(null);
+            JButton button = new JButton("Details");
+            root.setSize(200, 100);
+            button.setBounds(20, 20, 120, 32);
+            button.putClientProperty(SwingButtonRippleSupport.RIPPLE_DISABLED_PROPERTY, Boolean.TRUE);
+            root.add(button);
+            SwingButtonRippleSupport support = new SwingButtonRippleSupport(
+                    root,
+                    animator,
+                    Duration.ofSeconds(2L));
+
+            dispatchPress(button, 8, 8);
+
+            assertEquals(0, support.activeRippleCount());
+            support.close();
+        });
+    }
+
     /// Delivers one primary-button press at caller-selected local coordinates.
     ///
     /// @param button target button

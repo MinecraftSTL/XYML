@@ -60,6 +60,9 @@ import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -73,6 +76,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -112,7 +116,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
 
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> {
+                (navigateCommand, downloadsNavigation) -> {
                     navigation.set(navigateCommand);
                     return createModels(resources, gameVersions, gameInstaller);
                 },
@@ -168,7 +172,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
         RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(resources, gameVersions, gameInstaller),
+                (navigateCommand, downloadsNavigation) -> createModels(resources, gameVersions, gameInstaller),
                 presentation(),
                 themeManager(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
@@ -193,7 +197,7 @@ class SwingApplicationCompositionTest {
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
         AtomicInteger applicationCloseCalls = new AtomicInteger();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         resources,
                         new RecordingGameVersionCatalogModel(),
                         gameInstaller),
@@ -227,7 +231,7 @@ class SwingApplicationCompositionTest {
         List<CountingCloseable> resources = createResources(closeOrder);
         AtomicInteger applicationCloseCalls = new AtomicInteger();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         resources,
                         new RecordingGameVersionCatalogModel(),
                         gameInstaller),
@@ -255,7 +259,7 @@ class SwingApplicationCompositionTest {
         List<String> closeOrder = new ArrayList<>();
         IllegalStateException repeatedFailure = new IllegalStateException("shared close failure");
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(
+                (navigateCommand, downloadsNavigation) -> createModels(
                         createResources(closeOrder),
                         new RecordingGameVersionCatalogModel(),
                         failingCloseGameInstallService(
@@ -288,7 +292,7 @@ class SwingApplicationCompositionTest {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
                 () -> SwingApplicationComposition.createForCollaborators(
-                        navigateCommand -> createModels(resources, gameVersions, gameInstaller),
+                        (navigateCommand, downloadsNavigation) -> createModels(resources, gameVersions, gameInstaller),
                         presentation(),
                         themeManager(),
                         new SwingAnimator(MotionPolicy.OFF, 16),
@@ -311,7 +315,7 @@ class SwingApplicationCompositionTest {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
                 () -> SwingApplicationComposition.createForCollaborators(
-                        navigateCommand -> createModels(
+                        (navigateCommand, downloadsNavigation) -> createModels(
                                 createResources(closeOrder),
                                 new RecordingGameVersionCatalogModel(),
                                 failingCloseGameInstallService(
@@ -597,6 +601,7 @@ class SwingApplicationCompositionTest {
                 instanceManagement,
                 gameVersions,
                 gameInstaller,
+                new TaskLaunchController(() -> { }),
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
                 ownedResources);
@@ -699,7 +704,8 @@ class SwingApplicationCompositionTest {
                 "XYML test",
                 ShellPagePresentations.englishFallback(),
                 new HomeStrings(
-                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching", "Back"),
+                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching",
+                        "Cancel launch", "Back"),
                 new HomeStatusStrings("Ready", "Select account", "Select instance", "Exporting"),
                 new InstancesStrings(
                         "Instances", "Search", "Refresh", "Refreshing", "Add", "Manage", "Empty", "No matches"),
@@ -767,6 +773,9 @@ class SwingApplicationCompositionTest {
                 resourcePackStrings(),
                 resourcePackStatusStrings(),
                 resourcePackActionStrings(),
+                shaderPackStrings(),
+                shaderPackStatusStrings(),
+                shaderPackActionStrings(),
                 new GameVersionCatalogStrings(
                         "Game versions",
                         "Search",
@@ -870,6 +879,36 @@ class SwingApplicationCompositionTest {
                 "Enable incompatible %s?", "Delete", "Delete resource pack", "Delete %s?",
                 "Reveal", "Reveal resource pack", "Open directory", "Open resource-pack directory",
                 "Operation failed", "Reveal failed", "Open directory failed");
+    }
+
+    /// Creates shader-pack catalog text for the composition fixture.
+    ///
+    /// @return complete shader-pack catalog text
+    private static ShaderPackCatalogStrings shaderPackStrings() {
+        return new ShaderPackCatalogStrings(
+                "Shader packs", "Refresh", "Refreshing", "Refresh shader packs",
+                "Retry", "Retry loading shader packs", "Details", "Select a shader pack",
+                "File", "Path", "Enabled", "Enabled", "Disabled", "Invalid", "Backends", "No backend");
+    }
+
+    /// Creates shader-pack lifecycle text for the composition fixture.
+    ///
+    /// @return complete shader-pack lifecycle text
+    private static ShaderPackCatalogStatusStrings shaderPackStatusStrings() {
+        return new ShaderPackCatalogStatusStrings(
+                "Idle", "Loading", "Ready", "Empty", "Failed", "Writing", "Write failed");
+    }
+
+    /// Creates shader-pack action text for the composition fixture.
+    ///
+    /// @return complete shader-pack action text
+    private static ShaderPackCatalogActionStrings shaderPackActionStrings() {
+        return new ShaderPackCatalogActionStrings(
+                "Import", "Import shader packs", "Choose shader packs", "ZIP archive",
+                "Enable", "Enable shader pack", "Disable", "Disable shader pack", "Delete",
+                "Delete shader pack", "Delete %s?", "Delete %s packs?", "Reveal", "Reveal shader pack",
+                "Open", "Open shaderpacks directory", "Operation failed", "Reveal failed",
+                "Open failed", "Backends", "Choose backends");
     }
 
     /// Creates a non-initialized theme manager suitable for the fake window.

@@ -17,8 +17,11 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.SimpleMultimap;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -35,16 +38,23 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Normalizes legacy loader manifests and publishes bundled compatibility libraries when required.
+@NotNullByDefault
 public class MaintainTask extends Task<GameInstanceManifest> {
     private final GameRepository repository;
     private final GameInstanceManifest manifest;
 
+    /// Creates a maintenance task scoped to the manifest's effective library directory.
+    ///
+    /// @param repository repository used to resolve the manifest and library paths
+    /// @param manifest independent manifest to normalize
     public MaintainTask(GameRepository repository, GameInstanceManifest manifest) {
         this.repository = repository;
         this.manifest = manifest;
+        setResources(TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)));
 
         if (manifest.inheritsFrom() != null)
             throw new IllegalArgumentException("MaintainTask requires independent game version");
@@ -59,14 +69,14 @@ public class MaintainTask extends Task<GameInstanceManifest> {
         if (manifest.inheritsFrom() != null)
             throw new IllegalArgumentException("MaintainTask requires independent game version");
 
-        String mainClass = manifest.resolve(repository).mainClass();
+        @Nullable String mainClass = manifest.resolve(repository).mainClass();
 
-        if (mainClass != null && mainClass.equals(LibraryAnalyzer.LAUNCH_WRAPPER_MAIN)) {
+        if (mainClass != null && mainClass.equals(GameComponentAnalyzer.LAUNCH_WRAPPER_MAIN)) {
             manifest = maintainOptiFineLibrary(repository, maintainGameWithLaunchWrapper(repository, unique(manifest), true), false);
-        } else if (mainClass != null && mainClass.equals(LibraryAnalyzer.MOD_LAUNCHER_MAIN)) {
+        } else if (mainClass != null && mainClass.equals(GameComponentAnalyzer.MOD_LAUNCHER_MAIN)) {
             // Forge 1.13 and OptiFine
             manifest = maintainOptiFineLibrary(repository, maintainGameWithCpwModLauncher(repository, unique(manifest)), true);
-        } else if (mainClass != null && mainClass.equals(LibraryAnalyzer.BOOTSTRAP_LAUNCHER_MAIN)) {
+        } else if (mainClass != null && mainClass.equals(GameComponentAnalyzer.BOOTSTRAP_LAUNCHER_MAIN)) {
             // Forge 1.17
             manifest = maintainGameWithCpwBoostrapLauncher(repository, unique(manifest));
         } else {
@@ -99,43 +109,43 @@ public class MaintainTask extends Task<GameInstanceManifest> {
     }
 
     private static GameInstanceManifest maintainGameWithLaunchWrapper(GameRepository repository, GameInstanceManifest manifest, boolean reorderTweakClass) {
-        LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
+        GameComponentAnalyzer componentAnalyzer = GameComponentAnalyzer.analyze(manifest, null);
         GameInstanceLibraryBuilder builder = new GameInstanceLibraryBuilder(manifest);
-        String mainClass = null;
+        @Nullable String mainClass = null;
 
         // Installing Forge will override the Minecraft arguments in json, so LiteLoader and OptiFine Tweaker are being re-added.
-        if (libraryAnalyzer.has(LITELOADER) && !libraryAnalyzer.hasModLauncher()) {
-            builder.replaceTweakClass(LibraryAnalyzer.LITELOADER_TWEAKER, LibraryAnalyzer.LITELOADER_TWEAKER, !reorderTweakClass, reorderTweakClass);
+        if (componentAnalyzer.has(LITELOADER) && !componentAnalyzer.hasForgeModLauncher()) {
+            builder.replaceTweakClass(GameComponentAnalyzer.LITELOADER_TWEAKER, GameComponentAnalyzer.LITELOADER_TWEAKER, !reorderTweakClass, reorderTweakClass);
         } else {
-            builder.removeTweakClass(LibraryAnalyzer.LITELOADER_TWEAKER);
+            builder.removeTweakClass(GameComponentAnalyzer.LITELOADER_TWEAKER);
         }
 
-        if (libraryAnalyzer.has(OPTIFINE)) {
-            if (!libraryAnalyzer.has(LITELOADER) && !libraryAnalyzer.has(FORGE)) {
-                if (builder.hasTweakClass(LibraryAnalyzer.OPTIFINE_TWEAKERS[1])) {
-                    builder.replaceTweakClass(LibraryAnalyzer.OPTIFINE_TWEAKERS[1], LibraryAnalyzer.OPTIFINE_TWEAKERS[0], !reorderTweakClass, reorderTweakClass);
+        if (componentAnalyzer.has(OPTIFINE)) {
+            if (!componentAnalyzer.has(LITELOADER) && !componentAnalyzer.has(FORGE)) {
+                if (builder.hasTweakClass(GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(1))) {
+                    builder.replaceTweakClass(GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(1), GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(0), !reorderTweakClass, reorderTweakClass);
                 }
             } else {
-                if (libraryAnalyzer.hasModLauncher()) {
+                if (componentAnalyzer.hasForgeModLauncher()) {
                     // If ModLauncher installed, we use ModLauncher in place of LaunchWrapper.
-                    mainClass = LibraryAnalyzer.MOD_LAUNCHER_MAIN;
-                    for (String optiFineTweaker : LibraryAnalyzer.OPTIFINE_TWEAKERS) {
+                    mainClass = GameComponentAnalyzer.MOD_LAUNCHER_MAIN;
+                    for (String optiFineTweaker : GameComponentAnalyzer.OPTIFINE_TWEAKERS) {
                         builder.removeTweakClass(optiFineTweaker);
                     }
-                } else if (builder.hasTweakClass(LibraryAnalyzer.OPTIFINE_TWEAKERS[0])) {
+                } else if (builder.hasTweakClass(GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(0))) {
                     // If forge or LiteLoader installed, OptiFine Forge Tweaker is needed.
-                    builder.replaceTweakClass(LibraryAnalyzer.OPTIFINE_TWEAKERS[0], LibraryAnalyzer.OPTIFINE_TWEAKERS[1], !reorderTweakClass, reorderTweakClass);
+                    builder.replaceTweakClass(GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(0), GameComponentAnalyzer.OPTIFINE_TWEAKERS.get(1), !reorderTweakClass, reorderTweakClass);
                 }
 
             }
         } else {
-            for (String optiFineTweaker : LibraryAnalyzer.OPTIFINE_TWEAKERS) {
+            for (String optiFineTweaker : GameComponentAnalyzer.OPTIFINE_TWEAKERS) {
                 builder.removeTweakClass(optiFineTweaker);
             }
         }
 
-        boolean hasForge = libraryAnalyzer.has(FORGE), hasModLauncher = libraryAnalyzer.hasModLauncher();
-        for (String forgeTweaker : LibraryAnalyzer.FORGE_TWEAKERS) {
+        boolean hasForge = componentAnalyzer.has(FORGE), hasModLauncher = componentAnalyzer.hasForgeModLauncher();
+        for (String forgeTweaker : GameComponentAnalyzer.FORGE_TWEAKERS) {
             if (!hasForge) {
                 builder.removeTweakClass(forgeTweaker);
             } else if (!hasModLauncher && builder.hasTweakClass(forgeTweaker)) {
@@ -148,12 +158,12 @@ public class MaintainTask extends Task<GameInstanceManifest> {
     }
 
     private static GameInstanceManifest maintainGameWithCpwModLauncher(GameRepository repository, GameInstanceManifest manifest) {
-        LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
+        GameComponentAnalyzer componentAnalyzer = GameComponentAnalyzer.analyze(manifest, null);
         GameInstanceLibraryBuilder builder = new GameInstanceLibraryBuilder(manifest);
 
-        if (!libraryAnalyzer.has(FORGE)) return manifest;
+        if (!componentAnalyzer.has(FORGE)) return manifest;
 
-        if (libraryAnalyzer.has(OPTIFINE)) {
+        if (componentAnalyzer.has(OPTIFINE)) {
             Library xymlTransformerDiscoveryService = new Library(new Artifact("space.minecraftstl.xyml", "transformer-discovery-service", "1.0"));
             Optional<Library> optiFine = manifest.getLibraries().stream().filter(library -> library.is("optifine", "OptiFine")).findAny();
             boolean libraryExisting = manifest.getLibraries().stream().anyMatch(library -> library.is("space.minecraftstl.xyml", "transformer-discovery-service"));
@@ -161,7 +171,8 @@ public class MaintainTask extends Task<GameInstanceManifest> {
                 builder.addJvmArgument("-Dxyml.transformer.candidates=${library_directory}/" + library.getPath());
                 if (!libraryExisting) builder.addLibrary(xymlTransformerDiscoveryService);
                 Path libraryPath = repository.getLibraryFile(manifest, xymlTransformerDiscoveryService);
-                try (InputStream input = MaintainTask.class.getResourceAsStream("/assets/game/XYMLTransformerDiscoveryService-1.0.jar")) {
+                try (@Nullable InputStream input = MaintainTask.class.getResourceAsStream(
+                        "/assets/game/XYMLTransformerDiscoveryService-1.0.jar")) {
                     Files.createDirectories(libraryPath.getParent());
                     Files.copy(Objects.requireNonNull(input, "Bundled XYMLTransformerDiscoveryService is missing."), libraryPath, StandardCopyOption.REPLACE_EXISTING);
                 } catch (IOException | NullPointerException e) {
@@ -206,15 +217,15 @@ public class MaintainTask extends Task<GameInstanceManifest> {
 
     // Fix wrong configurations when launching 1.17+ with Forge.
     private static GameInstanceManifest maintainGameWithCpwBoostrapLauncher(GameRepository repository, GameInstanceManifest manifest) {
-        LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
+        GameComponentAnalyzer componentAnalyzer = GameComponentAnalyzer.analyze(manifest, null);
         GameInstanceLibraryBuilder builder = new GameInstanceLibraryBuilder(manifest);
 
-        if (!libraryAnalyzer.has(FORGE) && !libraryAnalyzer.has(NEO_FORGE)) return manifest;
+        if (!componentAnalyzer.has(FORGE) && !componentAnalyzer.has(NEO_FORGE)) return manifest;
 
-        Optional<String> bslVersion = libraryAnalyzer.getVersion(BOOTSTRAP_LAUNCHER);
+        @Nullable String bslVersion = componentAnalyzer.getBootstrapVersion();
 
-        if (bslVersion.isPresent()) {
-            if (VersionNumber.compare(bslVersion.get(), "0.1.17") < 0) {
+        if (bslVersion != null) {
+            if (VersionNumber.compare(bslVersion, "0.1.17") < 0) {
                 // The default ignoreList will be applied to all components of libraries in classpath,
                 // so if game directory located in some directory like /Users/asm, all libraries will be ignored,
                 // which is not expected. We fix this here.
@@ -247,17 +258,29 @@ public class MaintainTask extends Task<GameInstanceManifest> {
         return builder.build();
     }
 
-    private static GameInstanceManifest maintainOptiFineLibrary(GameRepository repository, GameInstanceManifest manifest, boolean remove) {
-        LibraryAnalyzer libraryAnalyzer = LibraryAnalyzer.analyze(manifest, null);
-        List<Library> libraries = new ArrayList<>(manifest.getLibraries());
+    /// Rewrites OptiFine library placement while tolerating legacy calls without a repository.
+    ///
+    /// @param repository repository used to locate installed libraries, or null to skip filesystem checks
+    /// @param manifest manifest to rewrite
+    /// @param remove whether the replacement OptiFine library should be removed
+    /// @return rewritten manifest
+    private static GameInstanceManifest maintainOptiFineLibrary(
+            @Nullable GameRepository repository,
+            GameInstanceManifest manifest,
+            boolean remove) {
+        GameComponentAnalyzer componentAnalyzer = GameComponentAnalyzer.analyze(manifest, null);
+        List<@Nullable Library> libraries = new ArrayList<>(manifest.getLibraries());
 
-        if (libraryAnalyzer.has(OPTIFINE)) {
-            if (libraryAnalyzer.has(LITELOADER) || libraryAnalyzer.has(FORGE)) {
+        if (componentAnalyzer.has(OPTIFINE)) {
+            if (componentAnalyzer.has(LITELOADER) || componentAnalyzer.has(FORGE)) {
                 // If forge or LiteLoader installed, OptiFine Forge Tweaker is needed.
                 // And we should load the installer jar instead of patch jar.
                 if (repository != null) {
                     for (int i = 0; i < manifest.getLibraries().size(); ++i) {
-                        Library library = libraries.get(i);
+                        @Nullable Library library = libraries.get(i);
+                        if (library == null) {
+                            continue;
+                        }
                         if (library.is("optifine", "OptiFine")) {
                             Library newLibrary = new Library(new Artifact("optifine", "OptiFine", library.version(), "installer"));
                             if (Files.exists(repository.getLibraryFile(manifest, newLibrary))) {

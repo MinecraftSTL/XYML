@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.page.settings.DisabledJavaRuntimeEntry;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
@@ -102,6 +103,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(1, store.saveCount.get());
             InstanceGameSettingsSnapshot saved = store.snapshot();
             assertTrue(saved.memory().automaticOverridden());
@@ -152,6 +154,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertTrue(store.snapshot().launchOptions().runningDirectoryOverridden());
             assertEquals("", store.snapshot().launchOptions().runningDirectory());
             assertEquals(1, workingDirectoryChanges.get());
@@ -162,6 +165,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertFalse(store.snapshot().launchOptions().runningDirectoryOverridden());
             assertEquals(2, workingDirectoryChanges.get());
         } finally {
@@ -233,6 +237,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(selectedId, store.snapshot().parentPreset().selectedId());
             assertEquals(1, store.saveCount.get());
         } finally {
@@ -264,12 +269,14 @@ final class InstanceGameSettingsPanelTest {
         RecordingStore store = new RecordingStore(withWritable(snapshot(), false));
         store.forceOverwriteAvailable = true;
         AtomicInteger reloads = new AtomicInteger();
+        AtomicInteger navigationCount = new AtomicInteger();
         EdtDispatcher.executeAndWait(() -> {
             InstanceGameSettingsFooterControls footer = new InstanceGameSettingsFooterControls(
                     store,
                     () -> { },
                     reloads::incrementAndGet,
                     () -> true);
+            footer.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet));
             footer.updateAvailability(false, true);
 
             findNamed(
@@ -278,8 +285,10 @@ final class InstanceGameSettingsPanelTest {
                     JButton.class).doClick();
         });
 
+        awaitTaskCompletion();
         assertEquals(1, store.forceOverwriteCount.get());
         assertEquals(1, reloads.get());
+        assertEquals(0, navigationCount.get());
     }
 
     /// Ensures inherited properties expose overrides while Java uses explicit radio rows without old checkboxes.
@@ -586,6 +595,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             InstanceGameSettingsSnapshot.JavaRuntimeSettings saved = store.snapshot().javaRuntime();
             assertTrue(saved.typeOverridden());
             assertTrue(saved.customPathOverridden());
@@ -810,6 +820,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(1, store.saveCount.get());
             InstanceGameSettingsSnapshot saved = store.snapshot();
             assertEquals(GameWindowType.FULLSCREEN, saved.window().type());
@@ -913,6 +924,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(1, store.saveCount.get());
             InstanceGameSettingsSnapshot.MemorySettings memory = store.snapshot().memory();
             assertTrue(memory.automaticOverridden());
@@ -994,6 +1006,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(1, store.saveCount.get());
             InstanceGameSettingsSnapshot saved = store.snapshot();
             assertFalse(saved.memory().maximumOverridden());
@@ -1022,6 +1035,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             InstanceGameSettingsSnapshot saved = store.snapshot();
             assertEquals("  --demo  ", saved.launchOptions().gameArguments());
             assertEquals("  XYML_TEST=1  ", saved.launchOptions().environmentVariables());
@@ -1052,6 +1066,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             InstanceGameSettingsSnapshot saved = store.snapshot();
             assertEquals("21", saved.javaRuntime().customVersion());
             assertEquals("localhost:25565", saved.quickPlay().multiplayer());
@@ -1093,6 +1108,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            awaitTaskCompletion();
             assertEquals(1, store.saveCount.get());
             assertEquals(854.5D, store.snapshot().window().width());
             assertEquals(100_000.25D, store.snapshot().window().height());
@@ -1640,6 +1656,19 @@ final class InstanceGameSettingsPanelTest {
         assertEquals(expected, actual.get());
     }
 
+    /// Drains the asynchronous persistence completion path before assertions inspect the fake store.
+    private static void awaitTaskCompletion() {
+        try {
+            for (int attempt = 0; attempt < 20; attempt++) {
+                EdtDispatcher.executeAndWait(() -> { });
+                Thread.sleep(5L);
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("persistence wait interrupted", exception);
+        }
+    }
+
     /// Creates one runtime whose existing path yields a distinct persisted identity.
     ///
     /// @param path existing test path
@@ -1823,6 +1852,7 @@ final class InstanceGameSettingsPanelTest {
             forceOverwriteCount.incrementAndGet();
             storedSnapshot = withWritable(storedSnapshot, true);
         }
+
     }
 
     /// Deterministic local-Java service that exposes refresh and subscription behavior to the panel test.

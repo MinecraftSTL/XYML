@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.GameBuilder;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 
@@ -39,8 +40,8 @@ public final class RepositoryGameInstallTaskFactoryTest {
     /// Remote installers are forwarded to the builder in order and loader selection is modded.
     @Test
     public void configuresOrderedRemoteInstallersAndRecognizesModLoaderIsolation() {
-        RemoteVersion forge = remoteVersion("forge", "47.2.0");
-        RemoteVersion fabric = remoteVersion("fabric", "47.2.0");
+        ComponentRemoteVersion forge = remoteVersion("forge", "47.2.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "47.2.0");
         GameInstallRequest request = new GameInstallRequest(
                 "loader-instance",
                 "1.21.1",
@@ -52,7 +53,7 @@ public final class RepositoryGameInstallTaskFactoryTest {
 
         assertEquals(instanceId, builder.getName());
         assertEquals("1.21.1", builder.gameVersion());
-        @Unmodifiable List<RemoteVersion> selected = builder.remoteVersionsSnapshot();
+        @Unmodifiable List<ComponentRemoteVersion> selected = builder.remoteVersionsSnapshot();
         assertEquals(2, selected.size());
         assertSame(forge, selected.get(0));
         assertSame(fabric, selected.get(1));
@@ -84,8 +85,8 @@ public final class RepositoryGameInstallTaskFactoryTest {
     /// @param libraryId selected installer identifier
     /// @param selfVersion selected installer version text
     /// @return remote installer metadata
-    private static RemoteVersion remoteVersion(String libraryId, String selfVersion) {
-        return new RemoteVersion(libraryId, "1.21.1", selfVersion, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String selfVersion) {
+        return new TestComponentRemoteVersion(libraryId, "1.21.1", selfVersion, Instant.EPOCH, List.of());
     }
 
     /// Captures builder calls without constructing files or starting a network-backed task.
@@ -101,7 +102,7 @@ public final class RepositoryGameInstallTaskFactoryTest {
         /// Returns an immutable snapshot of remote installers configured by the factory.
         ///
         /// @return immutable ordered remote installers
-        private @Unmodifiable List<RemoteVersion> remoteVersionsSnapshot() {
+        private @Unmodifiable List<ComponentRemoteVersion> remoteVersionsSnapshot() {
             return List.copyOf(remoteVersions);
         }
 

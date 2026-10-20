@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
@@ -31,20 +30,19 @@ import java.awt.Font;
 import java.awt.Frame;
 import java.awt.Window;
 import java.util.Objects;
-import java.util.concurrent.Executor;
 
-/// Embeddable settings page that owns the sole user-facing NBT file entry point.
+/// Embeddable settings page exposing the application-owned NBT editor entry point.
 ///
 /// The containing frame is resolved at click time so this panel can be constructed and cached
-/// before it is attached to the application window. The owned launcher reuses one modeless editor
-/// and is closed together with the settings center.
+/// before it is attached to the application window. The settings page borrows the launcher registered
+/// for that frame, so discarding the page cannot close an unsaved editor session.
 @NotNullByDefault
 public final class NBTSettingsPanel extends JPanel implements AutoCloseable {
     /// Stable localized page strings.
     private final NBTEditorStrings strings;
 
-    /// File-selection and editor-window lifecycle owned by this page.
-    private final SwingNBTEditorLauncher launcher;
+    /// Injected launcher used by focused tests, or null to resolve the application-owned launcher.
+    private final @Nullable SwingNBTEditorLauncher launcher;
 
     /// Sole command that opens a local NBT document.
     private final JButton openButton;
@@ -57,20 +55,15 @@ public final class NBTSettingsPanel extends JPanel implements AutoCloseable {
     /// @return configured NBT settings page
     public static NBTSettingsPanel createForCurrentLauncher() {
         EdtDispatcher.requireEventDispatchThread();
-        return new NBTSettingsPanel(Schedulers.io());
+        return new NBTSettingsPanel();
     }
 
-    /// Creates a settings tool with caller-owned asynchronous execution.
-    ///
-    /// @param ioExecutor executor used for NBT document and bundled-icon I/O
-    public NBTSettingsPanel(Executor ioExecutor) {
+    /// Creates a production settings tool which resolves the application-owned launcher on demand.
+    private NBTSettingsPanel() {
         super(new MigLayout("insets 20, fillx, wrap 1", "[grow,fill]", "[]16[]"));
         EdtDispatcher.requireEventDispatchThread();
         strings = NBTEditorStrings.localized();
-        launcher = SwingNBTEditorLauncher.create(
-                this,
-                this::resolveOwnerFrame,
-                Objects.requireNonNull(ioExecutor, "ioExecutor"));
+        launcher = null;
         openButton = new JButton(strings.openTooltip());
         configureComponents();
     }
@@ -106,7 +99,7 @@ public final class NBTSettingsPanel extends JPanel implements AutoCloseable {
         return openButton;
     }
 
-    /// Closes the current editor, disables the entry point, and rejects future actions.
+    /// Disables this entry point without closing the application-owned editor window.
     @Override
     public void close() {
         EdtDispatcher.executeAndWait(() -> {
@@ -115,7 +108,6 @@ public final class NBTSettingsPanel extends JPanel implements AutoCloseable {
             }
             closed = true;
             openButton.setEnabled(false);
-            launcher.close();
         });
     }
 
@@ -134,7 +126,12 @@ public final class NBTSettingsPanel extends JPanel implements AutoCloseable {
     private void openEditor() {
         EdtDispatcher.requireEventDispatchThread();
         if (!closed && resolveOwnerFrame() != null) {
-            launcher.chooseAndOpen();
+            @Nullable SwingNBTEditorLauncher currentLauncher = launcher == null
+                    ? SwingNBTEditorLauncher.sharedFor(this)
+                    : launcher;
+            if (currentLauncher != null) {
+                currentLauncher.chooseAndOpen();
+            }
         }
     }
 

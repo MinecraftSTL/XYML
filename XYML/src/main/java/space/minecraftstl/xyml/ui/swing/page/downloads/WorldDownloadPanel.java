@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JPanel;
@@ -62,14 +63,53 @@ public final class WorldDownloadPanel extends JPanel implements AutoCloseable {
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         this(
-                new RemoteAddonCatalogPanel(
-                        RemoteAddonCatalogKind.WORLD,
-                        new SwingRemoteWorldSaveTargetResolver(),
-                        RemoteAddonCatalogStrings.launcherLocalized(RemoteAddonCatalogKind.WORLD),
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }));
+    }
+
+    /// Creates the production world workflows with shared confirmed-task navigation.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    public WorldDownloadPanel(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        this(
+                createRemoteCatalog(
                         Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                         animator,
-                        Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration")),
+                        Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                        Objects.requireNonNull(taskLaunchController, "taskLaunchController")),
                 new WorldArchiveDownloadPanel());
+    }
+
+    /// Creates the remote world catalog with explicit task navigation ownership.
+    ///
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
+    /// @return configured remote world catalog
+    private static RemoteAddonCatalogPanel createRemoteCatalog(
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
+        RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                RemoteAddonCatalogKind.WORLD,
+                new SwingRemoteWorldSaveTargetResolver(),
+                RemoteAddonCatalogStrings.launcherLocalized(RemoteAddonCatalogKind.WORLD),
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+        panel.setTaskLaunchController(taskLaunchController);
+        return panel;
     }
 
     /// Creates a composite with explicit owned children for deterministic tests.

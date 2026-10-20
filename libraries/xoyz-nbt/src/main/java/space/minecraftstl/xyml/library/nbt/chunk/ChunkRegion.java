@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.library.nbt.chunk;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.NBTParent;
 import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,6 +34,7 @@ import java.util.stream.Stream;
 ///
 /// @see <a href="https://minecraft.wiki/w/Anvil_file_format">Anvil file format - Minecraft Wiki</a>
 /// @see <a href="https://minecraft.wiki/w/Region_file_format">Region file format - Minecraft Wiki</a>
+@NotNullByDefault
 public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable<Chunk> {
 
     private final @Nullable Chunk[] chunks = new Chunk[ChunkUtils.CHUNKS_PRE_REGION];
@@ -95,19 +97,49 @@ public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable
         Objects.requireNonNull(chunk);
 
         Chunk old = chunks[localIndex];
+        validateCurrentSlot(localIndex, old);
+        if (old == chunk) {
+            return this;
+        }
+        @Nullable ChunkRegion oldRegion = chunk.getParent();
+        validateCandidateChunk(chunk, oldRegion);
+        if (oldRegion != null) {
+            oldRegion.removeElement(chunk);
+        }
         if (old != null) {
             old.setParent(null, -1);
         }
-
-        if (chunk.getParent() != null) {
-            // The chunk is already in another region, so we need to remove it from its old region first.
-            ChunkRegion oldRegion = chunk.getParent();
-            oldRegion.removeElement(chunk);
-        }
-
         chunk.setParent(this, localIndex);
         chunks[localIndex] = chunk;
         return this;
+    }
+
+    /// Validates the target slot metadata before it can be replaced.
+    ///
+    /// @param localIndex target slot
+    /// @param current current slot value
+    private void validateCurrentSlot(int localIndex, @Nullable Chunk current) {
+        if (current != null && (current.getParent() != this || current.getLocalIndex() != localIndex)) {
+            throw new IllegalStateException("The region slot ownership invariant is inconsistent");
+        }
+    }
+
+    /// Validates a candidate chunk's existing region slot without mutating either region.
+    ///
+    /// @param candidate candidate chunk
+    /// @param oldRegion candidate's current region
+    private static void validateCandidateChunk(Chunk candidate, @Nullable ChunkRegion oldRegion) {
+        if (oldRegion == null) {
+            if (candidate.getLocalIndex() != -1) {
+                throw new IllegalArgumentException("The detached chunk has an invalid local index");
+            }
+            return;
+        }
+        int oldIndex = candidate.getLocalIndex();
+        if (oldIndex < 0 || oldIndex >= ChunkUtils.CHUNKS_PRE_REGION
+                || oldRegion.chunks[oldIndex] != candidate) {
+            throw new IllegalArgumentException("The candidate chunk has an invalid region index");
+        }
     }
 
     /// Sets the chunk at the given local coordinates.
@@ -165,6 +197,7 @@ public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable
         }
 
         int localIndex = chunk.getLocalIndex();
+        Objects.checkIndex(localIndex, ChunkUtils.CHUNKS_PRE_REGION);
 
         Chunk old = chunks[localIndex];
         if (old != chunk) {

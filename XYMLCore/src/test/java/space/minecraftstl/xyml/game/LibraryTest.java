@@ -25,6 +25,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for library JSON parsing and serialization.
 @NotNullByDefault
@@ -60,6 +62,15 @@ public final class LibraryTest {
         assertEquals(source, serialized);
         assertEquals(serialized, JsonUtils.GSON.toJsonTree(library));
         assertEquals(serialized, JsonUtils.GSON.toJsonTree(JsonUtils.GSON.fromJson(serialized, Library.class)));
+    }
+
+    /// Classifier-only native artifacts are recognized even when no classifiers download map is present.
+    @Test
+    public void recognizesNativeArtifactClassifier() {
+        assertTrue(new Library(new Artifact(
+                "org.example", "native-library", "1.0.0", "natives-linux")).isNative());
+        assertFalse(new Library(new Artifact(
+                "org.example", "regular-library", "1.0.0", "sources")).isNative());
     }
 
 }

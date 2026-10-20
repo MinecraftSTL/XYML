@@ -16,12 +16,16 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.output;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
+import space.minecraftstl.xyml.library.nbt.internal.TextUtils;
 
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+/// Buffered primitive writer used by the strict NBT serialization pipeline.
+@NotNullByDefault
 public abstract class DataWriter implements Closeable, Flushable {
     public abstract MinecraftEdition getEdition();
 
@@ -77,22 +81,46 @@ public abstract class DataWriter implements Closeable, Flushable {
     }
 
     public void writeIntArrayDirect(int[] value) throws IOException {
-        ensureBufferRemaining(value.length * Integer.BYTES);
+        final int bytes;
+        try {
+            bytes = Math.multiplyExact(value.length, Integer.BYTES);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("Integer array is too large to encode", overflow);
+        }
+        ensureBufferRemaining(bytes);
         getBuffer().putIntArray(value);
     }
 
     public void writeIntArrayDirect(int[] value, int offset, int length) throws IOException {
-        ensureBufferRemaining(length * Integer.BYTES);
+        final int bytes;
+        try {
+            bytes = Math.multiplyExact(length, Integer.BYTES);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("Integer array slice is too large to encode", overflow);
+        }
+        ensureBufferRemaining(bytes);
         getBuffer().putIntArray(value, offset, length);
     }
 
     public void writeLongArrayDirect(long[] value) throws IOException {
-        ensureBufferRemaining(value.length * Long.BYTES);
+        final int bytes;
+        try {
+            bytes = Math.multiplyExact(value.length, Long.BYTES);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("Long array is too large to encode", overflow);
+        }
+        ensureBufferRemaining(bytes);
         getBuffer().putLongArray(value);
     }
 
     public void writeLongArrayDirect(long[] value, int offset, int length) throws IOException {
-        ensureBufferRemaining(length * Long.BYTES);
+        final int bytes;
+        try {
+            bytes = Math.multiplyExact(length, Long.BYTES);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("Long array slice is too large to encode", overflow);
+        }
+        ensureBufferRemaining(bytes);
         getBuffer().putLongArray(value, offset, length);
     }
 
@@ -141,8 +169,13 @@ public abstract class DataWriter implements Closeable, Flushable {
         getBuffer().putDouble(value);
     }
 
-    private static int encodedMutf8Length(String value, int asciiLength) {
-        int length = value.length();
+    /// Calculates the encoded modified-UTF-8 length without overflowing an `int`.
+    ///
+    /// @param value complete Java string
+    /// @param asciiLength number of leading single-byte ASCII characters
+    /// @return encoded byte length
+    private static long encodedMutf8Length(String value, int asciiLength) {
+        long length = value.length();
 
         for (int i = asciiLength; i < value.length(); i++) {
             char ch = value.charAt(i);
@@ -196,7 +229,7 @@ public abstract class DataWriter implements Closeable, Flushable {
         if (getEdition() == MinecraftEdition.BEDROCK_EDITION) {
             // Need Optimization
             byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (value.length() > 65535) {
+            if (bytes.length > 65535 || TextUtils.utf8Length(value) > 65535L) {
                 throw new UTFDataFormatException("String too long: " + value);
             }
             writeUnsignedShort(bytes.length);
@@ -206,10 +239,11 @@ public abstract class DataWriter implements Closeable, Flushable {
         }
 
         // Slow path for non-ASCII strings
-        int encodedLength = encodedMutf8Length(value, asciiLength);
-        if (encodedLength > 65535) {
+        long encodedLengthLong = encodedMutf8Length(value, asciiLength);
+        if (encodedLengthLong > 65535L) {
             throw new UTFDataFormatException("String too long: " + value);
         }
+        int encodedLength = (int) encodedLengthLong;
 
         writeUnsignedShort(encodedLength);
 

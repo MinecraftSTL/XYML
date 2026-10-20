@@ -24,7 +24,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.yggdrasil.GameProfile;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.util.KeyUtils;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.HttpServer;
@@ -126,7 +125,7 @@ public class YggdrasilServer extends HttpServer {
         return ok(names.stream()
                 .distinct()
                 .map(this::findCharacterByName)
-                .flatMap(Lang::toStream)
+                .flatMap(Optional::stream)
                 .map(Character::toSimpleResponse)
                 .collect(Collectors.toList()));
     }

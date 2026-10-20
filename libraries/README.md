@@ -1,18 +1,24 @@
 # Bundled XYML libraries
 
-This directory contains XYML-maintained source forks of selected HMCL-dev projects that are built in the same Git
-repository. Each library remains an independent build result and retains its upstream license and copyright notices.
-No directory under `libraries/` is a Git submodule or contains upstream Git history.
+This directory contains first-party reusable libraries and XYML-maintained source forks that are built in the same Git
+repository. Each library remains an independent build result. Imported projects retain their upstream licenses and
+copyright notices. No directory under `libraries/` is a Git submodule or contains upstream Git history.
 
 ## Versioning
 
-The XYML application and the four bundled library projects use the shared `xymlReleaseVersion` value resolved by the
+The XYML application and the five bundled library projects use the shared `xymlReleaseVersion` value resolved by the
 root Gradle build. Existing projects that do not opt into this convention, including `XYMLCore`, retain their current
 version semantics. Upstream tag versions are provenance metadata and do not replace the XYML publication version.
 
 The Gradle runtime and the default Java project toolchain use Java 17. Only `lwjgl-unsafe-agent` overrides that
 default with a Java 25 toolchain. XYMLBoot, the Minecraft bootstrap libraries, and the Mesa loader retain their
 existing Java 8 or lower bytecode targets.
+
+## First-party libraries
+
+| Local project | Purpose | License |
+| --- | --- | --- |
+| `xoyz-mcp` | Compact Java MCP server library with Streamable HTTP transport | GPL-3.0-or-later |
 
 ## Snapshot provenance
 

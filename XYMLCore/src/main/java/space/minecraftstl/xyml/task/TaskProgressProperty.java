@@ -87,6 +87,16 @@ final class TaskProgressProperty implements ReadOnlyProperty<Double> {
         return Subscription.create(() -> listeners.remove(slot));
     }
 
+    /// Resets the committed value for a new task invocation without notifying listeners from an earlier invocation.
+    ///
+    /// A reusable task can be started again after its previous progress subscription has been released. Keeping the
+    /// reset silent prevents a late observer from attributing the new invocation's initial state to the old record.
+    void reset() {
+        synchronized (stateLock) {
+            value = -1.0D;
+        }
+    }
+
     /// Atomically commits and synchronously publishes a distinct value from the calling thread.
     ///
     /// The copy-on-write iterator captures this publication's listener snapshot before its first callback. Concurrent

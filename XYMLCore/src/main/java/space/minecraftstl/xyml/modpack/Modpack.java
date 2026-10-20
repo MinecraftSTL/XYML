@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.Charset;
 import java.nio.file.Path;
@@ -120,7 +121,35 @@ public abstract class Modpack {
         return this;
     }
 
-    public abstract Task<?> getInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, GameInstanceID instanceId, String iconUrl);
+    /// Creates the installation task for this modpack.
+    ///
+    /// @param dependencyManager dependency manager for the target repository
+    /// @param zipFile modpack archive
+    /// @param instanceId target instance identifier
+    /// @param iconUrl optional icon URL
+    /// @param excludedFiles keys of optional files to skip, or null to install all
+    /// @return the installation task
+    public abstract Task<?> getInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            GameInstanceID instanceId,
+            String iconUrl,
+            @Nullable Set<String> excludedFiles);
+
+    /// Creates an installation task with all optional files enabled.
+    ///
+    /// @param dependencyManager dependency manager for the target repository
+    /// @param zipFile modpack archive
+    /// @param instanceId target instance identifier
+    /// @param iconUrl optional icon URL
+    /// @return the installation task
+    public Task<?> getInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            GameInstanceID instanceId,
+            String iconUrl) {
+        return getInstallTask(dependencyManager, zipFile, instanceId, iconUrl, null);
+    }
 
     public static boolean acceptFile(String path, List<String> blackList, List<String> whiteList) {
         if (path.isEmpty())

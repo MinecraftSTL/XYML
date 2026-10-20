@@ -19,12 +19,15 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /// Immutable display metadata derived from one resolved XYML instance manifest.
@@ -49,9 +52,9 @@ record InstancePresentation(String detail, GameInstanceIconType defaultIconType)
             GameInstanceManifest.Resolved resolved,
             @Nullable String gameVersion,
             String unknownVersionDetail) {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+        GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(
                 Objects.requireNonNull(resolved, "resolved"),
-                gameVersion);
+                GameVersionNumber.asGameVersion(Optional.ofNullable(gameVersion)));
         return new InstancePresentation(
                 describe(analyzer, gameVersion, unknownVersionDetail),
                 InstanceAutomaticIconResolver.resolve(analyzer, gameVersion));
@@ -64,14 +67,14 @@ record InstancePresentation(String detail, GameInstanceIconType defaultIconType)
     /// @param unknownVersionDetail localized fallback for an unavailable Minecraft version
     /// @return localized row detail
     private static String describe(
-            LibraryAnalyzer analyzer,
+            GameComponentAnalyzer analyzer,
             @Nullable String gameVersion,
             String unknownVersionDetail) {
         String fallback = Objects.requireNonNull(unknownVersionDetail, "unknownVersionDetail");
         StringBuilder detail = new StringBuilder(
                 gameVersion == null || gameVersion.isBlank() ? fallback : gameVersion);
-        for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
-            if (type == LibraryAnalyzer.LibraryType.MINECRAFT || !analyzer.has(type)) {
+        for (GameComponentType type : GameComponentType.ALL) {
+            if (type == GameComponentType.GAME || !analyzer.has(type)) {
                 continue;
             }
             String translationKey = "install.installer." + type.getPatchId();
@@ -79,7 +82,7 @@ record InstancePresentation(String detail, GameInstanceIconType defaultIconType)
                 continue;
             }
             detail.append(", ").append(I18n.i18n(translationKey));
-            analyzer.getVersion(type)
+            Optional.ofNullable(analyzer.getVersion(type))
                     .map(version -> version.replaceAll(
                             "(?i)" + Pattern.quote(type.getPatchId()),
                             "").trim())

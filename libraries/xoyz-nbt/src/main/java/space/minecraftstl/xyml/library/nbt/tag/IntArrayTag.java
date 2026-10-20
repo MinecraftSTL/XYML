@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.library.nbt.internal.input.DataReader;
 import space.minecraftstl.xyml.library.nbt.internal.output.DataWriter;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import java.io.IOException;
 import java.nio.IntBuffer;
@@ -37,6 +38,7 @@ import java.util.stream.IntStream;
 /// @see ParentTag
 /// @see ArrayTag
 /// @see IntTag
+@NotNullByDefault
 public final class IntArrayTag extends ArrayTag<Integer, IntTag, int[], IntBuffer> {
     /// Creates a new IntArrayTag with an empty name and an empty array.
     public IntArrayTag() {
@@ -176,6 +178,16 @@ public final class IntArrayTag extends ArrayTag<Integer, IntTag, int[], IntBuffe
         return this;
     }
 
+    /// Inserts an integer at an exact index.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param value value to insert
+    /// @return this array
+    public IntArrayTag insert(int index, int value) {
+        super.insert(index, value);
+        return this;
+    }
+
     /// {@inheritDoc}
     ///
     /// @see #add(int)
@@ -236,6 +248,7 @@ public final class IntArrayTag extends ArrayTag<Integer, IntTag, int[], IntBuffe
         writer.writeIntArrayDirect(values, 0, size);
     }
 
+    /// Returns a detached copy with the same name and logical array contents.
     @Override
     @Contract(value = "-> new", pure = true)
     public IntArrayTag clone() {
@@ -243,6 +256,7 @@ public final class IntArrayTag extends ArrayTag<Integer, IntTag, int[], IntBuffe
         tag.setName0(name);
         if (size > 0) {
             tag.values = Arrays.copyOf(values, size);
+            tag.size = size;
         }
         return tag;
     }

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.annotations.SerializedName;
+import space.minecraftstl.xyml.modpack.ModpackFile;
 import space.minecraftstl.xyml.modpack.ModpackManifest;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
@@ -34,10 +35,16 @@ public record CurseManifest(@SerializedName("manifestType") String manifestType,
                             @SerializedName("author") String author,
                             @SerializedName("overrides") String overrides,
                             @SerializedName("minecraft") CurseManifestMinecraft minecraft,
-                            @SerializedName("files") @Unmodifiable List<CurseManifestFile> files) implements ModpackManifest {
+                            @SerializedName("files") @Unmodifiable List<CurseManifestFile> files)
+        implements ModpackManifest, ModpackManifest.SupportOptional {
 
     public CurseManifest setFiles(List<CurseManifestFile> files) {
         return new CurseManifest(manifestType, manifestVersion, name, version, author, overrides, minecraft, files);
+    }
+
+    @Override
+    public List<? extends ModpackFile> getFiles() {
+        return files;
     }
 
     @Override

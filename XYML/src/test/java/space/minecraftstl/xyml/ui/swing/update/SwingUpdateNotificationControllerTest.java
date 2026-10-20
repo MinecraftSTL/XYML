@@ -45,7 +45,7 @@ class SwingUpdateNotificationControllerTest {
                 request -> remote(version.get()),
                 remoteVersion -> true,
                 Runnable::run);
-        service.check(new UpdateCheckRequest(UpdateChannel.STABLE, false))
+        service.check(new UpdateCheckRequest(UpdateChannel.STABLE))
                 .toCompletableFuture()
                 .join();
 
@@ -67,14 +67,14 @@ class SwingUpdateNotificationControllerTest {
             flushEdt();
             assertEquals(1, interaction.confirmations());
 
-            service.check(new UpdateCheckRequest(UpdateChannel.STABLE, false))
+            service.check(new UpdateCheckRequest(UpdateChannel.STABLE))
                     .toCompletableFuture()
                     .join();
             flushEdt();
             assertEquals(1, interaction.confirmations());
 
             version.set("2.1");
-            service.check(new UpdateCheckRequest(UpdateChannel.STABLE, true))
+            service.check(new UpdateCheckRequest(UpdateChannel.STABLE))
                     .toCompletableFuture()
                     .join();
             flushEdt();

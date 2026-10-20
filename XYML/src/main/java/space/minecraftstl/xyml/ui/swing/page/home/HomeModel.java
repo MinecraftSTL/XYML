@@ -66,6 +66,12 @@ public interface HomeModel {
     /// Starts the selected instance with the selected account.
     void launch();
 
+    /// Requests cancellation of the launch preparation currently owned by the ordinary launch command.
+    ///
+    /// Other launch entry points, including test launch, are not affected by this command.
+    default void cancelLaunch() {
+    }
+
     /// Exports a standalone script for the selected account and instance.
     ///
     /// The caller must provide a local destination chosen through a native UI boundary. The returned stage completes

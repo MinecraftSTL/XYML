@@ -17,18 +17,73 @@
  */
 package space.minecraftstl.xyml.download.liteloader;
 
+import space.minecraftstl.xyml.download.ComponentRemoteVersionList;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.gson.JsonSerializable;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.TreeSet;
 
-public class LiteLoaderRemoteVersion extends RemoteVersion {
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
+@NotNullByDefault
+public final class LiteLoaderRemoteVersion extends ComponentRemoteVersion {
+
+    public static Task<ComponentRemoteVersionList<LiteLoaderRemoteVersion>> fetchAsync(GameVersionNumber gameVersion) {
+        @JsonSerializable
+        record LiteLoaderRemoteVersionRecord(
+                String gameVersion,
+                String version,
+                boolean snapshot,
+                String url,
+                String tweakClass,
+                List<Library> libraries
+        ) {
+        }
+
+        return Task.supplyAsync(() -> {
+            List<LiteLoaderRemoteVersionRecord> records;
+
+            try (var input = LiteLoaderRemoteVersion.class.getResourceAsStream("/assets/liteloader/versions.json")) {
+                if (input == null) {
+                    LOG.warning("Failed to load LiteLoader versions.json from resources");
+                    return ComponentRemoteVersionList.of(GameComponentType.LITELOADER);
+                }
+
+                records = JsonUtils.GSON.fromJson(
+                        new String(input.readAllBytes(), StandardCharsets.UTF_8),
+                        JsonUtils.listTypeOf(LiteLoaderRemoteVersionRecord.class));
+            }
+
+            var versions = new TreeSet<LiteLoaderRemoteVersion>();
+            for (var record : records) {
+                if (GameVersionNumber.asGameVersion(record.gameVersion).equals(gameVersion)) {
+                    versions.add(new LiteLoaderRemoteVersion(
+                            gameVersion,
+                            record.version,
+                            record.snapshot ? Type.SNAPSHOT : Type.RELEASE,
+                            List.of(record.url),
+                            record.tweakClass,
+                            List.copyOf(record.libraries)
+                    ));
+                }
+            }
+            return ComponentRemoteVersionList.of(GameComponentType.LITELOADER, versions);
+        });
+    }
+
     private final String tweakClass;
     private final Collection<Library> libraries;
 
@@ -39,8 +94,8 @@ public class LiteLoaderRemoteVersion extends RemoteVersion {
      * @param selfVersion the version string of the remote version.
      * @param urls        the installer or universal jar original URL.
      */
-    LiteLoaderRemoteVersion(String gameVersion, String selfVersion, Type type, List<String> urls, String tweakClass, Collection<Library> libraries) {
-        super(LibraryAnalyzer.LibraryType.LITELOADER.getPatchId(), gameVersion, selfVersion, null, type, urls);
+    LiteLoaderRemoteVersion(GameVersionNumber gameVersion, String selfVersion, Type type, List<String> urls, String tweakClass, Collection<Library> libraries) {
+        super(GameComponentType.LITELOADER, gameVersion, selfVersion, null, type, urls);
 
         this.tweakClass = tweakClass;
         this.libraries = libraries;
@@ -55,7 +110,7 @@ public class LiteLoaderRemoteVersion extends RemoteVersion {
     }
 
     @Override
-    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
-        return new LiteLoaderInstallTask(dependencyManager, baseVersion, this);
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseManifest, Path modsDirectory) {
+        return new LiteLoaderInstallTask(dependencyManager, baseManifest, this);
     }
 }

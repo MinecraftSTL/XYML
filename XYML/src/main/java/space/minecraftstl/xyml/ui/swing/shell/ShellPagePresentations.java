@@ -67,6 +67,7 @@ public final class ShellPagePresentations {
         return new ShellPagePresentations(Map.of(
                 ShellPageId.INSTANCES, new ShellPagePresentation("Instances", KeyEvent.VK_I),
                 ShellPageId.DOWNLOADS, new ShellPagePresentation("Downloads", KeyEvent.VK_D),
+                ShellPageId.TASKS, new ShellPagePresentation("Tasks", KeyEvent.VK_T),
                 ShellPageId.ACCOUNTS, new ShellPagePresentation("Accounts", KeyEvent.VK_A),
                 ShellPageId.SETTINGS, new ShellPagePresentation("Settings", KeyEvent.VK_S)));
     }

@@ -44,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
@@ -52,11 +53,14 @@ import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatus;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import javax.imageio.ImageIO;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -75,6 +79,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -147,12 +152,20 @@ final class DefaultInstanceManagementViewTest {
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
                             executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
+                            executor),
                     () -> returned.set(true),
                     presentation.taskProgress(),
+                    new TaskLaunchController(() -> { }),
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),
-                    null)));
+                    null,
+                    InstanceContentNavigation.disabled())));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -177,7 +190,8 @@ final class DefaultInstanceManagementViewTest {
                         InstanceManagementPageId.MODS,
                         InstanceManagementPageId.RESOURCE_PACKS,
                         InstanceManagementPageId.WORLDS,
-                        InstanceManagementPageId.DATA_PACKS,
+                        InstanceManagementPageId.SERVERS,
+                        InstanceManagementPageId.SHADERS,
                         InstanceManagementPageId.SCHEMATICS,
                         InstanceManagementPageId.BACKUPS,
                         InstanceManagementPageId.FILE_UPDATE_CHECK), navigation.availablePages());
@@ -198,6 +212,31 @@ final class DefaultInstanceManagementViewTest {
                 assertFalse(returned.get());
             });
 
+            for (InstanceManagementPageId pageId : List.of(
+                    InstanceManagementPageId.SERVERS,
+                    InstanceManagementPageId.SHADERS,
+                    InstanceManagementPageId.SERVERS)) {
+                EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(findNamed(
+                        view, "instanceManagementNavigation", InstanceManagementNavigationPanel.class))
+                        .button(pageId).doClick());
+                awaitExecutor(executor);
+                EdtDispatcher.executeAndWait(() -> {
+                    sizeAndLayout(view, RENDER_WIDTH, RENDER_HEIGHT);
+                    InstanceManagementPageDeck deck = Objects.requireNonNull(findNamed(
+                            view, "instanceManagementPageDeck", InstanceManagementPageDeck.class));
+                    assertEquals(pageId, deck.selectedPage());
+                    String prefix = pageId == InstanceManagementPageId.SERVERS ? "serverCatalog" : "shaderPacks";
+                    JComponent page = Objects.requireNonNull(findNamed(view, prefix + "Page", JComponent.class));
+                    JComponent heading = Objects.requireNonNull(findNamed(page, prefix + "Heading", JComponent.class));
+                    JLabel title = Objects.requireNonNull(findNamed(page,
+                            prefix + (pageId == InstanceManagementPageId.SERVERS ? "Title" : "PageTitle"), JLabel.class));
+                    assertEquals(pageId.localizedLabel(), title.getText());
+                    assertEquals(0, heading.getX());
+                    assertEquals(page.getWidth(), heading.getWidth(), "Heading spans the selected page");
+                    assertTrue(page.getHeight() > heading.getHeight());
+                });
+            }
+            assertFalse(Files.exists(repositoryRoot.resolve("servers.dat")), "Opening management never creates entries");
             view.close();
             view.close();
             assertEquals(new GameInstanceID("instance"), view.instanceId());
@@ -208,6 +247,128 @@ final class DefaultInstanceManagementViewTest {
             }
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Opens the Mods download center with the managed instance context.
+    @Test
+    void opensModsDownloadsWithManagedInstanceContext()
+            throws IOException, InterruptedException, ReflectiveOperationException {
+        Field launcherSettingsField = SettingsManager.class.getDeclaredField("launcherSettings");
+        Field gameSettingsPresetsField = SettingsManager.class.getDeclaredField("gameSettingsPresets");
+        Field userSettingsField = SettingsManager.class.getDeclaredField("userSettingsInstance");
+        launcherSettingsField.setAccessible(true);
+        gameSettingsPresetsField.setAccessible(true);
+        userSettingsField.setAccessible(true);
+        @Nullable Object previousLauncherSettings = launcherSettingsField.get(null);
+        @Nullable Object previousGameSettingsPresets = gameSettingsPresetsField.get(null);
+        @Nullable Object previousUserSettings = userSettingsField.get(null);
+        LauncherSettings temporarySettings = new LauncherSettings();
+        GameSettingsPresetID presetId = GameSettingsPresetID.generate();
+        GameSettingsPresets temporaryPresets = new GameSettingsPresets();
+        temporaryPresets.getPresets().add(new GameSettings.Preset(presetId));
+        temporarySettings.defaultGameSettingsPresetProperty().set(presetId);
+        launcherSettingsField.set(null, temporarySettings);
+        gameSettingsPresetsField.set(null, temporaryPresets);
+        userSettingsField.set(null, new UserSettings());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
+        List<String> requests = new ArrayList<>();
+        try {
+            initializeTestTheme();
+            createInstalledInstanceFixture();
+            XYMLGameRepository repository = new XYMLGameRepository(new GameDirectory(
+                    GameDirectoryID.generate(),
+                    LocalizedText.plain("Context test"),
+                    PortablePath.of(repositoryRoot.toString())));
+            GameInstanceID instanceId = new GameInstanceID("instance");
+            repository.refresh();
+            assertTrue(repository.hasInstance(instanceId));
+            SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
+                    "XYML test",
+                    Duration.ZERO,
+                    Duration.ZERO);
+            EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
+                    homeModel(),
+                    repository,
+                    ignored -> repositoryRoot.resolve("schematics"),
+                    instanceId,
+                    executor,
+                    presentation.schematicManagement(),
+                    presentation.schematics(),
+                    new DefaultSchematicBrowserInteractions(
+                            presentation.schematics().actions(),
+                            executor),
+                    presentation.mods(),
+                    presentation.modsStatus(),
+                    presentation.modsActions(),
+                    new DefaultModCatalogInteractions(
+                            presentation.modsActions(),
+                            executor),
+                    presentation.resourcePacks(),
+                    presentation.resourcePacksStatus(),
+                    presentation.resourcePacksActions(),
+                    new DefaultResourcePackCatalogInteractions(
+                            presentation.resourcePacksActions(),
+                            executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
+                            executor),
+                    () -> { },
+                    presentation.taskProgress(),
+                    new TaskLaunchController(() -> { }),
+                    null,
+                    Duration.ZERO,
+                    unusedWorldQuickPlayActions(),
+                    null,
+                    new InstanceContentNavigation() {
+                        /// Records one plain category navigation.
+                        @Override
+                        public void openDownloads(DownloadPageTarget target) {
+                            requests.add("plain:" + target.name());
+                        }
+
+                        /// Records one instance-bound category navigation.
+                        @Override
+                        public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID requestedInstanceId) {
+                            requests.add(target.name() + ":" + requestedInstanceId.id());
+                        }
+                    })));
+            DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
+
+            EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(findNamed(
+                            view,
+                            "instanceManagementNavigation",
+                            InstanceManagementNavigationPanel.class))
+                    .button(InstanceManagementPageId.MODS)
+                    .doClick());
+            awaitExecutor(executor);
+            EdtDispatcher.executeAndWait(() -> { });
+            EdtDispatcher.executeAndWait(() -> {
+                ModCatalogPanel mods = Objects.requireNonNull(findNamed(
+                        view,
+                        "modsCatalogPage",
+                        ModCatalogPanel.class));
+                Objects.requireNonNull(findNamed(mods, "modsDownload", JButton.class)).doClick();
+            });
+
+            assertEquals(List.of("MODS:instance"), requests);
+        } finally {
+            try {
+                @Nullable DefaultInstanceManagementView view = viewReference.get();
+                if (view != null) {
+                    view.close();
+                }
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            } finally {
+                launcherSettingsField.set(null, previousLauncherSettings);
+                gameSettingsPresetsField.set(null, previousGameSettingsPresets);
+                userSettingsField.set(null, previousUserSettings);
+            }
         }
     }
 
@@ -271,12 +432,20 @@ final class DefaultInstanceManagementViewTest {
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
                             executor),
+                    presentation.shaderPacks(),
+                    presentation.shaderPacksStatus(),
+                    presentation.shaderPacksActions(),
+                    new DefaultShaderPackCatalogInteractions(
+                            presentation.shaderPacksActions(),
+                            executor),
                     () -> { },
                     presentation.taskProgress(),
+                    new TaskLaunchController(() -> { }),
                     null,
                     Duration.ZERO,
                     unusedWorldQuickPlayActions(),
-                    new UnusedMaintenanceLaunchActions())));
+                    new UnusedMaintenanceLaunchActions(),
+                    InstanceContentNavigation.disabled())));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
             awaitExecutor(executor);
             EdtDispatcher.executeAndWait(() -> { });

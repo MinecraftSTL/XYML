@@ -27,6 +27,7 @@ import java.util.Objects;
 /// @param title primary user-visible account text
 /// @param detail secondary user-visible provider and storage text, or an empty string
 /// @param profileId stable game-profile identifier as text
+/// @param portable whether the account is stored in the portable account file
 /// @param avatarSource presentation-safe avatar texture source
 @NotNullByDefault
 public record AccountDescriptor(
@@ -34,6 +35,7 @@ public record AccountDescriptor(
         String title,
         String detail,
         String profileId,
+        boolean portable,
         AccountAvatarSource avatarSource) {
     /// Creates a descriptor whose avatar uses the UUID-derived launcher-bundled fallback.
     ///
@@ -42,7 +44,23 @@ public record AccountDescriptor(
     /// @param detail secondary user-visible provider and storage text, or an empty string
     /// @param profileId stable game-profile identifier as text
     public AccountDescriptor(String id, String title, String detail, String profileId) {
-        this(id, title, detail, profileId, AccountAvatarSource.bundledDefault());
+        this(id, title, detail, profileId, false, AccountAvatarSource.bundledDefault());
+    }
+
+    /// Creates a descriptor with an explicit avatar source in global storage.
+    ///
+    /// @param id stable persisted account identifier
+    /// @param title primary user-visible account text
+    /// @param detail secondary user-visible provider and storage text, or an empty string
+    /// @param profileId stable game-profile identifier as text
+    /// @param avatarSource presentation-safe avatar texture source
+    public AccountDescriptor(
+            String id,
+            String title,
+            String detail,
+            String profileId,
+            AccountAvatarSource avatarSource) {
+        this(id, title, detail, profileId, false, avatarSource);
     }
 
     /// Validates one immutable account descriptor.

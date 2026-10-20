@@ -18,14 +18,19 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
 
 /// Supplies lazy installed-resource-pack state without exposing JavaFX or Swing types.
 ///
@@ -40,7 +45,7 @@ public interface ResourcePackCatalogModel
     /// @return current catalog snapshot
     ResourcePackCatalogSnapshot snapshot();
 
-    /// Returns the current immutable shallow path index in source order.
+    /// Returns the current immutable shallow path index in enabled-priority display order.
     ///
     /// The list contains no parsed resource-pack metadata and is empty before a successful index.
     /// Callers may use it to derive filtered viewport indexes without widening metadata loads.
@@ -71,6 +76,15 @@ public interface ResourcePackCatalogModel
     /// Clears the stable selection without changing indexed content.
     void clearSelection();
 
+    /// Loads one visible resource-pack icon on the model executor.
+    ///
+    /// @param path normalized absolute resource-pack path
+    /// @return future containing encoded icon data, or null when no pack.png exists
+    default CompletionStage<@Nullable EncodedImage> loadIcon(Path path) {
+        Objects.requireNonNull(path, "path");
+        return CompletableFuture.completedFuture(null);
+    }
+
     /// Imports multiple resource-pack archives or directories as one serialized catalog write.
     ///
     /// The source list is captured defensively. An empty list, duplicate target name, unsupported
@@ -95,11 +109,30 @@ public interface ResourcePackCatalogModel
     /// @return asynchronous completion after options persistence and shallow reindexing
     CompletionStage<ResourcePackCatalogSnapshot> disableResourcePack(Path path);
 
+    /// Persistently reorders one enabled pack to a final display index.
+    ///
+    /// The first enabled entry has highest Minecraft priority. The target index addresses the
+    /// current enabled prefix and may be the final position after the move.
+    ///
+    /// @param path direct-child path belonging to the current complete enabled catalog
+    /// @param targetIndex zero-based final index in the current enabled display order
+    /// @return asynchronous completion after options persistence and shallow reindexing
+    CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex);
+
     /// Persistently disables and then deletes one current pack by stable path.
     ///
     /// @param path direct-child path belonging to the current complete catalog
     /// @return asynchronous completion after deletion and shallow reindexing
     CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path);
+
+    /// Deletes one current pack using the selected recycle-bin or permanent mode.
+    ///
+    /// @param path direct-child path belonging to the current complete catalog
+    /// @param mode selected deletion behavior
+    /// @return asynchronous completion after deletion and shallow reindexing
+    default CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path, DeletionMode mode) {
+        return deleteResourcePack(path);
+    }
 
     /// Closes commands and subscriptions, cancels index, viewport, and pre-commit write work.
     ///

@@ -18,73 +18,111 @@
 package space.minecraftstl.xyml.nbt;
 
 import space.minecraftstl.xyml.library.nbt.NBTElement;
-import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
-import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
-import space.minecraftstl.xyml.library.nbt.tag.ArrayTag;
-import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
-import space.minecraftstl.xyml.library.nbt.tag.ListTag;
-import space.minecraftstl.xyml.library.nbt.tag.ParentTag;
-import space.minecraftstl.xyml.library.nbt.tag.Tag;
-import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
+import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
+import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
+import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
+import space.minecraftstl.xyml.library.nbt.edit.NBTNode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-/// A toolkit-neutral NBT tree node that materializes each requested child independently.
+/// A lazy toolkit-neutral tree view backed only by immutable XoyzNBT node handles.
 ///
-/// Constructing a node reads only stable presentation metadata and the direct child count. In
-/// particular, a region root does not call `ChunkRegion.stream`, so asking for its size does not
-/// allocate all 1024 chunk objects. `childAt` creates and caches only the requested child node.
-/// The node is a structural view of the XoyzNBT state at construction time; callers should obtain
-/// a fresh root node from `NBTDocument` after changing the underlying document.
+/// The view captures one editor revision. It never retains or exposes an element from the mutable
+/// working tree, and each requested child is described independently. After a successful edit,
+/// callers must request a new root from [NBTDocument#rootNode()]; attempts to expand an old view
+/// fail as stale instead of resolving a structurally different node.
 @NotNullByDefault
 public final class NBTTreeNode {
-    /// XoyzNBT element retained solely to resolve requested direct children.
-    private final NBTElement element;
+    /// Editor used only to resolve immutable direct-child metadata.
+    private final NBTEditor<? extends NBTElement> editor;
 
-    /// Stable display name captured when this node was constructed.
+    /// Immutable revision-bound handle represented by this row.
+    private final NBTNode node;
+
+    /// Stable display name captured at construction.
     private final String displayName;
 
-    /// Stable element category captured when this node was constructed.
+    /// Stable node category captured at construction.
     private final NBTNodeType type;
 
-    /// Scalar value text, or `null` for parent and container elements.
+    /// Scalar value text, or `null` for containers without a scalar representation.
     private final @Nullable String scalarValue;
-
-    /// Exact number of direct children without eagerly constructing child nodes.
-    private final int childCount;
 
     /// Per-index cache whose initially null slots are populated on demand.
     private final AtomicReferenceArray<@Nullable NBTTreeNode> childNodes;
 
-    /// Creates a root node with a caller-supplied filename or contextual name.
+    /// Creates a detached standalone view for package tests and compatibility callers.
     ///
-    /// @param element root XoyzNBT element
-    /// @param displayName non-null root display name
+    /// The supplied element is deep-copied by [NBTEditor#of(NBTElement)], so later mutations of the
+    /// input cannot affect this view.
+    ///
+    /// @param element source root copied into a private editor
+    /// @param displayName contextual root display name
     NBTTreeNode(NBTElement element, String displayName) {
-        this(element, Objects.requireNonNull(displayName, "displayName"), true);
+        editor = NBTEditor.of(Objects.requireNonNull(element, "element"));
+        node = editor.getRootNode();
+        this.displayName = Objects.requireNonNull(displayName, "displayName");
+        type = NBTNodeType.fromRootElement(element);
+        scalarValue = node.value();
+        childNodes = new AtomicReferenceArray<>(node.childCount());
     }
 
-    /// Creates either a named root or a regular child node and captures its metadata.
+    /// Creates one view from already captured immutable metadata.
     ///
-    /// @param element source element
-    /// @param displayName explicit root name, or an ignored value for a regular child
-    /// @param overrideName whether to use the explicit name
-    private NBTTreeNode(NBTElement element, String displayName, boolean overrideName) {
-        this.element = Objects.requireNonNull(element, "element");
-        this.displayName = overrideName ? displayName : deriveDisplayName(element);
-        type = NBTNodeType.fromElement(element);
-        scalarValue = element instanceof ValueTag<?> valueTag ? valueTag.getAsString() : null;
-        childCount = deriveChildCount(element);
-        childNodes = new AtomicReferenceArray<>(childCount);
+    /// @param editor owning editor
+    /// @param node current immutable node handle
+    /// @param displayName stable row name
+    /// @param type stable presentation category
+    private NBTTreeNode(
+            NBTEditor<? extends NBTElement> editor,
+            NBTNode node,
+            String displayName,
+            NBTNodeType type) {
+        this.editor = Objects.requireNonNull(editor, "editor");
+        this.node = Objects.requireNonNull(node, "node");
+        this.displayName = Objects.requireNonNull(displayName, "displayName");
+        this.type = Objects.requireNonNull(type, "type");
+        scalarValue = node.value();
+        childNodes = new AtomicReferenceArray<>(node.childCount());
+    }
+
+    /// Creates a document root view without inspecting or copying the editor's mutable root.
+    ///
+    /// @param editor document editor
+    /// @param displayName filename-derived root name
+    /// @param fileType filename-derived document family
+    /// @return fresh root view at the current editor revision
+    static NBTTreeNode forDocument(
+            NBTEditor<? extends NBTElement> editor,
+            String displayName,
+            NBTFileType fileType) {
+        NBTEditor<? extends NBTElement> selectedEditor = Objects.requireNonNull(editor, "editor");
+        NBTNode root = selectedEditor.getRootNode();
+        NBTNodeType rootType = fileType == NBTFileType.TAG
+                ? NBTNodeType.fromTagType(root.type())
+                : NBTNodeType.CHUNK_REGION;
+        return new NBTTreeNode(selectedEditor, root, displayName, rootType);
+    }
+
+    /// Returns the immutable XoyzNBT node handle represented by this row.
+    ///
+    /// @return revision-bound read-only node metadata
+    public NBTNode node() {
+        return node;
+    }
+
+    /// Returns the immutable structural address represented by this row.
+    ///
+    /// @return node address
+    public NBTAddress address() {
+        return node.getAddress();
     }
 
     /// Returns the stable name to show beside this node.
-    ///
-    /// List and primitive-array entries use their numeric index; chunks use local coordinates; all
-    /// other tags use their NBT name.
     ///
     /// @return stable non-null presentation name
     public String displayName() {
@@ -98,9 +136,9 @@ public final class NBTTreeNode {
         return type;
     }
 
-    /// Returns the scalar value text reported by XoyzNBT.
+    /// Returns the scalar value captured in this node handle.
     ///
-    /// @return scalar text, or `null` for parent and container nodes
+    /// @return scalar text, or `null` for containers without a scalar representation
     public @Nullable String scalarValue() {
         return scalarValue;
     }
@@ -109,31 +147,42 @@ public final class NBTTreeNode {
     ///
     /// @return non-negative direct-child count
     public int childCount() {
-        return childCount;
+        return node.childCount();
     }
 
     /// Reports whether this node has no direct children.
     ///
     /// @return whether `childCount` is zero
     public boolean isLeaf() {
-        return childCount == 0;
+        return childCount() == 0;
     }
 
-    /// Returns one direct child, creating only that child node on first access.
-    ///
-    /// The method is thread-safe and returns the same node identity for repeated requests at the
-    /// same index.
+    /// Returns one direct child, creating only that child view on first access.
     ///
     /// @param index zero-based direct-child index
-    /// @return lazily materialized child node
+    /// @return lazily materialized child metadata
     /// @throws IndexOutOfBoundsException when the index is outside `childCount`
+    /// @throws IllegalStateException when this tree view belongs to an older editor revision
     public NBTTreeNode childAt(int index) {
-        Objects.checkIndex(index, childCount);
+        Objects.checkIndex(index, childCount());
+        if (editor.getRevision() != node.getRevision()) {
+            throw new IllegalStateException("NBT tree view belongs to an older editor revision");
+        }
         @Nullable NBTTreeNode cached = childNodes.get(index);
         if (cached != null) {
             return cached;
         }
-        NBTTreeNode created = new NBTTreeNode(resolveChildElement(index), "", false);
+        NBTTreeNode created;
+        try {
+            NBTNode child = editor.getChild(node, index);
+            created = new NBTTreeNode(
+                    editor,
+                    child,
+                    deriveDisplayName(child),
+                    NBTNodeType.fromNode(child));
+        } catch (NBTEditException failure) {
+            throw new IllegalStateException("NBT tree view is stale or inconsistent", failure);
+        }
         if (childNodes.compareAndSet(index, null, created)) {
             return created;
         }
@@ -146,9 +195,6 @@ public final class NBTTreeNode {
 
     /// Counts child nodes that have actually been requested so far.
     ///
-    /// This diagnostic does not create children and is useful to adapters and tests that verify
-    /// viewport-driven expansion behavior.
-    ///
     /// @return number of populated child-cache slots
     public int materializedChildCount() {
         int count = 0;
@@ -160,55 +206,23 @@ public final class NBTTreeNode {
         return count;
     }
 
-    /// Computes a regular child name from XoyzNBT parent and coordinate metadata.
+    /// Derives one non-root row name from its immutable address and tag metadata.
     ///
-    /// @param element child source element
-    /// @return non-null display name
-    private static String deriveDisplayName(NBTElement element) {
-        if (element instanceof Tag tag) {
-            return tag.getParent() instanceof ListTag<?> || tag.getParent() instanceof ArrayTag<?, ?, ?, ?>
-                    ? Integer.toString(tag.getIndex())
-                    : tag.getName();
+    /// @param child immutable child metadata
+    /// @return stable display name
+    private static String deriveDisplayName(NBTNode child) {
+        List<NBTAddress.Segment> segments = child.getAddress().segments();
+        if (segments.isEmpty()) {
+            return child.getName();
         }
-        if (element instanceof Chunk chunk) {
-            return "Chunk (" + chunk.getLocalX() + ", " + chunk.getLocalZ() + ")";
+        NBTAddress.Segment finalSegment = segments.get(segments.size() - 1);
+        if (finalSegment instanceof NBTAddress.IndexSegment index) {
+            return Integer.toString(index.index());
         }
-        return "";
-    }
-
-    /// Derives a direct-child count without enumerating a parent stream.
-    ///
-    /// @param element source element
-    /// @return exact non-negative direct-child count
-    private static int deriveChildCount(NBTElement element) {
-        if (element instanceof Chunk chunk) {
-            @Nullable CompoundTag rootTag = chunk.getRootTag();
-            return rootTag == null ? 0 : rootTag.size();
+        if (finalSegment instanceof NBTAddress.RegionChunkSegment chunk) {
+            int localIndex = chunk.localIndex();
+            return "Chunk (" + (localIndex & 31) + ", " + (localIndex >>> 5) + ')';
         }
-        if (element instanceof space.minecraftstl.xyml.library.nbt.NBTParent<?> parent) {
-            return parent.size();
-        }
-        return 0;
-    }
-
-    /// Resolves one direct XoyzNBT child without enumerating its siblings.
-    ///
-    /// @param index validated direct-child index
-    /// @return requested child element
-    private NBTElement resolveChildElement(int index) {
-        if (element instanceof ChunkRegion region) {
-            return region.getChunk(index);
-        }
-        if (element instanceof Chunk chunk) {
-            @Nullable CompoundTag rootTag = chunk.getRootTag();
-            if (rootTag == null) {
-                throw new AssertionError("Chunk child count changed after node construction");
-            }
-            return rootTag.getTag(index);
-        }
-        if (element instanceof ParentTag<?> parentTag) {
-            return parentTag.getTag(index);
-        }
-        throw new AssertionError("Leaf node unexpectedly resolved a child");
+        return child.getName();
     }
 }

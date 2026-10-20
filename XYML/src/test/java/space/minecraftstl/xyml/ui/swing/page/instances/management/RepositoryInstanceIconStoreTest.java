@@ -19,16 +19,20 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectory;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
-import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
+import space.minecraftstl.xyml.setting.GameSettingsPresets;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
@@ -39,6 +43,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -83,6 +88,75 @@ final class RepositoryInstanceIconStoreTest {
                 FileSaver.waitForAllSaves();
             } finally {
                 launcherSettingsField.set(null, previousLauncherSettings);
+            }
+        }
+    }
+
+    /// Declares the complete instance, settings, and input boundaries for every repository-backed write task.
+    @Test
+    void declaresResourcesForEveryRepositorySettingsAndIconWriteTask()
+            throws IOException, InterruptedException, ReflectiveOperationException {
+        Field launcherSettingsField = SettingsManager.class.getDeclaredField("launcherSettings");
+        Field gameSettingsPresetsField = SettingsManager.class.getDeclaredField("gameSettingsPresets");
+        launcherSettingsField.setAccessible(true);
+        gameSettingsPresetsField.setAccessible(true);
+        @Nullable Object previousLauncherSettings = launcherSettingsField.get(null);
+        @Nullable Object previousGameSettingsPresets = gameSettingsPresetsField.get(null);
+        LauncherSettings launcherSettings = new LauncherSettings();
+        GameSettingsPresetID presetId = GameSettingsPresetID.generate();
+        GameSettingsPresets presets = new GameSettingsPresets();
+        presets.setSavable(false);
+        presets.getPresets().add(new GameSettings.Preset(presetId));
+        launcherSettings.defaultGameSettingsPresetProperty().set(presetId);
+        launcherSettingsField.set(null, launcherSettings);
+        gameSettingsPresetsField.set(null, presets);
+        try {
+            Path root = Objects.requireNonNull(repositoryRoot, "repositoryRoot");
+            GameDirectory gameDirectory = new GameDirectory(
+                    GameDirectoryID.generate(),
+                    LocalizedText.plain("Resource test"),
+                    PortablePath.of(root.toString()));
+            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
+            GameInstanceID instanceId = new GameInstanceID("fabric-instance");
+            writeFabricPatchManifest(repository.getInstanceJson(instanceId));
+            repository.refresh();
+
+            @Unmodifiable Set<TaskResource> instanceSettingsResources = Set.of(
+                    TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                    TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)));
+            RepositoryInstanceGameSettingsStore settingsStore =
+                    new RepositoryInstanceGameSettingsStore(repository, instanceId);
+            InstanceGameSettingsSnapshot snapshot = settingsStore.snapshot();
+            assertEquals(
+                    instanceSettingsResources,
+                    settingsStore.saveTask(snapshot, Runnable::run).getResourceDeclarations());
+            assertEquals(
+                    instanceSettingsResources,
+                    settingsStore.forceOverwriteTask(Runnable::run).getResourceDeclarations());
+
+            RepositoryInstanceIconStore iconStore = new RepositoryInstanceIconStore(repository, instanceId);
+            assertEquals(
+                    instanceSettingsResources,
+                    iconStore.selectBuiltInTask(GameInstanceIconType.GRASS, Runnable::run)
+                            .getResourceDeclarations());
+            assertEquals(
+                    instanceSettingsResources,
+                    iconStore.deleteCustomTask(Runnable::run).getResourceDeclarations());
+
+            Path sourceImage = root.resolve("source-icon.png");
+            @Unmodifiable Set<TaskResource> customIconResources = Set.of(
+                    TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                    TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)),
+                    TaskResource.inputFile(sourceImage));
+            assertEquals(
+                    customIconResources,
+                    iconStore.selectCustomTask(sourceImage, Runnable::run).getResourceDeclarations());
+        } finally {
+            try {
+                FileSaver.waitForAllSaves();
+            } finally {
+                launcherSettingsField.set(null, previousLauncherSettings);
+                gameSettingsPresetsField.set(null, previousGameSettingsPresets);
             }
         }
     }

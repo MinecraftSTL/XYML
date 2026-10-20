@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 
 import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.time.Duration;
@@ -82,6 +83,62 @@ final class InstanceManagementPageDeckTest {
             assertTrue(deck.isLoaded(InstanceManagementPageId.OVERVIEW));
             assertTrue(deck.isLoaded(InstanceManagementPageId.MODS));
             assertEquals(InstanceManagementPageId.OVERVIEW, deck.selectedPage());
+        });
+    }
+
+    /// A newly selected page receives its allocated tree layout before activation runs.
+    @Test
+    void laysOutNewPageBeforeActivation() {
+        EdtDispatcher.executeAndWait(() -> {
+            AtomicInteger layoutCalls = new AtomicInteger();
+            AtomicReference<@Nullable Dimension> activationSize = new AtomicReference<>();
+            InstanceManagementPageDeck deck = new InstanceManagementPageDeck(Map.of(
+                    InstanceManagementPageId.MODS,
+                    () -> {
+                        LayoutTrackingPanel page = new LayoutTrackingPanel(layoutCalls);
+                        return new InstanceManagementPage(
+                                page,
+                                () -> activationSize.set(page.getSize()),
+                                () -> { });
+                    }));
+            deck.setSize(new Dimension(640, 480));
+
+            deck.showPage(InstanceManagementPageId.MODS);
+
+            assertEquals(new Dimension(640, 480), activationSize.get());
+            assertTrue(layoutCalls.get() > 0);
+            deck.close();
+        });
+    }
+
+    /// A page mounted before its parent receives bounds is laid out again before its first visible paint.
+    @Test
+    void relayoutsVisiblePageAfterLateDeckAllocation() {
+        EdtDispatcher.executeAndWait(() -> {
+            AtomicInteger layoutCalls = new AtomicInteger();
+            AtomicReference<@Nullable LayoutTrackingPanel> pageReference = new AtomicReference<>();
+            AtomicReference<@Nullable Dimension> activationSize = new AtomicReference<>();
+            InstanceManagementPageDeck deck = new InstanceManagementPageDeck(Map.of(
+                    InstanceManagementPageId.MODS,
+                    () -> {
+                        LayoutTrackingPanel page = new LayoutTrackingPanel(layoutCalls);
+                        pageReference.set(page);
+                        return new InstanceManagementPage(
+                                page,
+                                () -> activationSize.set(page.getSize()),
+                                () -> { });
+                    }));
+
+            deck.showPage(InstanceManagementPageId.MODS);
+            int layoutsBeforeAllocation = layoutCalls.get();
+            deck.setSize(new Dimension(640, 480));
+            deck.doLayout();
+
+            LayoutTrackingPanel page = Objects.requireNonNull(pageReference.get());
+            assertEquals(new Dimension(640, 480), page.getSize());
+            assertEquals(new Dimension(0, 0), activationSize.get());
+            assertTrue(layoutCalls.get() > layoutsBeforeAllocation);
+            deck.close();
         });
     }
 
@@ -239,5 +296,27 @@ final class InstanceManagementPageDeckTest {
         return InstanceManagementPage.passive(
                 new JPanel(),
                 () -> cleanupOrder.add(page));
+    }
+
+    /// Minimal page root that exposes whether a parent layout reached the newly mounted tree.
+    @NotNullByDefault
+    private static final class LayoutTrackingPanel extends JPanel {
+        /// Counter incremented for every layout pass.
+        private final AtomicInteger layoutCalls;
+
+        /// Creates a page root with a stable layout manager and counter.
+        ///
+        /// @param layoutCalls shared observation counter
+        private LayoutTrackingPanel(AtomicInteger layoutCalls) {
+            super(new BorderLayout());
+            this.layoutCalls = Objects.requireNonNull(layoutCalls, "layoutCalls");
+        }
+
+        /// Records one layout pass before delegating to Swing's layout manager.
+        @Override
+        public void doLayout() {
+            layoutCalls.incrementAndGet();
+            super.doLayout();
+        }
     }
 }

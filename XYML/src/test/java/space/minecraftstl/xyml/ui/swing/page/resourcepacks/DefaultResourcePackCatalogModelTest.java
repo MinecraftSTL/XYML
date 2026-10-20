@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ScrollDirection;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportLoadListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportLoadPlan;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportRequestCoordinator;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.SwingUtilities;
 import java.io.IOException;
@@ -137,7 +138,7 @@ public final class DefaultResourcePackCatalogModelTest {
         Path first = testPath("first.zip");
         Path second = testPath("second.zip");
         RecordingAccess access = new RecordingAccess(
-                cancellation -> supportedIndex(List.of(third, first, second)),
+                cancellation -> supportedIndex(List.of(first, second, third)),
                 DefaultResourcePackCatalogModelTest::itemsForPaths);
         ManualExecutor executor = new ManualExecutor();
         DefaultResourcePackCatalogModel model = model(access, executor);
@@ -810,6 +811,54 @@ public final class DefaultResourcePackCatalogModelTest {
         model.close();
     }
 
+    /// Verifies one successful reorder publishes the priority index and retains selection.
+    @Test
+    public void successfulReorderPublishesRefreshedPriorityAndKeepsSelection() {
+        Path first = testPath("first.zip");
+        Path second = testPath("second.zip");
+        AtomicInteger targetIndex = new AtomicInteger(-1);
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(first, second), 2),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    ResourcePackReorderMutation reorder = assertInstanceOf(
+                            ResourcePackReorderMutation.class,
+                            mutation);
+                    assertEquals(second, reorder.path());
+                    targetIndex.set(reorder.targetIndex());
+                    commitPoint.run();
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(second, first), 2),
+                            null);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        model.selectResourcePack(second);
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion =
+                model.reorderResourcePack(second, 0);
+        ResourcePackCatalogSnapshot busy = model.snapshot();
+        assertAll(
+                () -> assertEquals(ResourcePackCatalogWriteStatus.BUSY, busy.writeStatus()),
+                () -> assertEquals(2, busy.enabledItemCount()),
+                () -> assertFalse(busy.listEnabled()),
+                () -> assertFalse(completion.toCompletableFuture().isDone()));
+
+        executor.runNext();
+        ResourcePackCatalogSnapshot terminal = completion.toCompletableFuture().join();
+        assertAll(
+                () -> assertEquals(terminal, model.snapshot()),
+                () -> assertEquals(ResourcePackCatalogWriteStatus.IDLE, terminal.writeStatus()),
+                () -> assertEquals(List.of(second, first), model.indexedPaths()),
+                () -> assertEquals(OptionalInt.of(0), terminal.selectedIndex()),
+                () -> assertEquals(2, terminal.enabledItemCount()),
+                () -> assertEquals(0, targetIndex.get()),
+                () -> assertEquals(1, access.mutationCalls()));
+        model.close();
+    }
+
     /// Verifies a failed write still publishes the real post-failure index and clears deletion selection.
     @Test
     public void mutationFailurePublishesRescannedRealityAndErrorState() {
@@ -820,7 +869,10 @@ public final class DefaultResourcePackCatalogModelTest {
                 cancellation -> supportedIndex(List.of(retained, deleted)),
                 DefaultResourcePackCatalogModelTest::itemsForPaths,
                 (mutation, cancellation, commitPoint) -> {
-                    assertInstanceOf(ResourcePackDeleteMutation.class, mutation);
+                    ResourcePackDeleteMutation deleteMutation = assertInstanceOf(
+                            ResourcePackDeleteMutation.class,
+                            mutation);
+                    assertEquals(DeletionMode.RECYCLE_BIN_FIRST, deleteMutation.mode());
                     commitPoint.run();
                     return new ResourcePackCatalogMutationAccessResult(
                             supportedIndex(List.of(retained)),
@@ -833,7 +885,7 @@ public final class DefaultResourcePackCatalogModelTest {
         model.selectResourcePack(deleted);
 
         CompletionStage<ResourcePackCatalogSnapshot> completion =
-                model.deleteResourcePack(deleted);
+                model.deleteResourcePack(deleted, DeletionMode.RECYCLE_BIN_FIRST);
         executor.runNext();
         Throwable observed = stageFailure(completion);
         ResourcePackCatalogSnapshot terminal = model.snapshot();
@@ -1081,16 +1133,17 @@ public final class DefaultResourcePackCatalogModelTest {
         @Unmodifiable List<ResourcePackCatalogItem> items = access.loadItems(index.paths(), cancellation);
 
         assertAll(
-                () -> assertEquals(List.of(corruptZip, compatibleDirectory, tooOldDirectory).stream()
+                () -> assertEquals(List.of(compatibleDirectory, corruptZip, tooOldDirectory).stream()
                         .map(path -> path.toAbsolutePath().normalize())
                         .toList(), index.paths()),
                 () -> assertEquals(3, items.size()),
-                () -> assertEquals(ResourcePackCompatibility.INVALID, items.get(0).compatibility()),
-                () -> assertEquals(corruptZip.toAbsolutePath().normalize(), items.get(0).path()),
-                () -> assertEquals(ResourcePackCompatibility.COMPATIBLE,
+                () -> assertEquals(ResourcePackCompatibility.COMPATIBLE, items.get(0).compatibility()),
+                () -> assertEquals(compatibleDirectory.toAbsolutePath().normalize(), items.get(0).path()),
+                () -> assertTrue(items.get(0).enabled()),
+                () -> assertEquals("Compatible pack\nSecond line", items.get(0).description()),
+                () -> assertEquals(ResourcePackCompatibility.INVALID,
                         items.get(1).compatibility()),
-                () -> assertTrue(items.get(1).enabled()),
-                () -> assertEquals("Compatible pack\nSecond line", items.get(1).description()),
+                () -> assertEquals(corruptZip.toAbsolutePath().normalize(), items.get(1).path()),
                 () -> assertEquals(ResourcePackCompatibility.TOO_OLD,
                         items.get(2).compatibility()),
                 () -> assertFalse(items.get(2).enabled()));
@@ -1128,6 +1181,17 @@ public final class DefaultResourcePackCatalogModelTest {
     private static ResourcePackCatalogIndex supportedIndex(
             @Unmodifiable List<Path> paths) {
         return new ResourcePackCatalogIndex(true, paths);
+    }
+
+    /// Creates one supported source index with an explicit enabled prefix.
+    ///
+    /// @param paths display-order candidate paths
+    /// @param enabledPathCount enabled leading path count
+    /// @return supported source index
+    private static ResourcePackCatalogIndex supportedIndex(
+            @Unmodifiable List<Path> paths,
+            int enabledPathCount) {
+        return new ResourcePackCatalogIndex(true, paths, enabledPathCount);
     }
 
     /// Creates one ordinary parsed row per exact supplied path.

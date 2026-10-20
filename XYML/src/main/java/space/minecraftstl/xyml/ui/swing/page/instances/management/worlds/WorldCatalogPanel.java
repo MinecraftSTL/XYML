@@ -22,19 +22,28 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -47,7 +56,7 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -56,9 +65,12 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Image;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
@@ -68,13 +80,17 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -86,6 +102,18 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Fallback icon used when a world has no readable embedded PNG.
+    private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
+    /// Card containing the world catalog.
+    private static final String CATALOG_CARD = "catalog";
+
+    /// Card containing one selected world's data packs.
+    private static final String DATA_PACKS_CARD = "dataPacks";
+
     /// Pure background model owned and closed by this page.
     private final WorldCatalogModel model;
 
@@ -98,11 +126,23 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Existing launch-service callbacks bound to this managed instance, or an unavailable boundary.
     private final WorldQuickPlayActions quickPlayActions;
 
+    /// Card host switching between the world list and one world's data packs.
+    private final JPanel contentCards = new JPanel(new CardLayout());
+
     /// Viewport-driven sparse list backed by the shallow source index.
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
 
+    /// Responsive split that avoids first-layout preferred-width overflow on narrow hosts.
+    private final JComponent catalogSplit;
+
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
+
+    /// Opens the remote world download catalog.
+    private final JButton downloadButton = new JButton();
+
+    /// Opens the selected world's data-pack manager.
+    private final JButton dataPackButton = new JButton();
 
     /// Switches between the legacy current-version filter and every indexed world.
     private final JCheckBox showAllCheckBox = new JCheckBox(i18n("world.show_all"));
@@ -141,25 +181,25 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JLabel operationLabel = new JLabel();
 
     /// Selected world primary label.
-    private final JLabel detailTitle = new JLabel();
+    private final JTextArea detailTitle = SwingTextAreas.wrappingValue();
 
     /// Selected directory name.
-    private final JLabel directoryValue = new JLabel();
+    private final JTextArea directoryValue = SwingTextAreas.wrappingToken();
 
     /// Selected complete path.
-    private final JLabel pathValue = new JLabel();
+    private final JTextArea pathValue = SwingTextAreas.wrappingToken();
 
     /// Selected recorded game version.
-    private final JLabel gameVersionValue = new JLabel();
+    private final JTextArea gameVersionValue = SwingTextAreas.wrappingToken();
 
     /// Selected last-played timestamp.
-    private final JLabel lastPlayedValue = new JLabel();
+    private final JTextArea lastPlayedValue = SwingTextAreas.wrappingValue();
 
     /// Selected session-lock state.
-    private final JLabel lockedValue = new JLabel();
+    private final JTextArea lockedValue = SwingTextAreas.wrappingValue();
 
     /// Selected Core metadata readability state.
-    private final JLabel readabilityValue = new JLabel();
+    private final JTextArea readabilityValue = SwingTextAreas.wrappingValue();
 
     /// Selected world icon preview loaded with its viewport row.
     private final JLabel worldIconValue = new JLabel();
@@ -177,10 +217,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JPasswordField seedValue = new JPasswordField(18);
 
     /// Selected world spawn position.
-    private final JLabel worldSpawnValue = new JLabel();
+    private final JTextArea worldSpawnValue = SwingTextAreas.wrappingToken();
 
     /// Selected played-time duration.
-    private final JLabel playedTimeValue = new JLabel();
+    private final JTextArea playedTimeValue = SwingTextAreas.wrappingValue();
 
     /// Editable cheat and command permission.
     private final JCheckBox allowCheatsCheckBox = new JCheckBox();
@@ -196,13 +236,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private final JCheckBox difficultyLockedCheckBox = new JCheckBox();
 
     /// Selected player's current position.
-    private final JLabel playerLocationValue = new JLabel();
+    private final JTextArea playerLocationValue = SwingTextAreas.wrappingToken();
 
     /// Selected player's last death position.
-    private final JLabel playerLastDeathValue = new JLabel();
+    private final JTextArea playerLastDeathValue = SwingTextAreas.wrappingToken();
 
     /// Selected player's bed or respawn-anchor position.
-    private final JLabel playerSpawnValue = new JLabel();
+    private final JTextArea playerSpawnValue = SwingTextAreas.wrappingToken();
 
     /// Editable player game mode.
     private final JComboBox<WorldCatalogDetails.GameMode> playerGameModeBox = new JComboBox<>(
@@ -244,6 +284,24 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Guards terminal component cleanup and late asynchronous failures.
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    /// Command opening the remote world download catalog.
+    private volatile Runnable openDownloadsCommand = () -> { };
+
+    /// Repository used to construct the selected world's data-pack manager, or null in tests.
+    private @Nullable GameRepository dataPackRepository;
+
+    /// Managed instance identifier used by the selected world's data-pack manager.
+    private @Nullable GameInstanceID dataPackInstanceId;
+
+    /// Executor used by the selected world's data-pack manager.
+    private @Nullable Executor dataPackExecutor;
+
+    /// Current nested data-pack manager, or null while the world list is shown.
+    private @Nullable DataPackManagementPanel dataPackPanel;
+
+    /// Host component for the current nested data-pack manager.
+    private @Nullable JPanel dataPackHost;
+
     /// Last snapshot applied to the component tree.
     private WorldCatalogSnapshot displayedSnapshot;
 
@@ -279,6 +337,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 WorldCatalogStrings.localized(),
                 new DefaultWorldCatalogInteractions(WorldCatalogStrings.localized(), executor),
                 quickPlayActions);
+        dataPackRepository = repository;
+        dataPackInstanceId = instanceId;
+        dataPackExecutor = executor;
     }
 
     /// Creates a panel with injected catalog, interaction, and quick-play boundaries for deterministic tests.
@@ -301,7 +362,14 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.quickPlayActions = Objects.requireNonNull(quickPlayActions, "quickPlayActions");
         displayedSnapshot = this.model.snapshot();
-        choiceList = new ViewportChoiceList<>(this.model, WorldCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                this.model,
+                new RichChoiceListCellRenderer<>(
+                        WorldCatalogItem::displayText,
+                        this::worldRowDetail,
+                        this::worldRowBadge,
+                        this::worldRowIcon,
+                        this::worldRowTooltip), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;
 
@@ -309,8 +377,15 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
-        add(createCatalogSplit(), BorderLayout.CENTER);
-        add(createStatusBand(), BorderLayout.SOUTH);
+        catalogSplit = createCatalogSplit();
+        JPanel catalogCard = new JPanel(new BorderLayout());
+        catalogCard.setOpaque(false);
+        catalogCard.add(catalogSplit, BorderLayout.CENTER);
+        catalogCard.add(createStatusBand(), BorderLayout.SOUTH);
+        contentCards.setOpaque(false);
+        contentCards.setName("worldsContentCards");
+        contentCards.add(catalogCard, CATALOG_CARD);
+        add(contentCards, BorderLayout.CENTER);
         configureList();
         configureDetailsControls();
         showDetails(null);
@@ -325,6 +400,17 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedWorld,
                 this::importWorldArchive);
+    }
+
+    /// Installs the remote world-catalog navigation command.
+    ///
+    /// @param openDownloadsCommand command opening the remote world download catalog
+    public void setOpenDownloadsCommand(Runnable openDownloadsCommand) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            throw new IllegalStateException("World catalog is closed");
+        }
+        this.openDownloadsCommand = Objects.requireNonNull(openDownloadsCommand, "openDownloadsCommand");
     }
 
     /// Returns the visible tab title.
@@ -377,7 +463,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]12[]8[]8[]",
+                "[grow,fill][]12[]8[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
@@ -411,6 +497,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 strings.openSavesTooltip(),
                 this::openSavesDirectory);
         heading.add(openSavesButton, "w 40!, h 40!");
+        configureIconButton(
+                downloadButton,
+                "worldsDownload",
+                "assets/swing/icons/nav-downloads.svg",
+                i18n("world.download"),
+                () -> openDownloadsCommand.run());
+        heading.add(downloadButton, "w 40!, h 40!");
         return heading;
     }
 
@@ -429,26 +522,27 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.getList().setOpaque(false);
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         listSurface.add(choiceList, BorderLayout.CENTER);
+        Insets listInsets = listSurface.getInsets();
+        listSurface.setMinimumSize(new Dimension(
+                SwingTextAreas.minimumTextWidth(choiceList)
+                        + listInsets.left
+                        + listInsets.right,
+                0));
 
-        JSplitPane split = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
+        ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                 listSurface,
                 createDetailsSurface());
-        split.setName("worldsCatalogSplit");
-        split.setOpaque(false);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        split.setContinuousLayout(true);
-        split.setResizeWeight(0.46D);
-        split.setDividerLocation(0.46D);
-        split.setMinimumSize(new Dimension(0, 0));
-        return split;
+        return new SwingHorizontalScrollPane(
+                split,
+                "worldsCatalogScroll",
+                split.requiredMinimumWidth());
     }
 
     /// Creates editable selected-world metadata and icon-only row actions.
     ///
     /// @return transparent vertically scrollable detail surface
     private JComponent createDetailsSurface() {
-        JPanel details = new JPanel(new MigLayout(
+        JPanel details = new ViewportTrackingPanel(new MigLayout(
                 "insets 8 16 8 12, fillx, wrap 2",
                 "[140!][grow,fill]",
                 "[]8[]"));
@@ -456,7 +550,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         details.setOpaque(false);
         detailTitle.setName("worldsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
-        details.add(detailTitle, "span 2, growx");
+        details.add(detailTitle, "span 2, growx, wmin 0");
 
         addSectionTitle(details, i18n("world.info.basic"));
         JPanel iconControls = new JPanel(new MigLayout(
@@ -571,8 +665,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         details.add(saveDetailsButton, "span 2, right, h 36!");
 
         JPanel actions = new JPanel(new MigLayout(
-                "insets 0, gap 8, wrap 4",
-                "[40!][40!][40!][40!]",
+                "insets 0, gap 8, wrap 5",
+                "[40!][40!][40!][40!][40!]",
                 "[40!][40!]"));
         actions.setOpaque(false);
         configureIconButton(
@@ -623,6 +717,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "assets/swing/icons/format-list-bulleted.svg",
                 i18n("button.edit") + ": level.dat",
                 this::editSelectedLevelData);
+        configureIconButton(
+                dataPackButton,
+                "worldsDataPacks",
+                "assets/swing/icons/file-import.svg",
+                i18n("datapack"),
+                this::openSelectedWorldDataPacks);
         actions.add(quickPlayButton, "w 40!, h 40!");
         actions.add(launchScriptButton, "w 40!, h 40!");
         actions.add(chunkBaseButton, "w 40!, h 40!");
@@ -631,7 +731,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
         actions.add(editLevelDataButton, "w 40!, h 40!");
-        details.add(actions, "span 2, right");
+        actions.add(dataPackButton, "w 40!, h 40!");
+        details.add(actions, "span 2, right, wmin 0");
 
         JScrollPane scroll = new JScrollPane(details);
         scroll.setName("worldsDetailsScroll");
@@ -639,7 +740,16 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-        scroll.setMinimumSize(new Dimension(0, 0));
+        int valueMinimumWidth = SwingTextAreas.maximumMinimumTextWidth(
+                directoryValue, pathValue, gameVersionValue,
+                worldSpawnValue, lastPlayedValue, playedTimeValue,
+                playerLocationValue, playerLastDeathValue, playerSpawnValue,
+                lockedValue, readabilityValue);
+        int detailsMinimumWidth = Math.max(
+                Math.max(140 + 8 + valueMinimumWidth, 184),
+                valueMinimumWidth) + 28;
+        int scrollBarWidth = scroll.getVerticalScrollBar().getPreferredSize().width;
+        scroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);
         return scroll;
     }
@@ -666,10 +776,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param labelText non-blank static label
     /// @param value reusable value label
     /// @param name deterministic component name
-    private static void addDetailRow(JPanel panel, String labelText, JLabel value, String name) {
+    private static void addDetailRow(JPanel panel, String labelText, JTextArea value, String name) {
         panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
         value.setName(Objects.requireNonNull(name, "name"));
-        panel.add(value, "growx");
+        value.getAccessibleContext().setAccessibleName(labelText);
+        panel.add(value, "growx, wmin 0");
     }
 
     /// Adds one label and arbitrary value control to the aligned detail grid.
@@ -679,7 +790,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param value reusable value control
     private static void addDetailComponentRow(JPanel panel, String labelText, JComponent value) {
         panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
-        panel.add(Objects.requireNonNull(value, "value"), "growx");
+        panel.add(Objects.requireNonNull(value, "value"), "growx, wmin 0");
     }
 
     /// Adds one compact section heading without introducing nested card surfaces.
@@ -696,6 +807,78 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private void configureList() {
         choiceList.getList().addListSelectionListener(selectionListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
+    }
+
+    /// Formats the compact world metadata shown beside the row title.
+    ///
+    /// @param world loaded world row
+    /// @return game-version and last-played metadata, or retained failure detail
+    private String worldRowDetail(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return firstNonBlankLine(world.failureDetail());
+        }
+        List<String> values = new ArrayList<>();
+        if (world.gameVersion() != null) {
+            values.add(strings.gameVersionLabel() + ": " + world.gameVersion());
+        }
+        values.add(strings.lastPlayedLabel() + ": " + formatLastPlayed(world.lastPlayed()));
+        return String.join(" | ", values);
+    }
+
+    /// Formats the lock/readability badge for one world row.
+    ///
+    /// @param world loaded world row
+    /// @return localized readability and lock state
+    private String worldRowBadge(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return strings.unreadableValue();
+        }
+        return world.locked() ? strings.lockedValue() : strings.unlockedValue();
+    }
+
+    /// Returns a decoded and row-sized embedded world icon when available.
+    ///
+    /// @param world loaded world row
+    /// @return fixed-size icon, or the bundled fallback icon
+    private Icon worldRowIcon(WorldCatalogItem world) {
+        @Nullable WorldCatalogDetails details = world.details();
+        if (details == null || details.iconPngBase64() == null) {
+            return WORLD_ROW_ICON;
+        }
+        try {
+            ImageIcon source = new ImageIcon(Base64.getDecoder().decode(details.iconPngBase64()));
+            if (source.getIconWidth() <= 0 || source.getIconHeight() <= 0) {
+                return WORLD_ROW_ICON;
+            }
+            Image scaled = source.getImage().getScaledInstance(40, 40, Image.SCALE_SMOOTH);
+            return new ImageIcon(scaled);
+        } catch (IllegalArgumentException failure) {
+            return WORLD_ROW_ICON;
+        }
+    }
+
+    /// Supplies a useful tooltip without forcing another world read.
+    ///
+    /// @param world loaded world row
+    /// @return full path and optional failure detail
+    private String worldRowTooltip(WorldCatalogItem world) {
+        return world.failureDetail() == null
+                ? world.path().toString()
+                : world.path() + "\n" + world.failureDetail();
+    }
+
+    /// Returns the first meaningful line from a potentially multiline failure message.
+    ///
+    /// @param text nullable failure detail
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Configures transparent detail controls and localized enum rendering.
@@ -831,6 +1014,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                     ? snapshot.operationText()
                     : Objects.requireNonNull(quickPlayOperationText));
             refreshButton.setEnabled(snapshot.refreshEnabled() && commandIdle);
+            downloadButton.setEnabled(commandIdle);
             showAllCheckBox.setSelected(model.showAll());
             showAllCheckBox.setEnabled(
                     model.supportsVersionFiltering()
@@ -929,6 +1113,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         resetIconButton.setEnabled(mutableSelection && details != null && details.hasIcon());
         saveDetailsButton.setEnabled(editableDetails);
         editLevelDataButton.setEnabled(editableDetails);
+        dataPackButton.setEnabled(usableSelection
+                && Objects.requireNonNull(world).readable()
+                && dataPackRepository != null
+                && dataPackInstanceId != null
+                && dataPackExecutor != null);
 
         @Nullable WorldCatalogDetails.WorldSettings settings = details == null ? null : details.settings();
         allowCheatsCheckBox.setEnabled(editableDetails
@@ -1042,7 +1231,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             }
             @Nullable String targetName = interactions.chooseWorldName(this, candidate);
             if (targetName != null) {
-                observeFailure(model.installWorld(candidate, targetName));
+                observeRetryable(() -> model.installWorld(candidate, targetName));
             }
         }));
     }
@@ -1064,6 +1253,71 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Opens the selected world's per-world data-pack manager inside this page.
+    private void openSelectedWorldDataPacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable GameRepository repository = dataPackRepository;
+        @Nullable GameInstanceID instanceId = dataPackInstanceId;
+        @Nullable Executor executor = dataPackExecutor;
+        if (closed.get()
+                || selected == null
+                || !selected.readable()
+                || repository == null
+                || instanceId == null
+                || executor == null) {
+            return;
+        }
+        closeDataPackView();
+        DataPackManagementPanel panel = new DataPackManagementPanel(
+                repository,
+                instanceId,
+                executor,
+                selected.path());
+        JPanel host = new JPanel(new BorderLayout(0, 6));
+        host.setOpaque(false);
+        host.setName("worldsDataPacksHost");
+        JButton backButton = createDataPackBackButton();
+        backButton.setName("worldsDataPacksBack");
+        backButton.addActionListener(event -> showWorldCatalog());
+        host.add(backButton, BorderLayout.NORTH);
+        host.add(panel, BorderLayout.CENTER);
+        dataPackPanel = panel;
+        dataPackHost = host;
+        contentCards.add(host, DATA_PACKS_CARD);
+        ((CardLayout) contentCards.getLayout()).show(contentCards, DATA_PACKS_CARD);
+        panel.activate();
+    }
+
+    /// Creates the localized return action from the nested data-pack manager to the world list.
+    ///
+    /// @return button returning to the world list
+    static JButton createDataPackBackButton() {
+        return new JButton(i18n("swing.schematics.return"));
+    }
+
+    /// Returns from the nested data-pack manager to the world catalog.
+    private void showWorldCatalog() {
+        EdtDispatcher.requireEventDispatchThread();
+        ((CardLayout) contentCards.getLayout()).show(contentCards, CATALOG_CARD);
+        closeDataPackView();
+    }
+
+    /// Closes and removes the current nested data-pack manager, when present.
+    private void closeDataPackView() {
+        @Nullable DataPackManagementPanel panel = dataPackPanel;
+        if (panel == null) {
+            return;
+        }
+        dataPackPanel = null;
+        panel.close();
+        @Nullable JPanel host = dataPackHost;
+        dataPackHost = null;
+        if (host != null) {
+            contentCards.remove(host);
+        }
+    }
+
     /// Captures and submits every supported world-information field in one background write.
     private void saveWorldDetails() {
         @Nullable WorldCatalogItem selected = mutableDetailsSelection();
@@ -1077,7 +1331,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             showFailure(failure);
             return;
         }
-        observeFailure(model.updateWorldDetails(selected, update));
+        observeRetryable(() -> model.updateWorldDetails(selected, update));
     }
 
     /// Builds one validated update while preserving unsupported-field absence.
@@ -1184,7 +1438,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (source != null) {
-            observeFailure(model.replaceWorldIcon(selected, source));
+            observeRetryable(() -> model.replaceWorldIcon(selected, source));
         }
     }
 
@@ -1193,7 +1447,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = mutableDetailsSelection();
         if (selected != null
                 && Objects.requireNonNull(selected.details()).hasIcon()) {
-            observeFailure(model.resetWorldIcon(selected));
+            observeRetryable(() -> model.resetWorldIcon(selected));
         }
     }
 
@@ -1455,7 +1709,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (targetName != null) {
-            observeFailure(model.copyWorld(selected, targetName));
+            observeRetryable(() -> model.copyWorld(selected, targetName));
         }
     }
 
@@ -1473,15 +1727,110 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (archive != null) {
-            observeFailure(model.exportWorld(selected, archive));
+            observeRetryable(() -> model.exportWorld(selected, archive));
         }
     }
 
-    /// Confirms and delegates permanent deletion for one readable selected row.
+    /// Chooses a deletion mode and delegates one readable selected row.
     private void deleteSelectedWorld() {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
-        if (selected != null && selected.readable() && interactions.confirmDelete(this, selected)) {
-            observeFailure(model.deleteWorld(selected));
+        if (selected == null || !selected.readable()) {
+            return;
+        }
+        @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
+        if (mode != null) {
+            startDeletion(
+                    () -> model.deleteWorld(selected, mode),
+                    () -> model.deleteWorld(selected, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallback(this, selected),
+                    true);
+        }
+    }
+
+    /// Observes one world deletion and preserves recycle-bin fallback plus exact retry behavior.
+    ///
+    /// @param operation initial deletion operation
+    /// @param permanentRetry permanent retry operation
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    private void startDeletion(
+            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
+            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        Supplier<CompletionStage<WorldCatalogSnapshot>> capturedOperation =
+                Objects.requireNonNull(operation, "operation");
+        CompletionStage<WorldCatalogSnapshot> stage;
+        try {
+            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+        } catch (RuntimeException failure) {
+            handleDeletionFailure(capturedOperation, permanentRetry, confirmFallback, allowFallback, failure);
+            return;
+        }
+        stage.whenComplete((@Nullable WorldCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+            if (failure != null) {
+                Throwable resolved = unwrapFailure(failure);
+                EdtDispatcher.execute(() -> handleDeletionFailure(
+                        capturedOperation,
+                        permanentRetry,
+                        confirmFallback,
+                        allowFallback,
+                        resolved));
+            }
+        });
+    }
+
+    /// Handles one deletion failure on the EDT while preserving fallback and retry.
+    ///
+    /// @param operation exact deletion retry operation
+    /// @param permanentRetry permanent retry operation
+    /// @param confirmFallback original warning decision
+    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// @param failure original deletion failure
+    private void handleDeletionFailure(
+            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
+            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback,
+            Throwable failure) {
+        if (closed.get()) {
+            return;
+        }
+        if (allowFallback && failure instanceof TrashMoveException) {
+            if (confirmFallback.getAsBoolean()) {
+                startDeletion(permanentRetry, permanentRetry, confirmFallback, false);
+            }
+            return;
+        }
+        interactions.showRetryableFailure(
+                this,
+                strings.failureTitle(),
+                failureDetail(failure),
+                () -> startDeletion(operation, permanentRetry, confirmFallback, allowFallback));
+    }
+
+    /// Unwraps one completion exception when present.
+    ///
+    /// @param failure observed operation failure
+    /// @return original failure
+    private static Throwable unwrapFailure(Throwable failure) {
+        if (failure instanceof CompletionException && failure.getCause() != null) {
+            return failure.getCause();
+        }
+        return failure;
+    }
+
+    /// Invokes one local write request and captures the same supplier for retry.
+    ///
+    /// @param operation deferred local write operation
+    private void observeRetryable(Supplier<CompletionStage<?>> operation) {
+        Supplier<CompletionStage<?>> capturedOperation = Objects.requireNonNull(operation, "operation");
+        try {
+            observeFailure(
+                    Objects.requireNonNull(capturedOperation.get(), "operation returned null"),
+                    () -> observeRetryable(capturedOperation));
+        } catch (RuntimeException failure) {
+            showRetryableFailure(failure, () -> observeRetryable(capturedOperation));
         }
     }
 
@@ -1489,11 +1838,25 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     ///
     /// @param stage observed stage
     private void observeFailure(CompletionStage<?> stage) {
+        observeFailure(stage, null);
+    }
+
+    /// Shows one asynchronous failure with an optional exact retry request.
+    ///
+    /// @param stage observed stage
+    /// @param retryAction captured retry request, or null for a terminal failure
+    private void observeFailure(
+            CompletionStage<?> stage,
+            @Nullable Runnable retryAction) {
         Objects.requireNonNull(stage, "stage").whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
                 EdtDispatcher.execute(() -> {
                     if (!closed.get()) {
-                        showFailure(failure);
+                        if (retryAction == null) {
+                            showFailure(failure);
+                        } else {
+                            showRetryableFailure(failure, retryAction);
+                        }
                     }
                 });
             }
@@ -1505,6 +1868,18 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param failure original synchronous or asynchronous failure
     private void showFailure(Throwable failure) {
         interactions.showFailure(this, strings.failureTitle(), failureDetail(failure));
+    }
+
+    /// Displays one failure with an exact captured retry request on the EDT.
+    ///
+    /// @param failure original synchronous or asynchronous failure
+    /// @param retryAction captured retry request
+    private void showRetryableFailure(Throwable failure, Runnable retryAction) {
+        interactions.showRetryableFailure(
+                this,
+                strings.failureTitle(),
+                failureDetail(failure),
+                retryAction);
     }
 
     /// Formats an epoch timestamp for the current desktop locale, with a stable fallback.
@@ -1557,6 +1932,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.close();
         model.close();
         refreshButton.setEnabled(false);
+        downloadButton.setEnabled(false);
         showAllCheckBox.setEnabled(false);
         importButton.setEnabled(false);
         openSavesButton.setEnabled(false);
@@ -1582,6 +1958,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         playerXpLevelField.setEnabled(false);
         saveDetailsButton.setEnabled(false);
         editLevelDataButton.setEnabled(false);
+        dataPackButton.setEnabled(false);
+        closeDataPackView();
         interactions.close();
         removeAll();
     }

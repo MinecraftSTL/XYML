@@ -27,10 +27,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies preflighted Mod import conflict decisions against real files.
 @NotNullByDefault
@@ -57,6 +59,42 @@ public final class ModImportFileOperationsTest {
         assertArrayEquals(new byte[]{9, 8, 7}, Files.readAllBytes(modsDirectory.resolve("sample.jar")));
         assertFalse(Files.exists(disabled));
         assertFalse(Files.exists(archived));
+    }
+
+    /// A failed staged publish preserves the old target and variants, cleans staging, and can be retried.
+    @Test
+    public void preservesTargetWhenPublishFailsAndRetrySucceeds() throws IOException {
+        Path modsDirectory = Files.createDirectories(temporaryDirectory.resolve("mods"));
+        Path targetDirectory = Files.createDirectories(modsDirectory.resolve("sample.jar"));
+        Path held = Files.writeString(targetDirectory.resolve("held.txt"), "held");
+        Path disabled = Files.write(modsDirectory.resolve("sample.jar.disabled"), new byte[]{1});
+        Path source = source("sample.jar", new byte[]{9, 8, 7});
+
+        assertThrows(IOException.class, () -> ModImportFileOperations.importMods(
+                modsDirectory,
+                List.of(disabled),
+                List.of(source),
+                Map.of(source, ModImportConflictAction.REPLACE),
+                new LoadCancellation()));
+
+        assertTrue(Files.isDirectory(targetDirectory));
+        assertArrayEquals(new byte[]{1}, Files.readAllBytes(disabled));
+        try (Stream<Path> entries = Files.list(modsDirectory)) {
+            assertFalse(entries.anyMatch(path -> path.getFileName().toString()
+                    .startsWith(".xyml-mod-import-")));
+        }
+
+        Files.delete(held);
+        Files.delete(targetDirectory);
+        ModImportFileOperations.importMods(
+                modsDirectory,
+                List.of(disabled),
+                List.of(source),
+                Map.of(source, ModImportConflictAction.REPLACE),
+                new LoadCancellation());
+
+        assertArrayEquals(new byte[]{9, 8, 7}, Files.readAllBytes(modsDirectory.resolve("sample.jar")));
+        assertFalse(Files.exists(disabled));
     }
 
     /// Skipping one conflict leaves it unchanged while an uncontested source in the batch is copied.

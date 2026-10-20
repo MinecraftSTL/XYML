@@ -18,7 +18,10 @@
 package space.minecraftstl.xyml.upgrade;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
+
+import java.util.List;
 
 /// Canonical XYML release channels ordered from most stable to most frequently updated.
 @NotNullByDefault
@@ -69,6 +72,20 @@ public enum UpdateChannel {
     /// @return current artifact release channel
     public static UpdateChannel getChannel() {
         return fromName(Metadata.BUILD_CHANNEL);
+    }
+
+    /// Returns the update sources selectable through the settings UI for this build channel.
+    ///
+    /// The stable channel intentionally permits opting into public beta releases. Other channels may select
+    /// themselves or any more stable source.
+    ///
+    /// @return immutable selectable update-source channels ordered from most stable to least stable
+    public @Unmodifiable List<UpdateChannel> selectableUpdateSources() {
+        return switch (this) {
+            case STABLE, BETA -> List.of(STABLE, BETA);
+            case ALPHA -> List.of(STABLE, BETA, ALPHA);
+            case DEV -> List.of(STABLE, BETA, ALPHA, DEV);
+        };
     }
 
     /// Returns the canonical lowercase channel identifier.

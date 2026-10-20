@@ -49,8 +49,43 @@ final class RemoteAddonCatalogPageCacheTest {
         assertFalse(cache.get(query(0, 5)).isPresent());
 
         cache.put(query(0, 5), page(0, 20));
-        assertFalse(cache.get(query(8, 4)).isPresent());
+        assertTrue(cache.get(query(8, 4)).isPresent());
         assertTrue(cache.get(query(0, 5)).isPresent());
+    }
+
+    /// Retains distinct dependency searches while keeping each exact query bounded.
+    @Test
+    void retainsDistinctSearchQueries() {
+        RemoteAddonCatalogPageCache cache = new RemoteAddonCatalogPageCache();
+
+        cache.put(query("first-dependency", 0, 4), page(0, 20));
+        cache.put(query("second-dependency", 0, 4), page(0, 20));
+
+        assertTrue(cache.get(query("first-dependency", 0, 4)).isPresent());
+        assertTrue(cache.get(query("second-dependency", 0, 4)).isPresent());
+        assertEquals(2, cache.size());
+    }
+
+    /// Evicts the least recently used query pages after the global entry bound is reached.
+    @Test
+    void evictsLeastRecentlyUsedEntriesAboveGlobalBound() {
+        RemoteAddonCatalogPageCache cache = new RemoteAddonCatalogPageCache();
+
+        for (int scope = 0; scope < 9; scope++) {
+            for (int pageOffset = 0; pageOffset < RemoteAddonCatalogPageCache.MAXIMUM_PAGE_COUNT; pageOffset++) {
+                cache.put(
+                        query("dependency-" + scope, pageOffset, 4),
+                        page(pageOffset, 20));
+            }
+        }
+
+        assertEquals(RemoteAddonCatalogPageCache.MAXIMUM_ENTRY_COUNT, cache.size());
+        boolean firstScopeRetained = false;
+        for (int pageOffset = 0; pageOffset < RemoteAddonCatalogPageCache.MAXIMUM_PAGE_COUNT; pageOffset++) {
+            firstScopeRetained |= cache.get(query("dependency-0", pageOffset, 4)).isPresent();
+        }
+        assertFalse(firstScopeRetained);
+        assertTrue(cache.get(query("dependency-8", 7, 4)).isPresent());
     }
 
     /// Drops previously visited offsets that no longer exist when a provider reports fewer total pages.
@@ -76,10 +111,20 @@ final class RemoteAddonCatalogPageCacheTest {
     /// @param pageSize visible row count passed to the provider
     /// @return immutable exact cache key query
     private static RemoteAddonCatalogQuery query(int pageOffset, int pageSize) {
+        return query("cache fixture", pageOffset, pageSize);
+    }
+
+    /// Creates one explicit page query for a selected search text.
+    ///
+    /// @param searchText provider search text
+    /// @param pageOffset zero-based visited provider page
+    /// @param pageSize visible row count passed to the provider
+    /// @return immutable exact cache key query
+    private static RemoteAddonCatalogQuery query(String searchText, int pageOffset, int pageSize) {
         return new RemoteAddonCatalogQuery(
                 RemoteAddonCatalogKind.MOD,
                 RemoteAddonCatalogSource.MODRINTH,
-                "cache fixture",
+                searchText,
                 "1.20.1",
                 null,
                 RemoteAddonRepository.SortType.POPULARITY,

@@ -18,7 +18,6 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
@@ -26,19 +25,24 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
 
+import java.util.Optional;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as an XYML server-modpack archive.
@@ -46,17 +50,39 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class ServerModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
+
+    /// Stable exported instance identifier.
     private final GameInstanceID instanceId;
+
+    /// Validated export metadata.
     private final ModpackExportInfo exportInfo;
+
+    /// Effective instance run directory captured when the task is created.
+    private final Path runDirectory;
 
     /// Destination archive path.
     private final Path modpackFile;
 
-    public ServerModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, ModpackExportInfo exportInfo, Path modpackFile) {
-        this.repository = repository;
-        this.instanceId = instanceId;
-        this.exportInfo = exportInfo.validate();
-        this.modpackFile = modpackFile;
+    /// Creates a stopped server-modpack export task with stable source and destination paths.
+    ///
+    /// @param repository repository containing the exported instance
+    /// @param instanceId exported instance identifier
+    /// @param exportInfo export metadata and file selection
+    /// @param modpackFile destination archive
+    public ServerModpackExportTask(
+            DefaultGameRepository repository,
+            GameInstanceID instanceId,
+            ModpackExportInfo exportInfo,
+            Path modpackFile) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.exportInfo = Objects.requireNonNull(exportInfo, "exportInfo").validate();
+        this.runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        this.modpackFile = modpackFile.toAbsolutePath().normalize();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameInstance(runDirectory),
+                TaskResource.exportTarget(this.modpackFile));
 
         onDone().register(event -> {
             if (event.isFailed()) {
@@ -82,7 +108,6 @@ public class ServerModpackExportTask extends Task<Void> {
         blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (Zipper zip = new Zipper(modpackFile)) {
-            Path runDirectory = repository.getRunDirectory(instanceId);
             List<ModpackConfiguration.FileInformation> files = new ArrayList<>();
             zip.putDirectory(runDirectory, "overrides", path -> {
                 if (Modpack.acceptFile(path, blackList, exportInfo.getWhitelist())) {
@@ -99,20 +124,20 @@ public class ServerModpackExportTask extends Task<Void> {
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
             List<ServerModpackManifest.Addon> addons = new ArrayList<>();
-            addons.add(new ServerModpackManifest.Addon(MINECRAFT.getPatchId(), gameVersion));
-            analyzer.getVersion(FORGE).ifPresent(forgeVersion ->
+            addons.add(new ServerModpackManifest.Addon(GAME.getPatchId(), gameVersion));
+            Optional.ofNullable(analyzer.getVersion(FORGE)).ifPresent(forgeVersion ->
                     addons.add(new ServerModpackManifest.Addon(FORGE.getPatchId(), forgeVersion)));
-            analyzer.getVersion(NEO_FORGE).ifPresent(neoForgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(NEO_FORGE)).ifPresent(neoForgeVersion ->
                     addons.add(new ServerModpackManifest.Addon(NEO_FORGE.getPatchId(), neoForgeVersion)));
-            analyzer.getVersion(LITELOADER).ifPresent(liteLoaderVersion ->
+            Optional.ofNullable(analyzer.getVersion(LITELOADER)).ifPresent(liteLoaderVersion ->
                     addons.add(new ServerModpackManifest.Addon(LITELOADER.getPatchId(), liteLoaderVersion)));
-            analyzer.getVersion(OPTIFINE).ifPresent(optifineVersion ->
+            Optional.ofNullable(analyzer.getVersion(OPTIFINE)).ifPresent(optifineVersion ->
                     addons.add(new ServerModpackManifest.Addon(OPTIFINE.getPatchId(), optifineVersion)));
-            analyzer.getVersion(FABRIC).ifPresent(fabricVersion ->
+            Optional.ofNullable(analyzer.getVersion(FABRIC)).ifPresent(fabricVersion ->
                     addons.add(new ServerModpackManifest.Addon(FABRIC.getPatchId(), fabricVersion)));
-            analyzer.getVersion(QUILT).ifPresent(quiltVersion ->
+            Optional.ofNullable(analyzer.getVersion(QUILT)).ifPresent(quiltVersion ->
                     addons.add(new ServerModpackManifest.Addon(QUILT.getPatchId(), quiltVersion)));
             ServerModpackManifest manifest = new ServerModpackManifest(exportInfo.getName(), exportInfo.getAuthor(), exportInfo.getVersion(), exportInfo.getDescription(), StringUtils.removeSuffix(exportInfo.getFileApi(), "/"), files, addons);
             zip.putTextFile(JsonUtils.GSON.toJson(manifest), "server-manifest.json");

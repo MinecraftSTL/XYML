@@ -17,23 +17,24 @@
  */
 package space.minecraftstl.xyml.download.optifine;
 
-import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.UnsupportedInstallationException;
-import space.minecraftstl.xyml.download.VersionMismatchException;
+import space.minecraftstl.xyml.download.*;
+import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.CommandBuilder;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.platform.SystemUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 import org.jenkinsci.constant_pool_scanner.ConstantPool;
 import org.jenkinsci.constant_pool_scanner.ConstantPoolScanner;
 import org.jenkinsci.constant_pool_scanner.ConstantType;
 import org.jenkinsci.constant_pool_scanner.Utf8Constant;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -54,26 +55,63 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
     private final DefaultDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
     private final OptiFineRemoteVersion remote;
-    private final Path installer;
+    /// Vanilla client JAR used as patcher input.
+    private final Path minecraftJar;
+    private final @Nullable Path installer;
     private final List<Task<?>> dependents = new ArrayList<>(0);
     private final List<Task<?>> dependencies = new ArrayList<>(1);
-    private Path dest;
+    private @Nullable Path dest;
 
     private final Library optiFineLibrary;
     private final Library optiFineInstallerLibrary;
 
-    public OptiFineInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, OptiFineRemoteVersion remoteVersion) {
-        this(dependencyManager, manifest, remoteVersion, null);
+    /// Creates an OptiFine task that downloads its installer.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest          working manifest receiving the OptiFine patch
+    /// @param remoteVersion     selected OptiFine version
+    /// @param minecraftJar      vanilla client JAR for the target Minecraft version
+    public OptiFineInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            OptiFineRemoteVersion remoteVersion,
+            Path minecraftJar) {
+        this(dependencyManager, manifest, remoteVersion, minecraftJar, null);
     }
 
-    public OptiFineInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, OptiFineRemoteVersion remoteVersion, Path installer) {
+    /// Creates an OptiFine task with an optional local installer.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest          working manifest receiving the OptiFine patch
+    /// @param remoteVersion     selected OptiFine version
+    /// @param minecraftJar      vanilla client JAR for the target Minecraft version
+    /// @param installer         local installer JAR, or `null` to download it
+    public OptiFineInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            OptiFineRemoteVersion remoteVersion,
+            Path minecraftJar,
+            @Nullable Path installer) {
         this.dependencyManager = dependencyManager;
         this.gameRepository = dependencyManager.getGameRepository();
         this.manifest = manifest;
         this.remote = remoteVersion;
+        this.minecraftJar = minecraftJar;
         this.installer = installer;
 
         String mavenVersion = remote.getGameVersion() + "_" + remote.getSelfVersion();
+
+        if (installer == null) {
+            setResources(
+                    TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                    TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)));
+        } else {
+            setResources(
+                    TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                    TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)),
+                    TaskResource.archive(installer));
+        }
+        releaseResourcesBeforeDependencies();
 
         optiFineLibrary = new Library(new Artifact("optifine", "OptiFine", mavenVersion));
 
@@ -92,17 +130,19 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void preExecute() throws Exception {
-        dest = Files.createTempFile("optifine-installer", ".jar");
+        Path installerFile = Files.createTempFile("optifine-installer", ".jar");
+        dest = installerFile;
 
         if (installer == null) {
+            DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
             var task = new FileDownloadTask(
-                    dependencyManager.getDownloadProvider().injectURLsWithCandidates(remote.getUrls()),
-                    dest, null);
+                    downloadProvider.getDownloadCandidates(remote),
+                    installerFile, null);
             task.setCacheRepository(dependencyManager.getCacheRepository());
             task.setCaching(true);
             dependents.add(task);
         } else {
-            FileUtils.copyFile(installer, dest);
+            FileUtils.copyFile(installer, installerFile);
         }
     }
 
@@ -123,15 +163,19 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void execute() throws Exception {
-        String originalMainClass = manifest.resolve(dependencyManager.getGameRepository()).mainClass();
-        if (!LibraryAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
+        if (!Files.isRegularFile(minecraftJar)) {
+            throw new IOException("Minecraft client JAR not found: " + minecraftJar);
+        }
+        Path installerFile = Objects.requireNonNull(dest);
+        String originalMainClass = manifest.mainClass();
+        if (!GameComponentAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
             throw new UnsupportedInstallationException(UnsupportedInstallationException.UNSUPPORTED_LAUNCH_WRAPPER);
 
         List<Library> libraries = new ArrayList<>(4);
         libraries.add(optiFineLibrary);
 
         Path optiFineInstallerLibraryPath = gameRepository.getLibraryFile(manifest, optiFineInstallerLibrary);
-        FileUtils.copyFile(dest, optiFineInstallerLibraryPath);
+        FileUtils.copyFile(installerFile, optiFineInstallerLibraryPath);
 
         try (FileSystem fs2 = CompressingUtils.createWritableZipFileSystem(optiFineInstallerLibraryPath)) {
             Files.deleteIfExists(fs2.getPath("/META-INF/mods.toml"));
@@ -139,23 +183,23 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
 
         // Install launch wrapper modified by OptiFine
         boolean hasLaunchWrapper = false;
-        try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(dest)) {
+        try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installerFile)) {
             Path optiFineLibraryPath = gameRepository.getLibraryFile(manifest, optiFineLibrary);
             if (Files.exists(fs.getPath("optifine/Patcher.class"))) {
                 String[] command = {
                         JavaRuntime.getDefault().getBinary().toString(),
                         "-cp",
-                        dest.toString(),
+                        installerFile.toString(),
                         "optifine.Patcher",
-                        gameRepository.getInstanceJar(manifest).toAbsolutePath().normalize().toString(),
-                        dest.toString(),
+                        minecraftJar.toAbsolutePath().normalize().toString(),
+                        installerFile.toString(),
                         optiFineLibraryPath.toString()
                 };
                 int exitCode = SystemUtils.callExternalProcess(command);
                 if (exitCode != 0)
                     throw new IOException("OptiFine patcher failed, command: " + new CommandBuilder().addAll(Arrays.asList(command)));
             } else {
-                FileUtils.copyFile(dest, optiFineLibraryPath);
+                FileUtils.copyFile(installerFile, optiFineLibraryPath);
             }
 
             try (FileSystem fs2 = CompressingUtils.createWritableZipFileSystem(optiFineLibraryPath)) {
@@ -194,7 +238,7 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
                 String buildof = Files.readString(buildofText).trim();
                 VersionNumber buildofVer = VersionNumber.asVersion(buildof);
 
-                if (LibraryAnalyzer.BOOTSTRAP_LAUNCHER_MAIN.equals(originalMainClass)) {
+                if (GameComponentAnalyzer.BOOTSTRAP_LAUNCHER_MAIN.equals(originalMainClass)) {
                     // OptiFine H1 Pre2+ is compatible with Forge 1.17
                     if (buildofVer.compareTo("20210924-190833") < 0) {
                         throw new UnsupportedInstallationException(UnsupportedInstallationException.FORGE_1_17_OPTIFINE_H1_PRE2);
@@ -208,30 +252,31 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
         }
 
         setResult(new GameInstancePatch(
-                LibraryAnalyzer.LibraryType.OPTIFINE.getPatchId(),
+                GameComponentType.OPTIFINE.getPatchId(),
                 remote.getSelfVersion(),
                 10000,
                 new Arguments().addGameArguments("--tweakClass", "optifine.OptiFineTweaker"),
-                LibraryAnalyzer.LAUNCH_WRAPPER_MAIN,
+                GameComponentAnalyzer.LAUNCH_WRAPPER_MAIN,
                 libraries
         ));
 
         dependencies.add(new space.minecraftstl.xyml.download.game.GameLibrariesTask(dependencyManager, manifest, true, getResult().getLibraries()));
     }
 
-    /**
-     * Install OptiFine library from existing local file.
-     *
-     * @param dependencyManager game repository
-     * @param version           instance manifest
-     * @param installer         the OptiFine installer
-     * @return the task to install library
-     * @throws IOException              if unable to read compressed content of installer file, or installer file is corrupted, or the installer is not the one we want.
-     * @throws VersionMismatchException if required game version of installer does not match the actual one.
-     */
-    public static Task<GameInstancePatch> install(DefaultDependencyManager dependencyManager, GameInstanceManifest version, Path installer) throws IOException, VersionMismatchException {
-        Optional<String> gameVersion = dependencyManager.getGameRepository().getGameVersion(version);
-        if (!gameVersion.isPresent()) throw new IOException();
+    /// Creates a task that installs OptiFine from a local installer JAR.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest           working manifest receiving the OptiFine patch
+    /// @param gameVersion       Minecraft version expected by the installation
+    /// @param installer         the OptiFine installer JAR
+    /// @return the task producing the OptiFine patch
+    /// @throws IOException              if the installer is malformed or unsupported
+    /// @throws VersionMismatchException if the installer targets another Minecraft version
+    public static Task<GameInstancePatch> install(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            String gameVersion,
+            Path installer) throws IOException, VersionMismatchException {
         try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installer)) {
             Path configClass = fs.getPath("Config.class");
             if (!Files.exists(configClass)) configClass = fs.getPath("net/optifine/Config.class");
@@ -247,11 +292,21 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
             if (mcVersion == null || ofEdition == null || ofRelease == null)
                 throw new IOException("Unrecognized OptiFine installer");
 
-            if (!mcVersion.equals(gameVersion.get()))
-                throw new VersionMismatchException(mcVersion, gameVersion.get());
+            if (!mcVersion.equals(gameVersion))
+                throw new VersionMismatchException(mcVersion, gameVersion);
 
-            return new OptiFineInstallTask(dependencyManager, version,
-                    new OptiFineRemoteVersion(mcVersion, ofEdition + "_" + ofRelease, Collections.singletonList(""), false), installer);
+            OptiFineRemoteVersion remoteVersion = new OptiFineRemoteVersion(
+                    GameVersionNumber.asGameVersion(mcVersion),
+                    ofEdition + "_" + ofRelease,
+                    Collections.singletonList(""),
+                    false);
+            return new GameDownloadTask(dependencyManager, gameVersion, manifest)
+                    .thenComposeAsync(minecraftJar -> new OptiFineInstallTask(
+                            dependencyManager,
+                            manifest,
+                            remoteVersion,
+                            minecraftJar,
+                            installer));
         }
     }
 }

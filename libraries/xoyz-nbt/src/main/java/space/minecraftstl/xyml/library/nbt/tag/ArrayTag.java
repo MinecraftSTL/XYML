@@ -20,6 +20,7 @@ import space.minecraftstl.xyml.library.nbt.internal.ArrayAccessor;
 import org.intellij.lang.annotations.Flow;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.MustBeInvokedByOverriders;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.Buffer;
@@ -50,6 +51,7 @@ import java.util.stream.BaseStream;
 /// @see ByteArrayTag
 /// @see IntArrayTag
 /// @see LongArrayTag
+@NotNullByDefault
 public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A, B extends Buffer>
         extends ParentTag<T>
         permits ByteArrayTag, IntArrayTag, LongArrayTag {
@@ -69,6 +71,18 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
             //noinspection SuspiciousSystemArraycopy
             System.arraycopy(values, index + 1, values, index, size - index - 1);
         }
+    }
+
+    private void insertValueAt(int index, E value) {
+        A newValues = accessor().newArray(Math.max(ArrayAccessor.nextCapacity(size, size + 1), size + 1));
+        for (int i = 0; i < index; i++) {
+            accessor().set(newValues, i, accessor().get(values, i));
+        }
+        for (int i = size; i > index; i--) {
+            accessor().set(newValues, i, accessor().get(values, i - 1));
+        }
+        accessor().set(newValues, index, value);
+        values = newValues;
     }
 
     final void ensureValuesCapacityForAdd() {
@@ -103,8 +117,7 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
 
     /// Returns a view of the values of this array as a list.
     ///
-    /// @apiNote Currently, this list supports most list operations, but does not yet support
-    /// operations such as [List#add(int, Object)] for inserting at a specific index.
+    /// @apiNote The returned view supports insertion, replacement, removal, and clearing.
     @Contract(pure = true)
     public List<E> values() {
         if (listView == null) {
@@ -130,6 +143,11 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
                 public boolean add(E e) {
                     ArrayTag.this.add(e);
                     return true;
+                }
+
+                @Override
+                public void add(int index, E element) {
+                    ArrayTag.this.insert(index, element);
                 }
 
                 @Override
@@ -252,13 +270,12 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @MustBeInvokedByOverriders
     public ArrayTag<E, T, A, B> setAll(@Flow(sourceIsContainer = true, targetIsContainer = true)
                        A array) {
+        A source = Objects.requireNonNull(array, "array");
+        int newSize = accessor().getLength(source);
+        A replacement = newSize > 0 ? accessor().copyOf(source, newSize) : accessor().empty();
         clear();
-
-        int newSize = accessor().getLength(array);
-        if (newSize > 0) {
-            this.values = accessor().copyOf(array, newSize);
-            this.size = newSize;
-        }
+        this.values = replacement;
+        this.size = newSize;
         return this;
     }
 
@@ -271,64 +288,169 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(value = "_ -> this", mutates = "this,param1")
     public ArrayTag<E, T, A, B> setAll(@Flow(sourceIsContainer = true, targetIsContainer = true)
                              B buffer) {
-        clear();
-
-        if (buffer.hasRemaining()) {
-            A array = accessor().get(buffer);
-            setArrayWithoutClone(array, accessor().getLength(array));
-        }
+        B source = Objects.requireNonNull(buffer, "buffer");
+        A replacement = source.hasRemaining() ? accessor().get(source) : accessor().empty();
+        setArrayWithoutClone(replacement, accessor().getLength(replacement));
         return this;
     }
 
     /// Appends the specified value to the end of this array.
     @Contract(value = "_ -> this", mutates = "this")
     public abstract ArrayTag<E, T, A, B> add(@Flow(targetIsContainer = true)
-                                             E value);
+                                              E value);
+
+    /// Inserts a value at an exact index.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param value value to insert
+    /// @return this array
+    /// @throws IndexOutOfBoundsException if the index is outside `0..size()`
+    @Contract(value = "_, _ -> this", mutates = "this")
+    public ArrayTag<E, T, A, B> insert(int index, @Flow(targetIsContainer = true) E value)
+            throws IndexOutOfBoundsException {
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
+        }
+        Objects.requireNonNull(value, "value");
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
+        insertValueAt(index, value);
+        if (index < size) {
+            System.arraycopy(tags, index, tags, index + 1, size - index);
+        }
+        tags[index] = null;
+        size++;
+        updateIndexes(index + 1);
+        return this;
+    }
 
     @Override
     @MustBeInvokedByOverriders
     @Contract(value = "_ -> this", mutates = "this,param1")
     public ArrayTag<E, T, A, B> addTag(@Flow(targetIsContainer = true)
                                        T tag) throws IllegalArgumentException {
-        if (tag.getParentTag() != null) {
-            if (tag.getParentTag() == this) {
-                int index = tag.getIndex();
+        Objects.requireNonNull(tag, "tag");
+        validateTagForAttach(tag);
+        if (tag.getParent() == this) {
+            moveTag(tag.getIndex(), size - 1);
+            return this;
+        }
+        if (tag.getType() != getElementType()) {
+            throw new IllegalArgumentException("Cannot add a tag of type " + tag.getType()
+                    + " to an array of type " + getElementType());
+        }
+        ensureTagsCapacityForAdd();
+        ensureValuesCapacityForAdd();
+        detachFromCurrentParent(tag);
+        tag.setName0("");
+        accessor().set(values, size, tag.getValue());
+        tags[size] = tag;
+        tag.setParent(this, size);
+        size++;
+        return this;
+    }
 
-                if (tag.getIndex() == this.size() - 1) {
-                    // The tag is already the last child of this tag, so we don't need to do anything.
-                    assert tag == tags[index];
-                } else {
-                    // Move the tag to the end of the subTags list.
+    /// Inserts a detached value tag at an exact index.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param tag detached value tag of this array's element type
+    /// @return this array
+    /// @throws IllegalArgumentException if the tag is attached, named, or has the wrong type
+    @Override
+    @Contract(value = "_, _ -> this", mutates = "this,param2")
+    public ArrayTag<E, T, A, B> insertTag(int index, T tag) throws IllegalArgumentException {
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
+        }
+        Objects.requireNonNull(tag, "tag");
+        validateTagForAttach(tag);
+        if (tag.getParent() != null) {
+            throw new IllegalArgumentException("The tag must be detached before insertion");
+        }
+        if (tag.getType() != getElementType()) {
+            throw new IllegalArgumentException("Cannot insert a tag of type " + tag.getType()
+                    + " to an array of type " + getElementType());
+        }
+        if (!tag.getName().isEmpty()) {
+            throw new IllegalArgumentException("Array elements must have an empty name");
+        }
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
+        insertValueAt(index, tag.getValue());
+        if (index < size) {
+            System.arraycopy(tags, index, tags, index + 1, size - index);
+        }
+        tags[index] = tag;
+        size++;
+        tag.setParent(this, index);
+        updateIndexes(index + 1);
+        return this;
+    }
 
-                    Tag oldTag = removeTagFromArray(index);
-                    if (oldTag != tag) {
-                        throw new AssertionError("Expected " + tag + ", but got " + oldTag);
-                    }
+    /// Replaces an element at an exact index and keeps the primitive array synchronized.
+    ///
+    /// @param index element index
+    /// @param replacement detached replacement tag
+    /// @return the former element
+    @Override
+    @Contract(value = "_, _ -> new", mutates = "this,param2")
+    public T replaceTagAt(int index, T replacement) throws IllegalArgumentException {
+        Objects.checkIndex(index, size);
+        Objects.requireNonNull(replacement, "replacement");
+        validateTagForAttach(replacement);
+        if (replacement.getParent() != null) {
+            throw new IllegalArgumentException("The replacement must be detached before insertion");
+        }
+        if (replacement.getType() != getElementType()) {
+            throw new IllegalArgumentException("Cannot replace an array element with a different type");
+        }
+        if (!replacement.getName().isEmpty()) {
+            throw new IllegalArgumentException("Array elements must have an empty name");
+        }
+        T previous = getTag(index);
+        validateChildIdentity(index, previous);
+        accessor().set(values, index, replacement.getValue());
+        tags[index] = replacement;
+        previous.setParent(null, -1);
+        replacement.setParent(this, index);
+        return previous;
+    }
 
-                    removeValueFromArray(index);
-
-                    ensureTagsCapacity(size);
-                    tags[size - 1] = tag;
-                    accessor().set(values, size - 1, tag);
-
-                    updateIndexes(index);
-                }
-
-                return this;
-            } else {
-                // Remove the tag from its old parent.
-                tag.getParentTag().removeElement(tag);
+    /// Moves an array element and its primitive value to another index.
+    ///
+    /// @param fromIndex current index
+    /// @param toIndex destination index
+    /// @return this array
+    @Override
+    @Contract(value = "_, _ -> this", mutates = "this")
+    public ArrayTag<E, T, A, B> moveTag(int fromIndex, int toIndex) {
+        Objects.checkIndex(fromIndex, size);
+        Objects.checkIndex(toIndex, size);
+        validateChildRange(Math.min(fromIndex, toIndex), Math.max(fromIndex, toIndex));
+        if (fromIndex == toIndex) {
+            return this;
+        }
+        ensureTagsCapacity(size);
+        E movedValue = accessor().get(values, fromIndex);
+        if (fromIndex < toIndex) {
+            for (int i = fromIndex; i < toIndex; i++) {
+                accessor().set(values, i, accessor().get(values, i + 1));
+            }
+        } else {
+            for (int i = fromIndex; i > toIndex; i--) {
+                accessor().set(values, i, accessor().get(values, i - 1));
             }
         }
-
-        tag.setName0("");
-
-        ensureTagsCapacityForAdd();
-
-        add(tag.getValue());
-        tag.setParent(this, size - 1);
-        tags[size - 1] = tag;
-
+        accessor().set(values, toIndex, movedValue);
+        @SuppressWarnings("unchecked")
+        T movedTag = (T) tags[fromIndex];
+        if (fromIndex < toIndex) {
+            System.arraycopy(tags, fromIndex + 1, tags, fromIndex, toIndex - fromIndex);
+        } else {
+            System.arraycopy(tags, toIndex, tags, toIndex + 1, fromIndex - toIndex);
+        }
+        tags[toIndex] = movedTag;
+        updateIndexes(Math.min(fromIndex, toIndex));
         return this;
     }
 
@@ -336,13 +458,14 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(mutates = "this")
     public final void removeAt(int index) throws IndexOutOfBoundsException {
         Objects.checkIndex(index, size);
+        validateChildRange(index, size - 1);
 
-        T tag = removeTagFromArray(index);
+        T tag = getTagOrNull(index);
         if (tag != null) {
-            assert tag.getIndex() == index && tag.getParentTag() == this;
-
             tag.setParent(null, -1);
         }
+
+        removeTagFromArray(index);
 
         removeValueFromArray(index);
 
@@ -354,16 +477,17 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(mutates = "this")
     public final T removeTagAt(int index) throws IndexOutOfBoundsException {
         Objects.checkIndex(index, size);
+        validateChildRange(index, size - 1);
 
-        T tag = removeTagFromArray(index);
+        T tag = getTagOrNull(index);
 
         if (tag != null) {
-            assert tag.getIndex() == index && tag.getParentTag() == this;
-
             tag.setParent(null, -1);
         } else {
             tag = accessor().newTagFromElement(values, index);
         }
+
+        removeTagFromArray(index);
 
         removeValueFromArray(index);
 

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -276,7 +277,7 @@ public final class DefaultGameLoaderCatalogModel implements AutoCloseable {
             if (item.kind() != request.kind()) {
                 throw new IllegalStateException("Loader catalog source returned an item for another kind");
             }
-            if (!request.gameVersion().equals(item.remoteVersion().getGameVersion())) {
+            if (!GameVersionNumber.asGameVersion(request.gameVersion()).equals(item.remoteVersion().getGameVersion())) {
                 throw new IllegalStateException("Loader catalog source returned an item for another game version");
             }
         }

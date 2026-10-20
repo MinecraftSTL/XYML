@@ -59,7 +59,7 @@ public final class CoreRemoteModpackCatalogBackend implements RemoteModpackCatal
     public @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
             RemoteModpackCatalogSource source) throws IOException {
         RemoteModpackCatalogSource requestedSource = Objects.requireNonNull(source, "source");
-        return requestedSource.repository().getCategories().toList();
+        return requestedSource.repository().getCategories(RemoteAddon.Type.MODPACK).toList();
     }
 
     /// Queries one server page with the exact viewport-derived page size requested by the user.
@@ -73,6 +73,7 @@ public final class CoreRemoteModpackCatalogBackend implements RemoteModpackCatal
         RemoteAddonRepository repository = request.source().repository();
         RemoteAddonRepository.SearchResult result = repository.search(
                 downloadProvider,
+                RemoteAddon.Type.MODPACK,
                 request.gameVersion(),
                 request.category(),
                 request.pageOffset(),

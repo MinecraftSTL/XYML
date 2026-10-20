@@ -262,7 +262,11 @@ public final class SNBTCodec {
     public Tag readTag(CharSequence input, int startInclusive, int endExclusive) throws IOException {
         Tag tag;
         try {
-            tag = new SNBTParser(input, startInclusive, endExclusive).nextTag();
+            SNBTParser parser = new SNBTParser(input, startInclusive, endExclusive);
+            tag = parser.nextTag();
+            if (tag != null && parser.nextTag() != null) {
+                throw new IllegalArgumentException("Trailing data after SNBT tag");
+            }
         } catch (IllegalArgumentException e) {
             throw new IOException(e);
         }

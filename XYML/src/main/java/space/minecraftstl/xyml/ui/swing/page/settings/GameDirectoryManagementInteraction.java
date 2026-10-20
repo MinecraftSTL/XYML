@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.awt.Component;
 import java.nio.file.Path;
+import java.util.Objects;
 
 /// Separates native directory-selection and confirmation UI from game-directory state changes.
 @NotNullByDefault
@@ -32,6 +33,12 @@ interface GameDirectoryManagementInteraction {
     /// @param initialDirectory suggested initial directory, or `null` when no usable suggestion is available
     /// @return chosen directory, or `null` when the chooser is cancelled
     @Nullable Path chooseDirectory(Component owner, @Nullable Path initialDirectory);
+
+    /// Confirms use of a filesystem root as the game directory.
+    ///
+    /// @param owner confirmation parent component
+    /// @return whether saving the root directory may continue
+    boolean confirmRootDirectory(Component owner);
 
     /// Confirms backup and overwrite of a read-only game-directory settings file.
     ///
@@ -51,4 +58,17 @@ interface GameDirectoryManagementInteraction {
     /// @param owner dialog parent component
     /// @param detail localized or diagnostic failure detail
     void showFailure(Component owner, String detail);
+
+    /// Shows one retryable management failure and delegates to the plain failure boundary by default.
+    ///
+    /// @param owner dialog parent component
+    /// @param detail localized or diagnostic failure detail
+    /// @param retryAction captured operation to replay
+    default void showRetryableFailure(
+            Component owner,
+            String detail,
+            Runnable retryAction) {
+        Objects.requireNonNull(retryAction, "retryAction");
+        showFailure(owner, detail);
+    }
 }

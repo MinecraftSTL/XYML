@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.modpack.multimc;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.util.Immutable;
 import space.minecraftstl.xyml.util.Lang;
@@ -28,8 +27,8 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
-import java.util.*;
 import java.util.stream.Collectors;
+import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -300,10 +299,10 @@ public final class MultiMCInstancePatch {
             for (String jvmArg : patch.getJvmArgs()) {
                 jvmArguments.add(new StringArgument(jvmArg));
             }
-            mainClass = Lang.requireNonNullElse(mainClass, patch.getMainClass());
-            assetIndex = Lang.requireNonNullElse(patch.getAssetIndex(), assetIndex);
-            javaMajors = Lang.requireNonNullElse(patch.getJavaMajors(), javaMajors);
-            mainJar = Lang.requireNonNullElse(patch.getMainJar(), mainJar);
+            mainClass = Objects.requireNonNullElse(mainClass, patch.getMainClass());
+            assetIndex = Objects.requireNonNullElse(patch.getAssetIndex(), assetIndex);
+            javaMajors = Objects.requireNonNullElse(patch.getJavaMajors(), javaMajors);
+            mainJar = Objects.requireNonNullElse(patch.getMainJar(), mainJar);
             traits = Lang.merge(patch.getTraits(), traits);
             tweakers = Lang.merge(patch.getTweakers(), tweakers);
             libraries = Lang.merge(patch.getLibraries(), libraries);
@@ -311,7 +310,7 @@ public final class MultiMCInstancePatch {
             jarModFileNames = Lang.merge(patch.getJarMods().stream().map(library -> library.filename()).collect(Collectors.toList()), jarModFileNames);
         }
 
-        mainClass = Lang.requireNonNullElse(mainClass, "net.minecraft.client.Minecraft");
+        mainClass = Objects.requireNonNullElse(mainClass, "net.minecraft.client.Minecraft");
 
         if (minecraftArguments == null) {
             minecraftArguments = new ArrayList<>();
@@ -413,7 +412,7 @@ public final class MultiMCInstancePatch {
 
         String gameVersion = null;
         for (MultiMCInstancePatch patch : patches) {
-            if (MultiMCComponents.getComponent(patch.getID()) == LibraryAnalyzer.LibraryType.MINECRAFT) {
+            if (MultiMCComponents.getComponent(patch.getID()) == GameComponentType.GAME) {
                 gameVersion = patch.getVersion();
                 break;
             }

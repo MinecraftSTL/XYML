@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -27,6 +29,7 @@ import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -41,24 +44,45 @@ import java.util.stream.Collectors;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Completes updates and missing files for an installed server modpack instance.
+@NotNullByDefault
 public class ServerModpackCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
     private final DefaultGameRepository repository;
     private final GameInstanceID instanceId;
-    private ModpackConfiguration<ServerModpackManifest> manifest;
-    private GetTask dependent;
-    private ServerModpackManifest remoteManifest;
+    /// Configuration supplied by the caller or loaded from the instance, if available.
+    private @Nullable ModpackConfiguration<ServerModpackManifest> manifest;
+
+    /// Optional metadata fetch task created during pre-execution.
+    private @Nullable GetTask dependent;
+
+    /// Remote manifest resolved during execution, or null before resolution.
+    private @Nullable ServerModpackManifest remoteManifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
+    /// Creates a completion task that loads its configuration from the destination instance.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
     public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModpackConfiguration<ServerModpackManifest> manifest) {
+    /// Creates a repository-scoped completion task with an optional in-memory configuration.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest configuration, or null to load it from the instance
+    public ServerModpackCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable ModpackConfiguration<ServerModpackManifest> manifest) {
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.instanceId = instanceId;
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
 
         if (manifest == null) {
             try {
@@ -84,7 +108,9 @@ public class ServerModpackCompletionTask extends Task<Void> {
     @Override
     public void preExecute() throws Exception {
         if (manifest == null || StringUtils.isBlank(manifest.getManifest().getFileApi())) return;
-        dependent = new GetTask(manifest.getManifest().getFileApi() + "/server-manifest.json");
+        GetTask manifestTask = new GetTask(manifest.getManifest().getFileApi() + "/server-manifest.json");
+        manifestTask.setCacheRepository(dependencyManager.getCacheRepository());
+        dependent = manifestTask;
     }
 
     @Override

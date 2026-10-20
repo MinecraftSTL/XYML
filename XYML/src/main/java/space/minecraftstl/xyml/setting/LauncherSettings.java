@@ -42,6 +42,7 @@ import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeReference;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.*;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -109,6 +110,18 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Default launcher animation speed percentage.
     public static final int DEFAULT_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.DEFAULT_PERCENTAGE;
 
+    /// Default loopback port used by the local MCP server.
+    public static final int DEFAULT_MCP_PORT = 23968;
+
+    /// Default enablement for the local MCP server in a newly created settings file.
+    public static final boolean DEFAULT_MCP_ENABLED = false;
+
+    /// Default bearer token for the local MCP server. An empty token keeps authentication disabled.
+    public static final String DEFAULT_MCP_BEARER_TOKEN = "";
+
+    /// Default state for the warning shown before enabling the local MCP server.
+    public static final boolean DEFAULT_MCP_ENABLEMENT_WARNING = true;
+
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -128,7 +141,39 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         normalized.remove("backgroundFallbackType");
         normalized.remove("backgroundFallbackPaint");
         normalized.remove("backgroundLoadPolicy");
+        boolean hasInstanceDeletionConfirmation = normalized.has("mcpConfirmInstanceDeletion");
+        boolean hasModDeletionConfirmation = normalized.has("mcpConfirmModDeletion");
+        @Nullable JsonElement legacyDeletionConfirmation = normalized.remove("mcpConfirmDeletion");
+        @Nullable JsonElement enabledValue = normalized.get("mcpEnabled");
+        if (enabledValue != null
+                && (!enabledValue.isJsonPrimitive() || !enabledValue.getAsJsonPrimitive().isBoolean())) {
+            normalized.remove("mcpEnabled");
+        }
+        @Nullable JsonElement tokenValue = normalized.get("mcpBearerToken");
+        if (tokenValue != null && (!tokenValue.isJsonPrimitive() || !tokenValue.getAsJsonPrimitive().isString())) {
+            normalized.remove("mcpBearerToken");
+        }
+        @Nullable JsonElement warningValue = normalized.get("showMcpEnablementWarning");
+        if (warningValue != null
+                && (!warningValue.isJsonPrimitive() || !warningValue.getAsJsonPrimitive().isBoolean())) {
+            normalized.remove("showMcpEnablementWarning");
+        }
         LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
+        if (legacyDeletionConfirmation != null
+                && legacyDeletionConfirmation.isJsonPrimitive()
+                && legacyDeletionConfirmation.getAsJsonPrimitive().isBoolean()) {
+            boolean required = legacyDeletionConfirmation.getAsBoolean();
+            if (!hasInstanceDeletionConfirmation) {
+                settings.mcpConfirmInstanceDeletionProperty().set(required);
+            }
+            if (!hasModDeletionConfirmation) {
+                settings.mcpConfirmModDeletionProperty().set(required);
+            }
+        }
+        int mcpPort = settings.mcpPortProperty().get();
+        if (mcpPort < 1 || mcpPort > 0xFFFF) {
+            settings.mcpPortProperty().set(DEFAULT_MCP_PORT);
+        }
         settings.getThemeAppearanceOverrides().remove("windowTransparent");
         if (settings.themeColorTypeProperty().get() != ThemeColorType.CUSTOM) {
             settings.getThemeAppearanceOverrides().remove(THEME_APPEARANCE_COLOR);
@@ -209,13 +254,25 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return language;
     }
 
-    /// Whether preview builds are accepted by update checks.
-    @SerializedName("acceptPreviewUpdate")
-    private final BooleanProperty acceptPreviewUpdate = new SimpleBooleanProperty(false);
+    /// Update source channel shared by automatic and manual launcher checks.
+    @SerializedName("updateChannel")
+    private final ObjectProperty<@Nullable UpdateChannel> updateChannel =
+            new RawPreservingObjectProperty<>(UpdateChannel.getChannel());
 
-    /// Returns the preview update opt-in property.
-    public BooleanProperty acceptPreviewUpdateProperty() {
-        return acceptPreviewUpdate;
+    /// Returns the configured launcher update source channel property.
+    ///
+    /// Unsupported serialized values leave this property null while their raw JSON is preserved.
+    ///
+    /// @return nullable configured update source channel property
+    public ObjectProperty<@Nullable UpdateChannel> updateChannelProperty() {
+        return updateChannel;
+    }
+
+    /// Resolves the configured update source or the running build channel when no supported value is configured.
+    ///
+    /// @return effective update source channel
+    public UpdateChannel getEffectiveUpdateChannel() {
+        return Objects.requireNonNullElse(updateChannel.get(), UpdateChannel.getChannel());
     }
 
     /// Whether automatic update dialogs are disabled.
@@ -594,6 +651,61 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the proxy authentication password property.
     public StringProperty proxyPasswordProperty() {
         return proxyPassword;
+    }
+
+    /// Whether the local MCP server is enabled at launcher startup.
+    @SerializedName("mcpEnabled")
+    private final BooleanProperty mcpEnabled = new SimpleBooleanProperty(DEFAULT_MCP_ENABLED);
+
+    /// Returns the local MCP server enablement property.
+    public BooleanProperty mcpEnabledProperty() {
+        return mcpEnabled;
+    }
+
+    /// Bearer token required by the local MCP HTTP listener, or an empty string to disable transport authentication.
+    @SerializedName("mcpBearerToken")
+    private final StringProperty mcpBearerToken = new SimpleStringProperty(DEFAULT_MCP_BEARER_TOKEN);
+
+    /// Returns the local MCP bearer-token property.
+    public StringProperty mcpBearerTokenProperty() {
+        return mcpBearerToken;
+    }
+
+    /// Whether the Swing settings page warns before enabling the local MCP server.
+    @SerializedName("showMcpEnablementWarning")
+    private final BooleanProperty showMcpEnablementWarning =
+            new SimpleBooleanProperty(DEFAULT_MCP_ENABLEMENT_WARNING);
+
+    /// Returns the local MCP enablement-warning preference.
+    public BooleanProperty showMcpEnablementWarningProperty() {
+        return showMcpEnablementWarning;
+    }
+
+    /// Loopback port used by the local MCP server.
+    @SerializedName("mcpPort")
+    private final IntegerProperty mcpPort = new SimpleIntegerProperty(DEFAULT_MCP_PORT);
+
+    /// Returns the local MCP server port property.
+    public IntegerProperty mcpPortProperty() {
+        return mcpPort;
+    }
+
+    /// Whether deleting an instance through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmInstanceDeletion")
+    private final BooleanProperty mcpConfirmInstanceDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP instance-deletion confirmation preference.
+    public BooleanProperty mcpConfirmInstanceDeletionProperty() {
+        return mcpConfirmInstanceDeletion;
+    }
+
+    /// Whether deleting local mods through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmModDeletion")
+    private final BooleanProperty mcpConfirmModDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP mod-deletion confirmation preference.
+    public BooleanProperty mcpConfirmModDeletionProperty() {
+        return mcpConfirmModDeletion;
     }
 
     /// The selected game directory ID.

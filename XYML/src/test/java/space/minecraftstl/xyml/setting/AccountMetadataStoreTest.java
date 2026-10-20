@@ -208,6 +208,30 @@ public final class AccountMetadataStoreTest {
                 .getAsString());
     }
 
+    /// Tests that account record order survives JSON round trips without adding ordering fields.
+    @Test
+    public void preservesAccountRecordOrderWithoutAddingFields() {
+        JsonObject first = jsonObject(
+                "type", "offline",
+                "accountID", accountID(1),
+                "profileName", "Steve",
+                "profileID", "5627dd98-e6be-3c21-b8a8-e92344183641");
+        JsonObject second = jsonObject(
+                "type", "microsoft",
+                "accountID", accountID(2),
+                "profileName", "Alex",
+                "profileID", "12345678-1234-1234-1234-1234567890ab");
+        AccountMetadataStore accountMetadata = AccountMetadataStore.fromRecords(List.of(second, first));
+
+        String json = LauncherSettings.SETTINGS_GSON.toJson(accountMetadata, AccountMetadataStore.class);
+        AccountMetadataStore roundTrip = Objects.requireNonNull(
+                LauncherSettings.SETTINGS_GSON.fromJson(json, AccountMetadataStore.class));
+
+        assertEquals(List.of(second, first), roundTrip.getAccounts());
+        assertEquals(first.keySet(), roundTrip.getAccounts().get(1).keySet());
+        assertEquals(second.keySet(), roundTrip.getAccounts().get(0).keySet());
+    }
+
     /// Tests that private data save failures stop metadata from being saved.
     @Test
     public void doesNotSaveMetadataWhenPrivateDataSyncSaveFails()

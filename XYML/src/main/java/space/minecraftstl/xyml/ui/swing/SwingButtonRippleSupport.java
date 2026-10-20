@@ -54,6 +54,9 @@ import java.util.Set;
 /// finish smoothly even when the pressed button is removed by the page change it initiated.
 @NotNullByDefault
 public final class SwingButtonRippleSupport implements AutoCloseable {
+    /// Client-property key used by controls whose geometry is rebuilt during their press action.
+    public static final String RIPPLE_DISABLED_PROPERTY = "xyml.buttonRippleDisabled";
+
     /// Peak alpha applied to the button foreground color.
     private static final float MAXIMUM_OPACITY = 0.22F;
 
@@ -164,7 +167,10 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
     /// @param origin button-local click position
     private void startRipple(AbstractButton button, Point origin) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed || !button.isEnabled() || !registeredButtons.contains(button)) {
+        if (closed
+                || !button.isEnabled()
+                || !registeredButtons.contains(button)
+                || Boolean.TRUE.equals(button.getClientProperty(RIPPLE_DISABLED_PROPERTY))) {
             return;
         }
         @Nullable Container parent = button.getParent();

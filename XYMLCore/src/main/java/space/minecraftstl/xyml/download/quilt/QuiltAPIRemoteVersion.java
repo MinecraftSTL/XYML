@@ -18,17 +18,23 @@
 package space.minecraftstl.xyml.download.quilt;
 
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 
-public class QuiltAPIRemoteVersion extends RemoteVersion {
+@NotNullByDefault
+public final class QuiltAPIRemoteVersion extends ComponentRemoteVersion {
+    public static final String MODRINTH_ID = "qsl";
+
     private final String fullVersion;
     private final RemoteAddon.Version version;
 
@@ -39,8 +45,8 @@ public class QuiltAPIRemoteVersion extends RemoteVersion {
      * @param selfVersion the version string of the remote version.
      * @param urls        the installer or universal jar original URL.
      */
-    QuiltAPIRemoteVersion(String gameVersion, String selfVersion, String fullVersion, Instant datePublished, RemoteAddon.Version version, List<String> urls) {
-        super(LibraryAnalyzer.LibraryType.QUILT_API.getPatchId(), gameVersion, selfVersion, datePublished, urls);
+    public QuiltAPIRemoteVersion(GameVersionNumber gameVersion, String selfVersion, String fullVersion, Instant datePublished, RemoteAddon.Version version, List<String> urls) {
+        super(GameComponentType.QUILT_API, gameVersion, selfVersion, datePublished, Type.UNCATEGORIZED, urls);
 
         this.fullVersion = fullVersion;
         this.version = version;
@@ -56,12 +62,15 @@ public class QuiltAPIRemoteVersion extends RemoteVersion {
     }
 
     @Override
-    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
-        return new QuiltAPIInstallTask(dependencyManager, baseVersion, this);
+    public Task<GameInstancePatch> getInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest baseManifest,
+            Path modsDirectory) {
+        return new QuiltAPIInstallTask(dependencyManager, baseManifest, this, modsDirectory);
     }
 
     @Override
-    public int compareTo(RemoteVersion o) {
+    public int compareTo(ComponentRemoteVersion o) {
         if (!(o instanceof QuiltAPIRemoteVersion)) return 0;
         return -this.getReleaseDate().compareTo(o.getReleaseDate());
     }

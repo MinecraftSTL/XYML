@@ -16,12 +16,12 @@ dependencies {
     compileOnly(libs.jetbrains.annotations)
 
     implementation(libs.gson)
-    implementation(libs.jna)
-    implementation(libs.jna.platform)
     implementation(libs.kala.compress.tar)
     implementation(libs.kala.compress.ar)
     implementation(libs.weburl)
     implementation(libs.xz)
+    implementation(libs.jsoup)
+    implementation("org.apache.maven:maven-artifact:3.9.16")
 
     testImplementation(gradleApi())
     testImplementation(libs.junit.jupiter)
@@ -39,6 +39,7 @@ tasks.withType<JavaCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
 }
 
 tasks.processResources {

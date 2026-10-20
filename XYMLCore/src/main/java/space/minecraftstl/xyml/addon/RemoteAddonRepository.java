@@ -31,8 +31,6 @@ import java.util.stream.Stream;
 @NotNullByDefault
 public interface RemoteAddonRepository {
 
-    RemoteAddon.Type getType();
-
     /// Returns the provider API base URL used for raw metadata requests.
     ///
     /// @return absolute provider API base URL
@@ -43,12 +41,21 @@ public interface RemoteAddonRepository {
     /// @return absolute provider web base URL
     String getBaseUrl();
 
+    /// Provider-neutral result orderings exposed by the remote catalog filter.
     enum SortType {
+        /// Provider relevance ordering.
+        RELEVANCY,
+        /// Provider popularity or follower ranking.
         POPULARITY,
+        /// Project name ordering.
         NAME,
+        /// Project creation time.
         DATE_CREATED,
+        /// Latest project update time.
         LAST_UPDATED,
+        /// Project author ordering.
         AUTHOR,
+        /// Total project download count.
         TOTAL_DOWNLOADS
     }
 
@@ -76,6 +83,10 @@ public interface RemoteAddonRepository {
             this.totalPages = pages;
         }
 
+        public static SearchResult empty() {
+            return new SearchResult(Stream.empty(), 0);
+        }
+
         public Stream<RemoteAddon> getResults() {
             return this.sortedResults;
         }
@@ -89,16 +100,20 @@ public interface RemoteAddonRepository {
         }
     }
 
-    SearchResult search(DownloadProvider downloadProvider, String gameVersion, @Nullable Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder)
+    SearchResult search(DownloadProvider downloadProvider, RemoteAddon.Type type, String gameVersion, @Nullable Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder)
             throws IOException;
 
     Optional<RemoteAddon.Version> getRemoteVersionByLocalFile(Path file) throws IOException;
 
     RemoteAddon getAddonById(DownloadProvider downloadProvider, String id) throws IOException;
 
-    default RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException {
-        return getAddonById(downloadProvider, id);
-    }
+    /// Resolves dependency metadata while distinguishing a missing project from provider failure.
+    ///
+    /// @param downloadProvider provider used to transform or mirror API requests
+    /// @param id provider project identifier
+    /// @return the resolved dependency, or {@link RemoteAddon#BROKEN} when it no longer exists
+    /// @throws IOException if provider access fails for any reason other than a missing dependency
+    RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException;
 
     RemoteAddon.File getAddonFile(String projectId, String fileId) throws IOException;
 
@@ -121,7 +136,7 @@ public interface RemoteAddonRepository {
     /// @throws IOException when required provider project metadata cannot be loaded
     String getVersionPageUrl(RemoteAddon.Version version) throws IOException;
 
-    Stream<Category> getCategories() throws IOException;
+    Stream<Category> getCategories(RemoteAddon.Type type) throws IOException;
 
     record Category(Object self, String id, List<Category> subcategories) {
     }

@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.util.io.CompressingUtils;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.Set;
 
 /// Parses and installs the native XYML modpack archive format.
 @NotNullByDefault
@@ -60,7 +61,8 @@ public final class XYMLModpackProvider implements ModpackProvider {
             DefaultDependencyManager dependencyManager,
             GameInstanceID instanceId,
             Path zipFile,
-            Modpack modpack) throws MismatchedModpackTypeException {
+            Modpack modpack,
+            @Nullable Set<String> excludedFiles) throws MismatchedModpackTypeException {
         if (!(modpack.getManifest() instanceof XYMLModpackManifest))
             throw new MismatchedModpackTypeException(getName(), modpack.getManifest().getProvider().getName());
 
@@ -96,7 +98,12 @@ public final class XYMLModpackProvider implements ModpackProvider {
     private final static class XYMLModpack extends Modpack {
         /// Creates an installation task for the chosen destination instance.
         @Override
-        public Task<?> getInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, GameInstanceID instanceId, String iconUrl) {
+        public Task<?> getInstallTask(
+                DefaultDependencyManager dependencyManager,
+                Path zipFile,
+                GameInstanceID instanceId,
+                String iconUrl,
+                @Nullable Set<String> excludedFiles) {
             return new XYMLModpackInstallTask(
                     (XYMLGameRepository) dependencyManager.getGameRepository(), zipFile, this, instanceId);
         }

@@ -18,13 +18,15 @@
 package space.minecraftstl.xyml.download.game;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
+import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.AssetIndex;
 import space.minecraftstl.xyml.game.AssetIndexInfo;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -37,29 +39,36 @@ import java.util.List;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * This task is to download asset index file provided in minecraft.json.
- *
- * @author huangyuhui
- */
+/// Downloads and validates the asset index referenced by one game manifest.
+@NotNullByDefault
 public final class GameAssetIndexDownloadTask extends Task<Void> {
 
     private final AbstractDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
     private final boolean forceDownloading;
+    /// Immutable index destination used for both arbitration and publication.
+    private final Path assetIndexFile;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager that can provides {@link GameRepository}
-     * @param manifest the <b>resolved</b> version
-     */
-    public GameAssetIndexDownloadTask(AbstractDependencyManager dependencyManager, GameInstanceManifest manifest, boolean forceDownloading) {
+    /// Creates an asset-index download task scoped to its exact publication file.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest resolved game manifest
+    /// @param forceDownloading whether an existing valid index should still be replaced
+    public GameAssetIndexDownloadTask(
+            AbstractDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            boolean forceDownloading) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.forceDownloading = forceDownloading;
+        AssetIndexInfo assetIndexInfo = manifest.getAssetIndex();
+        this.assetIndexFile = dependencyManager.getGameRepository()
+                .getIndexFile(manifest.id(), assetIndexInfo.getId())
+                .toAbsolutePath()
+                .normalize();
         setSignificance(TaskSignificance.MODERATE);
+        setResources(TaskResource.downloadTarget(assetIndexFile));
     }
 
     @Override
@@ -70,7 +79,6 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
     @Override
     public void execute() {
         AssetIndexInfo assetIndexInfo = manifest.getAssetIndex();
-        Path assetIndexFile = dependencyManager.getGameRepository().getIndexFile(manifest.id(), assetIndexInfo.getId());
         boolean verifyHashCode = StringUtils.isNotBlank(assetIndexInfo.getSha1()) && assetIndexInfo.getUrl().contains(assetIndexInfo.getSha1());
 
         if (Files.exists(assetIndexFile) && !forceDownloading) {
@@ -95,8 +103,9 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
 
         // We should not check the hash code of asset index file since this file is not consistent
         // And Mojang will modify this file anytime. So assetIndex.hash might be outdated.
+        DownloadProvider downloadProvider = dependencyManager.getDownloadProvider();
         var task = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLWithCandidates(assetIndexInfo.getUrl()),
+                downloadProvider.getDownloadCandidates(assetIndexInfo.getUrl()),
                 assetIndexFile,
                 verifyHashCode ? new FileDownloadTask.IntegrityCheck("SHA-1", assetIndexInfo.getSha1()) : null
         );

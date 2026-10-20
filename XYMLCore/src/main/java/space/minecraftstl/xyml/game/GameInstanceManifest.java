@@ -352,6 +352,13 @@ public record GameInstanceManifest(
         return inheritsFrom == null;
     }
 
+    /// Returns whether components of this manifest can be modified in place.
+    ///
+    /// @return whether the manifest is an independent manifest with a game patch
+    public boolean isModifiable() {
+        return inheritsFrom == null && patches != null && hasPatch(GameComponentType.GAME);
+    }
+
     /// Returns the pending patches.
     ///
     /// @return the pending patches, or an empty list when absent
@@ -606,6 +613,29 @@ public record GameInstanceManifest(
     }
 
     /// Returns whether this manifest has a patch with the given id.
+    /// Returns whether this manifest contains a patch for the given component type.
+    ///
+    /// @param type component type
+    /// @return whether the component patch exists
+    public boolean hasPatch(GameComponentType type) {
+        return findPatch(type) != null;
+    }
+
+    /// Finds the patch describing one component type.
+    ///
+    /// @param type component type
+    /// @return the matching patch, or null when absent
+    public @Nullable GameInstancePatch findPatch(GameComponentType type) {
+        if (patches != null) {
+            for (GameInstancePatch patch : patches) {
+                if (type.getPatchId().equals(patch.id())) {
+                    return patch;
+                }
+            }
+        }
+        return null;
+    }
+
     public boolean hasPatch(String patchId) {
         return patches != null && patches.stream().anyMatch(patch -> patchId.equals(patch.id()));
     }

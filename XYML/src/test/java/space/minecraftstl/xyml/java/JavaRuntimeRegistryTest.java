@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -81,19 +82,36 @@ class JavaRuntimeRegistryTest {
         JavaRuntimeRegistry registry = new JavaRuntimeRegistry();
         registry.initialize(Map.of());
         JavaRuntime java17 = runtime("C:/java/17/bin/java.exe", "17.0.12", false);
+        JavaRuntime duplicatePath = runtime("C:/java/17/bin/java.exe", "17.0.13", true);
         AtomicInteger changes = new AtomicInteger();
         Subscription subscription = registry.snapshotProperty().subscribe(ignored -> changes.incrementAndGet());
 
         assertTrue(registry.add(java17));
-        assertFalse(registry.add(java17));
+        assertFalse(registry.add(duplicatePath));
         assertEquals(1, changes.get());
-        assertEquals(java17, registry.awaitRuntime(java17.getBinary()));
+        assertSame(java17, registry.awaitRuntime(java17.getBinary()));
 
         subscription.unsubscribe();
         assertTrue(registry.remove(java17.getBinary()));
         assertFalse(registry.remove(java17.getBinary()));
         assertEquals(1, changes.get());
         assertTrue(registry.awaitRuntimes().isEmpty());
+    }
+
+    /// Replaces stale metadata at one executable path without dropping independently registered runtimes.
+    @Test
+    void upsertReplacesSamePathAndRetainsOtherRuntimes() throws Exception {
+        JavaRuntimeRegistry registry = new JavaRuntimeRegistry();
+        JavaRuntime stale = runtime("C:/java/managed/bin/java.exe", "17.0.1", true);
+        JavaRuntime replacement = runtime("C:/java/managed/bin/java.exe", "17.0.12", true);
+        JavaRuntime retained = runtime("C:/java/other/bin/java.exe", "21.0.2", false);
+        registry.initialize(Map.of(stale.getBinary(), stale, retained.getBinary(), retained));
+
+        assertTrue(registry.upsert(replacement));
+        assertSame(replacement, registry.awaitRuntime(replacement.getBinary()));
+        assertSame(retained, registry.awaitRuntime(retained.getBinary()));
+        assertEquals(2, registry.awaitRuntimes().size());
+        assertFalse(registry.upsert(replacement));
     }
 
     /// Replays explicit mutations over a refresh result so a concurrent scan cannot roll them back.
@@ -114,6 +132,26 @@ class JavaRuntimeRegistryTest {
                 removed.getBinary(), removed,
                 discovered.getBinary(), discovered)));
         assertEquals(List.of(added, discovered), registry.awaitRuntimes());
+    }
+
+    /// Replays a downloaded-runtime upsert after an in-flight refresh reports stale metadata for the same path.
+    @Test
+    void refreshReplaysConcurrentUpsert() throws Exception {
+        JavaRuntimeRegistry registry = new JavaRuntimeRegistry();
+        JavaRuntime stale = runtime("C:/java/managed/bin/java.exe", "17.0.1", true);
+        JavaRuntime replacement = runtime("C:/java/managed/bin/java.exe", "17.0.12", true);
+        JavaRuntime retained = runtime("C:/java/other/bin/java.exe", "21.0.2", false);
+        registry.initialize(Map.of(stale.getBinary(), stale, retained.getBinary(), retained));
+
+        JavaRuntimeRegistry.RefreshTicket refresh = registry.beginRefresh();
+        assertTrue(registry.upsert(replacement));
+
+        assertTrue(registry.completeRefresh(refresh, Map.of(
+                stale.getBinary(), stale,
+                retained.getBinary(), retained)));
+        assertSame(replacement, registry.awaitRuntime(replacement.getBinary()));
+        assertSame(retained, registry.awaitRuntime(retained.getBinary()));
+        assertEquals(2, registry.awaitRuntimes().size());
     }
 
     /// Lets only the newest overlapping refresh commit its scan result.

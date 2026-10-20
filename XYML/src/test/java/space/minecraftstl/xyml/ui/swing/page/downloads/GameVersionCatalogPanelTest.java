@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -48,6 +49,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.AbstractButton;
 import javax.swing.Action;
@@ -554,6 +556,24 @@ public final class GameVersionCatalogPanelTest {
         });
     }
 
+    /// Retries a failed game-version catalog load when the visible failure text is clicked.
+    @Test
+    public void retriesFailedCatalogFromStateLabel() {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                List.of(),
+                snapshot(-1, 0, 1L, GameVersionCatalogStatus.FAILED, "Failed", false, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+        try {
+            onEventDispatchThread(() -> {
+                JLabel failed = findComponent(panel, "gameVersionsFailed", JLabel.class);
+                failed.dispatchEvent(primaryClick(failed));
+                assertEquals(1, model.refreshes.get());
+            });
+        } finally {
+            onEventDispatchThread(panel::close);
+        }
+    }
+
     /// Installs the exact loaded choice, derives only from its version ID, and preserves a user name.
     @Test
     public void installsExactLoadedChoiceAndPreservesUserAuthoredName() throws Exception {
@@ -561,7 +581,11 @@ public final class GameVersionCatalogPanelTest {
                 items(1_000),
                 snapshot(-1, 1_000, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
         RecordingGameInstallService service = RecordingGameInstallService.completed();
-        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+        AtomicInteger taskNavigations = new AtomicInteger();
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(
+                model,
+                service,
+                new TaskLaunchController(taskNavigations::incrementAndGet)));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 520));
@@ -584,19 +608,16 @@ public final class GameVersionCatalogPanelTest {
                     () -> assertEquals(
                             List.of(new GameInstallRequest("my-instance", "version-2")),
                             service.requests()),
-                    () -> assertTrue(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
-                    () -> assertFalse(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()));
+                    () -> assertEquals(1, taskNavigations.get()),
+                    () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()));
         });
 
         awaitTerminal(service.latestSession());
         EdtDispatcher.executeAndWait(() -> { });
 
         onEventDispatchThread(() -> {
-            assertTrue(findButton(panel, "gameVersionsBackToCatalog").isEnabled());
-            findButton(panel, "gameVersionsBackToCatalog").doClick();
             assertAll(
                     () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
-                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
                     () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()));
 
             IndexRange requested = model.requestedRanges().get(0);
@@ -617,7 +638,7 @@ public final class GameVersionCatalogPanelTest {
     /// Carries the exact embedded loader selection into installation and clears it for another base version.
     @Test
     public void installsEmbeddedLoaderSelectionAndClearsItWhenBaseVersionChanges() throws Exception {
-        RemoteVersion fabric = new RemoteVersion(
+        ComponentRemoteVersion fabric = new TestComponentRemoteVersion(
                 "fabric",
                 "1.20.1",
                 "0.16.0",
@@ -705,7 +726,6 @@ public final class GameVersionCatalogPanelTest {
         EdtDispatcher.executeAndWait(() -> { });
 
         onEventDispatchThread(() -> {
-            findButton(panel, "gameVersionsBackToCatalog").doClick();
             panel.choiceList().getList().setSelectedIndex(1);
             assertTrue(loaderPanel.selectedRemoteVersions().isEmpty());
             assertEquals("1.21.1", loaderPanel.selectionSnapshot().gameVersion().orElseThrow());
@@ -745,9 +765,9 @@ public final class GameVersionCatalogPanelTest {
                             INSTALL_STRINGS.instanceAlreadyExistsStatus(),
                             findComponent(
                                     panel,
-                                    "gameVersionsInstallTaskStatus",
+                                    "gameVersionsInstallStatus",
                                     javax.swing.JLabel.class).getText()),
-                    () -> assertTrue(findButton(panel, "gameVersionsBackToCatalog").isEnabled()));
+                    () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()));
             panel.close();
         });
         service.close();
@@ -780,7 +800,7 @@ public final class GameVersionCatalogPanelTest {
         EdtDispatcher.executeAndWait(() -> { });
 
         onEventDispatchThread(() -> assertAll(
-                () -> assertFalse(findButton(panel, "gameVersionsBackToCatalog").isEnabled()),
+                () -> assertFalse(findButton(panel, "gameVersionsInstall").isEnabled()),
                 () -> assertFalse(findTextField(panel, "gameVersionsInstanceName").isEnabled())));
         service.close();
         assertEquals(1, service.closeCount());
@@ -813,7 +833,6 @@ public final class GameVersionCatalogPanelTest {
         onEventDispatchThread(() -> {
             assertAll(
                     () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
-                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
                     () -> assertEquals(
                             INSTALL_STRINGS.installationFailedStatus(),
                             findComponent(
@@ -825,7 +844,7 @@ public final class GameVersionCatalogPanelTest {
         service.close();
     }
 
-    /// A status-unsubscribe failure is propagated only after the catalog card has been restored.
+    /// A status-unsubscribe failure is surfaced after the catalog card has been restored.
     @Test
     public void returnCleanupFailureStillRestoresCatalogCard() throws Exception {
         IllegalStateException unsubscribeFailure = new IllegalStateException("status unsubscribe failed");
@@ -846,17 +865,23 @@ public final class GameVersionCatalogPanelTest {
         awaitTerminal(service.latestSession());
         EdtDispatcher.executeAndWait(() -> { });
 
-        IllegalStateException thrown = assertThrows(
-                IllegalStateException.class,
-                () -> onEventDispatchThread(
-                        () -> findButton(panel, "gameVersionsBackToCatalog").doClick()));
-        assertSame(unsubscribeFailure, thrown);
+        assertEquals(
+                INSTALL_STRINGS.installationFailedStatus(),
+                onEventDispatchThread(() -> findComponent(
+                        panel,
+                        "gameVersionsInstallStatus",
+                        javax.swing.JLabel.class).getText()));
 
         onEventDispatchThread(() -> {
             assertAll(
                     () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
-                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
-                    () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()));
+                    () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()),
+                    () -> assertEquals(
+                            INSTALL_STRINGS.installationFailedStatus(),
+                            findComponent(
+                                    panel,
+                                    "gameVersionsInstallStatus",
+                                    javax.swing.JLabel.class).getText()));
             panel.close();
         });
         service.close();
@@ -880,8 +905,8 @@ public final class GameVersionCatalogPanelTest {
     /// @param libraryId loader patch identifier
     /// @param version loader self version
     /// @return remote loader version
-    private static RemoteVersion remoteVersion(String libraryId, String version) {
-        return new RemoteVersion(
+    private static ComponentRemoteVersion remoteVersion(String libraryId, String version) {
+        return new TestComponentRemoteVersion(
                 libraryId,
                 "1.21.1",
                 version,
@@ -923,6 +948,29 @@ public final class GameVersionCatalogPanelTest {
                 TASK_STRINGS,
                 null,
                 Duration.ZERO);
+    }
+
+    /// Creates a page fixture with explicit task navigation observation.
+    ///
+    /// @param model catalog model under test
+    /// @param installService installation service under test
+    /// @param taskLaunchController shared task submission controller
+    /// @return page fixture
+    private static GameVersionCatalogPanel createPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            TaskLaunchController taskLaunchController) {
+        return new GameVersionCatalogPanel(
+                model,
+                installService,
+                STRINGS,
+                INSTALL_STRINGS,
+                TASK_STRINGS,
+                null,
+                Duration.ZERO,
+                LoaderSelectionWizardPanel.createForLauncher(),
+                null,
+                taskLaunchController);
     }
 
     /// Creates a page fixture with an injected loader-selection workflow.
@@ -1072,6 +1120,23 @@ public final class GameVersionCatalogPanelTest {
         return SwingUtilities.convertRectangle(parent, component.getBounds(), root);
     }
 
+    /// Creates a primary-button mouse event for state-label action tests.
+    ///
+    /// @param source state label receiving the event
+    /// @return deterministic single-click event
+    private static MouseEvent primaryClick(Component source) {
+        return new MouseEvent(
+                source,
+                MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false,
+                MouseEvent.BUTTON1);
+    }
+
     /// Runs a value-producing operation synchronously on the EDT.
     ///
     /// @param operation operation to run
@@ -1120,7 +1185,7 @@ public final class GameVersionCatalogPanelTest {
     @NotNullByDefault
     private static final class FixtureLoaderCatalogSource implements GameLoaderCatalogSource {
         /// Original Core remote version whose identity must reach the install request.
-        private final RemoteVersion remoteVersion;
+        private final ComponentRemoteVersion remoteVersion;
 
         /// Number of explicit catalog refreshes.
         private final AtomicInteger requests = new AtomicInteger();
@@ -1128,7 +1193,7 @@ public final class GameVersionCatalogPanelTest {
         /// Creates a deterministic source for one Fabric catalog row.
         ///
         /// @param remoteVersion exact remote version returned by the source
-        private FixtureLoaderCatalogSource(RemoteVersion remoteVersion) {
+        private FixtureLoaderCatalogSource(ComponentRemoteVersion remoteVersion) {
             this.remoteVersion = Objects.requireNonNull(remoteVersion, "remoteVersion");
         }
 
@@ -1626,6 +1691,14 @@ public final class GameVersionCatalogPanelTest {
         @Override
         public ReadOnlyProperty<GameInstallStatus> statusProperty() {
             return statusProperty;
+        }
+
+        /// Returns the real submitted-state property.
+        ///
+        /// @return real submitted property
+        @Override
+        public ReadOnlyProperty<Boolean> submittedProperty() {
+            return delegate.submittedProperty();
         }
 
         /// Returns the real minimal completion stage.

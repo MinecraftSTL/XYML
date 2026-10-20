@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 import space.minecraftstl.xyml.util.io.CSVTable;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -53,6 +54,21 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// background executor. Native dialogs remain confined to the EDT.
 @NotNullByDefault
 final class DefaultAddonUpdatesInteractions implements AddonUpdatesInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Required extension for exported update snapshots.
     private static final String CSV_EXTENSION = ".csv";
 

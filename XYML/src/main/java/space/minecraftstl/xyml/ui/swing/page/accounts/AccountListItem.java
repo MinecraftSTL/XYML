@@ -27,6 +27,7 @@ import java.util.Objects;
 /// @param displayName primary account text
 /// @param detailText secondary provider and storage text, or an empty string
 /// @param profileId stable game-profile identifier as text
+/// @param portable whether the account belongs to the portable account group
 /// @param avatarSource presentation-safe avatar texture source
 @NotNullByDefault
 public record AccountListItem(
@@ -34,6 +35,7 @@ public record AccountListItem(
         String displayName,
         String detailText,
         String profileId,
+        boolean portable,
         AccountAvatarSource avatarSource) {
     /// Creates a row whose avatar uses the UUID-derived launcher-bundled fallback.
     ///
@@ -46,7 +48,23 @@ public record AccountListItem(
             String displayName,
             String detailText,
             String profileId) {
-        this(accountId, displayName, detailText, profileId, AccountAvatarSource.bundledDefault());
+        this(accountId, displayName, detailText, profileId, false, AccountAvatarSource.bundledDefault());
+    }
+
+    /// Creates a global account row with an explicit avatar source.
+    ///
+    /// @param accountId stable persisted account identifier used by selection commands
+    /// @param displayName primary account text
+    /// @param detailText secondary provider and storage text, or an empty string
+    /// @param profileId stable game-profile identifier as text
+    /// @param avatarSource presentation-safe avatar texture source
+    public AccountListItem(
+            String accountId,
+            String displayName,
+            String detailText,
+            String profileId,
+            AccountAvatarSource avatarSource) {
+        this(accountId, displayName, detailText, profileId, false, avatarSource);
     }
 
     /// Validates one account row.

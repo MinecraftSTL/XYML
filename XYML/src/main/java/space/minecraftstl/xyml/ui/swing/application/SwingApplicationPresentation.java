@@ -33,6 +33,9 @@ import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
@@ -57,6 +60,9 @@ import java.util.Objects;
 /// @param resourcePacks localized resource-pack content text
 /// @param resourcePacksStatus localized resource-pack lifecycle text
 /// @param resourcePacksActions localized resource-pack action text
+/// @param shaderPacks localized shader-pack content text
+/// @param shaderPacksStatus localized shader-pack lifecycle text
+/// @param shaderPacksActions localized shader-pack action text
 /// @param gameVersions localized game-version catalog controls
 /// @param gameVersionsStatus localized game-version catalog lifecycle states
 /// @param gameInstall localized vanilla-installation controls, task text, and validation feedback
@@ -81,6 +87,9 @@ public record SwingApplicationPresentation(
         ResourcePackCatalogStrings resourcePacks,
         ResourcePackCatalogStatusStrings resourcePacksStatus,
         ResourcePackCatalogActionStrings resourcePacksActions,
+        ShaderPackCatalogStrings shaderPacks,
+        ShaderPackCatalogStatusStrings shaderPacksStatus,
+        ShaderPackCatalogActionStrings shaderPacksActions,
         GameVersionCatalogStrings gameVersions,
         GameVersionCatalogStatusStrings gameVersionsStatus,
         GameInstallStrings gameInstall,
@@ -105,6 +114,9 @@ public record SwingApplicationPresentation(
         Objects.requireNonNull(resourcePacks, "resourcePacks");
         Objects.requireNonNull(resourcePacksStatus, "resourcePacksStatus");
         Objects.requireNonNull(resourcePacksActions, "resourcePacksActions");
+        Objects.requireNonNull(shaderPacks, "shaderPacks");
+        Objects.requireNonNull(shaderPacksStatus, "shaderPacksStatus");
+        Objects.requireNonNull(shaderPacksActions, "shaderPacksActions");
         Objects.requireNonNull(gameVersions, "gameVersions");
         Objects.requireNonNull(gameVersionsStatus, "gameVersionsStatus");
         Objects.requireNonNull(gameInstall, "gameInstall");

@@ -75,6 +75,19 @@ public final class WorldArchiveImporter {
         this.limits = Objects.requireNonNull(limits, "limits");
     }
 
+    /// Returns whether a user supplied world name belongs to the importer's temporary namespace.
+    ///
+    /// The comparison is case-insensitive because a case-preserving filesystem may still compare names without
+    /// case, and allowing a differently cased spelling would make the generated staging namespace ambiguous.
+    ///
+    /// @param name candidate direct-child world name
+    /// @return whether the name starts with the reserved staging prefix
+    public static boolean isReservedWorldName(String name) {
+        String checkedName = Objects.requireNonNull(name, "name");
+        return checkedName.length() >= STAGING_PREFIX.length()
+                && checkedName.regionMatches(true, 0, STAGING_PREFIX, 0, STAGING_PREFIX.length());
+    }
+
     /// Validates and atomically imports one ZIP archive into a direct child of `saves`.
     ///
     /// @param archive local ZIP archive
@@ -487,7 +500,10 @@ public final class WorldArchiveImporter {
     /// @throws IOException when blank, reserved, or path-like
     private static String requireTargetName(String targetName) throws IOException {
         String checkedName = Objects.requireNonNull(targetName, "targetName");
-        if (checkedName.isBlank() || ".".equals(checkedName) || "..".equals(checkedName)) {
+        if (checkedName.isBlank()
+                || ".".equals(checkedName)
+                || "..".equals(checkedName)
+                || isReservedWorldName(checkedName)) {
             throw new IOException("World target name must not be blank or reserved");
         }
         if (checkedName.indexOf('/') >= 0 || checkedName.indexOf('\\') >= 0 || checkedName.indexOf(':') >= 0) {

@@ -24,6 +24,8 @@ import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.io.ExternalChunkAccessor;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
+import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
+import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -34,10 +36,37 @@ import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 
 public final class NBTOutput {
+    private static final ThreadLocal<Integer> WRITE_DEPTH = ThreadLocal.withInitial(() -> 0);
+
     public static void writeTag(DataWriter writer, Tag tag) throws IOException {
+        int depth = WRITE_DEPTH.get();
+        if (depth == 0) {
+            validate(tag, writer.getEdition());
+        }
+        WRITE_DEPTH.set(depth + 1);
+        try {
+            writeTagUnchecked(writer, tag);
+        } finally {
+            if (depth == 0) {
+                WRITE_DEPTH.remove();
+            } else {
+                WRITE_DEPTH.set(depth);
+            }
+        }
+    }
+
+    private static void writeTagUnchecked(DataWriter writer, Tag tag) throws IOException {
         writer.writeByte(tag.getType().id()); // implicit null check
         writer.writeString(tag.getName());
         Access.TAG.writeContent(tag, writer);
+    }
+
+    private static void validate(Tag tag, MinecraftEdition edition) throws IOException {
+        try {
+            NBTStructureValidator.validateSubtree(tag, edition);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid NBT tree", exception);
+        }
     }
 
     private static final class TempOutputStream extends ByteArrayOutputStream {
@@ -61,6 +90,11 @@ public final class NBTOutput {
 
     public static void writeRegion(RawDataWriter writer, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
         assert writer.edition == MinecraftEdition.JAVA_EDITION : "Only Java Edition supports region file format";
+        try {
+            NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid chunk region", exception);
+        }
 
         var buffers = new ByteBuffer[ChunkUtils.CHUNKS_PRE_REGION];
 
@@ -137,12 +171,14 @@ public final class NBTOutput {
             int bytesRawContent = buffer.remaining();
             long bytesContent = bytesRawContent + 1;
             long bytes = bytesContent + 4;
-            long bytesSkip = header.getSectorLengthBytes(i) - bytes;
+            boolean external = bytes > ChunkUtils.SECTOR_BYTES * 0xFF;
+            long actualBytes = external ? 5L : bytes;
+            long bytesSkip = header.getSectorLengthBytes(i) - actualBytes;
 
             assert bytesSkip >= 0 : "Sector length mismatch for chunk " + i + ": expected less than or equal to " + header.getSectorLengthBytes(i) + ", got " + bytes;
 
-            writer.writeInt((int) bytesContent);
-            if (bytes <= ChunkUtils.SECTOR_BYTES * 0xFF) {
+            writer.writeInt(external ? 1 : (int) bytesContent);
+            if (!external) {
                 writer.writeByte((byte) 2); // Zlib
                 writer.writeByteBufferDirect(buffer);
             } else {
@@ -155,18 +191,22 @@ public final class NBTOutput {
                     if (outputStream == null) {
                         throw new IOException("Failed to open external chunk file for chunk (%d, %d)".formatted(ChunkUtils.getLocalX(i), ChunkUtils.getLocalZ(i)));
                     }
-                    outputStream.write(new byte[5]);
                     outputStream.write(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.limit());
                 }
             }
 
-            assert writer.position() - startPosition == sectorOffsetBytes + bytes : "Chunk content position mismatch for chunk " + i + ": expected " + (sectorOffsetBytes + bytes) + ", got " + (writer.position() - startPosition);
+            assert writer.position() - startPosition == sectorOffsetBytes + actualBytes : "Chunk content position mismatch for chunk " + i + ": expected " + (sectorOffsetBytes + actualBytes) + ", got " + (writer.position() - startPosition);
 
             writer.skip(bytesSkip);
         }
     }
 
     public static void writeRegion(SeekableByteChannel channel, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
+        try {
+            NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid chunk region", exception);
+        }
         long startPosition = channel.position();
 
         var header = new ChunkRegionHeader();
@@ -224,11 +264,11 @@ public final class NBTOutput {
                 chunkHeaderBuffer.clear();
                 channel.position(startPosition + sectorOffsetBytes);
 
-                chunkHeaderBuffer.putInt((int) bytesContent);
                 if (sectors <= 0xFF) {
                     actualSectors = sectors;
                     actualBytes = (int) bytes;
 
+                    chunkHeaderBuffer.putInt((int) bytesContent);
                     chunkHeaderBuffer.put((byte) 2); // Zlib
                     header.setSectorInfo(i, currentSector, sectors);
 
@@ -240,6 +280,7 @@ public final class NBTOutput {
                     actualSectors = 1;
                     actualBytes = 5;
 
+                    chunkHeaderBuffer.putInt(1);
                     chunkHeaderBuffer.put((byte) (2 + 128)); // Zlib + External
                     header.setSectorInfo(i, currentSector, 1);
 
@@ -250,7 +291,6 @@ public final class NBTOutput {
                         if (outputStream == null) {
                             throw new IOException("Failed to open external chunk file for chunk (%d, %d)".formatted(ChunkUtils.getLocalX(i), ChunkUtils.getLocalZ(i)));
                         }
-                        outputStream.write(new byte[5]);
                         outputStream.write(tempOutputStream.getBuffer(), 0, bytesRawContent);
                     }
                 }

@@ -1,0 +1,390 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+
+import javax.swing.JCheckBox;
+import javax.swing.JComponent;
+import javax.swing.JList;
+import javax.swing.JLabel;
+import javax.swing.JTextArea;
+import javax.swing.ListSelectionModel;
+import java.awt.Component;
+import java.awt.Container;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.OptionalInt;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+/// Verifies the shader-pack panel's single-enable and multi-delete interaction surface.
+@NotNullByDefault
+final class ShaderPackCatalogPanelTest {
+    /// Verifies the list is multi-select only for deletion and has no batch enable controls.
+    @Test
+    void exposesSingleEnableAndBatchDeleteWithoutSorting() {
+        EdtDispatcher.executeAndWait(() -> {
+            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
+                    new FakeModel(true),
+                    new ShaderPackCatalogStrings(
+                            "Shader Packs",
+                            "Refresh",
+                            "Refreshing",
+                            "Refresh",
+                            "Retry",
+                            "Retry",
+                            "Details",
+                            "No selection",
+                            "File",
+                            "Path",
+                            "Enabled",
+                            "Enabled",
+                            "Disabled",
+                            "Invalid",
+                            "Backends",
+                            "No backend"),
+                    new ShaderPackCatalogStatusStrings(
+                            "Idle",
+                            "Loading",
+                            "Ready",
+                            "Empty",
+                            "Failed",
+                            "Writing",
+                            "Write failed"),
+                    new ShaderPackCatalogActionStrings(
+                            "Import",
+                            "Import",
+                            "Import",
+                            "ZIP",
+                            "Enable",
+                            "Enable",
+                            "Disable",
+                            "Disable",
+                            "Delete",
+                            "Delete",
+                            "Delete %s?",
+                            "Delete %s items?",
+                            "Reveal",
+                            "Reveal",
+                            "Open",
+                            "Open",
+                            "Operation failed",
+                            "Reveal failed",
+                            "Open failed",
+                            "Backend",
+                            "Choose backends"),
+                    new FakeInteractions(),
+                    Path.of("shaderpacks"));
+            try {
+                JList<?> list = findNamed(panel, "shaderPacksList", JList.class);
+                assertNotNull(list);
+                assertEquals(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION, list.getSelectionMode());
+                assertNotNull(findNamed(panel, "shaderPacksEnabledToggle", JCheckBox.class));
+                assertNull(findNamed(panel, "shaderPacksEnableSelected", JComponent.class));
+                assertNull(findNamed(panel, "shaderPacksDisableSelected", JComponent.class));
+                assertNull(findNamed(panel, "shaderPacksSort", JComponent.class));
+                assertInstanceOf(RichValueListCellRenderer.class, list.getCellRenderer());
+                assertInstanceOf(RowBoundsCheckedList.class, list);
+                list.setFixedCellHeight(68);
+                list.setSize(520, 220);
+                list.setSelectedIndex(0);
+                java.awt.Rectangle lastRow = java.util.Objects.requireNonNull(list.getCellBounds(0, 0));
+                java.awt.Point blank = new java.awt.Point(
+                        lastRow.x + 8, lastRow.y + lastRow.height + 20);
+                dispatchPrimaryClick(list, blank);
+                assertEquals(-1, list.getSelectedIndex(),
+                        "Shader-pack blank click clears the selected row");
+                assertEquals("No selection", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksEnabled", JTextArea.class).getText());
+
+                assertEquals(-1, list.locationToIndex(blank));
+                assertEquals("", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksFileName", JTextArea.class).getText());
+                assertFalse(CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksEnabledToggle", JCheckBox.class).isEnabled());
+                dispatchPrimaryClick(list, blank);
+                assertEquals(-1, list.getSelectedIndex());
+                dispatchPrimaryClick(list, new java.awt.Point(lastRow.x + 20, lastRow.y + 20));
+                assertEquals(0, list.getSelectedIndex(), "A real row click still selects the shader pack");
+                assertEquals("Shader Packs", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksPageTitle", JLabel.class).getText());
+                assertEquals("Local shader description", CatalogLayoutAssertions.requireNamed(
+                        panel, "shaderPacksDescription", JTextArea.class).getText());
+                assertNull(findNamed(panel, "shaderPacksIcon", JLabel.class));
+                @SuppressWarnings("unchecked")
+                JList<ShaderPackCatalogItem> rows = (JList<ShaderPackCatalogItem>) list;
+                Component row = rows.getCellRenderer().getListCellRendererComponent(
+                        rows, rows.getModel().getElementAt(0), 0, false, false);
+                assertNull(findNamed((Container) row, "richChoiceListIcon", JLabel.class));
+                JComponent labels = CatalogLayoutAssertions.requireNamed((Container) row,
+                        "richChoiceListLabels", JComponent.class);
+                org.junit.jupiter.api.Assertions.assertTrue(labels.getX() < 40,
+                        "An icon-free shader row must not reserve the old icon square");
+                for (int width : new int[] {1000, 720, 520}) {
+                    CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "shaderPacks", width, 460);
+                }
+                CatalogLayoutAssertions.assertHorizontalWorkspace(panel, "shaderPacks", 1000, 600);
+                try {
+                    CatalogLayoutAssertions.writePreview(panel, "shader-pack-management.png");
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                }
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Dispatches a primary click through the real row-bounds list implementation.
+    ///
+    /// @param list target shader-pack list
+    /// @param point list-coordinate click point
+    private static void dispatchPrimaryClick(
+            javax.swing.JList<?> list,
+            java.awt.Point point) {
+        long when = System.currentTimeMillis();
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_PRESSED, when, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
+        list.dispatchEvent(new java.awt.event.MouseEvent(
+                list, java.awt.event.MouseEvent.MOUSE_RELEASED, when + 1L, 0,
+                point.x, point.y, 1, false, java.awt.event.MouseEvent.BUTTON1));
+    }
+
+    /// Verifies invalid packs cannot be activated from the panel.
+    @Test
+    void disablesEnableForInvalidPack() {
+        EdtDispatcher.executeAndWait(() -> {
+            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
+                    new FakeModel(false),
+                    new ShaderPackCatalogStrings(
+                            "Shader Packs", "Refresh", "Refreshing", "Refresh", "Retry", "Retry",
+                            "Details", "No selection", "File", "Path", "Enabled", "Enabled", "Disabled",
+                            "Invalid", "Backends", "No backend"),
+                    new ShaderPackCatalogStatusStrings(
+                            "Idle", "Loading", "Ready", "Empty", "Failed", "Writing", "Write failed"),
+                    new ShaderPackCatalogActionStrings(
+                            "Import", "Import", "Import", "ZIP", "Enable", "Enable", "Disable", "Disable",
+                            "Delete", "Delete", "Delete %s?", "Delete %s items?", "Reveal", "Reveal",
+                            "Open", "Open", "Operation failed", "Reveal failed", "Open failed",
+                            "Backend", "Choose backends"),
+                    new FakeInteractions(),
+                    Path.of("shaderpacks"));
+            try {
+                JList<?> list = findNamed(panel, "shaderPacksList", JList.class);
+                assertNotNull(list);
+                list.setSelectedIndex(0);
+                JCheckBox toggle = findNamed(panel, "shaderPacksEnabledToggle", JCheckBox.class);
+                assertNotNull(toggle);
+                assertFalse(toggle.isEnabled());
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Finds one named descendant.
+    ///
+    /// @param root component root
+    /// @param name stable component name
+    /// @param type required component type
+    /// @param <T> component type
+    /// @return matching component, or null
+    private static <T extends JComponent> @Nullable T findNamed(
+            Container root,
+            String name,
+            Class<T> type) {
+        for (Component component : root.getComponents()) {
+            if (type.isInstance(component) && name.equals(component.getName())) {
+                return type.cast(component);
+            }
+            if (component instanceof Container child) {
+                @Nullable T nested = findNamed(child, name, type);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Minimal ready model for panel construction tests.
+    @NotNullByDefault
+    private static final class FakeModel implements ShaderPackCatalogModel {
+        /// Whether the fixture pack is valid.
+        private final boolean valid;
+
+        /// Snapshot returned by the fixture.
+        private final ShaderPackCatalogSnapshot snapshot;
+
+        /// Creates one fixture with the requested validity.
+        ///
+        /// @param valid requested validity
+        private FakeModel(boolean valid) {
+            this.valid = valid;
+            snapshot = new ShaderPackCatalogSnapshot(
+                    OptionalInt.empty(),
+                    1,
+                    1L,
+                    ShaderPackCatalogStatus.READY,
+                    "Ready",
+                    ShaderPackCatalogWriteStatus.IDLE,
+                    "",
+                    List.of(new ShaderPackCatalogItem(
+                            Path.of("A").toAbsolutePath().normalize(),
+                            "A",
+                            "A",
+                            valid,
+                            Set.of(ShaderPackBackend.IRIS_OCULUS),
+                            "Local shader description")),
+                    Set.of(ShaderPackBackend.IRIS_OCULUS));
+        }
+
+        /// Returns the fixture snapshot.
+        @Override
+        public ShaderPackCatalogSnapshot snapshot() {
+            return snapshot;
+        }
+
+        /// Returns a no-op registration.
+        @Override
+        public Subscription subscribe(ValueChangeListener<ShaderPackCatalogSnapshot> listener) {
+            return Subscription.create(() -> { });
+        }
+
+        /// Ignores lazy loading.
+        @Override
+        public void loadIfNeeded() {
+        }
+
+        /// Ignores refresh.
+        @Override
+        public void refresh() {
+        }
+
+        /// Ignores selection.
+        @Override
+        public void selectShaderPack(Path path) {
+        }
+
+        /// Ignores selection clearing.
+        @Override
+        public void clearSelection() {
+        }
+
+        /// Returns the current snapshot after an import.
+        @Override
+        public CompletionStage<ShaderPackCatalogSnapshot> importShaderPacks(List<Path> sources) {
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Returns the current snapshot after an enable change.
+        @Override
+        public CompletionStage<ShaderPackCatalogSnapshot> setShaderPackEnabled(
+                Path path,
+                Set<ShaderPackBackend> backends,
+                boolean enabled) {
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Returns the current snapshot after a deletion.
+        @Override
+        public CompletionStage<ShaderPackCatalogSnapshot> deleteShaderPack(Path path, DeletionMode mode) {
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Returns the current snapshot after a batch deletion.
+        @Override
+        public CompletionStage<ShaderPackCatalogSnapshot> deleteShaderPacks(
+                List<Path> paths,
+                DeletionMode mode) {
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Ignores close.
+        @Override
+        public void close() {
+        }
+    }
+
+    /// Minimal interaction boundary for panel construction tests.
+    @NotNullByDefault
+    private static final class FakeInteractions implements ShaderPackCatalogInteractions {
+        /// Returns no selected sources.
+        @Override
+        public List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
+            return List.of();
+        }
+
+        /// Returns permanent deletion.
+        @Override
+        public DeletionMode chooseDeleteMode(Component owner, ShaderPackCatalogItem target) {
+            return DeletionMode.PERMANENT;
+        }
+
+        /// Returns permanent deletion.
+        @Override
+        public DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+            return DeletionMode.PERMANENT;
+        }
+
+        /// Returns the sole backend.
+        @Override
+        public Set<ShaderPackBackend> chooseBackends(
+                Component owner,
+                Set<ShaderPackBackend> availableBackends) {
+            return availableBackends;
+        }
+
+        /// Returns a completed reveal.
+        @Override
+        public CompletionStage<@Nullable Void> reveal(ShaderPackCatalogItem target) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Returns a completed open.
+        @Override
+        public CompletionStage<@Nullable Void> openDirectory(Path directory) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Ignores failure display.
+        @Override
+        public void showFailure(Component owner, String title, String detail) {
+        }
+    }
+}

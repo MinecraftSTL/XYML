@@ -77,6 +77,7 @@ public final class InstancePresentationTest {
         assertAll(
                 () -> assertVersionIcon("20w14infinite", GameInstanceIconType.APRIL_FOOLS),
                 () -> assertVersionIcon("13w24a", GameInstanceIconType.COMMAND),
+                () -> assertVersionIcon("26.1-snapshot-1", GameInstanceIconType.COMMAND),
                 () -> assertVersionIcon("b1.1-1", GameInstanceIconType.CRAFT_TABLE),
                 () -> assertVersionIcon("1.21.1", GameInstanceIconType.GRASS));
 

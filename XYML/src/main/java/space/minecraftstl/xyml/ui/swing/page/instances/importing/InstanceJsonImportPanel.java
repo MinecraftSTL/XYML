@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -93,6 +94,15 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
     /// Whether this panel has permanently released its task resources.
     private boolean closed;
 
+    /// Whether the active task has been handed to global task management.
+    private boolean handedOff;
+
+    /// Shared confirmed-task submission and navigation controller.
+    private final TaskLaunchController taskLaunchController;
+
+    /// Command dismissing the hosting confirmation surface after successful submission.
+    private final Runnable submittedDismissAction;
+
     /// Creates an empty reusable import panel on the Swing event-dispatch thread.
     ///
     /// @param service deferred import service
@@ -106,6 +116,25 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                service,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new TaskLaunchController(() -> { }),
+                () -> { });
+    }
+
+    /// Creates an import panel with explicit task navigation and dismissal ownership.
+    public InstanceJsonImportPanel(
+            InstanceJsonImportService service,
+            InstanceJsonImportStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController,
+            Runnable submittedDismissAction) {
         super(new MigLayout(
                 "insets 20 24 24 24, fill, wrap 2",
                 "[][grow,fill]",
@@ -113,6 +142,8 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         EdtDispatcher.requireEventDispatchThread();
         this.service = Objects.requireNonNull(service, "service");
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
+        this.submittedDismissAction = Objects.requireNonNull(submittedDismissAction, "submittedDismissAction");
         progressHost = new TaskProgressHostPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
@@ -141,7 +172,6 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         add(statusLabel, "growx");
 
         progressHost.setName("instanceJsonProgress");
-        add(progressHost, "span 2, grow");
         updateImportEligibility();
     }
 
@@ -209,10 +239,14 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         activeCompletionSubscription = completionSubscription;
         setInputsEnabled(false);
         setStatus(strings.importingStatus());
+        handedOff = true;
         try {
-            progressHost.bind(presentation);
-            executor.start();
+            taskLaunchController.launch(
+                    executor,
+                    strings.importingStatus(),
+                    submittedDismissAction);
         } catch (RuntimeException | Error startFailure) {
+            handedOff = false;
             LOG.warning("Failed to start instance JSON import", startFailure);
             cleanupFailedStart(presentation, completionSubscription);
             setInputsEnabled(true);
@@ -338,7 +372,7 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         closed = true;
         @Nullable TaskExecutor executor = activeExecutor;
         activeExecutor = null;
-        if (executor != null) {
+        if (executor != null && !handedOff) {
             try {
                 executor.cancel();
             } catch (RuntimeException cancellationFailure) {

@@ -247,22 +247,82 @@ public final class SwingAccountCreationCoordinatorTest {
         coordinator.close();
     }
 
-    /// Invalid-name recognition and typed acknowledgement preserve Unicode behavior.
+    /// Invalid-name recognition separates prompt display from normalized matching.
     @Test
     public void validatesOfflineNamesAndConfirmationText() {
-        String expected = SwingAccountCreationDialog.replacePunctuationWithSpaces(
+        String displayedExpected = SwingAccountCreationDialog.replacePunctuationWithSpaces(
                 "I know, and confirm!");
+        String expected = "I know and confirm";
 
         assertAll(
                 () -> assertFalse(SwingAccountCreationCoordinator.isInvalidOfflineUsername("Alex_123")),
                 () -> assertTrue(SwingAccountCreationCoordinator.isInvalidOfflineUsername("invalid name")),
                 () -> assertTrue(SwingAccountCreationCoordinator.isInvalidOfflineUsername("abcdefghijklmnopq")),
-                () -> assertEquals("I know  and confirm ", expected),
+                () -> assertEquals("I know  and confirm ", displayedExpected),
                 () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
                         "Iknowandconfirm",
                         expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "iKNOWandCONFIRM",
+                        expected)),
                 () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
                         "Iknow",
+                        expected)));
+    }
+
+    /// Confirmation matching follows the documented punctuation and boundary normalization order.
+    @Test
+    public void normalizesConfirmationPunctuationAndBoundaryQuotes() {
+        String expected = "I know and confirm";
+
+        assertAll(
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "I,know.and confirm",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        expected,
+                        "I,know.and confirm")),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "I\uFF0Cknow\u3002and confirm",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "\"I know and confirm",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "I know and confirm\"",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "\"I know and confirm\"",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        expected,
+                        "\"I know and confirm")),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "\"\"I know and confirm",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "I know and confirm\"\"",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "I \"know\" and confirm",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "\u201CI know and confirm\u201D",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        " \"I know and confirm\" ",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "I know and confirm\".",
+                        expected)),
+                () -> assertTrue(SwingAccountCreationDialog.matchesConfirmation(
+                        "I know and confirm.\"",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "I know and confirm!",
+                        expected)),
+                () -> assertFalse(SwingAccountCreationDialog.matchesConfirmation(
+                        "'I know and confirm'",
                         expected)));
     }
 
@@ -425,6 +485,7 @@ public final class SwingAccountCreationCoordinatorTest {
             return List.of(new AuthlibServerOption(
                     "https://example.test/",
                     "Example",
+                    "example.test/",
                     true));
         }
 

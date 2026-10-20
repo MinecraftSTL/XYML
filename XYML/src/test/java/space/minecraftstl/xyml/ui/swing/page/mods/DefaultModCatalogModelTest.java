@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.SwingUtilities;
 import java.nio.file.Path;
@@ -153,13 +154,16 @@ public final class DefaultModCatalogModelTest {
         assertEquals(List.of("mod-0", "mod-2"), enabledBatch.localKeys());
         assertFalse(enabledBatch.enabled());
 
-        CompletionStage<ModCatalogSnapshot> deleted = model.deleteMods(List.of("mod-1", "mod-3"));
+        CompletionStage<ModCatalogSnapshot> deleted = model.deleteMods(
+                List.of("mod-1", "mod-3"),
+                DeletionMode.RECYCLE_BIN_FIRST);
         executor.runNext();
         assertEquals(2, deleted.toCompletableFuture().join().itemCount().orElseThrow());
         ModCatalogMutation.DeleteBatch deleteBatch = assertInstanceOf(
                 ModCatalogMutation.DeleteBatch.class,
                 access.mutations().get(1));
         assertEquals(List.of("mod-1", "mod-3"), deleteBatch.localKeys());
+        assertEquals(DeletionMode.RECYCLE_BIN_FIRST, deleteBatch.mode());
         assertEquals(List.of("mod-0", "mod-2"), model.filteredLocalKeys());
         assertEquals(2, access.mutations().size());
         model.close();

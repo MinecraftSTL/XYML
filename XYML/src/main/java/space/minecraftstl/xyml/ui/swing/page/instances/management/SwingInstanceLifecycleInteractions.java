@@ -23,6 +23,10 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
@@ -38,14 +42,43 @@ import java.util.Objects;
 /// deliberately places the copy-worlds toggle in the same native confirmation surface as its target ID.
 @NotNullByDefault
 final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Localized text shared with the lifecycle panel.
     private final InstanceLifecycleStrings strings;
+
+    /// Platform recycle-bin capability and movement boundary.
+    private final TrashOperations trashOperations;
 
     /// Creates native interactions using one immutable visible text bundle.
     ///
     /// @param strings visible current-locale strings
     SwingInstanceLifecycleInteractions(InstanceLifecycleStrings strings) {
+        this(strings, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates native interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings visible current-locale strings
+    /// @param trashOperations recycle-bin implementation
+    SwingInstanceLifecycleInteractions(
+            InstanceLifecycleStrings strings,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Shows a native single-field prompt for a rename destination.
@@ -103,14 +136,39 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
         return new InstanceLifecycleDuplicateRequest(destinationField.getText(), copySaves.isSelected());
     }
 
-    /// Shows a native warning confirmation before an irreversible instance deletion.
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    ///
+    /// @param owner native dialog owner
+    /// @param sourceId current instance identifier
+    /// @return selected deletion mode, or null after cancellation
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, GameInstanceID sourceId) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(sourceId, "sourceId");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDeletionWarning(owner, sourceId) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the same original warning after a recycle-bin movement failed.
+    ///
+    /// @param owner native dialog owner
+    /// @param sourceId current instance identifier
+    /// @return whether permanent deletion was approved
+    @Override
+    public boolean confirmPermanentFallback(Component owner, GameInstanceID sourceId) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDeletionWarning(owner, sourceId);
+    }
+
+    /// Displays the original irreversible-deletion warning.
     ///
     /// @param owner native dialog owner
     /// @param sourceId current instance identifier
     /// @return whether deletion was approved
-    @Override
-    public boolean confirmDelete(Component owner, GameInstanceID sourceId) {
-        EdtDispatcher.requireEventDispatchThread();
+    private boolean confirmDeletionWarning(Component owner, GameInstanceID sourceId) {
         String source = Objects.requireNonNull(sourceId, "sourceId").id();
         return JOptionPane.showConfirmDialog(
                 Objects.requireNonNull(owner, "owner"),

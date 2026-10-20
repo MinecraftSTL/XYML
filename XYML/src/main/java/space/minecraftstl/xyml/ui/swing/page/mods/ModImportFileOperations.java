@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -137,9 +138,37 @@ final class ModImportFileOperations {
         }
 
         Files.createDirectories(normalizedDirectory);
-        for (PlannedImport plannedImport : plan) {
-            requireNotCancelled(cancellation);
-            apply(plannedImport);
+        Path stagingDirectory = Files.createTempDirectory(
+                normalizedDirectory,
+                ".xyml-mod-import-");
+        @Nullable Throwable failure = null;
+        try {
+            @Unmodifiable List<StagedImport> stagedImports = stage(
+                    plan, stagingDirectory, cancellation);
+            for (StagedImport stagedImport : stagedImports) {
+                requireNotCancelled(cancellation);
+                publish(stagedImport);
+            }
+            for (PlannedImport plannedImport : plan) {
+                deleteReplacedPaths(plannedImport);
+            }
+        } catch (IOException | RuntimeException | Error thrown) {
+            failure = thrown;
+        } finally {
+            try {
+                if (Files.exists(stagingDirectory)) {
+                    FileUtils.deleteDirectory(stagingDirectory);
+                }
+            } catch (IOException | RuntimeException | Error cleanupFailure) {
+                if (failure == null) {
+                    failure = cleanupFailure;
+                } else if (failure != cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
+        if (failure != null) {
+            rethrowFailure(failure);
         }
     }
 
@@ -281,30 +310,89 @@ final class ModImportFileOperations {
         }
     }
 
-    /// Copies one planned source and removes superseded same-key paths only after the new file exists.
+    /// Copies every planned source into one private staging directory before any target changes.
     ///
-    /// @param plannedImport immutable planned import
-    /// @throws IOException when copying or cleanup fails
-    private static void apply(PlannedImport plannedImport) throws IOException {
+    /// @param plan ordered immutable import plan
+    /// @param stagingDirectory private same-filesystem staging directory
+    /// @param cancellation cooperative cancellation checked before each source copy
+    /// @return immutable staged import plan in original order
+    /// @throws IOException when a staged copy fails
+    private static @Unmodifiable List<StagedImport> stage(
+            @Unmodifiable List<PlannedImport> plan,
+            Path stagingDirectory,
+            LoadCancellation cancellation) throws IOException {
+        List<StagedImport> staged = new ArrayList<>(plan.size());
+        for (PlannedImport plannedImport : plan) {
+            requireNotCancelled(cancellation);
+            Path stagedPath = Files.createTempFile(stagingDirectory, ".publish-", ".tmp");
+            Files.copy(
+                    plannedImport.source(),
+                    stagedPath,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
+            staged.add(new StagedImport(plannedImport, stagedPath));
+        }
+        return List.copyOf(staged);
+    }
+
+    /// Publishes one fully staged file without exposing a partially copied target.
+    ///
+    /// @param stagedImport exact staged import
+    /// @throws IOException when publishing fails
+    private static void publish(StagedImport stagedImport) throws IOException {
+        PlannedImport plannedImport = stagedImport.plannedImport();
         if (plannedImport.replace()) {
-            if (!sameFile(plannedImport.source(), plannedImport.target())) {
-                FileUtils.copyFile(plannedImport.source(), plannedImport.target());
-            }
-            for (Path replacedPath : plannedImport.replacedPaths()) {
-                if (!sameFile(replacedPath, plannedImport.target())) {
-                    Files.deleteIfExists(replacedPath);
-                }
+            try {
+                Files.move(
+                        stagedImport.stagedPath(),
+                        plannedImport.target(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(
+                        stagedImport.stagedPath(),
+                        plannedImport.target(),
+                        StandardCopyOption.REPLACE_EXISTING);
             }
             return;
         }
         try {
-            Files.copy(
-                    plannedImport.source(),
-                    plannedImport.target(),
-                    StandardCopyOption.COPY_ATTRIBUTES);
+            Files.move(stagedImport.stagedPath(), plannedImport.target());
         } catch (FileAlreadyExistsException conflict) {
             throw new ModImportConflictException(plannedImport.source());
         }
+    }
+
+    /// Removes superseded same-key paths only after every new target was published.
+    ///
+    /// @param plannedImport immutable planned import
+    /// @throws IOException when a superseded path cannot be removed
+    private static void deleteReplacedPaths(PlannedImport plannedImport) throws IOException {
+        if (!plannedImport.replace()) {
+            return;
+        }
+        for (Path replacedPath : plannedImport.replacedPaths()) {
+            if (!sameFile(replacedPath, plannedImport.target())) {
+                Files.deleteIfExists(replacedPath);
+            }
+        }
+    }
+
+    /// Rethrows one staged-import failure without losing its original category.
+    ///
+    /// @param failure original cleanup or publish failure
+    /// @throws IOException when the failure is a checked I/O failure
+    private static void rethrowFailure(Throwable failure) throws IOException {
+        if (failure instanceof IOException ioFailure) {
+            throw ioFailure;
+        }
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new IOException("Unexpected Mod import failure", failure);
     }
 
     /// Compares normalized paths and existing file identities without requiring both paths to exist.
@@ -338,6 +426,23 @@ final class ModImportFileOperations {
     private static void requireNotCancelled(LoadCancellation cancellation) {
         if (cancellation.isCancelled()) {
             throw new CancellationException("Mod import was cancelled");
+        }
+    }
+
+    /// Fully staged import paired with its immutable publish plan.
+    ///
+    /// @param plannedImport immutable planned import
+    /// @param stagedPath private staged file copied before publication
+    @NotNullByDefault
+    private record StagedImport(
+            PlannedImport plannedImport,
+            Path stagedPath) {
+        /// Captures a non-null plan and normalized staged path.
+        private StagedImport {
+            plannedImport = Objects.requireNonNull(plannedImport, "plannedImport");
+            stagedPath = Objects.requireNonNull(stagedPath, "stagedPath")
+                    .toAbsolutePath()
+                    .normalize();
         }
     }
 

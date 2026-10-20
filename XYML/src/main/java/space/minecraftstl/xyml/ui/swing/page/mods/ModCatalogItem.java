@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 
 import java.nio.file.Path;
@@ -38,6 +39,7 @@ import java.util.Objects;
 /// @param gameVersion parsed target game version
 /// @param loaderType detected Mod loader
 /// @param fileName exact current disk file name
+/// @param logoBase64 immutable encoded archive logo, or `null` when unavailable
 /// @param enabled whether the current path lacks the disabled suffix
 @NotNullByDefault
 public record ModCatalogItem(
@@ -51,6 +53,7 @@ public record ModCatalogItem(
         String gameVersion,
         ModLoaderType loaderType,
         String fileName,
+        @Nullable String logoBase64,
         boolean enabled) {
     /// Normalizes stable values and rejects blank identity fields.
     public ModCatalogItem {
@@ -64,12 +67,55 @@ public record ModCatalogItem(
         gameVersion = Objects.requireNonNull(gameVersion, "gameVersion");
         Objects.requireNonNull(loaderType, "loaderType");
         fileName = Objects.requireNonNull(fileName, "fileName");
+        if (logoBase64 != null && logoBase64.isBlank()) {
+            logoBase64 = null;
+        }
         if (localKey.isBlank()) {
             throw new IllegalArgumentException("localKey must not be blank");
         }
         if (fileName.isBlank()) {
             throw new IllegalArgumentException("fileName must not be blank");
         }
+    }
+
+    /// Creates a row without an embedded logo for compatibility with synthetic catalog sources.
+    ///
+    /// @param localKey stable local add-on key
+    /// @param path normalized absolute current file path
+    /// @param modId logical Mod identifier
+    /// @param name parsed human-readable Mod name
+    /// @param description parsed plain-text description
+    /// @param authors parsed author display text
+    /// @param version parsed Mod version
+    /// @param gameVersion parsed target game version
+    /// @param loaderType detected Mod loader
+    /// @param fileName exact current disk file name
+    /// @param enabled whether the current path lacks the disabled suffix
+    public ModCatalogItem(
+            String localKey,
+            Path path,
+            String modId,
+            String name,
+            String description,
+            String authors,
+            String version,
+            String gameVersion,
+            ModLoaderType loaderType,
+            String fileName,
+            boolean enabled) {
+        this(
+                localKey,
+                path,
+                modId,
+                name,
+                description,
+                authors,
+                version,
+                gameVersion,
+                loaderType,
+                fileName,
+                null,
+                enabled);
     }
 
     /// Returns the non-blank primary row label.

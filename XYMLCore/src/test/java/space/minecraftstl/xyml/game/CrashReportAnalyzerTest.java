@@ -29,6 +29,42 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class CrashReportAnalyzerTest {
+    /// Uses the latest report marker and excludes a Windows line terminator from its path.
+    @Test
+    public void findCrashReportUsesLatestLocation() throws IOException {
+        String log = "#@!@# Game crashed! Crash report saved to: #@!@# stale.txt\r\n"
+                + "#@!@# Game crashed! Crash report saved to: #@!@# latest.txt\r\n";
+
+        assertEquals("latest.txt", CrashReportAnalyzer.findCrashReport(log, Object::toString));
+    }
+
+    /// Keeps the latest complete embedded report when a later report header has not completed yet.
+    @Test
+    public void extractCrashReportIgnoresTrailingIncompleteHeader() {
+        String completeReport = "---- Minecraft Crash Report ----\ncomplete report\n";
+        String rawLog = completeReport
+                + "#@!@# Game crashed! Crash report saved to: #@!@# crash.txt\n"
+                + "---- Minecraft Crash Report ----\nincomplete report\n";
+
+        assertEquals(completeReport, CrashReportAnalyzer.extractCrashReport(rawLog));
+    }
+
+    /// Ensures mutating one compatibility matcher cannot alter the retained crash snapshot.
+    @Test
+    public void resultMatcherIsRecreatedFromImmutableSnapshot() {
+        CrashReportAnalyzer.Result result = CrashReportAnalyzer.analyze(
+                "Could not reserve enough space for 1048576KB object heap")
+                .stream()
+                .filter(candidate -> candidate.rule() == CrashReportAnalyzer.Rule.JVM_32BIT)
+                .findFirst()
+                .orElseThrow();
+
+        assertFalse(result.matcher().group().isEmpty());
+        assertFalse(result.matcher().find());
+        assertEquals("JVM_32BIT", result.rule().name());
+        assertEquals("Could not reserve enough space for 1048576KB object heap", result.matcher().group());
+    }
+
     private String loadLog(String path) throws IOException {
         List<Pair<String, Log4jLevel>> logs = new ArrayList<>();
         InputStream is = CrashReportAnalyzerTest.class.getResourceAsStream(path);
@@ -346,6 +382,9 @@ public class CrashReportAnalyzerTest {
         CrashReportAnalyzer.Result result = findResultByRule(
                 CrashReportAnalyzer.analyze(loadLog("/logs/out_of_memory.txt")),
                 CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
+        findResultByRule(
+                CrashReportAnalyzer.analyze(loadLog("/logs/out_of_memory.txt")),
+                CrashReportAnalyzer.Rule.MEMORY_EXCEEDED);
     }
 
     @Test

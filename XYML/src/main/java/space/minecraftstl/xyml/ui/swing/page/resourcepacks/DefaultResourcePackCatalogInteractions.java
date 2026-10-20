@@ -23,6 +23,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -50,6 +54,21 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// thread. The implementation performs no network access and has no JavaFX dependency.
 @NotNullByDefault
 public final class DefaultResourcePackCatalogInteractions implements ResourcePackCatalogInteractions {
+    /// Shows one retryable failure through the shared Swing Retry/Cancel dialog.
+    ///
+    /// @param owner dialog owner
+    /// @param title concise title
+    /// @param detail actionable detail
+    /// @param retryAction captured operation to replay
+    @Override
+    public void showRetryableFailure(
+            Component owner,
+            String title,
+            String detail,
+            Runnable retryAction) {
+        SwingFailureRetryDialog.show(owner, title, detail, retryAction);
+    }
+
     /// Localized action presentation.
     private final ResourcePackCatalogActionStrings strings;
 
@@ -65,6 +84,9 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
     /// Injectable NIO file-system boundary.
     private final ResourcePackFileActions fileActions;
 
+    /// Platform recycle-bin capability and movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates production interactions with explicit localized text and background executor.
     ///
     /// @param strings localized action presentation
@@ -77,7 +99,8 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
                 executor,
                 new SwingResourcePackDialogActions(),
                 new AwtResourcePackDesktopActions(),
-                new NioResourcePackFileActions());
+                new NioResourcePackFileActions(),
+                SystemTrashOperations.INSTANCE);
     }
 
     /// Creates interactions with deterministic dialog, desktop, and file-system boundaries.
@@ -93,11 +116,36 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
             ResourcePackDialogActions dialogActions,
             ResourcePackDesktopActions desktopActions,
             ResourcePackFileActions fileActions) {
+        this(
+                strings,
+                executor,
+                dialogActions,
+                desktopActions,
+                fileActions,
+                SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with deterministic dialog, desktop, file-system, and recycle-bin boundaries.
+    ///
+    /// @param strings localized action presentation
+    /// @param executor caller-owned executor that must execute work outside the EDT
+    /// @param dialogActions dialog boundary
+    /// @param desktopActions desktop boundary
+    /// @param fileActions file-system boundary
+    /// @param trashOperations recycle-bin implementation
+    DefaultResourcePackCatalogInteractions(
+            ResourcePackCatalogActionStrings strings,
+            Executor executor,
+            ResourcePackDialogActions dialogActions,
+            ResourcePackDesktopActions desktopActions,
+            ResourcePackFileActions fileActions,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.dialogActions = Objects.requireNonNull(dialogActions, "dialogActions");
         this.desktopActions = Objects.requireNonNull(desktopActions, "desktopActions");
         this.fileActions = Objects.requireNonNull(fileActions, "fileActions");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Opens the configured multi-selection ZIP chooser on the event-dispatch thread.
@@ -158,25 +206,79 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
     @Override
     public boolean confirmDelete(Component owner, ResourcePackCatalogItem target) {
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(owner, "owner");
-        Objects.requireNonNull(target, "target");
-        String message = strings.deleteConfirmationFormat().formatted(target.fileName());
-        return dialogActions.showConfirmDialog(
-                owner,
-                message,
-                strings.deleteAction(),
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+        return confirmSingleDelete(owner, target);
     }
 
     /// Confirms permanently deleting one selected path batch.
     @Override
     public boolean confirmDeleteSelected(Component owner, int selectedCount) {
         EdtDispatcher.requireEventDispatchThread();
+        return confirmSelectedDelete(owner, selectedCount);
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, ResourcePackCatalogItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(target, "target");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmSingleDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Chooses recycle-bin-first batch deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(owner, "owner");
         requirePositiveSelectionCount(selectedCount);
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmSelectedDelete(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original single-target warning after a recycle-bin failure.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, ResourcePackCatalogItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmSingleDelete(owner, target);
+    }
+
+    /// Shows the original batch warning after a recycle-bin failure.
+    @Override
+    public boolean confirmPermanentFallbackSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmSelectedDelete(owner, selectedCount);
+    }
+
+    /// Shows one single-target permanent deletion warning.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact pack proposed for deletion
+    /// @return whether permanent deletion was approved
+    private boolean confirmSingleDelete(Component owner, ResourcePackCatalogItem target) {
+        String message = strings.deleteConfirmationFormat().formatted(
+                Objects.requireNonNull(target, "target").fileName());
         return dialogActions.showConfirmDialog(
-                owner,
+                Objects.requireNonNull(owner, "owner"),
+                message,
+                strings.deleteAction(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Shows one generic batch permanent deletion warning.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected path count
+    /// @return whether permanent batch deletion was approved
+    private boolean confirmSelectedDelete(Component owner, int selectedCount) {
+        requirePositiveSelectionCount(selectedCount);
+        return dialogActions.showConfirmDialog(
+                Objects.requireNonNull(owner, "owner"),
                 i18n("button.remove.confirm"),
                 i18n("button.remove"),
                 JOptionPane.YES_NO_OPTION,

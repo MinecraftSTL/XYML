@@ -16,15 +16,55 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
+import space.minecraftstl.xyml.library.nbt.io.ReadLimits;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
+/// Buffered primitive reader shared by bounded raw and decompressed NBT inputs.
+@NotNullByDefault
 public sealed abstract class DataReader implements Closeable
         permits BoundedDataReader, RawDataReader {
+    /// Default upper bound for one encoded NBT string.
+    private static final long MAX_STRING_BYTES = ReadLimits.defaults().maxStringBytes();
+
+    /// Default upper bound for one encoded NBT array.
+    private static final long MAX_ARRAY_BYTES = ReadLimits.defaults().maxArrayBytes();
+
+    /// Enters one logical tag while enforcing the region-wide node and nesting limits.
+    ///
+    /// @throws IOException if the node or depth budget is exhausted
+    public final void enterTag() throws IOException {
+        getRawReader().enterStructureTag();
+    }
+
+    /// Leaves the current logical tag after its payload has been parsed.
+    public final void leaveTag() {
+        getRawReader().leaveStructureTag();
+    }
+
+    /// Validates a list or primitive-array element count before allocation or iteration.
+    ///
+    /// @param length declared element count
+    /// @throws IOException if the count is negative or exceeds the configured limit
+    public final void requireCollectionLength(int length) throws IOException {
+        getRawReader().requireStructureCollectionLength(length);
+    }
+
+    /// Reserves a complete run of non-container list elements before any element is allocated.
+    ///
+    /// @param count number of leaf tags declared by the list
+    /// @throws IOException if the document node or depth budget would be exceeded
+    public final void reserveLeafTags(int count) throws IOException {
+        getRawReader().reserveStructureLeafTags(count);
+    }
+
     protected abstract RawDataReader getRawReader();
 
     protected abstract InputBuffer getBuffer();
@@ -35,7 +75,8 @@ public sealed abstract class DataReader implements Closeable
     public abstract void close() throws IOException;
 
     public byte[] readByteArray(int len) throws IOException {
-        if (len < 0 || len >= Integer.MAX_VALUE - 8) {
+        requireCollectionLength(len);
+        if ((long) len > MAX_ARRAY_BYTES || len >= Integer.MAX_VALUE - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -44,7 +85,9 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public int[] readIntArray(int len) throws IOException {
-        if (len < 0 || len > Integer.MAX_VALUE / Integer.BYTES - 8) {
+        requireCollectionLength(len);
+        if ((long) len * Integer.BYTES > MAX_ARRAY_BYTES
+                || len > Integer.MAX_VALUE / Integer.BYTES - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -53,7 +96,9 @@ public sealed abstract class DataReader implements Closeable
     }
 
     public long[] readLongArray(int len) throws IOException {
-        if (len < 0 || len > Integer.MAX_VALUE / Long.BYTES - 8) {
+        requireCollectionLength(len);
+        if ((long) len * Long.BYTES > MAX_ARRAY_BYTES
+                || len > Integer.MAX_VALUE / Long.BYTES - 8) {
             throw new IOException("Array length too large");
         }
 
@@ -76,6 +121,25 @@ public sealed abstract class DataReader implements Closeable
     public byte lookAheadByte() throws IOException {
         ensureBufferRemaining(Byte.BYTES);
         return getBuffer().lookAheadByte();
+    }
+
+    /// Looks ahead by the given number of bytes without consuming input.
+    ///
+    /// @param offset number of bytes after the current position
+    /// @return byte at the requested offset
+    /// @throws IOException if the input ends before the requested byte
+    public byte lookAheadByte(int offset) throws IOException {
+        if (offset < 0) {
+            throw new IllegalArgumentException("offset must be non-negative");
+        }
+        if (offset == Integer.MAX_VALUE) {
+            throw new IOException("Look-ahead offset is too large");
+        }
+        int required = offset + 1;
+        ensureBufferRemaining(required);
+        ByteBuffer buffer = getBuffer().getByteBuffer();
+        int position = buffer.position();
+        return buffer.get(position + offset);
     }
 
     /// Read a short from the input stream.
@@ -118,18 +182,30 @@ public sealed abstract class DataReader implements Closeable
         return getBuffer().getDouble();
     }
 
-    private String getUTF8(ByteBuffer buffer, int offset, int length) {
+    private String getUTF8(ByteBuffer buffer, int offset, int length) throws IOException {
         String cached = getRawReader().stringCache.get(buffer, offset, length);
         if (cached != null) {
             return cached;
         }
 
         if (buffer.hasArray() && !buffer.isReadOnly()) {
-            return new String(buffer.array(), offset + buffer.arrayOffset(), length, StandardCharsets.UTF_8);
+            return decodeUTF8(buffer.array(), offset + buffer.arrayOffset(), length);
         } else {
             byte[] bytes = new byte[length];
             buffer.get(offset, bytes);
-            return new String(bytes, StandardCharsets.UTF_8);
+            return decodeUTF8(bytes, 0, bytes.length);
+        }
+    }
+
+    private static String decodeUTF8(byte[] bytes, int offset, int length) throws IOException {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, offset, length))
+                    .toString();
+        } catch (CharacterCodingException exception) {
+            throw new IOException("Malformed UTF-8 string", exception);
         }
     }
 
@@ -140,6 +216,10 @@ public sealed abstract class DataReader implements Closeable
     public String readString() throws IOException {
         int len = readUnsignedShort();
 
+        if ((long) len > MAX_STRING_BYTES) {
+            throw new IOException("String payload exceeds the read limit");
+        }
+
         if (len == 0) {
             return "";
         }
@@ -148,7 +228,12 @@ public sealed abstract class DataReader implements Closeable
 
         ByteBuffer bytes = getBuffer().getByteBuffer();
         int offset = bytes.position();
-        int limit = offset + len;
+        final int limit;
+        try {
+            limit = Math.addExact(offset, len);
+        } catch (ArithmeticException overflow) {
+            throw new IOException("String boundary overflows the input buffer", overflow);
+        }
 
         bytes.position(limit);
 
@@ -196,18 +281,21 @@ public sealed abstract class DataReader implements Closeable
             c = (int) bytes.get(i) & 0xff;
             switch (c >> 4) {
                 case 0, 1, 2, 3, 4, 5, 6, 7 -> {
-                    /* 0xxxxxxx*/
                     i++;
                     charsBuffer.append((char) c);
                 }
                 case 12, 13 -> {
                     /* 110x xxxx   10xx xxxx*/
+                    if (i + 1 >= limit) {
+                        throw new IOException("Malformed modified UTF-8 string at byte " + i);
+                    }
                     i += 2;
                     if (i > limit)
-                        throw new IllegalArgumentException("malformed input: partial character at end");
+                        throw new IOException("Malformed modified UTF-8 string: partial character at end");
                     char2 = (int) bytes.get(i - 1) & 0xff;
-                    if ((char2 & 0xC0) != 0x80)
-                        throw new IllegalArgumentException("malformed input around byte " + (i - 1));
+                    if ((char2 & 0xC0) != 0x80 || c == 0xC0 && char2 != 0x80 || c == 0xC1) {
+                        throw new IOException("Malformed modified UTF-8 string around byte " + (i - 1));
+                    }
                     charsBuffer.append((char) (((c & 0x1F) << 6) |
                             (char2 & 0x3F)));
                 }
@@ -215,18 +303,20 @@ public sealed abstract class DataReader implements Closeable
                     /* 1110 xxxx  10xx xxxx  10xx xxxx */
                     i += 3;
                     if (i > limit)
-                        throw new IllegalArgumentException("malformed input: partial character at end");
-                    char2 = bytes.get(i - 2);
-                    char3 = bytes.get(i - 1);
-                    if (((char2 & 0xC0) != 0x80) || ((char3 & 0xC0) != 0x80))
-                        throw new IllegalArgumentException("malformed input around byte " + (i - 1));
+                        throw new IOException("Malformed modified UTF-8 string: partial character at end");
+                    char2 = bytes.get(i - 2) & 0xFF;
+                    char3 = bytes.get(i - 1) & 0xFF;
+                    if (((char2 & 0xC0) != 0x80) || ((char3 & 0xC0) != 0x80)
+                            || (c == 0xE0 && char2 < 0xA0)) {
+                        throw new IOException("Malformed modified UTF-8 string around byte " + (i - 1));
+                    }
                     charsBuffer.append((char) (((c & 0x0F) << 12) |
                             ((char2 & 0x3F) << 6) |
                             (char3 & 0x3F)));
                 }
                 default ->
                     /* 10xx xxxx,  1111 xxxx */
-                        throw new IllegalArgumentException("malformed input around byte " + i);
+                        throw new IOException("Malformed modified UTF-8 string around byte " + i);
             }
         }
         return charsBuffer.toString();

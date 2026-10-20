@@ -20,29 +20,31 @@ package space.minecraftstl.xyml.modpack.modrinth;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.*;
-
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
+import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as a Modrinth-compatible modpack archive.
@@ -50,17 +52,39 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class ModrinthModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
+
+    /// Stable exported instance identifier.
     private final GameInstanceID instanceId;
+
+    /// Validated export metadata.
     private final ModpackExportInfo info;
+
+    /// Effective instance run directory captured when the task is created.
+    private final Path runDirectory;
 
     /// Destination archive path.
     private final Path modpackFile;
 
-    public ModrinthModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, ModpackExportInfo info, Path modpackFile) {
-        this.repository = repository;
-        this.instanceId = instanceId;
-        this.info = info.validate();
-        this.modpackFile = modpackFile;
+    /// Creates a stopped Modrinth export task with stable source and destination paths.
+    ///
+    /// @param repository repository containing the exported instance
+    /// @param instanceId exported instance identifier
+    /// @param info export metadata and file selection
+    /// @param modpackFile destination archive
+    public ModrinthModpackExportTask(
+            DefaultGameRepository repository,
+            GameInstanceID instanceId,
+            ModpackExportInfo info,
+            Path modpackFile) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.info = Objects.requireNonNull(info, "info").validate();
+        this.runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        this.modpackFile = modpackFile.toAbsolutePath().normalize();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameInstance(runDirectory),
+                TaskResource.exportTarget(this.modpackFile));
 
         onDone().register(event -> {
             if (event.isFailed()) {
@@ -88,21 +112,21 @@ public class ModrinthModpackExportTask extends Task<Void> {
 
         boolean isDisabled = repository.getModManager(instanceId).isDisabled(file);
         if (isDisabled) {
-            relativePath = repository.getModManager(instanceId).enableMod(Paths.get(relativePath)).toString();
+            relativePath = StringUtils.removeSuffix(relativePath, LocalAddonManager.DISABLED_EXTENSION);
         }
 
         Optional<RemoteAddon.Version> modrinthVersion = Optional.empty();
         Optional<RemoteAddon.Version> curseForgeVersion = Optional.empty();
 
         try {
-            modrinthVersion = ModrinthRemoteAddonRepository.MODS.getRemoteVersionByLocalFile(file);
+            modrinthVersion = ModrinthRemoteAddonRepository.getInstance().getRemoteVersionByLocalFile(file);
         } catch (IOException e) {
             LOG.warning("Failed to get remote file from Modrinth for: " + file, e);
         }
 
         if (!info.isSkipCurseForgeRemoteFiles() && CurseForgeRemoteAddonRepository.isAvailable()) {
             try {
-                curseForgeVersion = CurseForgeRemoteAddonRepository.MODS.getRemoteVersionByLocalFile(file);
+                curseForgeVersion = CurseForgeRemoteAddonRepository.getInstance().getRemoteVersionByLocalFile(file);
             } catch (IOException e) {
                 LOG.warning("Failed to get remote file from CurseForge for: " + file, e);
             }
@@ -154,7 +178,6 @@ public class ModrinthModpackExportTask extends Task<Void> {
         blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (var zip = new Zipper(modpackFile)) {
-            Path runDirectory = repository.getRunDirectory(instanceId);
             List<ModrinthManifest.File> files = new ArrayList<>();
             Set<String> filesInManifest = new HashSet<>();
 
@@ -194,18 +217,18 @@ public class ModrinthModpackExportTask extends Task<Void> {
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
 
             Map<String, String> dependencies = new HashMap<>();
             dependencies.put("minecraft", gameVersion);
 
-            analyzer.getVersion(FORGE).ifPresent(forgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(FORGE)).ifPresent(forgeVersion ->
                     dependencies.put("forge", forgeVersion));
-            analyzer.getVersion(NEO_FORGE).ifPresent(neoForgeVersion ->
+            Optional.ofNullable(analyzer.getVersion(NEO_FORGE)).ifPresent(neoForgeVersion ->
                     dependencies.put("neoforge", neoForgeVersion));
-            analyzer.getVersion(FABRIC).ifPresent(fabricVersion ->
+            Optional.ofNullable(analyzer.getVersion(FABRIC)).ifPresent(fabricVersion ->
                     dependencies.put("fabric-loader", fabricVersion));
-            analyzer.getVersion(QUILT).ifPresent(quiltVersion ->
+            Optional.ofNullable(analyzer.getVersion(QUILT)).ifPresent(quiltVersion ->
                     dependencies.put("quilt-loader", quiltVersion));
 
             ModrinthManifest manifest = new ModrinthManifest(

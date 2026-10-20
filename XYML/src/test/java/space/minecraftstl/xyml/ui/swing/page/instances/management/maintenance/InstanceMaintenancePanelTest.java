@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
@@ -110,6 +111,9 @@ final class InstanceMaintenancePanelTest {
                 false,
                 true,
                 true);
+        EdtDispatcher.executeAndWait(() -> panel.setTaskLaunchController(new TaskLaunchController(() -> {
+            throw new AssertionError("task navigation is not expected");
+        })));
 
         EdtDispatcher.executeAndWait(() -> {
             JButton removeAssets = button(panel, "instanceMaintenanceRemoveAssets");
@@ -139,7 +143,10 @@ final class InstanceMaintenancePanelTest {
         RecordingInteractions interactions = new RecordingInteractions();
         Path archive = Path.of("build", "maintenance-test", "update.mrpack");
         interactions.modpackArchive.set(archive);
+        AtomicInteger navigationCount = new AtomicInteger();
         InstanceMaintenancePanel panel = createPanel(service, interactions, new RecordingLaunchActions());
+        EdtDispatcher.executeAndWait(() ->
+                panel.setTaskLaunchController(new TaskLaunchController(navigationCount::incrementAndGet)));
         InstanceMaintenanceSnapshot snapshot = new InstanceMaintenanceSnapshot(
                 INSTANCE_ID,
                 true,
@@ -149,7 +156,10 @@ final class InstanceMaintenancePanelTest {
         service.mutationResult = snapshot;
         activateWithSnapshot(panel, service, snapshot);
 
-        EdtDispatcher.executeAndWait(() -> button(panel, "instanceMaintenanceUpdateModpack").doClick());
+        EdtDispatcher.executeAndWait(() -> {
+            button(panel, "instanceMaintenanceUpdateModpack").doClick();
+            assertEquals(1, navigationCount.get());
+        });
         waitFor(() -> service.updateCalls.get() == 1);
 
         assertEquals(archive, service.updateArchive.get());

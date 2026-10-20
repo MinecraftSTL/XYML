@@ -17,23 +17,60 @@
  */
 package space.minecraftstl.xyml.download.cleanroom;
 
-import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import com.google.gson.annotations.SerializedName;
+import org.glavo.url.WebURL;
+import space.minecraftstl.xyml.download.*;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.gson.JsonSerializable;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.TreeSet;
 
-public class CleanroomRemoteVersion extends RemoteVersion {
-    public CleanroomRemoteVersion(String gameVersion, String selfVersion, Instant releaseDate, List<String> url) {
-        super(LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId(), gameVersion, selfVersion, releaseDate, url);
+@NotNullByDefault
+public final class CleanroomRemoteVersion extends ComponentRemoteVersion {
+    private static final GameVersionNumber GAME_VERSION_1_12_2 = GameVersionNumber.asGameVersion("1.12.2");
+
+    public static final WebURL LOADER_LIST_URL = WebURL.parse("https://hmcl.glavo.site/metadata/cleanroom/index.json");
+
+    public static Task<ComponentRemoteVersionList<CleanroomRemoteVersion>> fetchAsync(
+            DownloadProvider downloadProvider, GameVersionNumber gameVersion) {
+        if (!gameVersion.equals(GAME_VERSION_1_12_2)) {
+            return Task.completed(ComponentRemoteVersionList.of(GameComponentType.CLEANROOM));
+        }
+
+        @JsonSerializable
+        record ReleaseResult(String name, @SerializedName("created_at") String createdAt) {
+        }
+
+        return new GetTask(downloadProvider.getCleanroomVersionListCandidates()).thenApplyAsync(result -> {
+            var results = JsonUtils.fromNonNullJson(result, JsonUtils.listTypeOf(ReleaseResult.class));
+
+            var versions = new TreeSet<CleanroomRemoteVersion>();
+            for (ReleaseResult version : results) {
+                versions.add(new CleanroomRemoteVersion(
+                        GAME_VERSION_1_12_2, version.name, Instant.parse(version.createdAt),
+                        List.of("https://hmcl.glavo.site/metadata/cleanroom/files/cleanroom-%s-installer.jar".formatted(version.name))
+                ));
+            }
+            return ComponentRemoteVersionList.of(GameComponentType.CLEANROOM, versions);
+        });
+    }
+
+    public CleanroomRemoteVersion(GameVersionNumber gameVersion, String selfVersion, Instant releaseDate, List<String> url) {
+        super(GameComponentType.CLEANROOM, gameVersion, selfVersion, releaseDate, Type.UNCATEGORIZED, url);
     }
 
     @Override
-    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
-        return new CleanroomInstallTask(dependencyManager, baseVersion, this);
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseManifest, Path modsDirectory) {
+        return new CleanroomInstallTask(dependencyManager, baseManifest, this);
     }
 }

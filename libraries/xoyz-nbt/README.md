@@ -10,11 +10,14 @@ It supports:
 - Supports reading NBT compressed by GZip, Zlib, and LZ4.
 - Supports reading and writing SNBT (Stringified Named Binary Tag).
 - Supports [NBTPath](https://minecraft.wiki/w/NBT_path) (a query language for NBT data).
+- Supports transactional tree editing with stale-node protection, undo/redo, detached snapshots, and structural validation.
+- Supports safe file sessions which preserve standalone compression and publish Region chunks copy-on-write.
 
 To get started, check out the following tutorials:
 
 - Quick Start ([中文](docs/QuickStart_zh.md))
 - Advanced Tutorial ([中文](docs/Tutorial_zh.md))
+- Safe Editing ([中文](docs/SafeEditing_zh.md))
 
 The `javadoc` task builds API documentation for the namespaced XYML fork.
 

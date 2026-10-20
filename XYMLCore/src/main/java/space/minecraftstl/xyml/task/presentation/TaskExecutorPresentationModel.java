@@ -94,6 +94,7 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
         this.executor = Objects.requireNonNull(executor, "executor");
         this.title = Objects.requireNonNull(title, "title");
         this.waitingPhase = Objects.requireNonNull(waitingPhase, "waitingPhase");
+        executor.setTaskExecutionPresentation(title, true);
         currentSnapshot = new TaskSnapshot(
                 title,
                 waitingPhase,

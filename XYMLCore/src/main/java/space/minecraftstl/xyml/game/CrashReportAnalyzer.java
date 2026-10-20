@@ -18,16 +18,21 @@
 package space.minecraftstl.xyml.game;
 
 import org.intellij.lang.annotations.Language;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.function.ExceptionalFunction;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/// Matches existing launcher crash rules and extracts referenced or embedded crash reports.
+@NotNullByDefault
 public final class CrashReportAnalyzer {
 
     private CrashReportAnalyzer() {
@@ -49,8 +54,9 @@ public final class CrashReportAnalyzer {
         MACOS_FAILED_TO_FIND_SERVICE_PORT_FOR_DISPLAY("java\\.lang\\.IllegalStateException: GLFW error before init: \\[0x10008\\]Cocoa: Failed to find service port for display"),
         // Out of memory
         OUT_OF_MEMORY("(java\\.lang\\.OutOfMemoryError|The system is out of physical RAM or swap space|Out of Memory Error|Error occurred during initialization of VM\\RToo small maximum heap)"),
-        // Memory exceeded
-        MEMORY_EXCEEDED("There is insufficient memory for the Java Runtime Environment to continue"),
+        // Memory exceeded: only an explicit JVM-native commit/map/reservation failure is specific
+        // enough to outrank the broad OUT_OF_MEMORY fallback rule.
+        MEMORY_EXCEEDED("(?im)(?:\\bNative memory allocation\\b[^\\r\\n]*\\bfailed\\b[^\\r\\n]*\\b(?:commit|map|reserv)\\w*\\b|\\bos::commit_memory\\s*\\([^\\r\\n]*\\)\\s+failed\\b)"),
         // Too high resolution
         RESOLUTION_TOO_HIGH("Maybe try a (lower resolution|lowerresolution) (resourcepack|texturepack)\\?"),
         // game can only run on Java 8. Version of uesr's JVM is too high.
@@ -160,16 +166,93 @@ public final class CrashReportAnalyzer {
             return pattern;
         }
 
+        /// Returns the named groups used by this rule.
+        ///
+        /// @return a defensive copy of the group names
         public String[] getGroupNames() {
-            return groupNames;
+            return groupNames.clone();
         }
     }
 
-    public record Result(Rule rule, String log, Matcher matcher) {
+    /// Immutable snapshot of one rule match.
+    ///
+    /// The public matcher accessor creates a fresh cursor on each call. This preserves the legacy
+    /// API while preventing a mutable [Matcher] from being retained in analysis state.
+    public static final class Result {
+        private final Rule rule;
+        private final String log;
+        private final int matchStart;
+        private final int matchEnd;
+
+        /// Creates a match snapshot from a matcher positioned at a successful match.
+        ///
+        /// @param rule rule that produced the match
+        /// @param log complete input log
+        /// @param matcher matcher positioned at its successful match
+        public Result(Rule rule, String log, Matcher matcher) {
+            this.rule = Objects.requireNonNull(rule, "rule");
+            this.log = Objects.requireNonNull(log, "log");
+            Matcher source = Objects.requireNonNull(matcher, "matcher");
+            try {
+                this.matchStart = source.start();
+                this.matchEnd = source.end();
+            } catch (IllegalStateException exception) {
+                throw new IllegalArgumentException("matcher must be positioned at a successful match", exception);
+            }
+            if (matchStart < 0 || matchEnd < matchStart || matchEnd > log.length()) {
+                throw new IllegalArgumentException("matcher match range is outside the supplied log");
+            }
+        }
+
+        /// Returns the rule that produced this match.
+        public Rule rule() {
+            return rule;
+        }
+
+        /// Returns the complete captured input log.
+        public String log() {
+            return log;
+        }
+
+        /// Returns a fresh matcher positioned at the captured match.
+        ///
+        /// @return mutable matcher isolated from this immutable snapshot
+        /// @throws IllegalStateException if the rule no longer reproduces the captured match
+        public Matcher matcher() {
+            Matcher result = rule.pattern.matcher(log);
+            while (result.find()) {
+                if (result.start() == matchStart && result.end() == matchEnd) {
+                    return result;
+                }
+            }
+            throw new IllegalStateException("Crash rule no longer matches its captured log");
+        }
+
+        /// Compares the stable rule, input and match range.
+        @Override
+        public boolean equals(Object object) {
+            return this == object || object instanceof Result other
+                    && rule == other.rule
+                    && matchStart == other.matchStart
+                    && matchEnd == other.matchEnd
+                    && log.equals(other.log);
+        }
+
+        /// Returns a hash code consistent with [#equals(Object)].
+        @Override
+        public int hashCode() {
+            return Objects.hash(rule, log, matchStart, matchEnd);
+        }
+
+        /// Returns a diagnostic representation without exposing the complete log.
+        @Override
+        public String toString() {
+            return "Result[rule=" + rule + ", matchStart=" + matchStart + ", matchEnd=" + matchEnd + ']';
+        }
     }
 
     public static Set<Result> analyze(String log) {
-        Set<Result> results = new HashSet<>();
+        Set<Result> results = new LinkedHashSet<>();
         for (Rule rule : Rule.values()) {
             Matcher matcher = rule.pattern.matcher(log);
             if (matcher.find()) {
@@ -179,22 +262,57 @@ public final class CrashReportAnalyzer {
         return results;
     }
 
-    private static final Pattern CRASH_REPORT_LOCATION_PATTERN = Pattern.compile("#@!@# Game crashed! Crash report saved to: #@!@# (?<location>.*)");
+    /// Matches one crash-report path marker without consuming the line terminator.
+    private static final Pattern CRASH_REPORT_LOCATION_PATTERN = Pattern.compile(
+            "#@!@# Game crashed! Crash report saved to: #@!@# (?<location>[^\\r\\n]+)");
 
+    /// Reads the latest crash report referenced by one launcher log through the default filesystem boundary.
+    ///
+    /// When multiple markers exist, the final marker represents the latest launch attempt.
+    ///
+    /// @param log launcher log that may contain crash-report location markers
+    /// @return referenced report text, or `null` when no marker exists
+    /// @throws IOException if the referenced report cannot be read
+    /// @throws InvalidPathException if the marker contains an invalid path
     @Nullable
     public static String findCrashReport(String log) throws IOException, InvalidPathException {
-        Matcher matcher = CRASH_REPORT_LOCATION_PATTERN.matcher(log);
-        if (matcher.find()) {
-            return Files.readString(Paths.get(matcher.group("location")));
-        } else {
-            return null;
-        }
+        return findCrashReport(log, Files::readString);
     }
 
-    public static String extractCrashReport(String rawLog) {
-        int begin = rawLog.lastIndexOf("---- Minecraft Crash Report ----");
+    /// Resolves the latest crash-report path in one launcher log through a caller-owned reader.
+    ///
+    /// This overload lets callers retain their own path-ownership checks before any report text is returned.
+    /// When multiple markers exist, the final marker represents the latest launch attempt.
+    ///
+    /// @param log launcher log that may contain crash-report location markers
+    /// @param reportReader reader that validates and reads the referenced path
+    /// @return referenced report text, or `null` when no marker exists or the reader declines the path
+    /// @throws IOException if the reader cannot inspect or read the referenced report
+    /// @throws InvalidPathException if the marker contains an invalid path
+    public static @Nullable String findCrashReport(
+            String log,
+            ExceptionalFunction<Path, @Nullable String, IOException> reportReader)
+            throws IOException, InvalidPathException {
+        Matcher matcher = CRASH_REPORT_LOCATION_PATTERN.matcher(log);
+        if (!matcher.find()) return null;
+
+        String location;
+        do {
+            location = matcher.group("location");
+        } while (matcher.find());
+        return reportReader.apply(Paths.get(location));
+    }
+
+    /// Extracts the last complete crash-report block embedded in launcher output.
+    ///
+    /// @param rawLog raw launcher output
+    /// @return embedded crash-report text, or `null` when no complete block exists
+    public static @Nullable String extractCrashReport(String rawLog) {
         int end = rawLog.lastIndexOf("#@!@# Game crashed! Crash report saved to");
-        if (begin == -1 || end == -1 || begin >= end) return null;
+        if (end == -1) return null;
+
+        int begin = rawLog.lastIndexOf("---- Minecraft Crash Report ----", end - 1);
+        if (begin == -1) return null;
         return rawLog.substring(begin, end);
     }
 

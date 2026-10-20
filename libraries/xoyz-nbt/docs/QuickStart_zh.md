@@ -118,3 +118,6 @@ XoyzNBT 提供了 `ExternalChunkAccessor` 接口来读取和写入外部区块�
 ## 完整教程
 
 如果需要更深入地了解 XoyzNBT 的用法，可以参阅 [XoyzNBT 教程](Tutorial_zh.md)。
+
+需要修改现有 NBT 文件时，不应直接截断并重写源文件。请使用 `NBTEditor` 执行事务化结构编辑，
+并通过 `NBTFile` 保留压缩格式、校验暂存字节并安全发布。完整用法与失败恢复规则参见[安全编辑指南](SafeEditing_zh.md)。

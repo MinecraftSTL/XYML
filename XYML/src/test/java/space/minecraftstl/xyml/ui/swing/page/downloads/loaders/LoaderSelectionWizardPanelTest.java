@@ -21,7 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -34,6 +35,7 @@ import javax.swing.ListSelectionModel;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.event.MouseEvent;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
@@ -44,6 +46,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -139,9 +142,9 @@ final class LoaderSelectionWizardPanelTest {
     /// safe ordering, and clearing.
     @Test
     void selectsExactVersionsOnlyAfterExplicitRefreshAndEnforcesInstallRules() throws Exception {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
-        RemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
-        RemoteVersion forge = remoteVersion("forge", "1.20.1", "47.2.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
+        ComponentRemoteVersion forge = remoteVersion("forge", "1.20.1", "47.2.0");
         RecordingSource source = new RecordingSource();
         source.put(GameLoaderKind.FABRIC, fabric);
         source.put(GameLoaderKind.FABRIC_API, fabricApi);
@@ -230,8 +233,8 @@ final class LoaderSelectionWizardPanelTest {
     /// Verifies existing instance loaders participate in compatibility checks without becoming task rows.
     @Test
     void retainedInstanceLoadersBlockConflictsAndSatisfyApiParents() throws Exception {
-        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
-        RemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        ComponentRemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
         RecordingSource source = new RecordingSource();
         source.put(GameLoaderKind.FABRIC, fabric);
         source.put(GameLoaderKind.FABRIC_API, fabricApi);
@@ -283,6 +286,61 @@ final class LoaderSelectionWizardPanelTest {
                 assertTrue(removeButton.isEnabled());
                 removeButton.doClick();
                 assertEquals(List.of(fabricApi), panel.selectedRemoteVersions());
+            });
+        } finally {
+            closePanel(panelReference.get());
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Retries a failed explicit loader-version request when the localized status text is clicked.
+    @Test
+    void retriesFailedLoaderLoadFromStatusLabel() throws Exception {
+        ComponentRemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        RecordingSource source = new RecordingSource();
+        source.put(GameLoaderKind.FABRIC, fabric);
+        source.failNextRequest();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable LoaderSelectionWizardPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new LoaderSelectionWizardPanel(
+                    new DefaultGameLoaderCatalogModel(source),
+                    executor,
+                    LoaderSelectionWizardStrings.english())));
+            LoaderSelectionWizardPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                panel.selectGameVersion("1.20.1");
+                JButton kindButton = findNamed(panel, "loaderKind_FABRIC", JButton.class);
+                JButton loadButton = findNamed(panel, "loaderLoadVersions", JButton.class);
+                assertNotNull(kindButton);
+                assertNotNull(loadButton);
+                kindButton.doClick();
+                loadButton.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JLabel status = findNamed(panel, "loaderSelectionStatus", JLabel.class);
+                assertNotNull(status);
+                assertEquals(LoaderSelectionWizardStrings.english().loadFailedStatus(), status.getText());
+                status.dispatchEvent(new MouseEvent(
+                        status,
+                        MouseEvent.MOUSE_CLICKED,
+                        System.currentTimeMillis(),
+                        0,
+                        1,
+                        1,
+                        1,
+                        false,
+                        MouseEvent.BUTTON1));
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                assertEquals(2, source.requestCount.get());
+                assertTrue(panel.versionChoiceList().getList().getModel().getSize() > 0);
             });
         } finally {
             closePanel(panelReference.get());
@@ -392,11 +450,11 @@ final class LoaderSelectionWizardPanelTest {
     /// @param gameVersion matching Minecraft version
     /// @param selfVersion selected loader self version
     /// @return non-null exact Core remote version
-    private static RemoteVersion remoteVersion(
+    private static ComponentRemoteVersion remoteVersion(
             String libraryId,
             String gameVersion,
             String selfVersion) {
-        return new RemoteVersion(
+        return new TestComponentRemoteVersion(
                 libraryId,
                 gameVersion,
                 selfVersion,
@@ -414,11 +472,19 @@ final class LoaderSelectionWizardPanelTest {
         /// Number of source refreshes initiated by an explicit version-list command.
         private final AtomicInteger requestCount = new AtomicInteger();
 
+        /// Causes exactly one subsequent source refresh to fail.
+        private final AtomicBoolean failNext = new AtomicBoolean();
+
+        /// Marks the next source refresh as a deterministic failure for retry tests.
+        private void failNextRequest() {
+            failNext.set(true);
+        }
+
         /// Configures one source result retaining the exact supplied remote object.
         ///
         /// @param kind selected loader catalog kind
         /// @param remoteVersion exact Core remote version to return
-        private void put(GameLoaderKind kind, RemoteVersion remoteVersion) {
+        private void put(GameLoaderKind kind, ComponentRemoteVersion remoteVersion) {
             GameLoaderKind nonNullKind = Objects.requireNonNull(kind, "kind");
             itemsByKind.put(nonNullKind, List.of(new GameLoaderCatalogItem(
                     nonNullKind,
@@ -434,6 +500,9 @@ final class LoaderSelectionWizardPanelTest {
                 GameLoaderCatalogRequest request) {
             GameLoaderCatalogRequest nonNullRequest = Objects.requireNonNull(request, "request");
             requestCount.incrementAndGet();
+            if (failNext.compareAndSet(true, false)) {
+                return CompletableFuture.failedFuture(new IllegalStateException("recorded loader failure"));
+            }
             @Unmodifiable List<GameLoaderCatalogItem> items = itemsByKind.getOrDefault(
                     nonNullRequest.kind(),
                     List.of());

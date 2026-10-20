@@ -196,7 +196,35 @@ final class JavaRuntimeRegistry {
             changed.put(binary, javaRuntime);
             javaByBinary = immutableMap(changed);
             if (activeRefresh != null) {
-                activeRefreshMutations.add(RefreshMutation.add(javaRuntime));
+                activeRefreshMutations.add(RefreshMutation.put(javaRuntime));
+            }
+            publishSnapshotLocked();
+            return true;
+        }
+    }
+
+    /// Adds or replaces one runtime after initialization using its executable path as the stable identity.
+    ///
+    /// This operation is reserved for completed managed-runtime downloads whose files and probed metadata may have
+    /// changed at an already registered path. Ordinary user additions retain [#add(JavaRuntime)] de-duplication.
+    ///
+    /// @param javaRuntime downloaded runtime to add or replace
+    /// @return true when the registered object changed
+    /// @throws InterruptedException if registry initialization is interrupted
+    boolean upsert(JavaRuntime javaRuntime) throws InterruptedException {
+        Objects.requireNonNull(javaRuntime, "javaRuntime");
+        initializedLatch.await();
+        synchronized (stateLock) {
+            Path binary = javaRuntime.getBinary();
+            if (javaByBinary.get(binary) == javaRuntime) {
+                return false;
+            }
+
+            Map<Path, JavaRuntime> changed = new HashMap<>(javaByBinary);
+            changed.put(binary, javaRuntime);
+            javaByBinary = immutableMap(changed);
+            if (activeRefresh != null) {
+                activeRefreshMutations.add(RefreshMutation.put(javaRuntime));
             }
             publishSnapshotLocked();
             return true;
@@ -281,11 +309,11 @@ final class JavaRuntimeRegistry {
             this.addedRuntime = addedRuntime;
         }
 
-        /// Creates an addition mutation.
+        /// Creates a runtime write mutation.
         ///
-        /// @param javaRuntime runtime to add
-        /// @return addition mutation
-        private static RefreshMutation add(JavaRuntime javaRuntime) {
+        /// @param javaRuntime runtime to add or replace
+        /// @return runtime write mutation
+        private static RefreshMutation put(JavaRuntime javaRuntime) {
             return new RefreshMutation(javaRuntime.getBinary(), javaRuntime);
         }
 

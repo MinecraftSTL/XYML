@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -48,10 +49,13 @@ interface WorldCatalogAccess {
 
     /// Produces a stable shallow index of direct-child world directories.
     ///
+    /// @param savesDirectory stable normalized directory captured for this index operation
     /// @param cancellation cooperative index cancellation signal
     /// @return immutable ordered direct-child directory paths
     /// @throws IOException when the saves directory cannot be listed
-    @Unmodifiable List<Path> indexWorldDirectories(LoadCancellation cancellation) throws IOException;
+    @Unmodifiable List<Path> indexWorldDirectories(
+            Path savesDirectory,
+            LoadCancellation cancellation) throws IOException;
 
     /// Materializes metadata for one direct-child world directory.
     ///
@@ -73,10 +77,15 @@ interface WorldCatalogAccess {
     /// Installs one previously validated archive under the user-selected target name.
     ///
     /// @param world import candidate
+    /// @param savesDirectory stable normalized destination catalog captured before resource acquisition
     /// @param targetName non-blank target directory and stored level name
     /// @param cancellation cooperative operation cancellation signal
     /// @throws IOException when Core cannot install the archive
-    void install(WorldCatalogImport world, String targetName, LoadCancellation cancellation) throws IOException;
+    void install(
+            WorldCatalogImport world,
+            Path savesDirectory,
+            String targetName,
+            LoadCancellation cancellation) throws IOException;
 
     /// Deletes one validated, unlocked current world through the Core World API.
     ///
@@ -84,6 +93,19 @@ interface WorldCatalogAccess {
     /// @param cancellation cooperative operation cancellation signal
     /// @throws IOException when Core cannot delete the world
     void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException;
+
+    /// Deletes one validated, unlocked world using the selected recycle-bin or permanent mode.
+    ///
+    /// @param world current loaded world row
+    /// @param mode selected deletion behavior
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot delete the world
+    default void delete(
+            WorldCatalogItem world,
+            DeletionMode mode,
+            LoadCancellation cancellation) throws IOException {
+        delete(world, cancellation);
+    }
 
     /// Writes one selected world's editable details and keeps the mutation on the background side.
     ///

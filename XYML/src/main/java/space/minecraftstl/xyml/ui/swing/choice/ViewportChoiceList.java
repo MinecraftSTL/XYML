@@ -50,7 +50,7 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
     private final ViewportChoiceListModel<T> choiceModel;
 
     /// The JList configured for exactly one selected row.
-    private final JList<ChoiceListEntry<T>> list;
+    private final RowBoundsCheckedList<ChoiceListEntry<T>> list;
 
     /// The one renderer instance reused for all painted rows.
     private final ListCellRenderer<ChoiceListEntry<T>> renderer;
@@ -87,7 +87,22 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
     public ViewportChoiceList(
             ViewportChoiceDataSource<T> dataSource,
             ChoiceTextProvider<T> textProvider) {
-        this(dataSource, new ChoiceEntryRenderer<>(textProvider));
+        this(
+                dataSource,
+                new ChoiceEntryRenderer<>(textProvider),
+                RowBoundsCheckedList.BlankClickPolicy.CLEAR);
+    }
+
+    /// Creates a viewport-driven single-choice list with an explicit blank-click policy.
+    ///
+    /// @param dataSource the indexed choice data source
+    /// @param textProvider the provider of localized loaded-row labels
+    /// @param blankClickPolicy selection behavior for primary-button presses outside all rows
+    public ViewportChoiceList(
+            ViewportChoiceDataSource<T> dataSource,
+            ChoiceTextProvider<T> textProvider,
+            RowBoundsCheckedList.BlankClickPolicy blankClickPolicy) {
+        this(dataSource, new ChoiceEntryRenderer<>(textProvider), blankClickPolicy);
     }
 
     /// Creates a viewport-driven single-choice list with a custom reusable renderer.
@@ -101,10 +116,22 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
     public ViewportChoiceList(
             ViewportChoiceDataSource<T> dataSource,
             ListCellRenderer<ChoiceListEntry<T>> renderer) {
+        this(dataSource, renderer, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
+    }
+
+    /// Creates a viewport-driven single-choice list with an explicit blank-click policy.
+    ///
+    /// @param dataSource the indexed choice data source
+    /// @param renderer the renderer used for every sparse row state
+    /// @param blankClickPolicy selection behavior for primary-button presses outside all rows
+    public ViewportChoiceList(
+            ViewportChoiceDataSource<T> dataSource,
+            ListCellRenderer<ChoiceListEntry<T>> renderer,
+            RowBoundsCheckedList.BlankClickPolicy blankClickPolicy) {
         choiceModel = new ViewportChoiceListModel<>(dataSource);
         this.renderer = Objects.requireNonNull(renderer, "renderer");
         loadStrategy = new ViewportLoadStrategy();
-        list = new JList<>(choiceModel);
+        list = new RowBoundsCheckedList<>(choiceModel, blankClickPolicy);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(this.renderer);
         setOpaque(false);
@@ -269,11 +296,11 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
         if (choiceModel.getSize() == 0) {
             return 0;
         }
-        int locatedIndex = list.locationToIndex(new Point(0, scrollOffset));
+        int locatedIndex = list.nearestIndexAt(new Point(0, scrollOffset));
         if (locatedIndex >= 0) {
-            return locatedIndex;
+            return Math.min(locatedIndex, choiceModel.getSize() - 1);
         }
-        return scrollOffset / rowHeight;
+        return Math.min(choiceModel.getSize() - 1, scrollOffset / rowHeight);
     }
 
     /// Measures how much of the first visible row is clipped above the viewport.

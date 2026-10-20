@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.settings.theme;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.theme.BuiltinThemePack;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
@@ -91,10 +92,20 @@ public final class LocalThemePackManagementBackend implements ThemePackManagemen
     /// @return completion stage resolved after deletion
     @Override
     public CompletionStage<@Nullable Void> deleteInstalled(ThemePackItem item, Executor executor) {
+        return deleteInstalled(item, DeletionMode.PERMANENT, executor);
+    }
+
+    /// Revalidates and deletes an exact installed package using the selected mode.
+    @Override
+    public CompletionStage<@Nullable Void> deleteInstalled(
+            ThemePackItem item,
+            DeletionMode mode,
+            Executor executor) {
         ThemePackItem installed = requireInstalled(item);
         return localRepository.deleteInstalled(
                 installed.reference().packId(),
                 Objects.requireNonNull(installed.installedDirectory(), "installedDirectory"),
+                Objects.requireNonNull(mode, "mode"),
                 Objects.requireNonNull(executor, "executor"));
     }
 

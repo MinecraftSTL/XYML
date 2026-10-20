@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.HashSet;
@@ -93,24 +94,44 @@ sealed interface ModCatalogMutation {
     /// Deletes one current Mod file.
     ///
     /// @param localKey rename-stable target key
+    /// @param mode selected deletion behavior
     @NotNullByDefault
-    record Delete(String localKey) implements ModCatalogMutation {
-        /// Validates the target key.
+    record Delete(String localKey, DeletionMode mode) implements ModCatalogMutation {
+        /// Creates a permanent-delete request for compatibility callers.
+        ///
+        /// @param localKey rename-stable target key
+        public Delete(String localKey) {
+            this(localKey, DeletionMode.PERMANENT);
+        }
+
+        /// Validates the target key and mode.
         public Delete {
             if (Objects.requireNonNull(localKey, "localKey").isBlank()) {
                 throw new IllegalArgumentException("localKey must not be blank");
             }
+            Objects.requireNonNull(mode, "mode");
         }
     }
 
     /// Deletes a non-empty batch of current Mod files.
     ///
     /// @param localKeys immutable rename-stable target keys
+    /// @param mode selected deletion behavior
     @NotNullByDefault
-    record DeleteBatch(@Unmodifiable List<String> localKeys) implements ModCatalogMutation {
+    record DeleteBatch(
+            @Unmodifiable List<String> localKeys,
+            DeletionMode mode) implements ModCatalogMutation {
+        /// Creates a permanent-delete request for compatibility callers.
+        ///
+        /// @param localKeys immutable rename-stable target keys
+        public DeleteBatch(@Unmodifiable List<String> localKeys) {
+            this(localKeys, DeletionMode.PERMANENT);
+        }
+
         /// Freezes and validates unique target keys before any file mutation starts.
         public DeleteBatch {
             localKeys = validatedLocalKeys(localKeys);
+            Objects.requireNonNull(mode, "mode");
         }
     }
 

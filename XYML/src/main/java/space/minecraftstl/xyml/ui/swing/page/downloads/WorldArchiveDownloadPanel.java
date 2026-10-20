@@ -33,6 +33,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.util.Objects;
 
@@ -68,9 +69,11 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         JPanel heading = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]8[]", "[40!]"));
         heading.setOpaque(false);
+        heading.setMinimumSize(new Dimension(0, 0));
         JLabel title = new JLabel(i18n("world"));
         title.setName("downloadsWorldArchiveTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 22.0F));
@@ -81,11 +84,13 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
         reloadTargetButton.setText(i18n("button.refresh"));
         reloadTargetButton.setToolTipText(i18n("instance.switch"));
         reloadTargetButton.addActionListener(event -> reloadTarget());
-        heading.add(reloadTargetButton, "h 40!");
+        reloadTargetButton.setMinimumSize(new Dimension(0, 0));
+        heading.add(reloadTargetButton, "grow, wmin 0, h 40!");
         add(heading, "growx");
 
         content.setName("downloadsWorldArchiveContent");
         content.setOpaque(false);
+        content.setMinimumSize(new Dimension(0, 0));
         emptyLabel.setName("downloadsWorldArchiveEmpty");
         emptyLabel.setHorizontalAlignment(JLabel.CENTER);
         content.add(emptyLabel, BorderLayout.CENTER);

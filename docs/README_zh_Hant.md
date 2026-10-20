@@ -23,7 +23,7 @@
 ---
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**中文** ([简体](README_zh.md), **繁體**, [文言](README_lzh.md)) | English ([Standard](README.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+**中文** ([简体](README.md), **繁體**, [文言](README_lzh.md)) | English ([Standard](README_en.md), [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## 簡介
@@ -58,9 +58,9 @@ XYML 是一個由社群驅動的開源專案，歡迎任何人參與貢獻程式
 
 ## 貢獻者
 
-自 2015 年以來，XYML 已經有超過 120 位貢獻者參與其中，感謝他們的辛勤付出！
+自 2015 年以來，XYML 已經有超過 130 位貢獻者參與其中，感謝他們的辛勤付出！
 
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML&max=200)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
 ## 開源協議
 

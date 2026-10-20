@@ -394,6 +394,86 @@ public final class GameDirectoriesTest {
         }
     }
 
+    /// Tests that displayed instances prefer version order over release-time order.
+    @Test
+    public void displayInstancesSortByVersionBeforeReleaseTime(@TempDir Path tempDirectory)
+            throws ReflectiveOperationException, IOException {
+        GameDirectory gameDirectory = new GameDirectory(
+                GameDirectoryID.generate(),
+                LocalizedText.plain("Dev"),
+                PortablePath.of(tempDirectory.toString()));
+        GameDirectories localDirectories = new GameDirectories();
+        localDirectories.getGameDirectories().add(gameDirectory);
+
+        try (GameDirectoryEnvironment ignored =
+                     new GameDirectoryEnvironment(localDirectories, new GameDirectories())) {
+            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
+            GameInstanceID lowerVersion = new GameInstanceID("1.19.4");
+            GameInstanceID higherVersion = new GameInstanceID("1.20.1");
+            Path lowerVersionManifest = repository.getInstanceJson(lowerVersion);
+            Path higherVersionManifest = repository.getInstanceJson(higherVersion);
+            Files.createDirectories(lowerVersionManifest.getParent());
+            Files.createDirectories(higherVersionManifest.getParent());
+            Files.writeString(lowerVersionManifest, """
+                    {
+                      "id": "1.19.4",
+                      "releaseTime": "2026-08-25T00:00:00Z"
+                    }
+                    """);
+            Files.writeString(higherVersionManifest, """
+                    {
+                      "id": "1.20.1",
+                      "releaseTime": "2020-01-01T00:00:00Z"
+                    }
+                    """);
+
+            repository.refresh();
+
+            assertEquals(
+                    List.of(lowerVersion, higherVersion),
+                    repository.getDisplayInstanceManifests().map(GameInstanceManifest::id).toList());
+        }
+    }
+
+    /// Tests that repository cleanup removes generated directories and only root-level log files.
+    @Test
+    public void cleanRemovesRootLogsAndKeepsOtherFiles(@TempDir Path tempDirectory)
+            throws ReflectiveOperationException, IOException {
+        GameDirectory gameDirectory = new GameDirectory(
+                GameDirectoryID.generate(),
+                LocalizedText.plain("Dev"),
+                PortablePath.of(tempDirectory.toString()));
+        GameDirectories localDirectories = new GameDirectories();
+        localDirectories.getGameDirectories().add(gameDirectory);
+
+        try (GameDirectoryEnvironment ignored =
+                     new GameDirectoryEnvironment(localDirectories, new GameDirectories())) {
+            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
+            Path crashReports = tempDirectory.resolve("crash-reports");
+            Path logs = tempDirectory.resolve("logs");
+            Path rootLog = tempDirectory.resolve("launcher.log");
+            Path retainedFile = tempDirectory.resolve("launcher.txt");
+            Path nestedLog = tempDirectory.resolve("retained").resolve("nested.log");
+            Files.createDirectories(crashReports);
+            Files.createDirectories(logs);
+            Files.createDirectories(nestedLog.getParent());
+            Files.writeString(crashReports.resolve("crash.txt"), "crash");
+            Files.writeString(logs.resolve("latest.log"), "latest");
+            Files.writeString(rootLog, "root");
+            Files.writeString(retainedFile, "text");
+            Files.writeString(nestedLog, "nested");
+
+            repository.clean(new GameInstanceID("missing-instance"));
+
+            assertAll(
+                    () -> assertFalse(Files.exists(crashReports)),
+                    () -> assertFalse(Files.exists(logs)),
+                    () -> assertFalse(Files.exists(rootLog)),
+                    () -> assertTrue(Files.exists(retainedFile)),
+                    () -> assertTrue(Files.exists(nestedLog)));
+        }
+    }
+
     /// Tests that instance settings without an explicit parent use the default preset.
     @Test
     public void nullInstanceParentUsesDefaultPreset()

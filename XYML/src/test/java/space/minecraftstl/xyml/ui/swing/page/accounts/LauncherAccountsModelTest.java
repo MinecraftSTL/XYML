@@ -235,6 +235,44 @@ public final class LauncherAccountsModelTest {
         model.close();
     }
 
+    /// Manual moves validate group boundaries, delegate one final index, and update selection revision.
+    @Test
+    public void movesOnlyWithinStorageGroupAndDelegatesFinalIndex() {
+        AccountDescriptor portableFirst = account("portable-first", "Alex", "Offline", "profile-p1", true);
+        AccountDescriptor portableSecond = account("portable-second", "Steve", "Offline", "profile-p2", true);
+        AccountDescriptor globalFirst = account("global-first", "Sunny", "Microsoft", "profile-g1", false);
+        AccountDescriptor globalSecond = account("global-second", "Ari", "Microsoft", "profile-g2", false);
+        FakeAccountStore store = new FakeAccountStore(state(
+                List.of(portableFirst, portableSecond, globalFirst, globalSecond),
+                portableFirst.id()));
+        LauncherAccountsModel model = new LauncherAccountsModel(store, () -> { });
+
+        boolean earlierBoundary = model.canMoveAccount(portableFirst.id(), -1);
+        boolean sameGroupMove = model.canMoveAccount(portableFirst.id(), 1);
+        boolean crossGroupMove = model.canMoveAccount(portableFirst.id(), 2);
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> model.moveAccount(portableFirst.id(), 2, false));
+
+        model.moveAccount(portableFirst.id(), 1, true);
+        ChoicePage<AccountListItem> page = model.load(
+                new IndexRange(0, 4), new LoadCancellation()).toCompletableFuture().join();
+
+        assertAll(
+                () -> assertFalse(earlierBoundary),
+                () -> assertTrue(sameGroupMove),
+                () -> assertFalse(crossGroupMove),
+                () -> assertTrue(rejected.getMessage().contains("2")),
+                () -> assertEquals(List.of(portableFirst.id()), store.movedIds()),
+                () -> assertEquals(List.of(1), store.moveTargets()),
+                () -> assertEquals(List.of(true), store.moveOverwritePermissions()),
+                () -> assertEquals(new AccountsSnapshot(OptionalInt.of(1), 4, 1L), model.snapshot()),
+                () -> assertEquals(
+                        List.of("portable-second", "portable-first", "global-first", "global-second"),
+                        page.items().stream().map(AccountListItem::accountId).toList()));
+        model.close();
+    }
+
     /// Refresh validates one current stable ID and preserves the injected asynchronous completion.
     @Test
     public void delegatesAsynchronousRefreshCommand() {
@@ -391,6 +429,29 @@ public final class LauncherAccountsModelTest {
         return new AccountDescriptor(id, title, detail, profileId);
     }
 
+    /// Creates one immutable account descriptor with an explicit storage group.
+    ///
+    /// @param id stable account ID
+    /// @param title display title
+    /// @param detail provider and storage detail
+    /// @param profileId stable profile ID
+    /// @param portable whether the account belongs to the portable group
+    /// @return immutable descriptor
+    private static AccountDescriptor account(
+            String id,
+            String title,
+            String detail,
+            String profileId,
+            boolean portable) {
+        return new AccountDescriptor(
+                id,
+                title,
+                detail,
+                profileId,
+                portable,
+                AccountAvatarSource.bundledDefault());
+    }
+
     /// Creates one immutable fake store state.
     ///
     /// @param accounts account descriptors
@@ -419,6 +480,15 @@ public final class LauncherAccountsModelTest {
 
         /// Backup-and-overwrite permissions delegated with removals.
         private final List<Boolean> removalOverwritePermissions = new ArrayList<>();
+
+        /// Stable IDs delegated through account move commands.
+        private final List<String> movedIds = new ArrayList<>();
+
+        /// Final indices delegated through account move commands.
+        private final List<Integer> moveTargets = new ArrayList<>();
+
+        /// Backup-and-overwrite permissions delegated with account moves.
+        private final List<Boolean> moveOverwritePermissions = new ArrayList<>();
 
         /// Replacement installed before the next subscription, or null when absent.
         private final AtomicReference<@Nullable AccountStoreState> transitionBeforeSubscription =
@@ -470,6 +540,29 @@ public final class LauncherAccountsModelTest {
             publish(new AccountStoreState(remaining, selected));
         }
 
+        /// Moves one descriptor within the fake source order and records its delegated target.
+        @Override
+        public synchronized void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
+            movedIds.add(accountId);
+            moveTargets.add(targetIndex);
+            moveOverwritePermissions.add(allowReadOnlyOverwrite);
+            AccountStoreState before = current.get();
+            List<AccountDescriptor> reordered = new ArrayList<>(before.accounts());
+            int sourceIndex = -1;
+            for (int index = 0; index < reordered.size(); index++) {
+                if (reordered.get(index).id().equals(accountId)) {
+                    sourceIndex = index;
+                    break;
+                }
+            }
+            if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= reordered.size()) {
+                throw new IllegalArgumentException("Invalid fake account move");
+            }
+            AccountDescriptor moved = reordered.remove(sourceIndex);
+            reordered.add(targetIndex, moved);
+            publish(new AccountStoreState(reordered, before.selectedAccountId()));
+        }
+
         /// Publishes one replacement store state synchronously.
         ///
         /// @param replacement replacement state
@@ -504,6 +597,27 @@ public final class LauncherAccountsModelTest {
         /// @return immutable permissions in call order
         private synchronized @Unmodifiable List<Boolean> removalOverwritePermissions() {
             return List.copyOf(removalOverwritePermissions);
+        }
+
+        /// Returns the immutable delegated account move history.
+        ///
+        /// @return stable moved IDs in call order
+        private synchronized @Unmodifiable List<String> movedIds() {
+            return List.copyOf(movedIds);
+        }
+
+        /// Returns the immutable delegated account move targets.
+        ///
+        /// @return final indices in call order
+        private synchronized @Unmodifiable List<Integer> moveTargets() {
+            return List.copyOf(moveTargets);
+        }
+
+        /// Returns delegated backup-and-overwrite permissions for moves.
+        ///
+        /// @return immutable permissions in call order
+        private synchronized @Unmodifiable List<Boolean> moveOverwritePermissions() {
+            return List.copyOf(moveOverwritePermissions);
         }
 
         /// Returns whether the model still owns a store registration.

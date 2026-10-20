@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -31,7 +32,7 @@ import java.util.concurrent.CompletionStage;
 /// Keeping these platform boundaries outside the panel makes repository state transitions independently
 /// testable while the production implementation still uses `JFileChooser` and `Desktop` directly.
 @NotNullByDefault
-public interface InstanceOverviewInteractions {
+public interface InstanceOverviewInteractions extends RetryableFailureInteraction {
     /// Displays the complete built-in and custom instance icon selector.
     ///
     /// @param owner parent component for the native dialogs

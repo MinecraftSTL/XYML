@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.UnsupportedPlatformException;
@@ -57,6 +58,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.zip.GZIPOutputStream;
 
 import static space.minecraftstl.xyml.util.gson.JsonUtils.fromJsonFile;
@@ -96,12 +98,20 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, task.getState()),
+                () -> assertEquals(1, task.getResources().size()),
+                () -> assertEquals(
+                        TaskResource.Kind.ORCHESTRATION,
+                        task.getResources().iterator().next().getKind()),
                 () -> assertEquals(0, backend.currentPlatformReads.get()),
+                () -> assertEquals(0, backend.managedRootReads.get()),
                 () -> assertEquals(0, backend.mojangPresenceChecks.get()),
                 () -> assertEquals(0, backend.downloadTaskRequests.get()));
         assertTrue(task.test());
         JavaRuntimeAcquisitionSnapshot snapshot = Objects.requireNonNull(task.getResult(), "snapshot result");
         assertAll(
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(backend.managedRoot)),
+                        task.getDependencies().iterator().next().getResources()),
                 () -> assertEquals(Platform.SYSTEM_PLATFORM, snapshot.platform()),
                 () -> assertEquals(
                         List.of(
@@ -113,6 +123,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                         () -> snapshot.mojangRuntimes().add(
                                 new MojangJavaRuntimeOption(GameJavaVersion.JAVA_25, false))),
                 () -> assertEquals(1, backend.currentPlatformReads.get()),
+                () -> assertEquals(1, backend.managedRootReads.get()),
                 () -> assertEquals(2, backend.mojangPresenceChecks.get()),
                 () -> assertEquals(0, backend.downloadTaskRequests.get()));
     }
@@ -154,13 +165,22 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, validTask.getState()),
                 () -> assertEquals(Task.TaskState.READY, forgedTask.getState()),
-                () -> assertEquals(0, backend.downloadTaskRequests.get()));
+                () -> assertEquals(
+                        Set.of(TaskResource.Kind.ORCHESTRATION),
+                        validTask.getResources().stream()
+                                .map(TaskResource::getKind)
+                                .collect(Collectors.toUnmodifiableSet())),
+                () -> assertEquals(0, backend.downloadTaskRequests.get()),
+                () -> assertEquals(0, backend.managedRootReads.get()));
         assertTrue(validTask.test());
         assertFalse(forgedTask.test());
         assertAll(
                 () -> assertEquals(1, backend.downloadTaskRequests.get()),
                 () -> assertEquals(GameJavaVersion.JAVA_17, backend.lastDownloadedVersion),
                 () -> assertEquals(backend.runtime, validTask.getResult()),
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(backend.managedRoot)),
+                        validTask.getDependencies().iterator().next().getResources()),
                 () -> assertInstanceOf(UnsupportedPlatformException.class, forgedTask.getException()));
 
         backend.installedMojangVersions.add(GameJavaVersion.JAVA_17);
@@ -200,6 +220,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 () -> assertTrue(service.supportsLocalArchive(Path.of("jdk.ZIP"))),
                 () -> assertTrue(service.supportsLocalArchive(Path.of("jdk.TAR.GZ"))),
                 () -> assertEquals(Task.TaskState.READY, inspectionTask.getState()),
+                () -> assertEquals(
+                        Set.of(TaskResource.archive(archive)),
+                        inspectionTask.getResources()),
                 () -> assertEquals(0, backend.archiveInspectionRequests.get()));
         assertTrue(inspectionTask.test());
         assertAll(
@@ -428,6 +451,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 targetDirectory,
                 manifestFile);
 
+        assertEquals(
+                Set.of(TaskResource.javaRuntime(platformRoot)),
+                task.getResources());
         assertTrue(task.test(), () -> "Publication failed: " + task.getException());
 
         JavaRuntime runtime = Objects.requireNonNull(task.getResult(), "published runtime");
@@ -779,6 +805,11 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, successTask.getState()),
+                () -> assertEquals(
+                        Set.of(
+                                TaskResource.javaRuntime(backend.managedRoot),
+                                TaskResource.archive(original.archiveFile())),
+                        successTask.getResources()),
                 () -> assertEquals(0, backend.copyRequests.get()),
                 () -> assertEquals(0, backend.prepareRequests.get()),
                 () -> assertEquals(0, backend.installTaskRequests.get()));
@@ -1273,6 +1304,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         /// Number of current-platform reads.
         private final AtomicInteger currentPlatformReads = new AtomicInteger();
 
+        /// Number of managed-platform root lookups.
+        private final AtomicInteger managedRootReads = new AtomicInteger();
+
         /// Number of local Mojang presence checks.
         private final AtomicInteger mojangPresenceChecks = new AtomicInteger();
 
@@ -1443,6 +1477,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         /// @return fake managed root
         @Override
         public Path managedPlatformRoot(Platform ignoredPlatform) {
+            managedRootReads.incrementAndGet();
             return managedRoot;
         }
 

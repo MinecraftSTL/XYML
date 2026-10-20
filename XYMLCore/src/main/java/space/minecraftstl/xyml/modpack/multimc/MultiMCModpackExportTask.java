@@ -18,16 +18,21 @@
 package space.minecraftstl.xyml.modpack.multimc;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.game.GameComponentAnalyzer;
+import space.minecraftstl.xyml.game.GameComponentType;
 
+import java.util.Optional;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -35,8 +40,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
-import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
+import static space.minecraftstl.xyml.game.GameComponentType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Exports one installed instance as a MultiMC-compatible modpack archive.
@@ -44,23 +50,45 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class MultiMCModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
+
+    /// Stable exported instance identifier.
     private final GameInstanceID instanceId;
-    private final List<String> whitelist;
+
+    /// Immutable selected instance-relative paths.
+    private final @Unmodifiable List<String> whitelist;
+
+    /// MultiMC instance settings written into the archive.
     private final MultiMCInstanceConfiguration configuration;
+
+    /// Effective instance run directory captured when the task is created.
+    private final Path runDirectory;
 
     /// Destination archive path.
     private final Path output;
 
-    /**
-     * @param output    mod pack file.
-     * @param instanceId to locate version.json
-     */
-    public MultiMCModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, List<String> whitelist, MultiMCInstanceConfiguration configuration, Path output) {
-        this.repository = repository;
-        this.instanceId = instanceId;
-        this.whitelist = whitelist;
-        this.configuration = configuration;
-        this.output = output;
+    /// Creates a stopped MultiMC export task with stable source and destination paths.
+    ///
+    /// @param repository repository containing the exported instance
+    /// @param instanceId exported instance identifier
+    /// @param whitelist immutable selected instance-relative paths
+    /// @param configuration MultiMC instance configuration
+    /// @param output destination archive
+    public MultiMCModpackExportTask(
+            DefaultGameRepository repository,
+            GameInstanceID instanceId,
+            @Unmodifiable List<String> whitelist,
+            MultiMCInstanceConfiguration configuration,
+            Path output) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.whitelist = List.copyOf(whitelist);
+        this.configuration = Objects.requireNonNull(configuration, "configuration");
+        this.runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        this.output = output.toAbsolutePath().normalize();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameInstance(runDirectory),
+                TaskResource.exportTarget(this.output));
 
         onDone().register(event -> {
             if (event.isFailed()) {
@@ -86,17 +114,17 @@ public class MultiMCModpackExportTask extends Task<Void> {
         blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (Zipper zip = new Zipper(output)) {
-            zip.putDirectory(repository.getRunDirectory(instanceId), ".minecraft", path -> Modpack.acceptFile(path, blackList, whitelist));
+            zip.putDirectory(runDirectory, ".minecraft", path -> Modpack.acceptFile(path, blackList, whitelist));
 
             String gameVersion = repository.getGameVersion(instanceId)
                     .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
+            GameComponentAnalyzer analyzer = GameComponentAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), GameVersionNumber.asGameVersion(gameVersion));
             List<MultiMCManifest.MultiMCManifestComponent> components = new ArrayList<>();
-            components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(MINECRAFT), gameVersion));
+            components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(GAME), gameVersion));
 
-            for (Map.Entry<String, LibraryAnalyzer.LibraryType> pair : MultiMCComponents.getPairs()) {
+            for (Map.Entry<String, GameComponentType> pair : MultiMCComponents.getPairs()) {
                 if (pair.getValue().isModLoader()) {
-                    analyzer.getVersion(pair.getValue()).ifPresent(
+                    Optional.ofNullable(analyzer.getVersion(pair.getValue())).ifPresent(
                             v -> components.add(new MultiMCManifest.MultiMCManifestComponent(false, false, pair.getKey(), v))
                     );
                 }

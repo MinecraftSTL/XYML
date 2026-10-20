@@ -20,10 +20,10 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersionList;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.DownloadProviderWrapper;
-import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.download.VersionList;
+import space.minecraftstl.xyml.game.GameComponentType;
 import space.minecraftstl.xyml.download.game.GameRemoteVersion;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
@@ -34,21 +34,18 @@ import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /// Adapts the launcher's mutable game-version download list to an immutable Swing catalog source.
 ///
-/// The underlying download providers cache mutable [VersionList] instances, so this adapter permits
+/// The underlying download provider caches mutable [ComponentRemoteVersionList] instances, so this adapter permits
 /// at most one refresh task to run at a time. A newer request cancels the running result and replaces
 /// any request that was already waiting, but does not start until the old task reports its terminal
 /// event. Provider-wrapper changes are snapshotted once per request and cannot mix refresh and read
@@ -56,12 +53,6 @@ import java.util.concurrent.CompletionStage;
 @NotNullByDefault
 public final class DownloadProviderGameVersionCatalogSource
         implements GameVersionCatalogSource, AutoCloseable {
-    /// Download-provider list identifier for the Minecraft game catalog.
-    private static final String VERSION_LIST_ID = "game";
-
-    /// Stable list scope used for both refresh and the subsequent snapshot read.
-    private static final String VERSION_LIST_SCOPE = "game";
-
     /// Lock protecting lifecycle state and the active/latest-waiting operation slots.
     private final Object stateLock = new Object();
 
@@ -132,18 +123,16 @@ public final class DownloadProviderGameVersionCatalogSource
                 return cancelledStage();
             }
 
-            final VersionList<?> versionList;
+            final Task<ComponentRemoteVersionList<?>> refreshTask;
             try {
-                DownloadProvider requestProvider = unwrapProvider(configuredProvider);
-                @Nullable VersionList<?> selectedList = requestProvider.getVersionListById(VERSION_LIST_ID);
-                versionList = Objects.requireNonNull(
-                        selectedList,
-                        "download provider returned null version list");
+                refreshTask = Objects.requireNonNull(
+                        configuredProvider.getVersionsAsync(GameComponentType.GAME, null, true),
+                        "download provider returned null game catalog task");
             } catch (RuntimeException failure) {
                 return failedStage(failure);
             }
 
-            operation = new LoadOperation(cancellation, versionList);
+            operation = new LoadOperation(cancellation, refreshTask);
             synchronized (stateLock) {
                 requireOpen();
                 if (activeOperation == null) {
@@ -276,8 +265,8 @@ public final class DownloadProviderGameVersionCatalogSource
         try {
             operation.cancellation.throwIfCancelled();
             refreshTask = Objects.requireNonNull(
-                    operation.versionList.refreshAsync(VERSION_LIST_SCOPE),
-                    "version list returned null refresh task");
+                    operation.refreshTask,
+                    "operation has no game catalog task");
         } catch (CancellationException cancellation) {
             finishOperation(operation, LoadResult.cancelledResult());
             return;
@@ -521,7 +510,7 @@ public final class DownloadProviderGameVersionCatalogSource
 
         try {
             operation.cancellation.throwIfCancelled();
-            @Unmodifiable List<GameVersionCatalogItem> items = mapVersions(operation.versionList);
+            @Unmodifiable List<GameVersionCatalogItem> items = mapVersions(operation.refreshTask);
             operation.cancellation.throwIfCancelled();
             finishOperation(operation, LoadResult.succeeded(items));
         } catch (CancellationException cancellation) {
@@ -585,13 +574,16 @@ public final class DownloadProviderGameVersionCatalogSource
         rethrowUnchecked(cleanupFailure);
     }
 
-    /// Converts the exact refreshed list snapshot into immutable, sorted, unique catalog items.
+    /// Converts the completed game catalog task result into immutable, sorted, unique catalog items.
     ///
-    /// @param versionList exact list instance used to create the completed refresh task
+    /// @param refreshTask completed game catalog refresh task
     /// @return newest-first immutable catalog with duplicate stable IDs removed
-    private static @Unmodifiable List<GameVersionCatalogItem> mapVersions(VersionList<?> versionList) {
+    private static @Unmodifiable List<GameVersionCatalogItem> mapVersions(
+            Task<ComponentRemoteVersionList<?>> refreshTask) {
+        ComponentRemoteVersionList<?> versionList = Objects.requireNonNull(
+                refreshTask.getResult(), "game version list result");
         List<GameVersionCatalogItem> mappedItems = new ArrayList<>();
-        for (@Nullable RemoteVersion remoteVersion : versionList.getVersions(VERSION_LIST_SCOPE)) {
+        for (@Nullable ComponentRemoteVersion remoteVersion : versionList) {
             if (remoteVersion == null) {
                 throw new IllegalStateException("Game version list returned a null entry");
             }
@@ -622,7 +614,7 @@ public final class DownloadProviderGameVersionCatalogSource
     private static GameVersionKind classify(GameRemoteVersion version) {
         return switch (version.getVersionType()) {
             case RELEASE -> GameVersionKind.RELEASE;
-            case SNAPSHOT -> GameVersionNumber.asGameVersion(version.getGameVersion()).isAprilFools()
+            case SNAPSHOT -> version.getGameVersion().isAprilFools()
                     ? GameVersionKind.APRIL_FOOLS
                     : GameVersionKind.SNAPSHOT;
             case PENDING, UNOBFUSCATED -> GameVersionKind.SNAPSHOT;
@@ -663,23 +655,6 @@ public final class DownloadProviderGameVersionCatalogSource
             return idComparison;
         }
         return left.kind().compareTo(right.kind());
-    }
-
-    /// Resolves nested provider wrappers while rejecting an accidental identity cycle.
-    ///
-    /// @param provider configured provider or wrapper
-    /// @return concrete provider snapshot for one load request
-    private static DownloadProvider unwrapProvider(DownloadProvider provider) {
-        DownloadProvider current = provider;
-        Set<DownloadProvider> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current instanceof DownloadProviderWrapper wrapper) {
-            if (!visited.add(current)) {
-                throw new IllegalStateException("Download-provider wrapper cycle detected");
-            }
-            @Nullable DownloadProvider nestedProvider = wrapper.getProvider();
-            current = Objects.requireNonNull(nestedProvider, "download-provider wrapper contains null");
-        }
-        return current;
     }
 
     /// Completes one operation's internal future according to its resolved terminal result.
@@ -823,8 +798,8 @@ public final class DownloadProviderGameVersionCatalogSource
         /// Caller-owned cooperative cancellation signal.
         private final LoadCancellation cancellation;
 
-        /// Exact provider list used for both refresh creation and terminal snapshot reading.
-        private final VersionList<?> versionList;
+        /// Exact provider task used for both refresh creation and terminal snapshot reading.
+        private final Task<ComponentRemoteVersionList<?>> refreshTask;
 
         /// Internal mutable completion retained after exposing only its minimal stage view.
         private final CompletableFuture<@Unmodifiable List<GameVersionCatalogItem>> completion =
@@ -854,10 +829,10 @@ public final class DownloadProviderGameVersionCatalogSource
         /// Creates one request before it is assigned to an operation slot.
         ///
         /// @param cancellation caller-owned cooperative cancellation signal
-        /// @param versionList exact request provider list
-        private LoadOperation(LoadCancellation cancellation, VersionList<?> versionList) {
+        /// @param refreshTask exact request provider task
+        private LoadOperation(LoadCancellation cancellation, Task<ComponentRemoteVersionList<?>> refreshTask) {
             this.cancellation = Objects.requireNonNull(cancellation, "cancellation");
-            this.versionList = Objects.requireNonNull(versionList, "versionList");
+            this.refreshTask = Objects.requireNonNull(refreshTask, "refreshTask");
         }
 
         /// Returns a minimal view that cannot directly mutate the internal completion.

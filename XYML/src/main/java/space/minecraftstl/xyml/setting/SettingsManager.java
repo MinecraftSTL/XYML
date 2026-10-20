@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.JsonObject;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
@@ -467,6 +468,28 @@ public final class SettingsManager {
             throw new IllegalStateException("Game settings presets haven't been loaded");
         }
         return gameSettingsPresets;
+    }
+
+    /// Retargets loaded preset policies after a source instance was successfully renamed.
+    ///
+    /// No policy exists to update before the preset document has been loaded.
+    ///
+    /// @param directoryId owning directory of the renamed source
+    /// @param from previous source instance ID
+    /// @param to replacement source instance ID
+    public static void renameInstanceConfigMigrationSources(
+            GameDirectoryID directoryId, GameInstanceID from, GameInstanceID to) {
+        @Nullable GameSettingsPresets loaded = gameSettingsPresets;
+        if (loaded == null) {
+            return;
+        }
+        for (GameSettings.Preset preset : loaded.getPresets()) {
+            InstanceConfigMigrationPolicy policy = preset.instanceConfigMigrationPolicyProperty().getValue();
+            InstanceConfigMigrationPolicy renamed = policy.renameSource(directoryId, from, to);
+            if (renamed != policy) {
+                preset.instanceConfigMigrationPolicyProperty().setValue(renamed);
+            }
+        }
     }
 
     /// Returns the loaded detached account metadata store.

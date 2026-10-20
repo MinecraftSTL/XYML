@@ -25,6 +25,9 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.theme.ThemePackExporter;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -55,13 +58,29 @@ public final class SwingThemePackManagementInteractions implements ThemePackMana
     /// Caller-owned worker used for potentially blocking desktop integration.
     private final Executor executor;
 
+    /// Recycle-bin capability boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates production interactions.
     ///
     /// @param strings localized interaction text
     /// @param executor caller-owned non-EDT worker executor
     public SwingThemePackManagementInteractions(ThemePackManagementStrings strings, Executor executor) {
+        this(strings, executor, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates interactions with an explicit recycle-bin implementation.
+    ///
+    /// @param strings localized interaction text
+    /// @param executor caller-owned non-EDT worker executor
+    /// @param trashOperations recycle-bin implementation
+    SwingThemePackManagementInteractions(
+            ThemePackManagementStrings strings,
+            Executor executor,
+            TrashOperations trashOperations) {
         this.strings = Objects.requireNonNull(strings, "strings");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Shows a native file chooser constrained to `.xyml-theme` archives.
@@ -170,6 +189,25 @@ public final class SwingThemePackManagementInteractions implements ThemePackMana
                 strings.confirmDeleteTitle(),
                 JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+    }
+
+    /// Chooses recycle-bin-first deletion without warning or warns before permanent deletion.
+    @Override
+    public @Nullable DeletionMode chooseDeleteMode(Component owner, ThemePackItem item) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(item, "item");
+        if (trashOperations.isSupported()) {
+            return DeletionMode.RECYCLE_BIN_FIRST;
+        }
+        return confirmDelete(owner, item) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Shows the original warning after a recycle-bin move fails.
+    @Override
+    public boolean confirmPermanentFallback(Component owner, ThemePackItem item) {
+        EdtDispatcher.requireEventDispatchThread();
+        return confirmDelete(owner, item);
     }
 
     /// Opens one revalidated directory on the caller-owned worker.

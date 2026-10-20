@@ -17,84 +17,82 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import space.minecraftstl.xyml.library.nbt.NBTElement;
-import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
-import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
-import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
-import space.minecraftstl.xyml.library.nbt.tag.ParentTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
+import space.minecraftstl.xyml.library.nbt.edit.NBTNode;
 import space.minecraftstl.xyml.nbt.NBTDocument;
 import space.minecraftstl.xyml.nbt.NBTTreeNode;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-/// Swing tree node that pairs lazy presentation metadata with the exact mutable XoyzNBT element.
+/// Swing adapter over one immutable, revision-bound XoyzNBT node handle.
+///
+/// No mutable NBT element crosses this boundary. A successful edit replaces the complete tree
+/// model, and any accidental use of an older adapter is rejected by the underlying editor.
 @NotNullByDefault
 public final class NBTEditorTreeNode {
-    /// Document whose mutable root owns this element.
+    /// Document identity used to reject rows retained from an older open operation.
     private final NBTDocument document;
 
-    /// Toolkit-neutral presentation node supplied by the NBT backend.
+    /// Toolkit-neutral immutable presentation metadata.
     private final NBTTreeNode presentation;
 
-    /// Exact XoyzNBT element edited when this row is selected.
-    private final NBTElement element;
-
-    /// Immutable child-index address from the document root.
-    private final @Unmodifiable List<Integer> address;
+    /// Index in the direct parent at the captured revision, or `-1` for the root.
+    private final int parentIndex;
 
     /// Per-index cache populated only when Swing requests a child.
     private final AtomicReferenceArray<@Nullable NBTEditorTreeNode> children;
 
-    /// Creates a root adapter for a loaded document.
+    /// Creates a root adapter for the document's current editor revision.
     ///
     /// @param document loaded document
     public NBTEditorTreeNode(NBTDocument document) {
-        this(
-                Objects.requireNonNull(document, "document"),
-                document.rootNode(),
-                document.rootElement(),
-                List.of());
+        this(Objects.requireNonNull(document, "document"), document.rootNode(), -1);
     }
 
     /// Creates one lazy child adapter.
     ///
     /// @param document owning document
-    /// @param presentation backend presentation node
-    /// @param element exact mutable element
-    /// @param address immutable child-index address
-    private NBTEditorTreeNode(
-            NBTDocument document,
-            NBTTreeNode presentation,
-            NBTElement element,
-            @Unmodifiable List<Integer> address) {
+    /// @param presentation immutable backend presentation
+    /// @param parentIndex direct index in the parent
+    private NBTEditorTreeNode(NBTDocument document, NBTTreeNode presentation, int parentIndex) {
         this.document = Objects.requireNonNull(document, "document");
         this.presentation = Objects.requireNonNull(presentation, "presentation");
-        this.element = Objects.requireNonNull(element, "element");
-        this.address = List.copyOf(Objects.requireNonNull(address, "address"));
+        this.parentIndex = parentIndex;
         children = new AtomicReferenceArray<>(presentation.childCount());
     }
 
-    /// Returns the toolkit-neutral metadata for rendering.
+    /// Returns immutable metadata for rendering.
     ///
-    /// @return stable backend presentation node
+    /// @return stable presentation node
     public NBTTreeNode presentation() {
         return presentation;
     }
 
-    /// Returns the immutable child-index address from the root.
+    /// Returns the revision-bound read-only node handle.
     ///
-    /// @return immutable address
-    public @Unmodifiable List<Integer> address() {
-        return address;
+    /// @return immutable editor node
+    public NBTNode node() {
+        return presentation.node();
     }
 
-    /// Returns the exact number of direct children without materializing them.
+    /// Returns the immutable structural address.
+    ///
+    /// @return node address
+    public NBTAddress address() {
+        return presentation.address();
+    }
+
+    /// Returns the captured direct index in the parent.
+    ///
+    /// @return direct child index, or `-1` for the root
+    int parentIndex() {
+        return parentIndex;
+    }
+
+    /// Returns the exact direct-child count without materializing children.
     ///
     /// @return direct child count
     public int childCount() {
@@ -109,13 +107,11 @@ public final class NBTEditorTreeNode {
         Objects.checkIndex(index, childCount());
         @Nullable NBTEditorTreeNode cached = children.get(index);
         if (cached != null) {
+            // Swing may query already rendered rows while replacing a stale model. The cached
+            // adapter is immutable; only materializing a new row must consult the current editor.
             return cached;
         }
-        NBTEditorTreeNode created = new NBTEditorTreeNode(
-                document,
-                presentation.childAt(index),
-                resolveElement(index),
-                childAddress(index));
+        NBTEditorTreeNode created = new NBTEditorTreeNode(document, presentation.childAt(index), index);
         if (children.compareAndSet(index, null, created)) {
             return created;
         }
@@ -128,7 +124,7 @@ public final class NBTEditorTreeNode {
 
     /// Counts child adapters already requested from this node.
     ///
-    /// @return populated child-cache slots
+    /// @return populated cache slots
     public int materializedChildCount() {
         int count = 0;
         for (int index = 0; index < children.length(); index++) {
@@ -139,64 +135,25 @@ public final class NBTEditorTreeNode {
         return count;
     }
 
-    /// Returns whether this row has an exact supported scalar setter.
+    /// Returns whether this row has a scalar value accepted by `NBTEditor.setScalar`.
     ///
-    /// @return whether value editing is supported
+    /// @return whether scalar editing is available
     public boolean editable() {
-        return NBTValueEditor.isEditable(element);
+        return node().getType() != null && node().getValue() != null;
     }
 
-    /// Returns the exact current scalar text when available.
+    /// Returns the scalar text captured at this revision.
     ///
-    /// @return current scalar text, or `null` for containers
+    /// @return scalar text, or `null` for containers
     public @Nullable String currentScalarValue() {
-        return NBTEditorTreeValues.scalarText(element);
+        return node().getValue();
     }
 
-    /// Returns whether this node belongs to the exact document identity.
+    /// Returns whether this row belongs to the exact current document identity.
     ///
     /// @param candidate document to compare
     /// @return whether both identities match
     boolean belongsTo(NBTDocument candidate) {
         return document == Objects.requireNonNull(candidate, "candidate");
-    }
-
-    /// Returns the exact mutable element for controller-owned edits.
-    ///
-    /// @return mutable XoyzNBT element
-    NBTElement element() {
-        return element;
-    }
-
-    /// Resolves one child element by index without enumerating its siblings.
-    ///
-    /// @param index validated child index
-    /// @return exact child element
-    private NBTElement resolveElement(int index) {
-        if (element instanceof ChunkRegion region) {
-            return region.getChunk(index);
-        }
-        if (element instanceof Chunk chunk) {
-            @Nullable CompoundTag rootTag = chunk.getRootTag();
-            if (rootTag == null) {
-                throw new AssertionError("Chunk child count changed after tree construction");
-            }
-            return rootTag.getTag(index);
-        }
-        if (element instanceof ParentTag<?> parentTag) {
-            return parentTag.getTag(index);
-        }
-        throw new AssertionError("Leaf node unexpectedly resolved a child");
-    }
-
-    /// Appends one index to this immutable address.
-    ///
-    /// @param index direct child index
-    /// @return immutable child address
-    private @Unmodifiable List<Integer> childAddress(int index) {
-        List<Integer> values = new ArrayList<>(address.size() + 1);
-        values.addAll(address);
-        values.add(index);
-        return List.copyOf(values);
     }
 }

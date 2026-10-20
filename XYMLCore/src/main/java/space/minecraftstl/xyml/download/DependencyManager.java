@@ -91,13 +91,13 @@ public interface DependencyManager {
      * @param libraryVersion the remote version of being installed library.
      * @return the task to install the specific library.
      */
-    Task<?> installLibraryAsync(GameInstanceManifest baseVersion, RemoteVersion libraryVersion);
+    Task<?> installLibraryAsync(GameInstanceManifest baseVersion, ComponentRemoteVersion libraryVersion);
 
-    /**
-     * Get registered version list.
-     *
-     * @param id the id of version list. i.e. game, forge, liteloader, optifine
-     * @throws IllegalArgumentException if the version list of specific id is not found.
-     */
-    VersionList<?> getVersionList(String id);
+    /// Checks that every library declared by the manifest is present and valid.
+    ///
+    /// @param manifest       the manifest whose libraries are verified
+    /// @param integrityCheck whether file digests are verified
+    /// @return verification task
+    Task<?> checkComponentCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck);
+
 }

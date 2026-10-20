@@ -18,10 +18,8 @@
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import javax.swing.JPanel;
 import javax.swing.TransferHandler;
@@ -30,7 +28,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,13 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
-/// Verifies default-workspace NBT filtering and editor lifecycle delegation.
+/// Verifies application-wide NBT filtering and editor lifecycle delegation.
 @NotNullByDefault
 final class SwingShellNBTDropLauncherTest {
-    /// Accepts every supported NBT family only on the default workspace and detaches on close.
+    /// Accepts every supported NBT family throughout the shell and detaches on close.
     @Test
-    void acceptsSupportedNbtOnlyOnDefaultWorkspace() {
-        AtomicReference<@Nullable ShellPageId> selectedPage = new AtomicReference<>();
+    void acceptsSupportedNbtThroughoutShell() {
         AtomicInteger editorCloseCount = new AtomicInteger();
         List<Path> opened = new ArrayList<>();
 
@@ -52,7 +48,6 @@ final class SwingShellNBTDropLauncherTest {
             JPanel shell = new JPanel();
             SwingShellNBTDropLauncher launcher = SwingShellNBTDropLauncher.install(
                     shell,
-                    selectedPage::get,
                     opened::add,
                     editorCloseCount::incrementAndGet);
             TransferHandler handler = Objects.requireNonNull(shell.getTransferHandler());
@@ -62,11 +57,6 @@ final class SwingShellNBTDropLauncherTest {
             assertTrue(handler.importData(fileTransfer(shell, List.of(Path.of("r.0.0.MCA")))));
             assertTrue(handler.importData(fileTransfer(shell, List.of(Path.of("r.0.0.mcr")))));
             assertFalse(handler.canImport(fileTransfer(shell, List.of(Path.of("version.json")))));
-
-            for (ShellPageId page : ShellPageId.values()) {
-                selectedPage.set(page);
-                assertFalse(handler.canImport(fileTransfer(shell, List.of(Path.of("blocked.dat")))));
-            }
 
             launcher.close();
             launcher.close();

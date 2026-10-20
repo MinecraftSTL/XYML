@@ -20,8 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
@@ -42,10 +42,10 @@ final class InstanceInstallerCompatibilityTest {
     /// Preserves the caller's original remote objects and installation order for a compatible request.
     @Test
     void preservesOriginalRemoteVersionsInCompatibleOrder() {
-        RemoteVersion forge = remote("forge", "47.2.0");
-        RemoteVersion optiFine = remote("optifine", "HD_U_I6");
+        ComponentRemoteVersion forge = remote("forge", "47.2.0");
+        ComponentRemoteVersion optiFine = remote("optifine", "HD_U_I6");
 
-        @Unmodifiable List<RemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
+        @Unmodifiable List<ComponentRemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
                 snapshot(),
                 List.of(forge, optiFine));
 
@@ -98,18 +98,18 @@ final class InstanceInstallerCompatibilityTest {
         InstanceInstallerSnapshot fabricInstance = snapshot(new InstanceInstallerEntry(
                 GameLoaderKind.FABRIC,
                 "0.16.0",
-                LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                InstallerStructureStatus.CLEAR));
         InstanceInstallerSnapshot fabricWithApi = snapshot(
                 new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC,
                         "0.16.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR),
+                        InstallerStructureStatus.CLEAR),
                 new InstanceInstallerEntry(
                         GameLoaderKind.FABRIC_API,
                         "0.104.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                        InstallerStructureStatus.CLEAR));
 
-        @Unmodifiable List<RemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
+        @Unmodifiable List<ComponentRemoteVersion> validated = InstanceInstallerCompatibility.validateRemoteInstallation(
                 fabricInstance,
                 List.of(remote("fabric-api", "0.104.0")));
         InstanceInstallerValidationException removalFailure = assertThrows(
@@ -118,7 +118,7 @@ final class InstanceInstallerCompatibilityTest {
 
         assertAll(
                 () -> assertEquals(1, validated.size()),
-                () -> assertEquals("fabric-api", validated.get(0).getLibraryId()),
+                () -> assertEquals("fabric-api", validated.get(0).getComponentType().getPatchId()),
                 () -> assertEquals(
                         InstanceInstallerValidationException.Reason.REQUIRED_COMPANION_WOULD_BE_ORPHANED,
                         removalFailure.reason()));
@@ -145,12 +145,12 @@ final class InstanceInstallerCompatibilityTest {
                 "third-party-clear",
                 "1.0.0",
                 InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR));
+                        InstallerStructureStatus.CLEAR));
         InstanceOtherLibraryEntry uncertain = new InstanceOtherLibraryEntry(
                 "third-party-external",
                 null,
                 InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED));
+                        InstallerStructureStatus.JUST_EXISTED));
         List<InstanceOtherLibraryEntry> mutableEntries = new ArrayList<>(List.of(clear, uncertain));
         InstanceInstallerSnapshot snapshot = new InstanceInstallerSnapshot(
                 new GameInstanceID("existing-instance"),
@@ -168,7 +168,7 @@ final class InstanceInstallerCompatibilityTest {
                 () -> assertEquals(
                         InstanceOtherLibraryEntry.StructureState.EXTERNALLY_UNCERTAIN,
                         InstanceOtherLibraryEntry.StructureState.fromAnalyzerStatus(
-                                LibraryAnalyzer.LibraryMark.LibraryStatus.UNSURE)),
+                                InstallerStructureStatus.UNSURE)),
                 () -> assertEquals(List.of(clear, uncertain), snapshot.otherRemovableLibraries()));
 
         assertAll(
@@ -189,7 +189,7 @@ final class InstanceInstallerCompatibilityTest {
                 List.of(new InstanceInstallerEntry(
                         GameLoaderKind.FORGE,
                         "47.2.0",
-                        LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED)),
+                        InstallerStructureStatus.JUST_EXISTED)),
                 List.of(
                         new InstanceOtherLibraryEntry(
                                 "clear-third-party",
@@ -258,7 +258,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @param libraryId Core library identifier
     /// @param selfVersion remote display version
     /// @return exact selected Core remote-version object
-    private static RemoteVersion remote(String libraryId, String selfVersion) {
+    private static ComponentRemoteVersion remote(String libraryId, String selfVersion) {
         return remote(libraryId, selfVersion, "1.21.1");
     }
 
@@ -268,7 +268,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @param selfVersion remote display version
     /// @param gameVersion matching Minecraft version
     /// @return exact selected Core remote-version object
-    private static RemoteVersion remote(String libraryId, String selfVersion, String gameVersion) {
-        return new RemoteVersion(libraryId, gameVersion, selfVersion, Instant.EPOCH, List.of());
+    private static ComponentRemoteVersion remote(String libraryId, String selfVersion, String gameVersion) {
+        return new TestComponentRemoteVersion(libraryId, gameVersion, selfVersion, Instant.EPOCH, List.of());
     }
 }

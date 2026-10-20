@@ -32,11 +32,13 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.ListCellRenderer;
 import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Container;
@@ -136,6 +138,8 @@ public final class ResourcePackCatalogPanelTest {
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
                 () -> newPanel(model));
+        AtomicInteger downloads = new AtomicInteger();
+        AtomicInteger checks = new AtomicInteger();
 
         assertAll(
                 () -> assertEquals(0, model.lazyLoads.get()),
@@ -161,6 +165,11 @@ public final class ResourcePackCatalogPanelTest {
             cardLayout.show(host, "resourcePacks");
             cardLayout.show(host, "other");
             cardLayout.show(host, "resourcePacks");
+            panel.setContentCommands(downloads::incrementAndGet, checks::incrementAndGet);
+            findButton(panel, "resourcePacksCheckUpdates").doClick();
+            findButton(panel, "resourcePacksDownload").doClick();
+            assertEquals(1, checks.get());
+            assertEquals(1, downloads.get());
             assertEquals(1, model.lazyLoads.get());
             panel.close();
             panel.close();
@@ -318,15 +327,15 @@ public final class ResourcePackCatalogPanelTest {
                     () -> assertTrue(requested.length() < rows.size()),
                     () -> assertEquals(List.of(selected.path()), model.selectedPaths()),
                     () -> assertEquals(selected.fileName(),
-                            findComponent(panel, "resourcePacksFileName", javax.swing.JLabel.class).getText()),
+                            findComponent(panel, "resourcePacksFileName", javax.swing.JTextArea.class).getText()),
                     () -> assertEquals(selected.path().toString(),
                             findTextArea(panel, "resourcePacksPath").getText()),
                     () -> assertEquals(selected.description(),
                             findTextArea(panel, "resourcePacksDescription").getText()),
                     () -> assertEquals(STRINGS.compatibleText(),
-                            findComponent(panel, "resourcePacksCompatibility", javax.swing.JLabel.class).getText()),
+                            findComponent(panel, "resourcePacksCompatibility", javax.swing.JTextArea.class).getText()),
                     () -> assertEquals(STRINGS.disabledText(),
-                            findComponent(panel, "resourcePacksEnabled", javax.swing.JLabel.class).getText()));
+                            findComponent(panel, "resourcePacksEnabled", javax.swing.JTextArea.class).getText()));
 
             list.clearSelection();
             assertAll(
@@ -394,6 +403,12 @@ public final class ResourcePackCatalogPanelTest {
                     panel,
                     "resourcePacksDetailsScroll",
                     JScrollPane.class);
+            JTextArea fileName = findTextArea(panel, "resourcePacksFileName");
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+            assertEquals(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
+            assertTrue(fileName.getLineWrap());
+            assertFalse(fileName.getWrapStyleWord());
             panel.setSize(new Dimension(980, 620));
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
@@ -418,12 +433,12 @@ public final class ResourcePackCatalogPanelTest {
                     detailsScroll.getVerticalScrollBar().getMaximum()
                             <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
 
-            panel.setSize(new Dimension(600, 420));
+            panel.setSize(new Dimension(360, 420));
             panel.invalidate();
             layoutRecursively(panel);
             assertAll(
                     () -> assertEquals(
-                            JSplitPane.VERTICAL_SPLIT,
+                            JSplitPane.HORIZONTAL_SPLIT,
                             split.getOrientation(),
                             () -> "panel=" + panel.getSize() + ", split=" + split.getSize()),
                     () -> assertTrue(split.getTopComponent().getHeight() > 0),
@@ -431,6 +446,35 @@ public final class ResourcePackCatalogPanelTest {
                     () -> assertTrue(detailsScroll.getViewport().getExtentSize().height > 0),
                     () -> assertTrue(detailsScroll.getVerticalScrollBar().getMaximum()
                             > detailsScroll.getVerticalScrollBar().getVisibleAmount()));
+            panel.close();
+        });
+    }
+
+    /// Uses a muted row surface for disabled packs while retaining the compatibility explanation.
+    @Test
+    public void rendersDisabledPackWithCompatibilityBadgeAndMutedSurface() {
+        @Unmodifiable List<ResourcePackCatalogItem> rows = items(2);
+        FakeResourcePackCatalogModel model = FakeResourcePackCatalogModel.immediate(
+                rows,
+                snapshot(OptionalInt.empty(), OptionalInt.of(rows.size()), 1L,
+                        ResourcePackCatalogStatus.READY, "Ready", true, true));
+        ResourcePackCatalogPanel panel = onEventDispatchThread(
+                () -> newPanel(model));
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.choiceList().getList();
+            list.setSize(new Dimension(420, 68));
+            ListCellRenderer<? super ChoiceListEntry<ResourcePackCatalogItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(1, rows.get(1)),
+                    1,
+                    false,
+                    false);
+            JLabel badge = findComponent((Container) row, "richChoiceListBadge", JLabel.class);
+            assertFalse(row.isOpaque());
+            assertEquals(list.getBackground(), row.getBackground());
+            assertEquals(STRINGS.compatibleText(), badge.getText());
             panel.close();
         });
     }
@@ -965,6 +1009,16 @@ public final class ResourcePackCatalogPanelTest {
         public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path) {
             Objects.requireNonNull(path, "path");
             return CompletableFuture.completedFuture(current.get());
+        }
+
+        /// Rejects unsupported reorder commands in this focused fake.
+        ///
+        /// @param path requested stable path
+        /// @param targetIndex requested final index
+        /// @return never
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> reorderResourcePack(Path path, int targetIndex) {
+            throw new UnsupportedOperationException("not used by this test");
         }
 
         /// Closes this test-owned model once.

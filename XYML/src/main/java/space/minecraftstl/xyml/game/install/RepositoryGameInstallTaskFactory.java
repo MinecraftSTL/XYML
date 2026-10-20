@@ -20,18 +20,17 @@ package space.minecraftstl.xyml.game.install;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.DownloadProviderWrapper;
 import space.minecraftstl.xyml.download.GameBuilder;
-import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.migration.AutomaticInstanceConfigMigrationTaskFactory;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.game.GameComponentType;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.Executor;
 
 /// Creates a complete game-installation task against one selected repository and download provider.
@@ -53,6 +52,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     /// Caller-owned dispatcher used only to publish the selected instance after success.
     private final Executor instanceSelectionExecutor;
 
+    /// Creates automatic non-replacing migration tasks for isolated installations.
+    private final AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory;
+
     /// Creates a repository-backed game-installation factory.
     ///
     /// @param repository selected target repository
@@ -64,6 +66,27 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
             DownloadProvider downloadProvider,
             Executor repositoryRefreshExecutor,
             Executor instanceSelectionExecutor) {
+        this(
+                repository,
+                downloadProvider,
+                repositoryRefreshExecutor,
+                instanceSelectionExecutor,
+                AutomaticInstanceConfigMigrationTaskFactory.disabled());
+    }
+
+    /// Creates a repository-backed installation factory with automatic isolated-instance migration.
+    ///
+    /// @param repository selected target repository
+    /// @param downloadProvider provider used for this installation
+    /// @param repositoryRefreshExecutor caller-owned background executor for repository refresh
+    /// @param instanceSelectionExecutor caller-owned dispatcher for selected-instance publication
+    /// @param migrationTaskFactory automatic migration task factory
+    public RepositoryGameInstallTaskFactory(
+            XYMLGameRepository repository,
+            DownloadProvider downloadProvider,
+            Executor repositoryRefreshExecutor,
+            Executor instanceSelectionExecutor,
+            AutomaticInstanceConfigMigrationTaskFactory migrationTaskFactory) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
         this.repositoryRefreshExecutor = Objects.requireNonNull(
@@ -72,6 +95,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         this.instanceSelectionExecutor = Objects.requireNonNull(
                 instanceSelectionExecutor,
                 "instanceSelectionExecutor");
+        this.migrationTaskFactory = Objects.requireNonNull(migrationTaskFactory, "migrationTaskFactory");
     }
 
     /// Validates the destination and creates the complete install and repository-update chain.
@@ -83,7 +107,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         Objects.requireNonNull(request, "request");
         return Task.composeAsync(() -> createDeferredInstallTask(
                 request,
-                unwrapProvider(downloadProvider)));
+                downloadProvider))
+                .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Performs destination validation and side-effectful task construction only after execution starts.
@@ -108,20 +134,42 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
 
         GameBuilder builder = repository.getDependency(requestProvider).newGameBuilder();
         configureBuilder(builder, instanceId, request);
-        repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
-        return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
+        Task<?> installation = Task.runAsync(() -> {
+            if (repository.instanceIdConflicts(instanceId)) {
+                throw new GameInstallRequestRejectedException(
+                        request,
+                        GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
+            }
+            repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
+        }).setResources(metadataResource, instanceResource)
+                .thenComposeAsync(builder.buildAsync())
+                .setResources(operationResource, instanceResource);
+        Task<@Nullable Void> refreshed = installation.whenCompleteWithResources(
+                repositoryRefreshExecutor,
+                ignoredFailure -> {
                     repository.refresh();
                     repository.applyDefaultIsolationSetting(instanceId);
-                })
-                .thenRunAsync(
+                },
+                TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .asOrchestration();
+        Task<?> migrated = refreshed.thenComposeAsync(
+                        repositoryRefreshExecutor,
+                        () -> migrationTaskFactory.createAfterInstall(repository, instanceId))
+                .asOrchestration();
+        return migrated.thenComposeAsync(instanceSelectionExecutor, () -> Task.runAsync(
+                        "Select installed instance",
                         instanceSelectionExecutor,
-                        () -> repository.setSelectedInstance(instanceId));
+                        () -> repository.setSelectedInstance(instanceId))
+                .setResources(TaskResource.configuration(SettingsManager.settingsLocation())))
+                .asOrchestration();
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.
     ///
-    /// Selected remote installers are passed to [GameBuilder#version(RemoteVersion)] in exact request
+    /// Selected remote installers are passed to [GameBuilder#version(ComponentRemoteVersion)] in exact request
     /// order. This is deliberately separate from construction so tests can verify task composition
     /// without opening a repository or starting any download.
     ///
@@ -136,14 +184,14 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         Objects.requireNonNull(instanceId, "instanceId");
         Objects.requireNonNull(request, "request");
         builder.name(instanceId).gameVersion(request.versionId());
-        for (RemoteVersion remoteVersion : request.selectedRemoteVersions()) {
+        for (ComponentRemoteVersion remoteVersion : request.selectedRemoteVersions()) {
             builder.version(remoteVersion);
         }
     }
 
     /// Determines whether the selected remote installers contain a real mod loader.
     ///
-    /// The repository isolation rule considers only [LibraryAnalyzer.LibraryType#isModLoader()] as
+    /// The repository isolation rule considers only [GameComponentType#isModLoader()] as
     /// considered modded, so auxiliary components such as OptiFine alone do not change the default
     /// running-directory policy.
     ///
@@ -151,9 +199,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     /// @return whether default isolation should use the modded branch
     static boolean isModded(GameInstallRequest request) {
         Objects.requireNonNull(request, "request");
-        for (RemoteVersion remoteVersion : request.selectedRemoteVersions()) {
-            @Nullable LibraryAnalyzer.LibraryType type = LibraryAnalyzer.LibraryType.fromPatchId(
-                    remoteVersion.getLibraryId());
+        for (ComponentRemoteVersion remoteVersion : request.selectedRemoteVersions()) {
+            @Nullable GameComponentType type = GameComponentType.fromPatchId(
+                    remoteVersion.getComponentType().getPatchId());
             if (type != null && type.isModLoader()) {
                 return true;
             }
@@ -161,20 +209,4 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         return false;
     }
 
-    /// Resolves a stable concrete provider snapshot while rejecting wrapper cycles and null links.
-    ///
-    /// @param provider configured provider or mutable wrapper
-    /// @return concrete provider used throughout one installation task
-    private static DownloadProvider unwrapProvider(DownloadProvider provider) {
-        DownloadProvider current = Objects.requireNonNull(provider, "provider");
-        Set<DownloadProvider> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current instanceof DownloadProviderWrapper wrapper) {
-            if (!visited.add(current)) {
-                throw new IllegalStateException("Download-provider wrapper cycle detected");
-            }
-            @Nullable DownloadProvider nestedProvider = wrapper.getProvider();
-            current = Objects.requireNonNull(nestedProvider, "download-provider wrapper contains null");
-        }
-        return current;
-    }
 }

@@ -26,7 +26,7 @@ import space.minecraftstl.xyml.util.gson.Validation;
  * @author huangyuhui
  */
 @Immutable
-public final class ForgeVersion implements Validation {
+final class ForgeVersion implements Validation {
 
     private final String branch;
     private final String mcversion;

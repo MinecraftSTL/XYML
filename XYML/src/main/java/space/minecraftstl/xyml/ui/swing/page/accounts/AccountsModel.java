@@ -57,6 +57,22 @@ public interface AccountsModel extends IdentifiedChoiceDataSource<AccountListIte
     /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
     void removeAccount(String accountId, boolean allowReadOnlyOverwrite);
 
+    /// Returns whether one loaded account can move to a final source index in the same storage group.
+    ///
+    /// @param accountId stable account identifier
+    /// @param targetIndex final zero-based source index after the move
+    /// @return true when the move changes order without crossing the portable/global boundary
+    boolean canMoveAccount(String accountId, int targetIndex);
+
+    /// Moves one loaded account to a final source index in the same storage group.
+    ///
+    /// @param accountId stable account identifier
+    /// @param targetIndex final zero-based source index after the move
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make storage writable
+    /// @throws IllegalArgumentException when the account or target ordering is invalid
+    /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
+    void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite);
+
     /// Starts asynchronous authentication and persistence for one currently loaded account.
     ///
     /// @param accountId stable account identifier

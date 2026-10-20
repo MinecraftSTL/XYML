@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -26,14 +27,11 @@ import java.util.Objects;
 /// Offline task wrapper that imports one world archive into a managed instance's effective run directory.
 @NotNullByDefault
 public final class WorldArchiveImportTask extends Task<WorldArchiveImportResult> {
-    /// Repository used to resolve the instance run directory at execution time.
-    private final GameRepository repository;
-
-    /// Stable managed instance identifier.
-    private final GameInstanceID instanceId;
-
     /// Local ZIP archive to validate and extract.
     private final Path archive;
+
+    /// Stable target instance saves directory.
+    private final Path savesDirectory;
 
     /// Requested final world directory and stored level name.
     private final String targetName;
@@ -68,22 +66,26 @@ public final class WorldArchiveImportTask extends Task<WorldArchiveImportResult>
             Path archive,
             String targetName,
             WorldArchiveImporter importer) {
-        this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        GameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
+        GameInstanceID checkedInstanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.archive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
+        Path runDirectory = Objects.requireNonNull(
+                        checkedRepository.getRunDirectory(checkedInstanceId),
+                        "repository run directory")
+                .toAbsolutePath()
+                .normalize();
+        this.savesDirectory = runDirectory.resolve("saves");
         this.targetName = requireNonBlank(targetName, "targetName");
         this.importer = Objects.requireNonNull(importer, "importer");
+        setResources(TaskResource.gameInstance(runDirectory), TaskResource.archive(this.archive));
     }
 
-    /// Resolves `saves` from the effective instance run directory and performs the offline import.
+    /// Imports into the effective instance `saves` directory captured at task creation.
     ///
     /// @throws Exception when validation, extraction, NBT parsing, or atomic publication fails
     @Override
     public void execute() throws Exception {
-        Path runDirectory = Objects.requireNonNull(
-                repository.getRunDirectory(instanceId),
-                "repository run directory");
-        setResult(importer.importArchive(archive, runDirectory.resolve("saves"), targetName));
+        setResult(importer.importArchive(archive, savesDirectory, targetName));
     }
 
     /// Rejects blank task identifiers and names.

@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSer
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import java.util.List;
 import java.util.Objects;
@@ -60,6 +61,9 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// Single-flight vanilla installation service used by the game-version page.
     private final GameInstallService gameInstaller;
 
+    /// Shared confirmed-task submission and task-manager navigation command.
+    private final TaskLaunchController taskLaunchController;
+
     /// Account state, viewport source, and commands.
     private final AccountsModel accounts;
 
@@ -83,6 +87,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @param instanceManagement dynamic instance-management view coordinator
     /// @param gameVersions lazy game-version catalog model
     /// @param gameInstaller single-flight vanilla installation service
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param accounts account-selection model
     /// @param appearance appearance-settings model
     /// @param ownedResources resources closed in the supplied order
@@ -93,6 +98,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             InstanceManagementCoordinator instanceManagement,
             GameVersionCatalogModel gameVersions,
             GameInstallService gameInstaller,
+            TaskLaunchController taskLaunchController,
             AccountsModel accounts,
             AppearanceSettingsModel appearance,
             List<? extends AutoCloseable> ownedResources) {
@@ -103,6 +109,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
                 instanceManagement,
                 gameVersions,
                 gameInstaller,
+                taskLaunchController,
                 accounts,
                 appearance,
                 ownedResources,
@@ -117,6 +124,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @param instanceManagement dynamic instance-management view coordinator
     /// @param gameVersions lazy game-version catalog model
     /// @param gameInstaller single-flight vanilla installation service
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param accounts account-selection model
     /// @param appearance appearance-settings model
     /// @param ownedResources resources closed in the supplied order
@@ -128,6 +136,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             InstanceManagementCoordinator instanceManagement,
             GameVersionCatalogModel gameVersions,
             GameInstallService gameInstaller,
+            TaskLaunchController taskLaunchController,
             AccountsModel accounts,
             AppearanceSettingsModel appearance,
             List<? extends AutoCloseable> ownedResources,
@@ -138,6 +147,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
         this.instanceManagement = Objects.requireNonNull(instanceManagement, "instanceManagement");
         this.gameVersions = Objects.requireNonNull(gameVersions, "gameVersions");
         this.gameInstaller = Objects.requireNonNull(gameInstaller, "gameInstaller");
+        this.taskLaunchController = Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         this.accounts = Objects.requireNonNull(accounts, "accounts");
         this.appearance = Objects.requireNonNull(appearance, "appearance");
         this.themePackManagementModelFactory = themePackManagementModelFactory;
@@ -185,6 +195,13 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return application-owned game installer
     public GameInstallService gameInstaller() {
         return gameInstaller;
+    }
+
+    /// Returns the shared confirmed-task submission controller.
+    ///
+    /// @return task launch controller
+    public TaskLaunchController taskLaunchController() {
+        return taskLaunchController;
     }
 
     /// Returns the account-selection model.

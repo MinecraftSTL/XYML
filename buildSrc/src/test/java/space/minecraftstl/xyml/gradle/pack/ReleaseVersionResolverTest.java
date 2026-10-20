@@ -66,6 +66,21 @@ final class ReleaseVersionResolverTest {
                 ReleaseType.DEV, "1.0.0", null, null, false));
     }
 
+    /// Accepts only canonical release versions followed by the feature marker.
+    @Test
+    void validatesMarkedFeatureVersions() {
+        ReleaseVersionResolver.validateFeatureVersion("1.0.0.");
+        ReleaseVersionResolver.validateFeatureVersion("1.0.0.1.");
+        ReleaseVersionResolver.validateFeatureVersion("1.0.0.0.1.");
+        ReleaseVersionResolver.validateFeatureVersion("1.0.0.0.0.1.");
+        assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.validateFeatureVersion("1.0.0"));
+        assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.validateFeatureVersion("1.0."));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReleaseVersionResolver.validateFeatureVersion("1.0.0.0.0.0.0."));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReleaseVersionResolver.validateFeatureVersion("1.0.0..0.0.1."));
+    }
+
     /// Requires an explicit version source for official non-stable builds.
     @Test
     void requiresOfficialVersionSource() {

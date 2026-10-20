@@ -20,7 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.downloads.loaders;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.TestComponentRemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -60,7 +61,7 @@ final class DefaultGameLoaderCatalogModelTest {
                     () -> assertEquals(0, source.requestCount()));
 
             CompletionStage<GameLoaderCatalogSnapshot> result = model.refreshAsync();
-            RemoteVersion remoteVersion = remoteVersion("fabric", "1.20.1", "0.16.0");
+            ComponentRemoteVersion remoteVersion = remoteVersion("fabric", "1.20.1", "0.16.0");
             source.request(0).complete(List.of(new GameLoaderCatalogItem(
                     GameLoaderKind.FABRIC,
                     remoteVersion)));
@@ -148,11 +149,11 @@ final class DefaultGameLoaderCatalogModelTest {
     /// @param gameVersion target Minecraft version
     /// @param selfVersion concrete remote loader version
     /// @return stable remote version fixture
-    private static RemoteVersion remoteVersion(
+    private static ComponentRemoteVersion remoteVersion(
             String libraryId,
             String gameVersion,
             String selfVersion) {
-        return new RemoteVersion(
+        return new TestComponentRemoteVersion(
                 libraryId,
                 gameVersion,
                 selfVersion,

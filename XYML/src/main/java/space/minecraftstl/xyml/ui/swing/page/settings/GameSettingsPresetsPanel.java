@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
+import space.minecraftstl.xyml.setting.InstanceConfigMigrationPolicy;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -32,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSe
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsStore;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -70,7 +72,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     private final DefaultListModel<GameSettingsPresetSnapshot> presetListModel = new DefaultListModel<>();
 
     /// Single-selection preset list.
-    private final JList<GameSettingsPresetSnapshot> presetList = new JList<>(presetListModel);
+    private final JList<GameSettingsPresetSnapshot> presetList = new RowBoundsCheckedList<>(presetListModel, RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
     /// Starts creation of a new automatic or custom-named preset.
     private final JButton createButton = new JButton(i18n("settings.type.global.preset.create"));
@@ -101,6 +103,9 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
 
     /// Displays validation and asynchronous command feedback.
     private final JLabel statusLabel = new JLabel();
+
+    /// Policy controls rendered in the selected preset's launcher-settings tab.
+    private final InstanceConfigMigrationPolicyPanel migrationPolicyPanel;
 
     /// Subscription delivering immutable store changes.
     private final Subscription storeSubscription;
@@ -161,11 +166,13 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         GameSettingsPresetSnapshot initialPreset = initialSnapshot.presets().get(0);
         editorSurfaceStore = new PresetEditorSurfaceStore(
                 initialPreset.editor().toEditorSnapshot(initialSnapshot.writable()));
+        migrationPolicyPanel = new InstanceConfigMigrationPolicyPanel();
         gameSettingsEditor = new InstanceGameSettingsPanel(
                 editorSurfaceStore,
                 runtimeService,
                 CompletableFuture.completedFuture(GameVersionNumber.unknown()),
                 GameSettingsEditorPresentation.GLOBAL_PRESET);
+        gameSettingsEditor.addGlobalMigrationPolicyPanel(migrationPolicyPanel);
         configureComponents();
         storeSubscription = store.subscribe(this::storeSnapshotChanged);
         applySnapshot(initialSnapshot);
@@ -245,7 +252,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     ///
     /// @return configured header row
     private JPanel createHeader() {
-        JPanel header = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]8[]8[]8[]8[]", "[]"));
+        JPanel header = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]8[]8[]8[]8[]8[]", "[]"));
         header.setOpaque(false);
         JLabel heading = new JLabel(i18n("settings.type.global.preset.manage_all"));
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20.0F));
@@ -434,6 +441,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             GameSettingsPresetEditor editor = GameSettingsPresetEditor.fromEditorSnapshot(
                     selected.editor(),
                     isolationType,
+                    migrationPolicyPanel.editedPolicy(),
                     gameSettingsEditor.editedSnapshot());
             beginMutation(() -> store.updatePreset(editor), selected.id(), false);
         } catch (IllegalArgumentException | IllegalStateException failure) {
@@ -577,12 +585,14 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             if (preset == null) {
                 selectedNameLabel.setText("");
                 isolationTypeBox.setSelectedItem(DefaultIsolationType.MODDED);
+                migrationPolicyPanel.loadPolicy(InstanceConfigMigrationPolicy.defaults());
             } else {
                 selectedNameLabel.setText(preset.displayName());
                 @Nullable GameSettingsPresetsSnapshot snapshot = displayedSnapshot;
                 boolean writable = snapshot != null && snapshot.writable() && !closed && !mutationPending;
                 editorSurfaceStore.replace(preset.editor().toEditorSnapshot(writable));
                 gameSettingsEditor.reloadFromStore();
+                migrationPolicyPanel.loadPolicy(preset.editor().launcher().migrationPolicy());
                 isolationTypeBox.setSelectedItem(preset.editor().defaultIsolationType());
             }
         } finally {
@@ -604,6 +614,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         defaultButton.setEnabled(writable && hasSelection && !selected.defaultPreset());
         isolationTypeBox.setEnabled(writable && hasSelection);
         saveButton.setEnabled(writable && hasSelection);
+        migrationPolicyPanel.setInteractionEnabled(writable && hasSelection);
         gameSettingsEditor.setInteractionEnabled(!closed && !mutationPending && hasSelection);
     }
 

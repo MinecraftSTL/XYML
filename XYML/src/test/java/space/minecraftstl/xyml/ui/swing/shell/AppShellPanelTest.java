@@ -161,6 +161,7 @@ public final class AppShellPanelTest {
                                     ShellPageId.INSTANCES,
                                     ShellPageId.ACCOUNTS,
                                     ShellPageId.DOWNLOADS,
+                                    ShellPageId.TASKS,
                                     ShellPageId.SETTINGS),
                             creationOrder),
                     () -> assertEquals(ShellPageId.values().length, panel.cachedPageCount()),
@@ -271,6 +272,7 @@ public final class AppShellPanelTest {
                 for (ShellPageId overlay : List.of(
                         ShellPageId.ACCOUNTS,
                         ShellPageId.DOWNLOADS,
+                        ShellPageId.TASKS,
                         ShellPageId.SETTINGS)) {
                     panel.navigateTo(overlay);
                     assertAll(
@@ -538,6 +540,38 @@ public final class AppShellPanelTest {
                         () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Long player and instance-folder names ellipsize without overlapping the launch command.
+    @Test
+    public void ellipsizesLongSelectorValuesAtMinimumWidth() {
+        AppShellPanel panel = createPanel(creationCounts());
+        String playerName = "PlayerName-" + "very-long-segment-".repeat(8);
+        String instanceName = "InstanceFolder-" + "very-long-segment-".repeat(8);
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.setSize(new Dimension(AppShellPanel.MINIMUM_WIDTH, RENDER_HEIGHT));
+                ShellToolbarPanel toolbar = panel.toolbar();
+                toolbar.accountSelector().setSelectedText(playerName, "Microsoft");
+                toolbar.instanceSelector().setSelectedText(instanceName, "Minecraft");
+                layoutTree(panel);
+
+                ShellDropdownButton account = toolbar.accountSelector().valueButton();
+                ShellDropdownButton instance = toolbar.instanceSelector().valueButton();
+                assertAll(
+                        () -> assertEquals(playerName, account.fullText()),
+                        () -> assertTrue(account.getText().endsWith("...")),
+                        () -> assertTrue(account.getToolTipText().contains(playerName)),
+                        () -> assertEquals(instanceName, instance.fullText()),
+                        () -> assertTrue(instance.getText().endsWith("...")),
+                        () -> assertTrue(instance.getToolTipText().contains(instanceName)),
+                        () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()));
             });
         } finally {
             panel.close();
@@ -1095,6 +1129,7 @@ public final class AppShellPanelTest {
                 "Generate launch script",
                 "Launch game",
                 "Launching",
+                "Cancel launch",
                 "Back");
     }
 
@@ -1300,7 +1335,7 @@ public final class AppShellPanelTest {
     /// Minimal enabled launcher model for title-bar and frame tests.
     @NotNullByDefault
     private static final class TestHomeModel implements HomeModel {
-        /// Observable empty launch-session property required by the task overlay.
+        /// Observable empty launch-session property required by the title-bar launch controls.
         private final SimpleObjectProperty<Optional<LaunchSession>> launchSession =
                 new SimpleObjectProperty<>(this, "launchSession", Optional.empty());
 
@@ -1547,6 +1582,19 @@ public final class AppShellPanelTest {
         /// @param allowReadOnlyOverwrite ignored overwrite permission
         @Override
         public void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+            Objects.requireNonNull(accountId, "accountId");
+        }
+
+        /// Reports that the immutable shell fixture has no reorderable rows.
+        @Override
+        public boolean canMoveAccount(String accountId, int targetIndex) {
+            Objects.requireNonNull(accountId, "accountId");
+            return false;
+        }
+
+        /// Performs no reorder in the immutable shell fixture.
+        @Override
+        public void moveAccount(String accountId, int targetIndex, boolean allowReadOnlyOverwrite) {
             Objects.requireNonNull(accountId, "accountId");
         }
 

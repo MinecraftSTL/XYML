@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.OrderedChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
@@ -174,7 +175,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         this.recentSelections = Objects.requireNonNull(recentSelections, "recentSelections");
         this.navigateCommand = Objects.requireNonNull(navigateCommand, "navigateCommand");
         orderedSource = new OrderedChoiceDataSource<>(model);
-        choiceList = new ViewportChoiceList<>(orderedSource, new InstanceListCellRenderer());
+        choiceList = new ViewportChoiceList<>(orderedSource, new InstanceListCellRenderer(), RowBoundsCheckedList.BlankClickPolicy.RETAIN);
         displayedSnapshot = model.snapshot();
         addButton = new PopupCommandButton(
                 Objects.requireNonNull(addLabel, "addLabel"),

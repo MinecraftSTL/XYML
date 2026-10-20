@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
@@ -118,11 +119,31 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// @return asynchronous terminal snapshot
     CompletionStage<ModCatalogSnapshot> deleteMod(String localKey);
 
+    /// Deletes one indexed current Mod using the selected recycle-bin or permanent mode.
+    ///
+    /// @param localKey rename-stable target key
+    /// @param mode selected deletion behavior
+    /// @return asynchronous terminal snapshot
+    default CompletionStage<ModCatalogSnapshot> deleteMod(String localKey, DeletionMode mode) {
+        return deleteMod(localKey);
+    }
+
     /// Permanently deletes one non-empty batch of indexed current Mods with one follow-up refresh.
     ///
     /// @param localKeys immutable rename-stable target keys
     /// @return asynchronous terminal snapshot
     CompletionStage<ModCatalogSnapshot> deleteMods(@Unmodifiable List<String> localKeys);
+
+    /// Deletes one non-empty Mod batch using the selected recycle-bin or permanent mode.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @param mode selected deletion behavior
+    /// @return asynchronous terminal snapshot
+    default CompletionStage<ModCatalogSnapshot> deleteMods(
+            @Unmodifiable List<String> localKeys,
+            DeletionMode mode) {
+        return deleteMods(localKeys);
+    }
 
     /// Cancels outstanding pre-commit work and rejects later commands and loads.
     @Override

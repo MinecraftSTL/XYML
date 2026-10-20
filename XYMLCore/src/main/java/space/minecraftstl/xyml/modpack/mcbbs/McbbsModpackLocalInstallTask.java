@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.mcbbs;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -29,6 +31,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
@@ -39,6 +42,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+/// Installs a local MCBBS-format archive into one game repository.
+@NotNullByDefault
 public final class McbbsModpackLocalInstallTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -52,14 +57,31 @@ public final class McbbsModpackLocalInstallTask extends Task<Void> {
     private final List<Task<?>> dependencies = new ArrayList<>(2);
     private final List<Task<?>> dependents = new ArrayList<>(4);
 
-    public McbbsModpackLocalInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, Modpack modpack, McbbsModpackManifest manifest, GameInstanceID instanceId) {
+    /// Creates a repository-scoped installation that also owns its input archive.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest MCBBS manifest
+    /// @param instanceId destination instance
+    public McbbsModpackLocalInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            McbbsModpackManifest manifest,
+            GameInstanceID instanceId) {
         this.dependencyManager = dependencyManager;
         this.zipFile = zipFile;
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.repository = dependencyManager.getGameRepository();
-        Path run = repository.getRunDirectory(instanceId);
+        Path run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(run),
+                TaskResource.archive(zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))
@@ -78,7 +100,7 @@ public final class McbbsModpackLocalInstallTask extends Task<Void> {
                 repository.removeInstanceFromDisk(instanceId);
         });
 
-        ModpackConfiguration<McbbsModpackManifest> config = null;
+        @Nullable ModpackConfiguration<McbbsModpackManifest> config = null;
         try {
             if (Files.exists(json)) {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(McbbsModpackManifest.class));

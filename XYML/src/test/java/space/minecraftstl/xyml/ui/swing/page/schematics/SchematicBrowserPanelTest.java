@@ -31,12 +31,15 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
@@ -144,8 +147,10 @@ public final class SchematicBrowserPanelTest {
         Path root = Path.of("schematics").toAbsolutePath().normalize();
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
                 List.of(), snapshot(root, root, OptionalInt.empty(), 0L, SchematicBrowserStatus.IDLE, null, false));
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        AtomicInteger projectionMods = new AtomicInteger();
         SchematicBrowserPanel panel = onEventDispatchThread(() ->
-                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
+                new SchematicBrowserPanel(model, STRINGS, interactions));
 
         assertAll(
                 () -> assertEquals(0, model.initialLoads.get()),
@@ -163,6 +168,12 @@ public final class SchematicBrowserPanelTest {
                     () -> assertTrue(assertInstanceOf(
                             FlatSVGIcon.class,
                             findButton(panel, "schematicsCreateDirectory").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class,
+                            findButton(panel, "schematicsOpenFolder").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class,
+                            findButton(panel, "schematicsInstallMod").getIcon()).hasFound()),
                     () -> assertTrue(assertInstanceOf(
                             FlatSVGIcon.class,
                             findButton(panel, "schematicsOpenDirectory").getIcon()).hasFound()),
@@ -190,6 +201,11 @@ public final class SchematicBrowserPanelTest {
                             findButton(panel, "schematicsDelete"),
                             ACTION_STRINGS.deleteAction(),
                             ACTION_STRINGS.deleteTooltip()));
+            panel.setOpenProjectionModCommand(projectionMods::incrementAndGet);
+            findButton(panel, "schematicsInstallMod").doClick();
+            findButton(panel, "schematicsOpenFolder").doClick();
+            assertEquals(1, projectionMods.get());
+            assertEquals(root, interactions.revealedTargets.get(0).path());
             panel.start();
             panel.start();
             assertEquals(1, model.initialLoads.get());
@@ -468,6 +484,13 @@ public final class SchematicBrowserPanelTest {
         onEventDispatchThread(() -> {
             JTextArea details = assertInstanceOf(
                     JTextArea.class, findComponent(panel, "schematicsDetailsText"));
+            JTextArea heading = assertInstanceOf(
+                    JTextArea.class, findComponent(panel, "schematicsDetailsTitle"));
+            JScrollPane detailsScroll = assertInstanceOf(
+                    JScrollPane.class, findComponent(panel, "schematicsDetailsScroll"));
+            assertTrue(heading.getLineWrap());
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    detailsScroll.getHorizontalScrollBarPolicy());
             details.setText("closed details sentinel");
             ListDataEvent lateListEvent = new ListDataEvent(
                     panel.choiceList().getChoiceModel(), ListDataEvent.CONTENTS_CHANGED, 0, 0);
@@ -1171,6 +1194,16 @@ public final class SchematicBrowserPanelTest {
             confirmedTargets.add(target);
             deleteDialogHook.run();
             return deletionConfirmed;
+        }
+
+        /// Maps deletion confirmation to permanent mode for this headless test.
+        ///
+        /// @param owner owning panel
+        /// @param target deletion target
+        /// @return permanent mode when confirmed, otherwise null
+        @Override
+        public @Nullable DeletionMode chooseDeleteMode(Component owner, SchematicBrowserItem target) {
+            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
         }
 
         /// Captures the exact reveal target and returns the configured completion.

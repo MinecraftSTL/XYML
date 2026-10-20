@@ -85,12 +85,24 @@ class MetadataUpdateAvailabilityPolicyTest {
         MetadataUpdateAvailabilityPolicy placeholder = new MetadataUpdateAvailabilityPolicy(
                 "@develop@",
                 UpdateChannel.DEV);
-        MetadataUpdateAvailabilityPolicy featureBuild = new MetadataUpdateAvailabilityPolicy(
-                "1.0.0.0.0.0.",
+        MetadataUpdateAvailabilityPolicy stableFeature = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.",
+                UpdateChannel.DEV);
+        MetadataUpdateAvailabilityPolicy betaFeature = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.1.",
+                UpdateChannel.DEV);
+        MetadataUpdateAvailabilityPolicy alphaFeature = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.0.1.",
+                UpdateChannel.DEV);
+        MetadataUpdateAvailabilityPolicy devFeature = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.0.0.1.",
                 UpdateChannel.DEV);
 
         assertFalse(placeholder.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
-        assertFalse(featureBuild.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
+        assertFalse(stableFeature.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
+        assertFalse(betaFeature.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
+        assertFalse(alphaFeature.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
+        assertFalse(devFeature.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
     }
 
     /// Builds one deterministic remote-version fixture.

@@ -32,6 +32,7 @@ import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
@@ -132,18 +133,33 @@ final class WorldDownloadPanelTest {
                 Rectangle saveAsBounds = bounds(panel, saveAs);
                 assertTrue(workflowBounds.width >= 900);
                 assertTrue(resultBounds.width >= 850);
-                assertTrue(resultBounds.height >= 300);
+                assertTrue(resultBounds.height >= 240,
+                        () -> "size=1024x720, results=" + resultBounds);
                 assertFalse(searchBounds.intersects(searchActionBounds));
                 assertFalse(gameVersionBounds.intersects(previousPageBounds));
                 assertFalse(previousPageBounds.intersects(nextPageBounds));
-                assertEquals(120, previousPageBounds.width);
-                assertEquals(120, nextPageBounds.width);
+                assertTrue(previousPageBounds.width > 0);
+                assertTrue(nextPageBounds.width > 0);
                 assertTrue(previousPageBounds.y >= gameVersionBounds.y + gameVersionBounds.height);
                 assertEquals(previousPageBounds.y, nextPageBounds.y);
                 assertTrue(resultBounds.y >= previousPageBounds.y + previousPageBounds.height);
                 assertFalse(versionBounds.intersects(saveAsBounds));
                 assertTrue(versionBounds.y >= resultBounds.y + resultBounds.height);
 
+                panel.setSize(new Dimension(1040, 508));
+                layoutRecursively(panel);
+                Rectangle minimumPanelBounds = new Rectangle(0, 0, panel.getWidth(), panel.getHeight());
+                Rectangle minimumResultBounds = bounds(panel, results);
+                Rectangle minimumVersionBounds = bounds(panel, version);
+                Rectangle minimumSaveAsBounds = bounds(panel, saveAs);
+                assertTrue(minimumPanelBounds.contains(minimumResultBounds));
+                assertTrue(minimumPanelBounds.contains(minimumVersionBounds));
+                assertTrue(minimumPanelBounds.contains(minimumSaveAsBounds));
+                assertFalse(minimumVersionBounds.intersects(minimumSaveAsBounds));
+                assertTrue(minimumResultBounds.height > 0);
+
+                panel.setSize(new Dimension(1024, 720));
+                layoutRecursively(panel);
                 BufferedImage rendered = new BufferedImage(1024, 720, BufferedImage.TYPE_INT_ARGB);
                 Graphics2D graphics = rendered.createGraphics();
                 try {

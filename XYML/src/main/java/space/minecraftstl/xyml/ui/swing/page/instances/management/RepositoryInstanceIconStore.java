@@ -25,11 +25,15 @@ import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceAutomaticIconResolver;
+import space.minecraftstl.xyml.util.FileSaver;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -99,17 +103,57 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         settings.iconProperty().setValue(selection.iconType());
     }
 
+    /// Creates the audited bundled-icon mutation with the complete instance resource boundary.
+    ///
+    /// @param iconType independently selectable bundled icon type
+    /// @param executor executor used for repository and file work
+    /// @return resource-aware deferred task
+    @Override
+    public Task<?> selectBuiltInTask(GameInstanceIconType iconType, Executor executor) {
+        Objects.requireNonNull(iconType, "iconType");
+        return Task.runAsync(Objects.requireNonNull(executor, "executor"), () -> {
+            waitForQueuedSettingsSaves();
+            selectBuiltIn(iconType);
+            waitForQueuedSettingsSaves();
+            repository.saveGameSettingsSync(instanceId);
+            waitForQueuedSettingsSaves();
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)));
+    }
+
     /// Copies one supported image and restores automatic bundled selection after custom-image removal.
     ///
     /// @param sourceImage local supported image
     /// @throws IOException when copying the image fails
     @Override
     public void selectCustom(Path sourceImage) throws IOException {
-        repository.setInstanceIconFile(instanceId, Objects.requireNonNull(sourceImage, "sourceImage"));
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettingsOrCreate(instanceId);
-        if (settings != null) {
-            settings.iconProperty().setValue(GameInstanceIconType.DEFAULT);
+        if (settings == null) {
+            throw new IllegalStateException("Instance icon settings are unavailable or read-only");
         }
+        repository.setInstanceIconFile(instanceId, Objects.requireNonNull(sourceImage, "sourceImage"));
+        settings.iconProperty().setValue(GameInstanceIconType.DEFAULT);
+    }
+
+    /// Creates the audited custom-image copy task with source and destination resources.
+    ///
+    /// @param sourceImage local image selected by the user
+    /// @param executor executor used for repository and file work
+    /// @return resource-aware deferred task
+    @Override
+    public Task<?> selectCustomTask(Path sourceImage, Executor executor) {
+        Path checkedSource = Objects.requireNonNull(sourceImage, "sourceImage").toAbsolutePath().normalize();
+        return Task.runAsync(Objects.requireNonNull(executor, "executor"), () -> {
+            waitForQueuedSettingsSaves();
+            selectCustom(checkedSource);
+            waitForQueuedSettingsSaves();
+            repository.saveGameSettingsSync(instanceId);
+            waitForQueuedSettingsSaves();
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)),
+                TaskResource.inputFile(checkedSource));
     }
 
     /// Deletes every custom icon and verifies that no supported variant remains.
@@ -123,12 +167,32 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         }
     }
 
+    /// Creates the audited custom-image deletion task.
+    ///
+    /// @param executor executor used for repository and file work
+    /// @return resource-aware deferred task
+    @Override
+    public Task<?> deleteCustomTask(Executor executor) {
+        return Task.runAsync(Objects.requireNonNull(executor, "executor"), () -> {
+            waitForQueuedSettingsSaves();
+            deleteCustom();
+            waitForQueuedSettingsSaves();
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.configuration(repository.getInstanceGameSettingsFile(instanceId)));
+    }
+
     /// Fires the repository's established icon change event after successful persistence.
     ///
     /// @param source object responsible for the transition
     @Override
     public void publishChanged(Object source) {
         repository.onInstanceIconChanged.fireEvent(new Event(Objects.requireNonNull(source, "source")));
+    }
+
+    /// Drains legacy observable-setting writes before the task lease is released.
+    private static void waitForQueuedSettingsSaves() throws InterruptedException {
+        FileSaver.waitForAllSaves();
     }
 
     /// Validates one required non-blank identifier.

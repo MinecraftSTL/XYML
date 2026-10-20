@@ -46,7 +46,7 @@ public abstract class GameBuilder {
     protected final Map<String, String> toolVersions = new HashMap<>();
 
     /// Selected remote library installers in the exact caller-supplied order.
-    protected final List<RemoteVersion> remoteVersions = new ArrayList<>();
+    protected final List<ComponentRemoteVersion> remoteVersions = new ArrayList<>();
 
     /// Returns the target instance identifier, or null before it is configured.
     public @Nullable GameInstanceID getName() {
@@ -92,7 +92,7 @@ public abstract class GameBuilder {
     ///
     /// @param remoteVersion selected installer metadata
     /// @return this builder
-    public GameBuilder version(RemoteVersion remoteVersion) {
+    public GameBuilder version(ComponentRemoteVersion remoteVersion) {
         remoteVersions.add(Objects.requireNonNull(remoteVersion, "remoteVersion"));
         return this;
     }

@@ -19,16 +19,18 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.nbt.NBTDocument;
 
 import javax.swing.event.TreeModelListener;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/// `TreeModel` adapter that delegates every child request to one independently lazy backend node.
+/// Lazy Swing tree model for one immutable XoyzNBT editor revision.
 @NotNullByDefault
 public final class NBTLazyTreeModel implements TreeModel {
     /// Root adapter for the loaded document.
@@ -40,17 +42,17 @@ public final class NBTLazyTreeModel implements TreeModel {
     /// Whether Swing may enumerate the root's direct children.
     private boolean rootChildrenVisible;
 
-    /// Creates a fresh structural model for the document's current mutable root.
+    /// Creates a fresh structural model with immediately visible root children.
     ///
     /// @param document loaded document
     public NBTLazyTreeModel(NBTDocument document) {
         this(document, true);
     }
 
-    /// Creates a model whose root can remain dormant until a page receives a real expansion request.
+    /// Creates a model whose root can remain dormant until a real expansion request.
     ///
     /// @param document loaded document
-    /// @param rootChildrenVisible whether root children are immediately visible to Swing
+    /// @param rootChildrenVisible whether root children are immediately visible
     NBTLazyTreeModel(NBTDocument document, boolean rootChildrenVisible) {
         root = new NBTEditorTreeNode(Objects.requireNonNull(document, "document"));
         this.rootChildrenVisible = rootChildrenVisible;
@@ -74,7 +76,7 @@ public final class NBTLazyTreeModel implements TreeModel {
         return requireNode(parent).childAt(index);
     }
 
-    /// Returns the direct child count without expanding the parent.
+    /// Returns the direct-child count without expanding the parent.
     ///
     /// @param parent parent adapter
     /// @return direct child count
@@ -93,7 +95,7 @@ public final class NBTLazyTreeModel implements TreeModel {
         return requireNode(node).childCount() == 0;
     }
 
-    /// Ignores Swing's generic inline-edit callback because edits use exact typed setters.
+    /// Ignores Swing's generic inline-edit callback because edits use explicit controller commands.
     ///
     /// @param path edited path
     /// @param newValue generic replacement value
@@ -103,7 +105,7 @@ public final class NBTLazyTreeModel implements TreeModel {
         Objects.requireNonNull(newValue, "newValue");
     }
 
-    /// Returns a child's stored address index without scanning or materializing siblings.
+    /// Returns the child's captured direct index without scanning siblings.
     ///
     /// @param parent expected parent adapter
     /// @param child expected direct child adapter
@@ -112,13 +114,7 @@ public final class NBTLazyTreeModel implements TreeModel {
     public int getIndexOfChild(Object parent, Object child) {
         NBTEditorTreeNode parentNode = requireNode(parent);
         NBTEditorTreeNode childNode = requireNode(child);
-        @Unmodifiable List<Integer> parentAddress = parentNode.address();
-        @Unmodifiable List<Integer> childAddress = childNode.address();
-        if (childAddress.size() != parentAddress.size() + 1
-                || !childAddress.subList(0, parentAddress.size()).equals(parentAddress)) {
-            return -1;
-        }
-        return childAddress.get(childAddress.size() - 1);
+        return childNode.address().parent().equals(parentNode.address()) ? childNode.parentIndex() : -1;
     }
 
     /// Adds one Swing model listener.
@@ -137,11 +133,31 @@ public final class NBTLazyTreeModel implements TreeModel {
         listeners.remove(Objects.requireNonNull(listener, "listener"));
     }
 
-    /// Resolves an immutable child-index address into a lazily materialized Swing path.
+    /// Resolves an immutable structural address into a lazily materialized Swing path.
     ///
-    /// @param address child-index address from the root
+    /// @param address exact current address
     /// @return resolved path
     /// @throws IndexOutOfBoundsException when the current tree no longer contains the address
+    public TreePath pathForAddress(NBTAddress address) {
+        NBTAddress target = Objects.requireNonNull(address, "address");
+        if (!target.isRoot()) {
+            revealRootChildren();
+        }
+        List<Object> components = new ArrayList<>(target.segments().size() + 1);
+        NBTEditorTreeNode current = root;
+        components.add(current);
+        for (NBTAddress.Segment segment : target.segments()) {
+            current = directChild(current, segment);
+            components.add(current);
+        }
+        return new TreePath(components.toArray());
+    }
+
+    /// Resolves a legacy child-index address for compatibility callers.
+    ///
+    /// @param address child indexes from the root
+    /// @return resolved path
+    /// @throws IndexOutOfBoundsException when an index is absent
     public TreePath pathForAddress(@Unmodifiable List<Integer> address) {
         @Unmodifiable List<Integer> indexes = List.copyOf(Objects.requireNonNull(address, "address"));
         if (!indexes.isEmpty()) {
@@ -157,11 +173,49 @@ public final class NBTLazyTreeModel implements TreeModel {
         return new TreePath(components);
     }
 
-    /// Makes the root's exact direct children visible to subsequent Swing layout queries.
-    ///
-    /// Calling this method does not itself materialize a child.
+    /// Makes root children visible to subsequent Swing layout queries.
     void revealRootChildren() {
         rootChildrenVisible = true;
+    }
+
+    /// Resolves the direct child represented by one structural segment.
+    ///
+    /// @param parent current parent row
+    /// @param segment next address segment
+    /// @return matching direct child
+    /// @throws IndexOutOfBoundsException when no child has the requested segment
+    private static NBTEditorTreeNode directChild(NBTEditorTreeNode parent, NBTAddress.Segment segment) {
+        int fixedIndex = -1;
+        if (segment instanceof NBTAddress.IndexSegment index) {
+            fixedIndex = index.index();
+        } else if (segment instanceof NBTAddress.RegionChunkSegment chunk) {
+            fixedIndex = chunk.localIndex();
+        } else if (segment instanceof NBTAddress.ChunkRootSegment) {
+            fixedIndex = 0;
+        }
+        if (fixedIndex >= 0) {
+            NBTEditorTreeNode child = parent.childAt(fixedIndex);
+            if (finalSegment(child.address()).equals(segment)) {
+                return child;
+            }
+            throw new IndexOutOfBoundsException("NBT address segment no longer exists: " + segment);
+        }
+        for (int index = 0; index < parent.childCount(); index++) {
+            NBTEditorTreeNode child = parent.childAt(index);
+            if (finalSegment(child.address()).equals(segment)) {
+                return child;
+            }
+        }
+        throw new IndexOutOfBoundsException("NBT address segment no longer exists: " + segment);
+    }
+
+    /// Returns the final segment of a non-root child address.
+    ///
+    /// @param address non-root child address
+    /// @return final segment
+    private static NBTAddress.Segment finalSegment(NBTAddress address) {
+        @Unmodifiable List<NBTAddress.Segment> segments = address.segments();
+        return segments.get(segments.size() - 1);
     }
 
     /// Validates one generic Swing node value.

@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementEntry;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSnapshot;
@@ -88,7 +89,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     private final DefaultListModel<GameDirectoryManagementEntry> listModel = new DefaultListModel<>();
 
     /// Single-selection directory list without a redundant radio indicator.
-    private final JList<GameDirectoryManagementEntry> list = new JList<>(listModel);
+    private final JList<GameDirectoryManagementEntry> list = new RowBoundsCheckedList<>(listModel, RowBoundsCheckedList.BlankClickPolicy.RETAIN);
 
     /// Smooth-wheel scroll container for the bounded MRU directory list.
     private final JScrollPane directoryScrollPane = new JScrollPane(list);

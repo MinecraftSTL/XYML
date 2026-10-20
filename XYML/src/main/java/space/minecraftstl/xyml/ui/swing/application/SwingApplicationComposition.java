@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
@@ -35,6 +36,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.task.TaskExecutionRegistry;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
 import space.minecraftstl.xyml.theme.LocalThemePackRepository;
 import space.minecraftstl.xyml.theme.ResolvedTheme;
@@ -47,14 +49,19 @@ import space.minecraftstl.xyml.ui.swing.SwingLauncherFontManager;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.MissingDependencySearchRequest;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountStore;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageNavigation;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageRequest;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
@@ -64,15 +71,20 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.SelectedRepositoryInstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.importing.SwingInstanceJsonImportLauncher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.DefaultInstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceContentNavigation;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.LauncherAutomaticInstanceConfigMigrationTaskFactory;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.CommandInstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.crash.SwingCrashReportDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingShellNBTDropLauncher;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -91,6 +103,8 @@ import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementM
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.tasks.TaskManagerPanel;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
@@ -225,11 +239,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
 
         try {
             return createForCollaborators(
-                    navigateCommand -> createProductionModels(
+                    (navigateCommand, downloadsNavigation) -> createProductionModels(
                             bindings,
                             commands,
                             presentation,
                             navigateCommand,
+                            downloadsNavigation,
                             themeManager,
                             animator,
                             systemThemeDetector),
@@ -303,11 +318,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             }
             currentWindow.navigateTo(page);
         };
+        DownloadPageNavigation downloadsNavigation = new DownloadPageNavigation();
 
         final SwingApplicationPageModels models;
         try {
             models = Objects.requireNonNull(
-                    modelFactory.createModels(navigateCommand),
+                    modelFactory.createModels(navigateCommand, downloadsNavigation),
                     "modelFactory returned null");
         } catch (RuntimeException | Error failure) {
             closeAfterFailure(animator::cancelAll, failure);
@@ -315,7 +331,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
 
         @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories =
-                createPageFactories(models, presentation, animator, themeManager);
+                createPageFactories(models, presentation, animator, themeManager, downloadsNavigation);
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
@@ -378,6 +394,54 @@ public final class SwingApplicationComposition implements AutoCloseable {
         window.setInteractionEnabled(enabled);
     }
 
+    /// Opens the Mods search page for a missing dependency while retaining shell ownership of page creation.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    public void openModSearch(String dependencyId) {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        String query = Objects.requireNonNull(dependencyId, "dependencyId");
+        window.open();
+        window.openModSearch(query);
+    }
+
+    /// Opens a missing-dependency catalog search with the analyzer's captured version constraint.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+        openMissingDependencySearch(dependencyId, gameVersion, null);
+    }
+
+    /// Opens a missing-dependency catalog search with the loader and captured target instance.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    /// @param gameVersion analyzed Minecraft version, or null when unavailable
+    /// @param modLoader current instance mod loader, or null when unavailable
+    public void openMissingDependencySearch(
+            String dependencyId,
+            @Nullable String gameVersion,
+            @Nullable ModLoaderType modLoader) {
+        openMissingDependencySearch(new MissingDependencySearchRequest(
+                dependencyId,
+                gameVersion,
+                modLoader,
+                null));
+    }
+
+    /// Opens a missing-dependency catalog search with its captured target-instance context.
+    ///
+    /// @param request validated missing-dependency search request
+    public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+        window.open();
+        window.openMissingDependencySearch(checked);
+    }
+
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
     ///
     /// @return `true` after the first close request begins cleanup
@@ -400,6 +464,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         failure = runCollecting(animator::cancelAll, failure);
         failure = closeCollecting(pageModels, failure);
         failure = runCollecting(applicationCloseCommand, failure);
+        failure = runCollecting(TaskExecutionRegistry.global()::clear, failure);
         rethrowFailure(failure);
     }
 
@@ -413,7 +478,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingApplicationPageModels models,
             SwingApplicationPresentation presentation,
             SwingAnimator animator,
-            SwingThemeManager themeManager) {
+            SwingThemeManager themeManager,
+            DownloadPageNavigation downloadsNavigation) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(
@@ -422,14 +488,21 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 models.instanceManagement()));
         factories.put(
                 ShellPageId.DOWNLOADS,
-                () -> new GameVersionCatalogPanel(
-                        models.gameVersions(),
-                        models.gameInstaller(),
-                        presentation.gameVersions(),
-                        presentation.gameInstall(),
-                        presentation.taskProgress(),
-                        animator,
-                        presentation.taskProgressAnimationDuration()));
+                () -> {
+                    GameVersionCatalogPanel panel = new GameVersionCatalogPanel(
+                            models.gameVersions(),
+                            models.gameInstaller(),
+                            presentation.gameVersions(),
+                            presentation.gameInstall(),
+                            presentation.taskProgress(),
+                            animator,
+                            presentation.taskProgressAnimationDuration(),
+                            models.instances(),
+                            models.taskLaunchController());
+                    panel.attachDownloadPageNavigation(downloadsNavigation);
+                    return panel;
+                });
+        factories.put(ShellPageId.TASKS, TaskManagerPanel::new);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
@@ -487,10 +560,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw failure;
         }
         try {
-            return SettingsCenterPanel.createForCurrentSettings(
+            SettingsCenterPanel settings = SettingsCenterPanel.createForCurrentSettings(
                     appearancePanel,
                     family -> themeManager.updateDefaultFontFamily(
                             SwingLauncherFontManager.effectiveLauncherFontFamily(family)));
+            settings.setTaskLaunchController(models.taskLaunchController());
+            return settings;
         } catch (RuntimeException | Error failure) {
             appearancePanel.close();
             throw failure;
@@ -521,9 +596,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingApplicationCommands commands,
             SwingApplicationPresentation presentation,
             Consumer<ShellPageId> navigateCommand,
+            DownloadPageNavigation downloadsNavigation,
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SystemThemeDetector systemThemeDetector) {
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         ThemeRuntimeController themeRuntime = new ThemeRuntimeController(
                 bindings.settings(),
                 new BuiltinThemePackCatalog(),
@@ -540,9 +618,32 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 new DefaultResourcePackCatalogInteractions(
                         presentation.resourcePacksActions(),
                         Schedulers.io());
+        ShaderPackCatalogInteractions shaderPackInteractions =
+                new DefaultShaderPackCatalogInteractions(
+                        presentation.shaderPacksActions(),
+                        Schedulers.io());
         ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
                 presentation.modsActions(),
                 Schedulers.io());
+        InstanceContentNavigation contentNavigation = new InstanceContentNavigation() {
+            /// Opens one plain download category request.
+            @Override
+            public void openDownloads(DownloadPageTarget target) {
+                requestDownloads(DownloadPageRequest.of(target));
+            }
+
+            /// Opens one download category request bound to an explicit instance context.
+            @Override
+            public void openInstanceDownloads(DownloadPageTarget target, GameInstanceID instanceId) {
+                requestDownloads(new DownloadPageRequest(target, instanceId));
+            }
+
+            /// Selects the downloads destination before its lazily created page applies the request.
+            private void requestDownloads(DownloadPageRequest request) {
+                navigateCommand.accept(ShellPageId.DOWNLOADS);
+                downloadsNavigation.request(request);
+            }
+        };
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
                         bindings.homeStore(),
@@ -590,12 +691,18 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 presentation.resourcePacksStatus(),
                                 presentation.resourcePacksActions(),
                                 resourcePackInteractions,
+                                presentation.shaderPacks(),
+                                presentation.shaderPacksStatus(),
+                                presentation.shaderPacksActions(),
+                                shaderPackInteractions,
                                 () -> navigateCommand.accept(ShellPageId.INSTANCES),
                                 presentation.taskProgress(),
+                                taskLaunchController,
                                 animator,
                                 presentation.taskProgressAnimationDuration(),
                                 worldQuickPlayActions,
-                                maintenanceLaunchActions);
+                                maintenanceLaunchActions,
+                                contentNavigation);
                 }),
                 (management, addInstanceCommand) -> new SelectedRepositoryInstancesModel(
                         Schedulers.io(),
@@ -609,7 +716,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                         bindings.repository(),
                                         DownloadProviders.getDownloadProvider(),
                                         Schedulers.io(),
-                                        LauncherStateDispatcher::execute)
+                                        LauncherStateDispatcher::execute,
+                                        new LauncherAutomaticInstanceConfigMigrationTaskFactory(Schedulers.io()))
                                 .create(request),
                         Schedulers.io(),
                         presentation.gameInstall().taskTitle(),
@@ -725,6 +833,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(stateResources, "stateResources");
         Objects.requireNonNull(navigateCommand, "navigateCommand");
         Runnable addInstanceCommand = () -> navigateCommand.accept(ShellPageId.DOWNLOADS);
+        TaskLaunchController taskLaunchController = new TaskLaunchController(
+                () -> navigateCommand.accept(ShellPageId.TASKS));
         List<AutoCloseable> services = new ArrayList<>(1);
         List<AutoCloseable> models = new ArrayList<>(7);
         List<AutoCloseable> sources = new ArrayList<>(1);
@@ -777,6 +887,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     instanceManagement,
                     gameVersions,
                     gameInstaller,
+                    taskLaunchController,
                     accounts,
                     appearance,
                     resources,
@@ -907,14 +1018,24 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 animator,
                 presentation.pageTransitionDuration(),
                 presentation.taskProgressAnimationDuration());
+        frame.shellPanel().setDroppedModpackInstallLauncher((owner, archive) ->
+                SwingLocalModpackInstallDialog.show(
+                        owner,
+                        archive,
+                        presentation.taskProgress(),
+                        models.taskLaunchController(),
+                        animator,
+                        presentation.taskProgressAnimationDuration()));
         SwingInstanceJsonImportLauncher.install(
                 frame,
                 GameDirectoryManager::getSelectedRepository,
                 Schedulers.io(),
                 presentation.taskProgress(),
                 animator,
-                presentation.taskProgressAnimationDuration());
+                presentation.taskProgressAnimationDuration(),
+                models.taskLaunchController());
         SwingShellNBTDropLauncher.install(frame, Schedulers.io());
+        SwingCrashReportDropLauncher.install(frame, Schedulers.io());
         return new AppShellApplicationWindow(frame);
     }
 
@@ -1289,6 +1410,77 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 if (!closed.get()) {
                     frame.shellPanel().navigateTo(page);
                 }
+            });
+        }
+
+        /// Routes a missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        @Override
+        public void openModSearch(String dependencyId) {
+            Objects.requireNonNull(dependencyId, "dependencyId");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openModSearch(dependencyId);
+                frame.toFront();
+                frame.requestFocusInWindow();
+            });
+        }
+
+        /// Routes a version-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(String dependencyId, @Nullable String gameVersion) {
+            openMissingDependencySearch(dependencyId, gameVersion, null);
+        }
+
+        /// Routes a loader-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        /// @param gameVersion analyzed Minecraft version, or null when unavailable
+        /// @param modLoader current instance mod loader, or null when unavailable
+        @Override
+        public void openMissingDependencySearch(
+                String dependencyId,
+                @Nullable String gameVersion,
+                @Nullable ModLoaderType modLoader) {
+            Objects.requireNonNull(dependencyId, "dependencyId");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openMissingDependencySearch(dependencyId, gameVersion, modLoader);
+                frame.toFront();
+                frame.requestFocusInWindow();
+            });
+        }
+
+        /// Routes a target-aware missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param request validated missing-dependency search request
+        @Override
+        public void openMissingDependencySearch(MissingDependencySearchRequest request) {
+            MissingDependencySearchRequest checked = Objects.requireNonNull(request, "request");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openMissingDependencySearch(checked);
+                frame.toFront();
+                frame.requestFocusInWindow();
             });
         }
 

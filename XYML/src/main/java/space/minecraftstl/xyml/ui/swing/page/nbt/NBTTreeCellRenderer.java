@@ -58,6 +58,7 @@ final class NBTTreeCellRenderer extends DefaultTreeCellRenderer {
     /// @param strings localized count formatting
     NBTTreeCellRenderer(NBTEditorStrings strings) {
         this.strings = Objects.requireNonNull(strings, "strings");
+        putClientProperty("html.disable", Boolean.TRUE);
     }
 
     /// Loads and decodes the complete immutable icon table on a caller-owned background thread.
@@ -147,15 +148,16 @@ final class NBTTreeCellRenderer extends DefaultTreeCellRenderer {
         if (icon != null) {
             setIcon(icon);
         }
+        String displayName = strings.nodeName(node);
         @Nullable String scalar = node.currentScalarValue();
         if (scalar != null) {
-            setText(presentation.displayName() + " = " + scalar);
+            setText(strings.treeValue(displayName, scalar));
         } else if (presentation.childCount() > 0) {
-            setText(presentation.displayName() + " (" + strings.entries(presentation.childCount()) + ")");
+            setText(strings.treeEntries(displayName, presentation.childCount()));
         } else {
-            setText(presentation.displayName());
+            setText(displayName);
         }
-        setToolTipText(presentation.type().name());
+        setToolTipText(strings.nodeType(node));
         return this;
     }
 

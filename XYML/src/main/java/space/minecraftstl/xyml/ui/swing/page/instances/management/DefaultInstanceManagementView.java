@@ -25,16 +25,17 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadPageTarget;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.export.ModpackExportPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.installers.InstanceInstallerPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenancePanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.servers.ServerCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
@@ -47,9 +48,17 @@ import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogIn
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.DefaultShaderPackCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.FileSystemShaderPackCatalogAccess;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.shaderpacks.ShaderPackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -103,8 +112,13 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackStatusStrings localized resource-pack lifecycle text
     /// @param resourcePackActionStrings localized resource-pack action text
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
+    /// @param shaderPackStrings localized shader-pack content text
+    /// @param shaderPackStatusStrings localized shader-pack lifecycle text
+    /// @param shaderPackActionStrings localized shader-pack action text
+    /// @param shaderPackInteractions shader-pack dialog and desktop interactions
     /// @param returnCommand shell command opening the instance-list side page
     /// @param taskProgressStrings localized task-progress labels for long-running instance operations
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param animator optional shared motion-aware progress animator
     /// @param progressAnimationDuration non-negative progress animation duration for instance operations
     /// @param worldQuickPlayActions non-blocking launch and script commands bound to this instance's worlds
@@ -126,12 +140,18 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogStatusStrings resourcePackStatusStrings,
             ResourcePackCatalogActionStrings resourcePackActionStrings,
             ResourcePackCatalogInteractions resourcePackInteractions,
+            ShaderPackCatalogStrings shaderPackStrings,
+            ShaderPackCatalogStatusStrings shaderPackStatusStrings,
+            ShaderPackCatalogActionStrings shaderPackActionStrings,
+            ShaderPackCatalogInteractions shaderPackInteractions,
             Runnable returnCommand,
             TaskProgressStrings taskProgressStrings,
+            TaskLaunchController taskLaunchController,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             WorldQuickPlayActions worldQuickPlayActions,
-            @Nullable InstanceMaintenanceLaunchActions maintenanceLaunchActions) {
+            @Nullable InstanceMaintenanceLaunchActions maintenanceLaunchActions,
+            InstanceContentNavigation contentNavigation) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -164,13 +184,25 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 Objects.requireNonNull(resourcePackActionStrings, "resourcePackActionStrings");
         ResourcePackCatalogInteractions requiredResourcePackInteractions =
                 Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
+        ShaderPackCatalogStrings requiredShaderPackStrings =
+                Objects.requireNonNull(shaderPackStrings, "shaderPackStrings");
+        ShaderPackCatalogStatusStrings requiredShaderPackStatusStrings =
+                Objects.requireNonNull(shaderPackStatusStrings, "shaderPackStatusStrings");
+        ShaderPackCatalogActionStrings requiredShaderPackActionStrings =
+                Objects.requireNonNull(shaderPackActionStrings, "shaderPackActionStrings");
+        ShaderPackCatalogInteractions requiredShaderPackInteractions =
+                Objects.requireNonNull(shaderPackInteractions, "shaderPackInteractions");
         Runnable requiredReturnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
         TaskProgressStrings requiredTaskProgressStrings =
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+        TaskLaunchController requiredTaskLaunchController =
+                Objects.requireNonNull(taskLaunchController, "taskLaunchController");
         Duration requiredAnimationDuration =
                 Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
         WorldQuickPlayActions requiredWorldQuickPlayActions =
                 Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
+        InstanceContentNavigation requiredContentNavigation =
+                Objects.requireNonNull(contentNavigation, "contentNavigation");
         if (requiredAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
@@ -194,6 +226,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     this.instanceId,
                     requiredExecutor,
                     summarySink::applyOverviewSummary);
+            createdOverview.setTaskLaunchController(requiredTaskLaunchController);
             overviewReference.set(createdOverview);
             createdPageDeck = new InstanceManagementPageDeck(createPageFactories(
                     requiredRepository,
@@ -214,13 +247,21 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             requiredResourcePackStatusStrings,
                             requiredResourcePackActionStrings,
                             requiredResourcePackInteractions),
+                    new ShaderPackPageDependencies(
+                            requiredShaderPackStrings,
+                            requiredShaderPackStatusStrings,
+                            requiredShaderPackActionStrings,
+                            requiredShaderPackInteractions),
                     new OperationPageDependencies(
                             requiredReturnCommand,
                             requiredTaskProgressStrings,
+                            requiredTaskLaunchController,
                             animator,
                             requiredAnimationDuration,
                             requiredWorldQuickPlayActions,
                             maintenanceLaunchActions),
+                    requiredContentNavigation,
+                    this::selectPage,
                     createdOverview,
                     () -> workingDirectoryChanged(pageDeckReference, overviewReference)));
             pageDeckReference.set(createdPageDeck);
@@ -346,7 +387,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             SchematicPageDependencies schematicDependencies,
             ModPageDependencies modDependencies,
             ResourcePackPageDependencies resourcePackDependencies,
+            ShaderPackPageDependencies shaderPackDependencies,
             OperationPageDependencies operationDependencies,
+            InstanceContentNavigation contentNavigation,
+            java.util.function.Consumer<InstanceManagementPageId> pageSelector,
             InstanceOverviewPanel overview,
             Runnable workingDirectoryChanged) {
         EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> factories =
@@ -363,7 +407,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             modDependencies.statusStrings()),
                     modDependencies.strings(),
                     modDependencies.actionStrings(),
-                    modDependencies.interactions());
+                    modDependencies.interactions(),
+                    () -> contentNavigation.openInstanceDownloads(DownloadPageTarget.MODS, instanceId),
+                    () -> pageSelector.accept(InstanceManagementPageId.FILE_UPDATE_CHECK));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.RESOURCE_PACKS, () -> {
@@ -377,6 +423,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     resourcePackDependencies.actionStrings(),
                     resourcePackDependencies.interactions(),
                     repository.getResourcePackDirectory(instanceId));
+            panel.setContentCommands(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.RESOURCE_PACKS),
+                    () -> pageSelector.accept(InstanceManagementPageId.FILE_UPDATE_CHECK));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.WORLDS, () -> {
@@ -385,11 +434,34 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     instanceId,
                     executor,
                     operationDependencies.worldQuickPlayActions());
+            panel.setOpenDownloadsCommand(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.WORLDS));
             return new InstanceManagementPage(panel, panel::activate, panel::close);
         });
-        factories.put(InstanceManagementPageId.DATA_PACKS, () -> {
-            DataPackManagementPanel panel = new DataPackManagementPanel(repository, instanceId, executor);
-            return new InstanceManagementPage(panel, panel::activate, panel::close);
+        factories.put(InstanceManagementPageId.SERVERS, () -> {
+            ServerCatalogPanel panel = new ServerCatalogPanel(repository,
+                    instanceId, executor);
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+        factories.put(InstanceManagementPageId.SHADERS, () -> {
+            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
+                    new DefaultShaderPackCatalogModel(
+                            new FileSystemShaderPackCatalogAccess(repository, instanceId),
+                            executor,
+                            shaderPackDependencies.statusStrings().idleText(),
+                            shaderPackDependencies.statusStrings().loadingText(),
+                            shaderPackDependencies.statusStrings().readyText(),
+                            shaderPackDependencies.statusStrings().emptyText(),
+                            shaderPackDependencies.statusStrings().failureText(),
+                            shaderPackDependencies.statusStrings().writingText(),
+                            shaderPackDependencies.statusStrings().writeFailedText()),
+                    shaderPackDependencies.strings(),
+                    shaderPackDependencies.statusStrings(),
+                    shaderPackDependencies.actionStrings(),
+                    shaderPackDependencies.interactions(),
+                    repository.getRunDirectory(instanceId).resolve("shaderpacks"));
+            panel.setContentCommands(() -> contentNavigation.openDownloads(DownloadPageTarget.SHADERS));
+            return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.SCHEMATICS, () -> {
             SchematicInstanceManagementView panel = new SchematicInstanceManagementView(
@@ -401,6 +473,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     schematicDependencies.interactions(),
                     () -> { },
                     false);
+            panel.setOpenProjectionModCommand(
+                    () -> contentNavigation.openDownloads(DownloadPageTarget.MODS));
             return InstanceManagementPage.passive(panel, panel::close);
         });
         factories.put(InstanceManagementPageId.BACKUPS, () -> {
@@ -415,6 +489,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     operationDependencies.taskProgressStrings(),
                     operationDependencies.animator(),
                     operationDependencies.progressAnimationDuration());
+            panel.setTaskLaunchController(operationDependencies.taskLaunchController());
             return InstanceManagementPage.passive(panel, panel::close);
         });
 
@@ -425,6 +500,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         instanceId,
                         executor,
                         workingDirectoryChanged);
+                panel.setTaskLaunchController(operationDependencies.taskLaunchController());
                 return InstanceManagementPage.passive(panel, panel::close);
             });
             factories.put(InstanceManagementPageId.AUTOMATIC_INSTALL, () -> {
@@ -434,6 +510,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         operationDependencies.taskProgressStrings(),
                         operationDependencies.animator(),
                         operationDependencies.progressAnimationDuration());
+                panel.setTaskLaunchController(operationDependencies.taskLaunchController());
                 return new InstanceManagementPage(panel, panel::activate, panel::close);
             });
             factories.put(InstanceManagementPageId.MODPACK_EXPORT, () -> {
@@ -443,7 +520,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         executor,
                         operationDependencies.taskProgressStrings(),
                         operationDependencies.animator(),
-                        operationDependencies.progressAnimationDuration());
+                        operationDependencies.progressAnimationDuration(),
+                        operationDependencies.taskLaunchController());
                 return new InstanceManagementPage(panel, panel::activate, panel::close);
             });
             factories.put(InstanceManagementPageId.INSTANCE_OPERATIONS, () -> {
@@ -452,6 +530,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         instanceId,
                         executor,
                         operationDependencies.returnCommand());
+                panel.setTaskLaunchController(operationDependencies.taskLaunchController());
                 return InstanceManagementPage.passive(panel, panel::close);
             });
             @Nullable InstanceMaintenanceLaunchActions availableMaintenanceActions =
@@ -464,7 +543,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             availableMaintenanceActions,
                             operationDependencies.taskProgressStrings(),
                             operationDependencies.animator(),
-                            operationDependencies.progressAnimationDuration());
+                            operationDependencies.progressAnimationDuration(),
+                            operationDependencies.taskLaunchController());
                     return new InstanceManagementPage(panel, panel::activate, panel::close);
                 });
             }
@@ -551,10 +631,32 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         }
     }
 
+    /// Immutable shader-pack page construction dependencies.
+    ///
+    /// @param strings localized content text
+    /// @param statusStrings localized lifecycle text
+    /// @param actionStrings localized action text
+    /// @param interactions shader-pack dialogs and desktop interactions
+    @NotNullByDefault
+    private record ShaderPackPageDependencies(
+            ShaderPackCatalogStrings strings,
+            ShaderPackCatalogStatusStrings statusStrings,
+            ShaderPackCatalogActionStrings actionStrings,
+            ShaderPackCatalogInteractions interactions) {
+        /// Validates shader-pack page dependencies.
+        private ShaderPackPageDependencies {
+            Objects.requireNonNull(strings, "strings");
+            Objects.requireNonNull(statusStrings, "statusStrings");
+            Objects.requireNonNull(actionStrings, "actionStrings");
+            Objects.requireNonNull(interactions, "interactions");
+        }
+    }
+
     /// Immutable lifecycle, progress, animation, world, and maintenance construction dependencies.
     ///
     /// @param returnCommand command opening the instance list after destructive lifecycle work
     /// @param taskProgressStrings localized long-running task labels
+    /// @param taskLaunchController shared confirmed-task submission controller
     /// @param animator optional shared motion-aware animator
     /// @param progressAnimationDuration non-negative task animation duration
     /// @param worldQuickPlayActions world launch and script commands
@@ -563,6 +665,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     private record OperationPageDependencies(
             Runnable returnCommand,
             TaskProgressStrings taskProgressStrings,
+            TaskLaunchController taskLaunchController,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration,
             WorldQuickPlayActions worldQuickPlayActions,
@@ -571,6 +674,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         private OperationPageDependencies {
             Objects.requireNonNull(returnCommand, "returnCommand");
             Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+            Objects.requireNonNull(taskLaunchController, "taskLaunchController");
             Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
             Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
             if (progressAnimationDuration.isNegative()) {

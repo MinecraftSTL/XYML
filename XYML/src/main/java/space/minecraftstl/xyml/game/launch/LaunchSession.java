@@ -63,9 +63,11 @@ public interface LaunchSession extends TaskPresentationModel {
     /// @return preparation failure, or an empty value otherwise
     Optional<Throwable> failure();
 
-    /// Requests cooperative cancellation while preparation still owns the single-flight slot.
+    /// Requests cancellation while preparation still owns the single-flight slot.
     ///
-    /// This method never stops a process that has already been created.
+    /// If the task produces a process after cancellation is accepted, that process is forcefully terminated and the
+    /// session reaches [LaunchStatus#CANCELLED] instead of exposing a successful process result. Once preparation has
+    /// already reached [LaunchStatus#PROCESS_CREATED], later cancellation requests are rejected.
     ///
     /// @return true only for the first accepted cancellation request
     boolean cancel();

@@ -26,11 +26,17 @@ import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
+import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
@@ -41,7 +47,6 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
@@ -68,6 +73,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -132,6 +138,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Search-filtered path source that preserves viewport-only metadata resolution.
     private final FilteredResourcePackCatalogDataSource filteredDataSource;
 
+    /// Lazy local icon cache shared by the visible resource-pack rows.
+    private final ResourcePackIconCache iconCache;
+
     /// Viewport-measured multi-choice list.
     private final ViewportChoiceList<ResourcePackCatalogItem> choiceList;
 
@@ -155,6 +164,12 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Theme-aware source refresh command.
     private final JButton refreshButton;
+
+    /// Opens the remote resource-pack catalog.
+    private final JButton downloadButton;
+
+    /// Opens the instance update checker.
+    private final JButton checkUpdatesButton;
 
     /// Retry command available only after a failed local scan.
     private final JButton retryButton;
@@ -193,7 +208,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private final JTextArea emptyText;
 
     /// Exact file or directory name for the loaded selection.
-    private final JLabel fileNameValue;
+    private final JTextArea fileNameValue;
 
     /// Normalized absolute path for the loaded selection.
     private final JTextArea pathArea;
@@ -202,13 +217,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private final JTextArea descriptionArea;
 
     /// Compatibility text for the managed game version.
-    private final JLabel compatibilityValue;
+    private final JTextArea compatibilityValue;
 
     /// Whether Minecraft options currently enable the loaded selection.
-    private final JLabel enabledValue;
+    private final JTextArea enabledValue;
 
     /// Responsive split that changes from side-by-side to stacked at narrow widths.
-    private final ResponsiveCatalogSplitPane catalogSplit;
+    private final JComponent catalogSplit;
 
     /// Rechecks a pending placeholder selection and details after sparse rows change.
     private final ListDataListener listDataListener;
@@ -257,11 +272,20 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether EDT-owned component and model resources have been released.
     private boolean resourcesClosed;
 
+    /// Command opening the remote resource-pack catalog.
+    private Runnable openDownloadsCommand = () -> { };
+
+    /// Command opening the instance update checker.
+    private Runnable checkUpdatesCommand = () -> { };
+
     /// Whether programmatic checkbox reconciliation suppresses user commands.
     private boolean applyingEnabledToggle;
 
     /// Whether a model write command remains locally outstanding.
     private boolean writePending;
+
+    /// Exact captured write request retained until its terminal result is presented.
+    private @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> activeWriteOperation;
 
     /// Model-notification revision captured immediately before the current write invocation.
     private long writeStartUpdateRevision;
@@ -304,6 +328,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     "[]8[]12[grow,fill]8[]"));
             contentCards = new JPanel(new CardLayout());
             refreshButton = new JButton();
+            downloadButton = new JButton();
+            checkUpdatesButton = new JButton();
             retryButton = new JButton();
             importButton = new JButton();
             openDirectoryButton = new JButton();
@@ -321,19 +347,35 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             failedText = stateText("resourcePacksFailed");
             unsupportedText = stateText("resourcePacksUnsupported");
             emptyText = stateText("resourcePacksEmpty");
-            fileNameValue = new JLabel();
+            fileNameValue = SwingTextAreas.wrappingToken();
             pathArea = new JTextArea();
             descriptionArea = new JTextArea();
-            compatibilityValue = new JLabel();
-            enabledValue = new JLabel();
+            compatibilityValue = SwingTextAreas.wrappingValue();
+            enabledValue = SwingTextAreas.wrappingValue();
             listDataListener = createListDataListener();
             selectionListener = this::selectionChanged;
             searchListener = createSearchListener();
             showingListener = this::showingChanged;
             filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
-            acquiredChoiceList = new ViewportChoiceList<>(filteredDataSource, ResourcePackCatalogItem::displayText);
+            iconCache = new ResourcePackIconCache();
+            acquiredChoiceList = new ViewportChoiceList<>(
+                    filteredDataSource, new RichChoiceListCellRenderer<>(
+                            ResourcePackCatalogItem::displayText,
+                            item -> resourcePackRowDetail(item),
+                            item -> resourcePackRowBadge(item),
+                            item -> iconCache.iconFor(model, item, iconRepaintList()),
+                            ResourcePackCatalogItem::description,
+                            item -> !item.enabled(),
+                            item -> item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
             choiceList = acquiredChoiceList;
-            catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
+            ResourcePackCatalogReorderSupport.install(this);
+            ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
+                    choiceList,
+                    createDetailsPanel());
+            catalogSplit = new SwingHorizontalScrollPane(
+                    split,
+                    "resourcePacksCatalogScroll",
+                    split.requiredMinimumWidth());
             configureComponents();
             acquiredSubscription = Objects.requireNonNull(
                     model.subscribe(this::modelChanged),
@@ -370,6 +412,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         dropRegistration = Objects.requireNonNull(acquiredDropRegistration);
     }
 
+    /// Installs navigation commands without changing local catalog behavior.
+    ///
+    /// @param openDownloadsCommand command opening the remote resource-pack catalog
+    /// @param checkUpdatesCommand command opening the instance update checker
+    public void setContentCommands(Runnable openDownloadsCommand, Runnable checkUpdatesCommand) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Resource-pack catalog is closed");
+        }
+        this.openDownloadsCommand = Objects.requireNonNull(openDownloadsCommand, "openDownloadsCommand");
+        this.checkUpdatesCommand = Objects.requireNonNull(checkUpdatesCommand, "checkUpdatesCommand");
+    }
+
     /// Returns the immutable snapshot currently represented by the page.
     ///
     /// @return displayed catalog state
@@ -383,13 +438,6 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @return viewport-driven resource-pack list
     public ViewportChoiceList<ResourcePackCatalogItem> choiceList() {
         return choiceList;
-    }
-
-    /// Selects the responsive list/details orientation from this page's allocated width.
-    @Override
-    public void doLayout() {
-        catalogSplit.updateForAvailableWidth(getWidth());
-        super.doLayout();
     }
 
     /// Rechecks first-load eligibility after this page becomes displayable.
@@ -447,7 +495,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         setOpaque(false);
         JPanel headingBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][][][]",
+                "[grow,fill][][][][][]",
                 "[40!]"));
         headingBand.setOpaque(false);
 
@@ -473,6 +521,24 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 actionStrings.openDirectoryTooltip(),
                 this::openResourcePackDirectory);
         headingBand.add(openDirectoryButton, "w 40!, h 40!");
+
+        configureIconButton(
+                checkUpdatesButton,
+                "resourcePacksCheckUpdates",
+                "assets/swing/icons/refresh.svg",
+                i18n("addon.check_update.button"),
+                i18n("addon.check_update.button"),
+                () -> checkUpdatesCommand.run());
+        headingBand.add(checkUpdatesButton, "w 40!, h 40!");
+
+        configureIconButton(
+                downloadButton,
+                "resourcePacksDownload",
+                "assets/swing/icons/nav-downloads.svg",
+                i18n("resourcepack.download"),
+                i18n("resourcepack.download"),
+                () -> openDownloadsCommand.run());
+        headingBand.add(downloadButton, "w 40!, h 40!");
 
         refreshButton.setName("resourcePacksRefresh");
         refreshButton.setText(null);
@@ -669,11 +735,43 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         choiceList.getChoiceModel().addListDataListener(listDataListener);
     }
 
+    /// Formats one installed resource pack's compact description and file identity.
+    ///
+    /// @param item loaded resource-pack row
+    /// @return one-line description and exact file name
+    private String resourcePackRowDetail(ResourcePackCatalogItem item) {
+        String description = firstNonBlankLine(item.description());
+        if (description.isBlank()) {
+            return item.fileName();
+        }
+        return description + " | " + item.fileName();
+    }
+
+    /// Formats the compatibility badge for one resource pack.
+    ///
+    /// @param item loaded resource-pack row
+    /// @return localized compatibility text
+    private String resourcePackRowBadge(ResourcePackCatalogItem item) {
+        return strings.compatibilityText(item.compatibility());
+    }
+
+    /// Returns the first meaningful line from a potentially multiline pack description.
+    ///
+    /// @param text complete pack description
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(String text) {
+        return text.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
+    }
+
     /// Creates the unframed read-only details surface used by both responsive orientations.
     ///
     /// @return configured details panel
     private JComponent createDetailsPanel() {
-        JPanel details = new JPanel(new MigLayout(
+        JPanel details = new ViewportTrackingPanel(new MigLayout(
                 "insets 12 16, fillx, wrap 2",
                 "[][grow,fill]",
                 "[]8[]6[]6[]8[]4[]8[]4[]8[]"));
@@ -689,19 +787,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         fileNameLabel.setLabelFor(fileNameValue);
         details.add(fileNameLabel);
         fileNameValue.setName("resourcePacksFileName");
-        details.add(fileNameValue, "growx");
+        details.add(fileNameValue, "growx, wmin 0");
 
         JLabel compatibilityLabel = new JLabel(strings.compatibilityLabel());
         compatibilityLabel.setLabelFor(compatibilityValue);
         details.add(compatibilityLabel);
         compatibilityValue.setName("resourcePacksCompatibility");
-        details.add(compatibilityValue, "growx");
+        details.add(compatibilityValue, "growx, wmin 0");
 
         JLabel enabledLabel = new JLabel(strings.enabledLabel());
         enabledLabel.setLabelFor(enabledValue);
         details.add(enabledLabel);
         enabledValue.setName("resourcePacksEnabled");
-        details.add(enabledValue, "growx");
+        details.add(enabledValue, "growx, wmin 0");
 
         JLabel pathLabel = new JLabel(strings.pathLabel());
         pathLabel.setLabelFor(pathArea);
@@ -711,7 +809,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         JScrollPane pathScroll = new JScrollPane(pathArea);
         pathScroll.setName("resourcePacksPathScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(pathScroll);
-        details.add(pathScroll, "span 2, growx, hmin 52");
+        pathScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        pathScroll.setMinimumSize(new Dimension(0, 0));
+        details.add(pathScroll, "span 2, growx, wmin 0, hmin 52");
 
         JLabel descriptionLabel = new JLabel(strings.descriptionLabel());
         descriptionLabel.setLabelFor(descriptionArea);
@@ -721,7 +821,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("resourcePacksDescriptionScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        details.add(descriptionScroll, "span 2, growx");
+        descriptionScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        descriptionScroll.setMinimumSize(new Dimension(0, 0));
+        details.add(descriptionScroll, "span 2, growx, wmin 0");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -754,13 +856,26 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 actionStrings.deleteTooltip(),
                 this::confirmAndDeleteSelectedResourcePack);
         actions.add(deleteButton, "w 40!, h 40!");
-        details.add(actions, "span 2, growx");
+        details.add(actions, "span 2, growx, wmin 0");
 
         JScrollPane detailsScroll = createTransparentScrollPane(details, "resourcePacksDetailsScroll");
         detailsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         detailsScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         detailsScroll.getVerticalScrollBar().setUnitIncrement(16);
-        detailsScroll.setMinimumSize(new Dimension(0, 0));
+        int labelMinimumWidth = Math.max(
+                fileNameLabel.getPreferredSize().width,
+                Math.max(compatibilityLabel.getPreferredSize().width,
+                        enabledLabel.getPreferredSize().width));
+        int valueMinimumWidth = SwingTextAreas.maximumMinimumTextWidth(
+                fileNameValue, compatibilityValue, enabledValue, pathArea, descriptionArea);
+        int actionMinimumWidth = enabledToggle.getMinimumSize().width
+                + 8
+                + revealButton.getMinimumSize().width
+                + 8
+                + deleteButton.getMinimumSize().width;
+        int detailsMinimumWidth = Math.max(labelMinimumWidth + 8 + valueMinimumWidth, actionMinimumWidth) + 32;
+        int scrollBarWidth = detailsScroll.getVerticalScrollBar().getPreferredSize().width;
+        detailsScroll.setMinimumSize(new Dimension(detailsMinimumWidth + scrollBarWidth, 0));
         return detailsScroll;
     }
 
@@ -830,6 +945,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 || previous.contentRevision() != snapshot.contentRevision()
                 || !previous.itemCount().equals(snapshot.itemCount());
         displayedSnapshot = snapshot;
+        if (contentChanged) {
+            iconCache.clear();
+        }
 
         applyingSnapshot = true;
         try {
@@ -866,6 +984,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 : strings.refreshAction();
         refreshButton.getAccessibleContext().setAccessibleName(refreshName);
         refreshButton.setEnabled(snapshot.refreshEnabled());
+        checkUpdatesButton.setEnabled(snapshot.refreshEnabled());
+        downloadButton.setEnabled(snapshot.refreshEnabled());
         retryButton.setEnabled(snapshot.status() == ResourcePackCatalogStatus.FAILED
                 && snapshot.refreshEnabled());
         String visibleStatus = snapshot.writeStatus() == ResourcePackCatalogWriteStatus.IDLE
@@ -1112,7 +1232,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 enabled ? model::enableResourcePack : model::disableResourcePack));
     }
 
-    /// Confirms and permanently deletes every selected stable path.
+    /// Chooses a mode and deletes every selected stable path.
     private void confirmAndDeleteSelectedResourcePacks() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
@@ -1121,15 +1241,28 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         long expectedRevision = snapshot.contentRevision();
-        final boolean confirmed;
+        int selectedCount = selectedPaths.size();
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDeleteSelected(this, selectedPaths.size());
+            mode = interactions.chooseDeleteModeSelected(this, selectedCount);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (confirmed && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
-            startWrite(() -> applySequentially(selectedPaths, model::deleteResourcePack));
+        if (mode != null && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
+            startDeletion(
+                    () -> ResourcePackDeletionFallback.deleteSerially(
+                            selectedPaths,
+                            mode,
+                            path -> model.deleteResourcePack(path, mode),
+                            model::snapshot),
+                    () -> ResourcePackDeletionFallback.deleteSerially(
+                            selectedPaths,
+                            DeletionMode.PERMANENT,
+                            path -> model.deleteResourcePack(path, DeletionMode.PERMANENT),
+                            model::snapshot),
+                    () -> interactions.confirmPermanentFallbackSelected(this, selectedCount),
+                    true);
         }
     }
 
@@ -1170,6 +1303,52 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     "resource-pack batch mutation returned null"));
         }
         return completion;
+    }
+
+    /// Returns the panel-owned list for reorder interaction installation.
+    ///
+    /// @return resource-pack list
+    JList<ChoiceListEntry<ResourcePackCatalogItem>> resourcePackList() {
+        return choiceList.getList();
+    }
+
+    /// Returns the displayed snapshot for same-thread drag validation.
+    ///
+    /// @return displayed snapshot, or null before initialization
+    @Nullable ResourcePackCatalogSnapshot displayedSnapshotValue() {
+        return displayedSnapshot;
+    }
+
+    /// Returns whether handle interaction is currently allowed.
+    ///
+    /// @return whether the list may start or accept a reorder drag
+    boolean isReorderInteractionAllowed() {
+        return !closed && !writePending && searchField.getText().isBlank();
+    }
+
+    /// Starts one reorder only when the captured row still owns the current enabled prefix.
+    ///
+    /// @param selected captured loaded row
+    /// @param targetIndex final zero-based enabled display index
+    /// @return whether one model reorder was started
+    boolean reorderResourcePackToIndex(ResourcePackCatalogItem selected, int targetIndex) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || writePending || targetIndex < 0 || !searchField.getText().isBlank()) {
+            return false;
+        }
+        @Nullable ResourcePackCatalogSnapshot before = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem current = selectedActionTarget(before);
+        if (before == null || current == null || !current.path().equals(selected.path()) || !current.enabled()) {
+            return false;
+        }
+        int enabledCount = before.enabledItemCount();
+        int sourceIndex = filteredDataSource.indexOf(current.path());
+        if (sourceIndex < 0 || sourceIndex >= enabledCount || targetIndex >= enabledCount
+                || sourceIndex == targetIndex) {
+            return false;
+        }
+        startWrite(() -> model.reorderResourcePack(current.path(), targetIndex));
+        return true;
     }
 
     /// Toggles the selected pack through the model after compatibility confirmation when required.
@@ -1215,7 +1394,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 : model.disableResourcePack(expectedPath));
     }
 
-    /// Permanently deletes the selected pack only after confirmation and stale-state rejection.
+    /// Deletes the selected pack after mode selection and stale-state rejection.
     private void confirmAndDeleteSelectedResourcePack() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot beforeDialog = currentWritableSnapshot();
@@ -1225,15 +1404,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
         long expectedRevision = beforeDialog.contentRevision();
         Path expectedPath = selected.path();
-        final boolean confirmed;
+        final @Nullable DeletionMode mode;
         try {
-            confirmed = interactions.confirmDelete(this, selected);
+            mode = interactions.chooseDeleteMode(this, selected);
         } catch (RuntimeException failure) {
             showOperationFailure(failure);
             return;
         }
-        if (confirmed && isSelectedActionCurrent(expectedRevision, expectedPath)) {
-            startWrite(() -> model.deleteResourcePack(expectedPath));
+        if (mode != null && isSelectedActionCurrent(expectedRevision, expectedPath)) {
+            startDeletion(
+                    () -> model.deleteResourcePack(expectedPath, mode),
+                    () -> model.deleteResourcePack(expectedPath, DeletionMode.PERMANENT),
+                    () -> interactions.confirmPermanentFallback(this, selected),
+                    true);
         }
     }
 
@@ -1290,10 +1473,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @param operation deferred model write
     private void startWrite(Supplier<CompletionStage<ResourcePackCatalogSnapshot>> operation) {
         EdtDispatcher.requireEventDispatchThread();
-        if (writePending || currentWritableSnapshot() == null) {
-            return;
-        }
+        if (writePending || currentWritableSnapshot() == null) return;
         writePending = true;
+        activeWriteOperation = Objects.requireNonNull(operation, "operation");
         synchronized (stateLock) {
             writeStartUpdateRevision = updateRevision;
         }
@@ -1314,11 +1496,40 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
     }
 
+    /// Starts one deletion and delegates fallback ownership to the focused helper.
+    private void startDeletion(
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
+            BooleanSupplier confirmFallback,
+            boolean allowFallback) {
+        ResourcePackDeletionFallback.start(
+                initial,
+                permanentRetry,
+                confirmFallback,
+                allowFallback,
+                () -> !writePending && currentWritableSnapshot() != null,
+                () -> {
+                    writePending = true;
+                    synchronized (stateLock) {
+                        writeStartUpdateRevision = updateRevision;
+                    }
+                    updateActionAvailability(choiceList.getSelectedValue());
+                },
+                () -> {
+                    writePending = false;
+                    updateSelectionDetails();
+                },
+                this::writeCompleted);
+    }
+
     /// Clears the local write gate and reports only failures not already published by the model.
     ///
     /// @param failure asynchronous wrapper or original failure, or null after success
     private void writeCompleted(@Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Supplier<CompletionStage<ResourcePackCatalogSnapshot>> retryOperation =
+                activeWriteOperation;
+        activeWriteOperation = null;
         if (!isOpen()) {
             return;
         }
@@ -1330,10 +1541,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         Throwable resolved = unwrapCompletionFailure(failure);
         if (!(resolved instanceof CancellationException)
                 && !currentWriteFailureWasPublished()) {
-            interactions.showFailure(
-                    this,
-                    actionStrings.operationFailedTitle(),
-                    failureText(resolved));
+            @Nullable Runnable retryAction = retryOperation == null ? null : () -> startWrite(retryOperation);
+            interactions.showFailure(this, actionStrings.operationFailedTitle(),
+                    failureText(resolved), retryAction);
         }
     }
 
@@ -1443,6 +1653,15 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         enabledToggle.getAccessibleContext().setAccessibleName(toggleName);
         enabledToggle.getAccessibleContext().setAccessibleDescription(toggleTooltip);
         enabledToggle.setToolTipText(toggleTooltip);
+
+        boolean reorderAvailable = writable != null
+                && writable.enabledItemCount() > 1
+                && searchField.getText().isBlank();
+        @Nullable String reorderTooltip = reorderAvailable
+                ? i18n("swing.resourcepacks.reorder_tooltip")
+                : null;
+        choiceList.getList().setToolTipText(reorderTooltip);
+        choiceList.getList().getAccessibleContext().setAccessibleDescription(reorderTooltip);
     }
 
     /// Returns the displayed snapshot only when it still denotes the exact writable catalog.
@@ -1549,6 +1768,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     () -> searchField.getDocument().removeDocumentListener(searchListener));
             failure = attemptCleanup(failure, () -> removeHierarchyListener(showingListener));
             failure = attemptCleanup(failure, () -> refreshButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> checkUpdatesButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> downloadButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> retryButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> importButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> openDirectoryButton.setEnabled(false));
@@ -1619,6 +1840,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         return message == null || message.isBlank()
                 ? failure.getClass().getSimpleName()
                 : message;
+    }
+
+    /// Returns the list used to repaint rows after asynchronous icon completion.
+    ///
+    /// @return current resource-pack list
+    private JList<?> iconRepaintList() {
+        return choiceList.getList();
     }
 
     /// Configures one fixed-size icon command with visible tooltip and accessible text.
@@ -1747,66 +1975,6 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
         if (failure != null) {
             throw new IllegalStateException("Unexpected checked cleanup failure", failure);
-        }
-    }
-
-    /// Switches the catalog between side-by-side and stacked layouts from actual allocated width.
-    @NotNullByDefault
-    private static final class ResponsiveCatalogSplitPane extends JSplitPane {
-        /// Whether the divider ratio has been initialized for the current orientation.
-        private boolean orientationInitialized;
-
-        /// Creates a borderless responsive split using stable list and details components.
-        ///
-        /// @param list viewport-driven list
-        /// @param details read-only details surface
-        private ResponsiveCatalogSplitPane(
-                ViewportChoiceList<ResourcePackCatalogItem> list,
-                JComponent details) {
-            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
-            setName("resourcePacksCatalogSplit");
-            setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder());
-            setContinuousLayout(true);
-            setResizeWeight(0.42D);
-        }
-
-        /// Selects an orientation from the page width that the shell actually allocated.
-        ///
-        /// @param availableWidth allocated page width
-        private void updateForAvailableWidth(int availableWidth) {
-            boolean horizontal = availableWidth >= WIDE_LAYOUT_MINIMUM_WIDTH;
-            int desiredOrientation = horizontal ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
-            boolean orientationChanged = getOrientation() != desiredOrientation;
-            if (orientationChanged) {
-                setOrientation(desiredOrientation);
-                orientationInitialized = false;
-            }
-            setResizeWeight(horizontal ? 0.42D : 0.48D);
-        }
-
-        /// Lays out children and initializes the divider ratio for the selected orientation.
-        @Override
-        public void doLayout() {
-            boolean horizontal = getOrientation() == HORIZONTAL_SPLIT;
-            if (!orientationInitialized) {
-                int extent = horizontal ? getWidth() : getHeight();
-                int usableExtent = extent - getDividerSize();
-                if (usableExtent > 1) {
-                    double ratio = horizontal ? 0.42D : 0.48D;
-                    setDividerLocation((int) Math.round(usableExtent * ratio));
-                    orientationInitialized = true;
-                }
-            }
-            super.doLayout();
-        }
-
-        /// Allows the shell to allocate widths below the side-by-side breakpoint.
-        ///
-        /// @return zero minimum so the existing child scroll panes receive every constrained dimension
-        @Override
-        public Dimension getMinimumSize() {
-            return new Dimension(0, 0);
         }
     }
 }

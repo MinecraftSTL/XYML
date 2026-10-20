@@ -35,28 +35,42 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param lastUpdatedSortLabel last-update sort option
 /// @param authorSortLabel author sort option
 /// @param totalDownloadsSortLabel total-download sort option
+/// @param versionSortLabel installable-version ordering label
+/// @param recommendedVersionSortLabel recommended version ordering option
+/// @param gameVersionSortLabel Minecraft-version ordering option
+/// @param modVersionSortLabel mod-version ordering option
 @NotNullByDefault
 public record RemoteCatalogFilterStrings(
         String categoryLabel,
         String allCategoriesLabel,
         String sortLabel,
+        String relevancySortLabel,
         String popularitySortLabel,
         String nameSortLabel,
         String dateCreatedSortLabel,
         String lastUpdatedSortLabel,
         String authorSortLabel,
-        String totalDownloadsSortLabel) {
+        String totalDownloadsSortLabel,
+        String versionSortLabel,
+        String recommendedVersionSortLabel,
+        String gameVersionSortLabel,
+        String modVersionSortLabel) {
     /// Validates the complete filter text bundle.
     public RemoteCatalogFilterStrings {
         Objects.requireNonNull(categoryLabel, "categoryLabel");
         Objects.requireNonNull(allCategoriesLabel, "allCategoriesLabel");
         Objects.requireNonNull(sortLabel, "sortLabel");
+        Objects.requireNonNull(relevancySortLabel, "relevancySortLabel");
         Objects.requireNonNull(popularitySortLabel, "popularitySortLabel");
         Objects.requireNonNull(nameSortLabel, "nameSortLabel");
         Objects.requireNonNull(dateCreatedSortLabel, "dateCreatedSortLabel");
         Objects.requireNonNull(lastUpdatedSortLabel, "lastUpdatedSortLabel");
         Objects.requireNonNull(authorSortLabel, "authorSortLabel");
         Objects.requireNonNull(totalDownloadsSortLabel, "totalDownloadsSortLabel");
+        Objects.requireNonNull(versionSortLabel, "versionSortLabel");
+        Objects.requireNonNull(recommendedVersionSortLabel, "recommendedVersionSortLabel");
+        Objects.requireNonNull(gameVersionSortLabel, "gameVersionSortLabel");
+        Objects.requireNonNull(modVersionSortLabel, "modVersionSortLabel");
     }
 
     /// Returns the visible label for one Core-supported catalog sort.
@@ -65,12 +79,25 @@ public record RemoteCatalogFilterStrings(
     /// @return localized visible sort label
     public String sortTypeLabel(RemoteAddonRepository.SortType sortType) {
         return switch (Objects.requireNonNull(sortType, "sortType")) {
+            case RELEVANCY -> relevancySortLabel;
             case POPULARITY -> popularitySortLabel;
             case NAME -> nameSortLabel;
             case DATE_CREATED -> dateCreatedSortLabel;
             case LAST_UPDATED -> lastUpdatedSortLabel;
             case AUTHOR -> authorSortLabel;
             case TOTAL_DOWNLOADS -> totalDownloadsSortLabel;
+        };
+    }
+
+    /// Returns the visible label for one installable-version ordering mode.
+    ///
+    /// @param mode version ordering mode
+    /// @return localized visible version-order label
+    public String versionSortModeLabel(RemoteAddonVersionSortMode mode) {
+        return switch (Objects.requireNonNull(mode, "mode")) {
+            case RECOMMENDED -> recommendedVersionSortLabel;
+            case GAME_VERSION -> gameVersionSortLabel;
+            case MOD_VERSION -> modVersionSortLabel;
         };
     }
 
@@ -82,12 +109,17 @@ public record RemoteCatalogFilterStrings(
                 "Category",
                 "All categories",
                 "Sort by",
+                "Relevance",
                 "Popularity",
                 "Name",
                 "Date created",
                 "Last updated",
                 "Author",
-                "Total downloads");
+                "Total downloads",
+                "Version order",
+                "Recommended",
+                "Game version",
+                "Mod version");
     }
 
     /// Resolves filter labels from the launcher's existing translation keys.
@@ -98,11 +130,16 @@ public record RemoteCatalogFilterStrings(
                 i18n("addon.category"),
                 i18n("curse.category.0"),
                 i18n("search.sort"),
+                i18n("curse.sort.relevance"),
                 i18n("curse.sort.popularity"),
                 i18n("curse.sort.name"),
                 i18n("curse.sort.date_created"),
                 i18n("curse.sort.last_updated"),
                 i18n("curse.sort.author"),
-                i18n("curse.sort.total_downloads"));
+                i18n("curse.sort.total_downloads"),
+                i18n("swing.download.version_sort"),
+                i18n("swing.download.version_sort.recommended"),
+                i18n("swing.download.version_sort.game"),
+                i18n("swing.download.version_sort.mod"));
     }
 }

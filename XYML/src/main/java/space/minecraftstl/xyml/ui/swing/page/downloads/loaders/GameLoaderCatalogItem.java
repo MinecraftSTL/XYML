@@ -18,19 +18,19 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads.loaders;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.download.ComponentRemoteVersion;
 
 import java.util.Objects;
 
 /// Pairs a selected loader kind with its exact Core remote version instance.
 ///
-/// The concrete [RemoteVersion] is intentionally retained rather than converted into a display-only
+/// The concrete [ComponentRemoteVersion] is intentionally retained rather than converted into a display-only
 /// DTO, so a later installer task can use the original subtype and metadata without re-querying.
 ///
 /// @param kind loader catalog that produced the version
 /// @param remoteVersion original Core remote version object
 @NotNullByDefault
-public record GameLoaderCatalogItem(GameLoaderKind kind, RemoteVersion remoteVersion) {
+public record GameLoaderCatalogItem(GameLoaderKind kind, ComponentRemoteVersion remoteVersion) {
     /// Validates source provenance while preserving remote-version identity.
     public GameLoaderCatalogItem {
         kind = Objects.requireNonNull(kind, "kind");

@@ -44,6 +44,11 @@ public interface GameInstallSession extends TaskPresentationModel {
     /// @return read-only status property
     ReadOnlyProperty<GameInstallStatus> statusProperty();
 
+    /// Returns whether the underlying task executor has entered the application task registry.
+    ///
+    /// @return read-only submitted-state property
+    ReadOnlyProperty<Boolean> submittedProperty();
+
     /// Returns a stage that completes normally only after repository post-processing succeeds.
     ///
     /// Cancellation completes with [java.util.concurrent.CancellationException].

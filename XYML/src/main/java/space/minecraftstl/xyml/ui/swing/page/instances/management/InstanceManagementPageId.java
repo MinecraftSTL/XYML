@@ -51,11 +51,17 @@ public enum InstanceManagementPageId {
             "world.manage",
             "assets/swing/icons/folder-open.svg"),
 
-    /// Data-pack management for the selected world.
-    DATA_PACKS(
+    /// Multiplayer server-list management.
+    SERVERS(
             InstanceManagementPageGroup.CONTENT,
-            "datapack",
-            "assets/swing/icons/file-import.svg"),
+            "server.manage",
+            "assets/swing/icons/format-list-bulleted.svg"),
+
+    /// Installed shader-pack management.
+    SHADERS(
+            InstanceManagementPageGroup.CONTENT,
+            "shaderpack.manage",
+            "assets/swing/icons/image.svg"),
 
     /// Local schematic browsing and management.
     SCHEMATICS(

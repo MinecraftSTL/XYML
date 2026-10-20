@@ -29,7 +29,10 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.SystemTrashOperations;
+import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.util.io.Unzipper;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
@@ -77,11 +80,23 @@ public class DataPack {
     /// Latest immutable pack snapshot, safely published to readers on any thread.
     private volatile @Unmodifiable List<Pack> packs = List.of();
 
+    /// Platform recycle-bin movement boundary.
+    private final TrashOperations trashOperations;
+
     /// Creates a data-pack manager for one directory.
     ///
     /// @param path data-pack directory
     public DataPack(Path path) {
+        this(path, SystemTrashOperations.INSTANCE);
+    }
+
+    /// Creates a data-pack manager with an explicit recycle-bin implementation.
+    ///
+    /// @param path data-pack directory
+    /// @param trashOperations recycle-bin implementation
+    DataPack(Path path, TrashOperations trashOperations) {
         this.path = Objects.requireNonNull(path, "path");
+        this.trashOperations = Objects.requireNonNull(trashOperations, "trashOperations");
     }
 
     /// Returns the managed data-pack directory.
@@ -277,19 +292,50 @@ public class DataPack {
     /// @param packToDelete pack to delete
     /// @throws IOException when the pack cannot be deleted
     public void deletePack(Pack packToDelete) throws IOException {
+        deletePack(packToDelete, DeletionMode.PERMANENT);
+    }
+
+    /// Deletes one pack through the selected recycle-bin or permanent mode and publishes the retained snapshot.
+    ///
+    /// @param packToDelete pack to delete
+    /// @param mode selected deletion behavior
+    /// @throws IOException when the selected deletion fails
+    public void deletePack(Pack packToDelete, DeletionMode mode) throws IOException {
         Objects.requireNonNull(packToDelete, "packToDelete");
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         synchronized (mutationLock) {
-            Path pathToDelete = packToDelete.getPath();
-            if (Files.isDirectory(pathToDelete)) {
-                FileUtils.deleteDirectory(pathToDelete);
-            } else if (Files.isRegularFile(pathToDelete)) {
-                Files.delete(pathToDelete);
-            }
+            FileUtils.deleteWithMode(packToDelete.getPath(), requestedMode, trashOperations);
 
             @Unmodifiable List<Pack> retained = packs.stream()
                     .filter(pack -> !pack.getId().equals(packToDelete.getId()))
                     .toList();
             publishPacksLocked(retained);
+        }
+    }
+
+    /// Deletes every supplied pack, attempts all targets, and publishes the actual retained snapshot.
+    ///
+    /// @param packsToDelete non-empty immutable packs to delete
+    /// @param mode selected deletion behavior
+    /// @throws IOException when one or more targets remain after all attempts
+    public void deletePacks(
+            @Unmodifiable List<Pack> packsToDelete,
+            DeletionMode mode) throws IOException {
+        @Unmodifiable List<Pack> selected = List.copyOf(
+                Objects.requireNonNull(packsToDelete, "packsToDelete"));
+        if (selected.isEmpty()) {
+            return;
+        }
+        DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
+        @Unmodifiable List<Path> paths = selected.stream()
+                .map(pack -> Objects.requireNonNull(pack, "packsToDelete contains null").getPath())
+                .toList();
+        synchronized (mutationLock) {
+            try {
+                FileUtils.deleteAllWithMode(paths, requestedMode, trashOperations);
+            } finally {
+                loadFromDirLocked();
+            }
         }
     }
 

@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Instant;
@@ -34,9 +35,10 @@ import java.util.stream.Stream;
 /// Represents a chunk in a region file.
 ///
 /// A chunk can contain a root tag, which is usually a compound tag containing the chunk data.
+@NotNullByDefault
 public final class Chunk implements NBTParent<CompoundTag>, NBTElement {
     @Nullable ChunkRegion region;
-    int localIndex;
+    int localIndex = -1;
 
     @Nullable CompoundTag rootTag;
     Instant timestamp = Instant.EPOCH;
@@ -128,29 +130,70 @@ public final class Chunk implements NBTParent<CompoundTag>, NBTElement {
     /// Sets the root tag of this chunk.
     @Contract(value = "_ -> this", mutates = "this,param1")
     public Chunk setRootTag(@Nullable CompoundTag rootTag) {
+        validateCurrentRoot();
         if (rootTag == this.rootTag) {
             return this;
         }
 
-        if (this.rootTag != null) {
-            removeElement(this.rootTag);
+        @Nullable NBTParent<? extends Tag> oldParent = rootTag == null ? null : rootTag.getParent();
+        if (rootTag != null) {
+            validateCandidateRoot(rootTag, oldParent);
         }
 
+        if (oldParent != null) {
+            // The candidate is already owned elsewhere, so detach it only after every ownership
+            // check has completed. A validated parent/index pair makes this call non-failing.
+            @SuppressWarnings("unchecked")
+            NBTParent<Tag> typedParent = (NBTParent<Tag>) oldParent;
+            typedParent.removeElement(rootTag);
+        }
+        if (this.rootTag != null) {
+            Access.TAG.setParent(this.rootTag, null, -1);
+        }
         if (rootTag != null) {
-            if (rootTag.getParent() != null) {
-                assert rootTag.getParent() != this;
-
-                // The root tag is already a child of another tag, so we need to remove it from its parent first.
-                @SuppressWarnings("unchecked")
-                var oldParent = (NBTParent<Tag>) rootTag.getParent();
-                oldParent.removeElement(rootTag);
-            }
-
             Access.TAG.setParent(rootTag, this, 0);
         }
-
         this.rootTag = rootTag;
         return this;
+    }
+
+    /// Validates the current root metadata before any replacement can detach it.
+    private void validateCurrentRoot() {
+        if (rootTag != null && (rootTag.getParent() != this || rootTag.getIndex() != 0)) {
+            throw new IllegalStateException("The chunk root ownership invariant is inconsistent");
+        }
+    }
+
+    /// Validates a candidate root's existing parent and index without changing either tree.
+    ///
+    /// @param candidate candidate root
+    /// @param oldParent candidate's current parent
+    private void validateCandidateRoot(
+            CompoundTag candidate,
+            @Nullable NBTParent<? extends Tag> oldParent) {
+        if (oldParent == this) {
+            throw new IllegalArgumentException("The candidate is already owned by this chunk");
+        }
+        if (oldParent == null) {
+            if (candidate.getIndex() != -1) {
+                throw new IllegalArgumentException("The detached root has an invalid index");
+            }
+            return;
+        }
+        if (oldParent instanceof Chunk oldChunk) {
+            if (candidate.getIndex() != 0 || oldChunk.getRootTag() != candidate) {
+                throw new IllegalArgumentException("The candidate root has an invalid chunk index");
+            }
+            return;
+        }
+        if (oldParent instanceof space.minecraftstl.xyml.library.nbt.tag.ParentTag<?> parentTag) {
+            int index = candidate.getIndex();
+            if (index < 0 || index >= parentTag.size() || parentTag.getTag(index) != candidate) {
+                throw new IllegalArgumentException("The candidate root has an invalid parent index");
+            }
+            return;
+        }
+        throw new IllegalArgumentException("Unsupported candidate root parent: " + oldParent.getClass());
     }
 
     /// Return the timestamp of this chunk.
@@ -172,11 +215,14 @@ public final class Chunk implements NBTParent<CompoundTag>, NBTElement {
         return this;
     }
 
+    /// Removes this chunk's root tag and detaches it from the chunk.
+    ///
+    /// @throws IllegalArgumentException if the supplied tag is not this chunk's root tag
     @Override
     @Contract(mutates = "this,param1")
     public void removeElement(CompoundTag element) throws IllegalArgumentException {
-        if (element.getParent() != null) {
-            throw new IllegalArgumentException("The root tag is not a root element");
+        if (element.getParent() != this) {
+            throw new IllegalArgumentException("The tag is not the root tag of this chunk");
         }
 
         if (element != rootTag) {
@@ -186,7 +232,7 @@ public final class Chunk implements NBTParent<CompoundTag>, NBTElement {
             throw new AssertionError("Expected index 0, but got " + element.getIndex());
         }
 
-        Access.TAG.setParent(rootTag, null, -1);
+        Access.TAG.setParent(element, null, -1);
         rootTag = null;
     }
 

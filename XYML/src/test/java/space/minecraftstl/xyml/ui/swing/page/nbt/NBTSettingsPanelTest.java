@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-/// Verifies the embeddable settings entry and its owned editor lifecycle.
+/// Verifies the embeddable settings entry and its borrowed editor lifecycle.
 @NotNullByDefault
 final class NBTSettingsPanelTest {
     /// The detached page exposes one localized command but does not open a native chooser.
@@ -59,11 +59,12 @@ final class NBTSettingsPanelTest {
         Objects.requireNonNull(panelReference.get()).close();
     }
 
-    /// Closing the settings page releases its current modeless editor and disables the command.
+    /// Closing the settings page disables its command without closing the shared editor.
     @Test
-    void closesOwnedEditorLifecycle() {
+    void preservesSharedEditorLifecycle() {
         AtomicReference<@Nullable RecordingEditorWindow> windowReference = new AtomicReference<>();
         AtomicReference<@Nullable NBTSettingsPanel> panelReference = new AtomicReference<>();
+        AtomicReference<@Nullable SwingNBTEditorLauncher> launcherReference = new AtomicReference<>();
 
         EdtDispatcher.executeAndWait(() -> {
             SwingNBTEditorLauncher launcher = new SwingNBTEditorLauncher(
@@ -73,6 +74,7 @@ final class NBTSettingsPanelTest {
                         windowReference.set(window);
                         return window;
                     });
+            launcherReference.set(launcher);
             NBTSettingsPanel panel = new NBTSettingsPanel(NBTEditorStrings.english(), launcher);
             panelReference.set(panel);
             launcher.chooseAndOpen();
@@ -80,8 +82,10 @@ final class NBTSettingsPanelTest {
             assertFalse(panel.openButton().isEnabled());
         });
 
-        assertEquals(1, Objects.requireNonNull(windowReference.get()).closeCount());
+        assertEquals(0, Objects.requireNonNull(windowReference.get()).closeCount());
         Objects.requireNonNull(panelReference.get()).close();
+        Objects.requireNonNull(launcherReference.get()).close();
+        assertEquals(1, Objects.requireNonNull(windowReference.get()).closeCount());
     }
 
     /// Minimal editor-window fake used to observe settings-owned closure.

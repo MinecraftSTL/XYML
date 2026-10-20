@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.page.downloads.ExistingInstanceRemoteModpackUpdateLauncher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.RemoteModpackCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.RemoteModpackCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.BorderFactory;
@@ -54,13 +55,15 @@ final class SwingRemoteModpackUpdateDialog {
     /// @param taskProgressStrings localized task progress text
     /// @param animator optional shared motion-aware animator
     /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param taskLaunchController shared confirmed-task submission controller
     static void show(
             Component owner,
             XYMLGameRepository repository,
             GameInstanceID instanceId,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
-            Duration progressAnimationDuration) {
+            Duration progressAnimationDuration,
+            TaskLaunchController taskLaunchController) {
         EdtDispatcher.requireEventDispatchThread();
         Component resolvedOwner = Objects.requireNonNull(owner, "owner");
         XYMLGameRepository resolvedRepository = Objects.requireNonNull(repository, "repository");
@@ -72,7 +75,8 @@ final class SwingRemoteModpackUpdateDialog {
                 strings,
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"),
+                Objects.requireNonNull(taskLaunchController, "taskLaunchController"));
         @Nullable Window ancestor = SwingUtilities.getWindowAncestor(resolvedOwner);
         JDialog dialog = new JDialog(ancestor, strings.pageTitle(), Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -82,6 +86,7 @@ final class SwingRemoteModpackUpdateDialog {
         dialog.setMinimumSize(new Dimension(760, 520));
         dialog.setSize(new Dimension(1_040, 720));
         dialog.setLocationRelativeTo(resolvedOwner);
+        panel.setTaskLaunchDismissAction(() -> dialog.setVisible(false));
         try {
             dialog.setVisible(true);
         } finally {

@@ -50,6 +50,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param installingStatus active download state text
 /// @param installSucceededStatus terminal task success text
 /// @param installFailedStatus terminal task failure text
+/// @param categoryLoadFailedStatus category metadata failure text
 /// @param searchFailedStatus source query failure text
 /// @param versionLoadFailedStatus selected-project version failure text
 @NotNullByDefault
@@ -76,6 +77,7 @@ public record RemoteAddonCatalogStrings(
         String installingStatus,
         String installSucceededStatus,
         String installFailedStatus,
+        String categoryLoadFailedStatus,
         String searchFailedStatus,
         String versionLoadFailedStatus) {
     /// Rejects incomplete text bundles before a Swing panel can expose partial user-visible state.
@@ -102,6 +104,7 @@ public record RemoteAddonCatalogStrings(
         Objects.requireNonNull(installingStatus, "installingStatus");
         Objects.requireNonNull(installSucceededStatus, "installSucceededStatus");
         Objects.requireNonNull(installFailedStatus, "installFailedStatus");
+        Objects.requireNonNull(categoryLoadFailedStatus, "categoryLoadFailedStatus");
         Objects.requireNonNull(searchFailedStatus, "searchFailedStatus");
         Objects.requireNonNull(versionLoadFailedStatus, "versionLoadFailedStatus");
     }
@@ -143,8 +146,22 @@ public record RemoteAddonCatalogStrings(
                 world ? "Downloading the world archive..." : "Installing to the selected instance...",
                 world ? "World archive saved." : "Installation completed.",
                 world ? "World archive download failed." : "Installation failed.",
+                "Unable to load categories. Click to retry.",
                 "Unable to search remote projects.",
                 "Unable to load versions for this project.");
+    }
+
+    /// Selects the stable top-level task title for one remote acquisition request.
+    ///
+    /// @param item selected remote project
+    /// @param strings localized catalog text
+    /// @return mod download title, or the existing generic install title
+    static String installTaskTitle(RemoteAddonCatalogItem item, RemoteAddonCatalogStrings strings) {
+        Objects.requireNonNull(item, "item");
+        Objects.requireNonNull(strings, "strings");
+        return item.kind() == RemoteAddonCatalogKind.MOD
+                ? i18n("mods.download")
+                : strings.installingStatus();
     }
 
     /// Resolves production catalog text from existing launcher translations.
@@ -162,8 +179,8 @@ public record RemoteAddonCatalogStrings(
                     RemoteCatalogFilterStrings.launcherLocalized(),
                     i18n("archive.version"),
                     i18n("search"),
-                    i18n("wizard.prev"),
-                    i18n("wizard.next"),
+                    i18n("search.previous_page"),
+                    i18n("search.next_page"),
                     i18n("button.save_as"),
                     i18n("swing.remote_world.initial"),
                     i18n("swing.remote_world.loading"),
@@ -177,6 +194,7 @@ public record RemoteAddonCatalogStrings(
                     i18n("swing.remote_world.downloading"),
                     i18n("swing.remote_world.saved"),
                     i18n("swing.remote_world.failed"),
+                    i18n("swing.download.category_failed"),
                     i18n("swing.remote_world.search_failed"),
                     i18n("swing.remote_world.version_failed"));
         }
@@ -188,13 +206,13 @@ public record RemoteAddonCatalogStrings(
                 RemoteCatalogFilterStrings.launcherLocalized(),
                 i18n("archive.version"),
                 i18n("search"),
-                i18n("wizard.prev"),
-                i18n("wizard.next"),
+                i18n("search.previous_page"),
+                i18n("search.next_page"),
                 i18n("button.install"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.initial"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
@@ -203,7 +221,8 @@ public record RemoteAddonCatalogStrings(
                 i18n("message.doing"),
                 i18n("message.success"),
                 i18n("message.failed"),
-                i18n("download.failed.refresh"),
-                i18n("download.failed.refresh"));
+                i18n("swing.download.category_failed"),
+                i18n("swing.download.search_failed"),
+                i18n("swing.download.retry"));
     }
 }

@@ -51,6 +51,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param installingStatus active installation status
 /// @param installSucceededStatus terminal installation success status
 /// @param installFailedStatus terminal installation failure status
+/// @param categoryLoadFailedStatus category metadata failure status
 /// @param searchFailedStatus source-query failure status
 /// @param versionLoadFailedStatus version-request failure status
 @NotNullByDefault
@@ -78,6 +79,7 @@ public record RemoteModpackCatalogStrings(
         String installingStatus,
         String installSucceededStatus,
         String installFailedStatus,
+        String categoryLoadFailedStatus,
         String searchFailedStatus,
         String versionLoadFailedStatus) {
     /// Validates that every catalog surface has explicit text.
@@ -105,6 +107,7 @@ public record RemoteModpackCatalogStrings(
         Objects.requireNonNull(installingStatus, "installingStatus");
         Objects.requireNonNull(installSucceededStatus, "installSucceededStatus");
         Objects.requireNonNull(installFailedStatus, "installFailedStatus");
+        Objects.requireNonNull(categoryLoadFailedStatus, "categoryLoadFailedStatus");
         Objects.requireNonNull(searchFailedStatus, "searchFailedStatus");
         Objects.requireNonNull(versionLoadFailedStatus, "versionLoadFailedStatus");
     }
@@ -137,6 +140,7 @@ public record RemoteModpackCatalogStrings(
                 "Installing modpack...",
                 "Modpack installation completed.",
                 "Modpack installation failed.",
+                "Unable to load categories. Click to retry.",
                 "Unable to search remote modpacks.",
                 "Unable to load versions for this modpack.");
     }
@@ -164,7 +168,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.choose.repository"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("download.failed.empty"),
+                i18n("swing.download.no_versions"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
@@ -173,8 +177,9 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.installing"),
                 i18n("message.success"),
                 i18n("message.failed"),
-                i18n("download.failed.refresh"),
-                i18n("download.failed.refresh"));
+                i18n("swing.download.category_failed"),
+                i18n("swing.download.search_failed"),
+                i18n("swing.download.retry"));
     }
 
     /// Returns catalog text for updating one fixed existing instance from a repository version.
@@ -206,6 +211,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.update"),
                 base.installSucceededStatus(),
                 base.installFailedStatus(),
+                base.categoryLoadFailedStatus(),
                 base.searchFailedStatus(),
                 base.versionLoadFailedStatus());
     }
