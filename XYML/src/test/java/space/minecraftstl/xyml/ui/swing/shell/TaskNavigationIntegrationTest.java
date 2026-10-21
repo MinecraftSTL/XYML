@@ -46,6 +46,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,6 +107,33 @@ public final class TaskNavigationIntegrationTest {
                     .allMatch(snapshot -> snapshot.status() == TaskExecutionStatus.SUCCEEDED));
             assertEquals(1, fixture.taskPageCreations.get());
         }
+    }
+
+    /// Returning home preserves the cached task page and its manually selected history tab.
+    @Test
+    public void homepageNavigationRetainsManualTaskTabAndSessionRecords() {
+        EdtDispatcher.executeAndWait(() -> {
+            try (ShellFixture fixture = new ShellFixture()) {
+                fixture.panel.openRunningTasks();
+                TaskManagerPanel page = fixture.taskPage();
+                JTabbedPane tabs = fixture.tabs();
+                ShellNavigationRail rail = assertInstanceOf(
+                        ShellNavigationRail.class,
+                        fixture.panel.navigationButton(ShellPageId.TASKS).getParent().getParent());
+                for (int historyTab : new int[] {1, 2}) {
+                    tabs.setSelectedIndex(historyTab);
+                    rail.homeButton().doClick(0);
+                    rail.homeButton().doClick(0);
+                    assertNull(fixture.panel.selectedPage());
+                    assertTrue(rail.homeButton().isSelected());
+                    fixture.panel.navigationButton(ShellPageId.TASKS).doClick(0);
+                    assertSame(page, fixture.panel.activePage());
+                    assertEquals(historyTab, tabs.getSelectedIndex());
+                    assertEquals(1, fixture.taskPageCreations.get());
+                    assertTrue(fixture.registry.snapshots().isEmpty());
+                }
+            }
+        });
     }
 
     /// Background completion never steals a history tab and local launches do not navigate away.

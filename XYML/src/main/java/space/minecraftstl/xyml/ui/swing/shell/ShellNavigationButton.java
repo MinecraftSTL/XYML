@@ -190,7 +190,15 @@ final class ShellNavigationButton extends JToggleButton {
     /// @param page destination represented by the returned icon
     /// @return configured 20-pixel SVG icon
     private static FlatSVGIcon createNavigationIcon(ShellPageId page) {
-        FlatSVGIcon icon = new FlatSVGIcon(iconResource(page), 20, 20);
+        return createNavigationIcon(iconResource(page));
+    }
+
+    /// Creates a theme-aware navigation icon from a bundled SVG asset.
+    ///
+    /// @param resource classpath-relative SVG resource path
+    /// @return configured 20-pixel SVG icon
+    static FlatSVGIcon createNavigationIcon(String resource) {
+        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(resource, "resource"), 20, 20);
         icon.setColorFilter(new FlatSVGIcon.ColorFilter(ShellNavigationButton::resolveIconColor));
         return icon;
     }

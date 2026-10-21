@@ -220,7 +220,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (instancesPage instanceof InstancesPanel panel) {
             panel.setRevealDefaultPageCommand(this::revealDefaultPage);
         }
-        navigationRail = new ShellNavigationRail(pagePresentations, this::togglePage);
+        navigationRail = new ShellNavigationRail(pagePresentations, this::returnHome, this::togglePage);
         toolbar = new ShellToolbarPanel(
                 Objects.requireNonNull(windowTitle, "windowTitle"),
                 toolbarModels.home(),
@@ -556,6 +556,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         navigateTo(destination);
     }
 
+    /// Returns to the persistent homepage without repeating management restoration while already at home.
+    private void returnHome() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || navigationState.selectedPage() == null) {
+            return;
+        }
+        showDefaultPage();
+    }
+
     /// Reveals the persistent main page and clears every side-navigation selection.
     private void showDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
@@ -566,12 +575,11 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Exposes the cached persistent page without starting another management transition.
     private void revealDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable ShellPageId previousPage = navigationState.selectedPage();
         navigationState.clear();
         pageDeck.showPage(
                 instancesPage,
                 true,
-                transitionDirection(previousPage, ShellPageId.INSTANCES));
+                SwingContentTransition.Direction.VERTICAL_BACKWARD);
         updateSelection(null);
     }
 
@@ -745,8 +753,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     private static SwingContentTransition.Direction transitionDirection(
             @Nullable ShellPageId previous,
             ShellPageId destination) {
-        ShellPageId origin = previous != null ? previous : ShellPageId.INSTANCES;
-        return NAVIGATION_ORDER.indexOf(destination) > NAVIGATION_ORDER.indexOf(origin)
+        int originIndex = previous == null ? -1 : NAVIGATION_ORDER.indexOf(previous);
+        return NAVIGATION_ORDER.indexOf(destination) > originIndex
                 ? SwingContentTransition.Direction.VERTICAL_FORWARD
                 : SwingContentTransition.Direction.VERTICAL_BACKWARD;
     }
