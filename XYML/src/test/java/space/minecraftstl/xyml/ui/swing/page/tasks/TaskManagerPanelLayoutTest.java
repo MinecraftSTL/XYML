@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.tasks;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -35,6 +36,10 @@ import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JTabbedPane;
+import javax.swing.LookAndFeel;
+import javax.swing.UIManager;
+import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -60,6 +65,7 @@ import java.util.OptionalDouble;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -566,6 +572,179 @@ public final class TaskManagerPanelLayoutTest {
         }
     }
 
+    /// Keeps subpixel log input inside the log through real component dispatch under FlatLaf.
+    @Test
+    public void keepsFractionalLogInputOutOfOuterList() {
+        withWheelFixture(panel -> {
+            JScrollPane list = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JScrollPane log = named(panel, "taskLogScroll", JScrollPane.class).stream()
+                    .reduce((first, second) -> second).orElseThrow();
+            JTextArea area = (JTextArea) log.getViewport().getView();
+            JScrollBar logBar = log.getVerticalScrollBar();
+            JScrollBar listBar = list.getVerticalScrollBar();
+            assertTrue(logBar.getMaximum() - logBar.getVisibleAmount() > 12);
+            logBar.setUnitIncrement(1);
+            logBar.setValue(10);
+            listBar.setUnitIncrement(1);
+            listBar.setValue(10);
+            for (int index = 1; index <= 3; index++) {
+                MouseWheelEvent event = preciseWheel(area, false, 0.125D);
+                area.dispatchEvent(event);
+                assertTrue(event.isConsumed());
+                assertEquals(10 + (index == 3 ? 1 : 0), logBar.getValue());
+                assertEquals(10, listBar.getValue());
+            }
+            MouseWheelEvent zero = preciseWheel(area, false, 0.0D);
+            area.dispatchEvent(zero);
+            assertFalse(zero.isConsumed());
+            assertEquals(11, logBar.getValue());
+            assertEquals(10, listBar.getValue());
+        });
+    }
+
+    /// Consumes the event reaching a log edge and forwards only subsequent outward events to the list.
+    @Test
+    public void handsOffLogInputOnlyAfterReachingBoundary() {
+        withWheelFixture(panel -> {
+            JScrollPane list = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JScrollPane log = named(panel, "taskLogScroll", JScrollPane.class).stream()
+                    .reduce((first, second) -> second).orElseThrow();
+            JTextArea area = (JTextArea) log.getViewport().getView();
+            JScrollBar logBar = log.getVerticalScrollBar();
+            JScrollBar listBar = list.getVerticalScrollBar();
+            logBar.setUnitIncrement(1);
+            listBar.setUnitIncrement(1);
+            for (int direction : new int[]{-1, 1}) {
+                int edge = direction > 0 ? logBar.getMaximum() - logBar.getVisibleAmount() : logBar.getMinimum();
+                logBar.setValue(edge - direction);
+                listBar.setValue(10);
+                MouseWheelEvent reachesEdge = preciseWheel(area, false, direction * 0.5D);
+                area.dispatchEvent(reachesEdge);
+                assertTrue(reachesEdge.isConsumed());
+                assertEquals(edge, logBar.getValue());
+                assertEquals(10, listBar.getValue());
+                MouseWheelEvent outward = preciseWheel(area, false, direction);
+                area.dispatchEvent(outward);
+                assertTrue(outward.isConsumed());
+                assertEquals(edge, logBar.getValue());
+                assertEquals(10 + direction * 3, listBar.getValue());
+                MouseWheelEvent reverse = preciseWheel(area, false, direction * -0.5D);
+                area.dispatchEvent(reverse);
+                assertTrue(reverse.isConsumed());
+                assertEquals(edge - direction, logBar.getValue());
+                assertEquals(10 + direction * 3, listBar.getValue());
+            }
+        });
+    }
+
+    /// Preserves horizontal subpixels and the nearest viewport's ownership at its horizontal boundary.
+    @Test
+    public void keepsFractionalHorizontalInputOnNearestViewport() {
+        withWheelFixture(panel -> {
+            JScrollPane list = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JScrollPane details = named(panel, "taskExecutionDetailsScroll", JScrollPane.class).get(0);
+            JScrollPane log = named(panel, "taskLogScroll", JScrollPane.class).stream()
+                    .reduce((first, second) -> second).orElseThrow();
+            JTextArea area = (JTextArea) log.getViewport().getView();
+            JScrollBar horizontal = log.getHorizontalScrollBar();
+            assertTrue(horizontal.getMaximum() - horizontal.getVisibleAmount() > 12);
+            horizontal.setUnitIncrement(1);
+            horizontal.setValue(10);
+            int listPosition = list.getVerticalScrollBar().getValue();
+            int detailsPosition = details.getHorizontalScrollBar().getValue();
+            for (int index = 1; index <= 3; index++) {
+                MouseWheelEvent event = preciseWheel(area, true, 0.125D);
+                area.dispatchEvent(event);
+                assertTrue(event.isConsumed());
+                assertEquals(10 + (index == 3 ? 1 : 0), horizontal.getValue());
+                assertEquals(listPosition, list.getVerticalScrollBar().getValue());
+                assertEquals(detailsPosition, details.getHorizontalScrollBar().getValue());
+            }
+            MouseWheelEvent zero = preciseWheel(area, true, 0.0D);
+            area.dispatchEvent(zero);
+            assertFalse(zero.isConsumed());
+            assertEquals(11, horizontal.getValue());
+            horizontal.setValue(horizontal.getMaximum() - horizontal.getVisibleAmount());
+            MouseWheelEvent boundary = preciseWheel(area, true, 1.0D);
+            area.dispatchEvent(boundary);
+            assertTrue(boundary.isConsumed());
+            assertEquals(detailsPosition, details.getHorizontalScrollBar().getValue());
+            assertEquals(listPosition, list.getVerticalScrollBar().getValue());
+        });
+    }
+
+    /// Checks integer distances through both descendant and scroll-pane dispatch with FlatLaf installed.
+    @Test
+    public void preservesIntegerDistanceUnderFlatLafDispatch() {
+        withWheelFixture(panel -> {
+            JScrollPane list = named(panel, "taskManagerRunningScroll", JScrollPane.class).get(0);
+            JScrollPane log = named(panel, "taskLogScroll", JScrollPane.class).stream()
+                    .reduce((first, second) -> second).orElseThrow();
+            JTextArea area = (JTextArea) log.getViewport().getView();
+            JScrollBar bar = log.getVerticalScrollBar();
+            bar.setUnitIncrement(4);
+            int middle = (bar.getMaximum() - bar.getVisibleAmount()) / 2;
+            assertTrue(middle > 24);
+            int listPosition = list.getVerticalScrollBar().getValue();
+            for (Component source : new Component[]{area, log}) {
+                for (int rotation : new int[]{-2, -1, 1, 2}) {
+                    bar.setValue(middle);
+                    MouseWheelEvent event = preciseWheel(source, false, rotation);
+                    source.dispatchEvent(event);
+                    assertTrue(event.isConsumed());
+                    assertEquals(middle + rotation * 12, bar.getValue());
+                    assertEquals(listPosition, list.getVerticalScrollBar().getValue());
+                }
+            }
+        });
+    }
+
+    /// Routes fractional details input through each lifecycle tab without requiring an overflowing log.
+    @Test
+    public void forwardsFractionalInputInEveryLifecycleList() {
+        withFlatLaf(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            try {
+                @Unmodifiable List<TaskExecutionStatus> states = List.of(
+                        TaskExecutionStatus.RUNNING, TaskExecutionStatus.SUCCEEDED, TaskExecutionStatus.CANCELLED);
+                @Unmodifiable List<String> scrollNames = List.of(
+                        "taskManagerRunningScroll", "taskManagerCompletedScroll", "taskManagerAbortedScroll");
+                List<TaskExecutionSnapshot> snapshots = new ArrayList<>();
+                Instant timestamp = Instant.parse("2026-10-25T00:00:00Z");
+                for (TaskExecutionStatus state : states) {
+                    for (int index = 0; index < 30; index++) {
+                        snapshots.add(executionSnapshot(UUID.randomUUID(), state, OptionalDouble.of(0.5D),
+                                timestamp, state.isTerminal() ? timestamp.plusSeconds(1) : null));
+                    }
+                }
+                publish(panel, List.copyOf(snapshots));
+                panel.setSize(new Dimension(640, 320));
+                JTabbedPane tabs = named(panel, "", JTabbedPane.class).get(0);
+                for (int index = 0; index < states.size(); index++) {
+                    tabs.setSelectedIndex(index);
+                    layoutTree(panel);
+                    expand(panel, snapshots.get(index * 30).id());
+                    layoutTree(panel);
+                    JScrollPane list = named(panel, scrollNames.get(index), JScrollPane.class).get(0);
+                    JScrollPane details = named(list, "taskExecutionDetailsScroll", JScrollPane.class).get(0);
+                    Component content = details.getViewport().getView();
+                    JScrollBar bar = list.getVerticalScrollBar();
+                    assertTrue(bar.getMaximum() - bar.getVisibleAmount() > 12);
+                    bar.setUnitIncrement(1);
+                    bar.setValue(10);
+                    for (int count = 1; count <= 3; count++) {
+                        MouseWheelEvent event = preciseWheel(content, false, 0.125D);
+                        content.dispatchEvent(event);
+                        assertTrue(event.isConsumed());
+                        assertEquals(10 + (count == 3 ? 1 : 0), bar.getValue());
+                    }
+                }
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
     /// Exposes terminal-row actions without turning them into additional top-level records.
     @Test
     public void terminalRowsExposeDeleteAndAbortedRetryActions() {
@@ -665,6 +844,64 @@ public final class TaskManagerPanelLayoutTest {
         } finally {
             EdtDispatcher.executeAndWait(panel::close);
         }
+    }
+
+    /// Runs a deep expanded workflow fixture on the EDT under FlatLaf and releases its subscription afterward.
+    ///
+    /// @param assertions assertions receiving the laid-out page
+    private static void withWheelFixture(Consumer<TaskManagerPanel> assertions) {
+        withFlatLaf(() -> {
+            TaskManagerPanel panel = new TaskManagerPanel(new TaskExecutionRegistry());
+            try {
+                TaskExecutionSnapshot target = deepSnapshot();
+                publish(panel, surroundingSnapshots(target));
+                panel.setSize(new Dimension(640, 320));
+                layoutTree(panel);
+                expand(panel, target.id());
+                layoutTree(panel);
+                assertions.accept(panel);
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Installs FlatLaf for an EDT-confined assertion and restores the previous global look and feel afterward.
+    ///
+    /// @param assertions assertions to run while FlatLaf is installed
+    private static void withFlatLaf(Runnable assertions) {
+        EdtDispatcher.executeAndWait(() -> {
+            @Nullable LookAndFeel previous = UIManager.getLookAndFeel();
+            setTestLookAndFeel(new FlatLightLaf());
+            try {
+                assertions.run();
+            } finally {
+                setTestLookAndFeel(previous);
+            }
+        });
+    }
+
+    /// Changes the test look and feel while retaining failures as explicit test errors.
+    ///
+    /// @param lookAndFeel look and feel to install, or null to clear the current one
+    private static void setTestLookAndFeel(@Nullable LookAndFeel lookAndFeel) {
+        try {
+            UIManager.setLookAndFeel(lookAndFeel);
+        } catch (UnsupportedLookAndFeelException exception) {
+            throw new IllegalStateException("Cannot install test look and feel", exception);
+        }
+    }
+
+    /// Creates a wheel event retaining a fractional rotation and the ordinary three-unit multiplier.
+    ///
+    /// @param component event source
+    /// @param horizontal whether Shift should request horizontal scrolling
+    /// @param rotation signed precise wheel rotation
+    /// @return synthetic precise wheel event for component dispatch
+    private static MouseWheelEvent preciseWheel(Component component, boolean horizontal, double rotation) {
+        return new MouseWheelEvent(component, MouseEvent.MOUSE_WHEEL, 0L,
+                horizontal ? MouseEvent.SHIFT_DOWN_MASK : 0,
+                4, 4, 4, 4, 0, false, MouseWheelEvent.WHEEL_UNIT_SCROLL, 3, (int) rotation, rotation);
     }
 
     /// Creates one unit-scroll wheel event for a details component.
