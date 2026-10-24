@@ -836,7 +836,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
     ///
     /// @param event wheel event delivered by a details descendant
     private void forwardDetailsWheel(MouseWheelEvent event) {
-        if (event.isConsumed()) {
+        if (event.isConsumed() || event.getPreciseWheelRotation() == 0.0D) {
             return;
         }
         if (event.isShiftDown()) {
@@ -854,41 +854,24 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
             return;
         }
         JScrollBar scrollBar = listScroll.getVerticalScrollBar();
-        int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
-        int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
-        int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
-                ? scrollBar.getBlockIncrement(direction)
-                : scrollBar.getUnitIncrement(direction);
-        long delta = (long) direction * Math.max(1, increment) * units;
-        setScrollBarValue(scrollBar, delta);
+        TaskWheelScrollSupport.applyWheel(scrollBar, event);
         event.consume();
     }
 
     /// Forwards a vertical wheel to the nearest overflowing task-log viewport.
     ///
     /// Returning false at a scrollbar boundary lets the same event continue to the outer task list, so the user can
-    /// keep scrolling the page after reaching the beginning or end of a log.
+    /// keep scrolling the page after reaching the beginning or end of a log. While the log can still scroll,
+    /// fractional pixels stay with it and prevent the same input from also moving the outer list.
     ///
     /// @param event vertical wheel event
-    /// @return whether the log viewport moved
+    /// @return whether the log viewport accepted the event, including a retained subpixel delta
     private static boolean forwardLogVerticalWheel(MouseWheelEvent event) {
         @Nullable JScrollPane logScroll = findLogScrollPane(event.getComponent());
         if (logScroll == null || event.getPreciseWheelRotation() == 0.0D) {
             return false;
         }
-        JScrollBar scrollBar = logScroll.getVerticalScrollBar();
-        if (scrollBar.getMaximum() <= scrollBar.getVisibleAmount()) {
-            return false;
-        }
-        int previousValue = scrollBar.getValue();
-        int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
-        int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
-        int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
-                ? scrollBar.getBlockIncrement(direction)
-                : scrollBar.getUnitIncrement(direction);
-        long delta = (long) direction * Math.max(1, increment) * units;
-        setScrollBarValue(scrollBar, delta);
-        return scrollBar.getValue() != previousValue;
+        return TaskWheelScrollSupport.applyWheel(logScroll.getVerticalScrollBar(), event);
     }
 
     /// Forwards a horizontal (normally Shift-wheel) event to the nearest overflowing details viewport.
@@ -905,13 +888,7 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
                     && scrollPane.getHorizontalScrollBarPolicy() != JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
                 JScrollBar scrollBar = scrollPane.getHorizontalScrollBar();
                 if (scrollBar.getMaximum() > scrollBar.getVisibleAmount()) {
-                    int direction = event.getPreciseWheelRotation() > 0.0D ? 1 : -1;
-                    int units = Math.max(1, Math.abs(event.getUnitsToScroll()));
-                    int increment = event.getScrollType() == MouseWheelEvent.WHEEL_BLOCK_SCROLL
-                            ? scrollBar.getBlockIncrement(direction)
-                            : scrollBar.getUnitIncrement(direction);
-                    long delta = (long) direction * Math.max(1, increment) * units;
-                    setScrollBarValue(scrollBar, delta);
+                    TaskWheelScrollSupport.applyWheel(scrollBar, event);
                     return true;
                 }
             }
@@ -961,17 +938,6 @@ public final class TaskManagerPanel extends JPanel implements AutoCloseable {
         return "taskManagerRunningScroll".equals(name)
                 || "taskManagerCompletedScroll".equals(name)
                 || "taskManagerAbortedScroll".equals(name);
-    }
-
-    /// Applies one bounded wheel delta to a Swing scrollbar.
-    ///
-    /// @param scrollBar target scrollbar
-    /// @param delta signed pixel-like increment
-    private static void setScrollBarValue(JScrollBar scrollBar, long delta) {
-        int minimum = scrollBar.getMinimum();
-        int maximum = Math.max(minimum, scrollBar.getMaximum() - scrollBar.getVisibleAmount());
-        long target = (long) scrollBar.getValue() + delta;
-        scrollBar.setValue((int) Math.max(minimum, Math.min(maximum, target)));
     }
 
     /// Creates one actual-task detail row, indented according to its parent task.
