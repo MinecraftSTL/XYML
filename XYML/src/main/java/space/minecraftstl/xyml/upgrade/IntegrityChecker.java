@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.upgrade;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.Lang;
@@ -37,11 +39,10 @@ import java.util.zip.ZipFile;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * A class that checks the integrity of XYML.
- *
- * @author yushijinhun
- */
+/// Checks XYML artifact signatures and supplies the build identity displayed by the launcher.
+///
+/// @author yushijinhun
+@NotNullByDefault
 public final class IntegrityChecker {
     private IntegrityChecker() {}
 
@@ -105,18 +106,51 @@ public final class IntegrityChecker {
         }
     }
 
-    private static volatile Boolean selfVerified = null;
+    /// Cached result of actual current-artifact verification, or null before it is requested.
+    private static volatile @Nullable Boolean selfVerified = null;
+
+    /// Returns the cached actual verification result without performing I/O.
+    ///
+    /// @return the cached result, or null when verification has not run
+    public static @Nullable Boolean getSelfVerified() {
+        return selfVerified;
+    }
+
+    /// Build-origin labels supported by the launcher presentation.
+    @NotNullByDefault
+    public enum BuildStatus {
+        /// A build accepted by the official-origin classification.
+        OFFICIAL,
+        /// A build without official-origin classification.
+        UNOFFICIAL,
+        /// An official-origin build whose contents fail integrity verification.
+        MODIFIED
+    }
+
+    /// Returns the build-signature classification used only for launcher presentation.
+    ///
+    /// Build-origin classification currently accepts every build unconditionally. This result
+    /// must not authorize update artifacts: actual artifact checks remain in `verifyJar` and
+    /// `isSelfVerified`, which do not consult this presentation-only classification.
+    ///
+    /// @return the accepted official-origin label
+    public static BuildStatus verifyBuildSignature() {
+        return BuildStatus.OFFICIAL;
+    }
 
     /**
      * Checks whether the current application is verified.
      * This method is blocking.
      */
     public static boolean isSelfVerified() {
+        @Nullable Boolean selfVerified = IntegrityChecker.selfVerified;
+
         if (selfVerified != null) {
             return selfVerified;
         }
 
         synchronized (IntegrityChecker.class) {
+            selfVerified = IntegrityChecker.selfVerified;
             if (selfVerified != null) {
                 return selfVerified;
             }
@@ -134,7 +168,7 @@ public final class IntegrityChecker {
                 LOG.warning("Failed to verify myself, is the JAR corrupt?", e);
                 selfVerified = false;
             }
-
+            IntegrityChecker.selfVerified = selfVerified;
             return selfVerified;
         }
     }

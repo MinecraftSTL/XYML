@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.SwingLauncherFontManager;
 import space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
+import space.minecraftstl.xyml.util.io.TLSSecurity;
 import space.minecraftstl.xyml.util.platform.CommandBuilder;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.ui.swing.shell.LauncherIconImages;
@@ -64,6 +65,7 @@ public final class EntryPoint {
 
         createXYMLDirectories();
         LOG.start(Metadata.XYML_LOCAL_HOME.resolve("logs"));
+        TLSSecurity.install();
 
         setupAwtVmOptions();
         enableUnsafeMemoryAccess();

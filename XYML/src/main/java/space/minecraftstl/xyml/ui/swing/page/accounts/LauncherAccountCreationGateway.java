@@ -31,7 +31,7 @@ import space.minecraftstl.xyml.auth.yggdrasil.GameProfile;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.setting.Accounts;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
-import space.minecraftstl.xyml.util.i18n.LocaleUtils;
+import space.minecraftstl.xyml.util.RegionUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -80,6 +80,14 @@ public final class LauncherAccountCreationGateway implements AccountCreationGate
         AtomicReference<Boolean> result = new AtomicReference<>();
         LauncherStateDispatcher.executeAndWait(() -> result.set(isMicrosoftOnlyOnEventThread()));
         return Boolean.TRUE.equals(result.get());
+    }
+
+    /// Returns whether the configured Microsoft OAuth client ID is usable.
+    ///
+    /// @return true when the launcher contains a non-blank client ID
+    @Override
+    public boolean isMicrosoftLoginAvailable() {
+        return !Accounts.OAUTH_CALLBACK.getClientId().isBlank();
     }
 
     /// Persists the selected login type through the launcher event dispatcher.
@@ -221,6 +229,10 @@ public final class LauncherAccountCreationGateway implements AccountCreationGate
             AccountCreationRequest request,
             AccountRoleSelector roleSelector,
             Consumer<AccountCreationNotice> progress) throws Exception {
+        if (!isMicrosoftLoginAvailable()) {
+            throw new IllegalStateException(space.minecraftstl.xyml.util.i18n.I18n.i18n(
+                    "account.methods.microsoft.unavailable"));
+        }
         MicrosoftAccountLoginMode loginMode = Objects.requireNonNull(
                 request.microsoftLoginMode(),
                 "Microsoft login mode");
@@ -358,7 +370,7 @@ public final class LauncherAccountCreationGateway implements AccountCreationGate
         LauncherStateDispatcher.requireEventThread();
         String policy = System.getProperty("xyml.offline.auth.restricted", "auto");
         boolean unrestricted = "false".equals(policy)
-                || "auto".equals(policy) && LocaleUtils.IS_CHINA_MAINLAND
+                || "auto".equals(policy) && "CN".equals(RegionUtils.MACHINE_REGION)
                 || userSettings().enableOfflineAccountProperty().get();
         return !unrestricted;
     }

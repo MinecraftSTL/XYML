@@ -28,6 +28,14 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.DataSizeUnit;
+import space.minecraftstl.xyml.util.platform.Architecture;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.util.platform.SystemInfo;
+import space.minecraftstl.xyml.util.platform.hardware.CentralProcessor;
+import space.minecraftstl.xyml.util.platform.hardware.GraphicsCard;
 
 import javax.imageio.ImageIO;
 import javax.swing.Icon;
@@ -54,16 +62,34 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Renders the grouped About page inside the Swing settings center.
 ///
 /// The acknowledgement and dependency sections are read from the launcher-owned JSON resources so credits, order,
 /// images, links, and localized text stay aligned with packaged acknowledgement assets.
 @NotNullByDefault
-final class AboutPanel extends JPanel {
+final class AboutPanel extends JPanel implements AutoCloseable {
+    /// Environment-only component host updated on the Swing EDT.
+    private final JPanel environmentPanel = new JPanel(new MigLayout("insets 0, fillx, wrap 1", "[grow,fill]", "[]2[]"));
+
+    /// Page-owned completion whose result is ignored after close.
+    private final CompletableFuture<@Unmodifiable List<AboutEntry>> environmentLoad;
+
+    /// Thread-safe closure gate shared by the worker completion and the settings owner.
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    /// Immutable environment rows last published on the EDT.
+    private @Unmodifiable List<AboutEntry> environmentRows = List.of();
+
     /// Classpath resource containing ordered acknowledgements.
     static final String THANKS_RESOURCE = "/assets/about/thanks.json";
 
@@ -89,12 +115,37 @@ final class AboutPanel extends JPanel {
     ///
     /// @param linkCommand command used to open trusted external links
     AboutPanel(Consumer<URI> linkCommand) {
-        super(new MigLayout("insets 20, fillx, wrap 1", "[grow,fill]", "[]12[]18[]12[]18[]12[]18[]12[]"));
+        this(linkCommand, Schedulers.io(), AboutPanel::readEnvironment);
+    }
+
+    /// Creates one About page with explicitly owned asynchronous environment work.
+    ///
+    /// @param linkCommand trusted external link action
+    /// @param executor caller-owned background executor that the page must not shut down
+    /// @param environmentSource background row supplier whose returned list is defensively copied
+    AboutPanel(
+            Consumer<URI> linkCommand,
+            Executor executor,
+            Supplier<List<AboutEntry>> environmentSource) {
+        super(new MigLayout("insets 20, fillx, wrap 1", "[grow,fill]", "[]12[]18[]12[]18[]12[]18[]12[]18[]12[]"));
         this.linkCommand = Objects.requireNonNull(linkCommand, "linkCommand");
+        Objects.requireNonNull(executor, "executor");
+        Objects.requireNonNull(environmentSource, "environmentSource");
         acknowledgements = loadListResource(THANKS_RESOURCE);
         dependencies = loadListResource(DEPENDENCIES_RESOURCE);
         setOpaque(false);
+        environmentPanel.setOpaque(false);
+        environmentPanel.add(new JLabel(i18n("about.environment.loading")), "growx");
         configureComponents();
+        CompletableFuture<@Unmodifiable List<AboutEntry>> load;
+        try {
+            load = CompletableFuture.supplyAsync(() -> List.copyOf(environmentSource.get()), executor);
+        } catch (RuntimeException failure) {
+            load = CompletableFuture.failedFuture(failure);
+        }
+        environmentLoad = load;
+        load.whenComplete((@Nullable @Unmodifiable List<AboutEntry> rows, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> showEnvironment(rows, failure)));
     }
 
     /// Returns the ordered acknowledgement data for focused tests.
@@ -149,9 +200,80 @@ final class AboutPanel extends JPanel {
     /// Builds every acknowledgement group in resource order.
     private void configureComponents() {
         addSection(i18n("about"), productEntries());
+        add(createHeading(i18n("about.environment")), "growx");
+        add(environmentPanel, "growx");
         addSection(i18n("about.thanks_to"), acknowledgements);
         addSection(i18n("about.dependency"), dependencies);
         addSection(i18n("about.legal"), legalEntries());
+    }
+
+    /// Returns the immutable environment snapshot without exposing the mutable component host.
+    ///
+    /// @return environment rows published for this page
+    @Unmodifiable List<AboutEntry> environmentSnapshot() {
+        EdtDispatcher.requireEventDispatchThread();
+        return environmentRows;
+    }
+
+    /// Publishes one environment result only while the owning page is open.
+    ///
+    /// @param rows immutable successful result, or null on failure
+    /// @param failure background or scheduling failure, or null on success
+    private void showEnvironment(@Nullable @Unmodifiable List<AboutEntry> rows, @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get())
+            return;
+        environmentPanel.removeAll();
+        if (failure != null || rows == null) {
+            if (failure != null)
+                LOG.warning("Failed to read launcher environment information", failure);
+            environmentPanel.add(new JLabel(i18n("about.environment.failed")), "growx");
+        } else {
+            environmentRows = rows;
+            for (AboutEntry entry : rows)
+                environmentPanel.add(createEntryRow(entry), "growx");
+        }
+        environmentPanel.revalidate();
+        environmentPanel.repaint();
+    }
+
+    /// Collects local system and runtime information without creating a JavaFX context or network request.
+    ///
+    /// @return immutable rows, omitting unavailable hardware instead of fabricating values
+    private static @Unmodifiable List<AboutEntry> readEnvironment() {
+        List<AboutEntry> rows = new ArrayList<>();
+        String system = OperatingSystem.OS_RELEASE_PRETTY_NAME == null
+                ? "%s %s (%s)".formatted(OperatingSystem.SYSTEM_NAME,
+                        OperatingSystem.SYSTEM_VERSION.getVersion(), Architecture.SYSTEM_ARCH.getDisplayName())
+                : "%s (%s %s, %s)".formatted(OperatingSystem.OS_RELEASE_PRETTY_NAME, OperatingSystem.SYSTEM_NAME,
+                        OperatingSystem.SYSTEM_VERSION.getVersion(), Architecture.SYSTEM_ARCH.getDisplayName());
+        rows.add(new AboutEntry(null, null, i18n("about.environment.system"), system, null));
+        long memory = SystemInfo.getTotalMemorySize();
+        if (memory > 0) {
+            rows.add(new AboutEntry(null, null, i18n("about.environment.memory"),
+                    String.format(Locale.ROOT, "%.1f GiB", DataSizeUnit.GIGABYTES.convertFromBytes(memory)), null));
+        }
+        @Nullable CentralProcessor cpu = SystemInfo.getCentralProcessor();
+        if (cpu != null)
+            rows.add(new AboutEntry(null, null, i18n("about.environment.cpu"), cpu.toString(), null));
+        @Nullable List<GraphicsCard> cards = SystemInfo.getGraphicsCards();
+        if (cards != null) {
+            for (int index = 0; index < cards.size(); index++) {
+                String title = cards.size() == 1 ? i18n("about.environment.gpu")
+                        : i18n("about.environment.gpu.n", index + 1);
+                rows.add(new AboutEntry(null, null, title, cards.get(index).getName(), null));
+            }
+        }
+        rows.add(new AboutEntry(null, null, "Java", "%s, %s by %s".formatted(
+                Runtime.version(), System.getProperty("java.vm.name"), System.getProperty("java.vendor")), null));
+        return List.copyOf(rows);
+    }
+
+    /// Cancels pending page-owned completion without shutting down its caller-owned executor.
+    @Override
+    public void close() {
+        if (closed.compareAndSet(false, true))
+            environmentLoad.cancel(false);
     }
 
     /// Creates the product and author identity rows at the start of the About page.

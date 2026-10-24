@@ -91,17 +91,17 @@ public final class AboutPanelTest {
                 () -> assertTrue(allConfiguredImagesExist(dependencies)));
     }
 
-    /// The concrete panel exposes all four acknowledgement sections while delegating external opening to settings.
+    /// The concrete panel exposes environment and all four acknowledgement sections while delegating external opening to settings.
     @Test
     public void createsCompleteGroupedPanel() {
         AtomicReference<@Nullable URI> opened = new AtomicReference<>();
         AtomicReference<@Nullable AboutPanel> panelRef = new AtomicReference<>();
 
-        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(opened::set)));
+        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(opened::set, Runnable::run, List::of)));
 
         AboutPanel panel = Objects.requireNonNull(panelRef.get());
         assertAll(
-                () -> assertEquals(8, panel.getComponentCount()),
+                () -> assertEquals(10, panel.getComponentCount()),
                 () -> assertEquals(14, panel.acknowledgements().size()),
                 () -> assertEquals(13, panel.dependencies().size()),
                 () -> assertFalse(panel.isOpaque()),
@@ -112,7 +112,7 @@ public final class AboutPanelTest {
     @Test
     public void rendersLegacyGroupedAboutPage() {
         AtomicReference<@Nullable AboutPanel> panelRef = new AtomicReference<>();
-        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(uri -> { })));
+        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(uri -> { }, Runnable::run, List::of)));
 
         AboutPanel panel = Objects.requireNonNull(panelRef.get());
         JPanel stage = new JPanel(new BorderLayout());

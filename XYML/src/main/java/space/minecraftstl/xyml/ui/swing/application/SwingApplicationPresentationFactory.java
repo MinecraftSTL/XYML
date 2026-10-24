@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.upgrade.IntegrityChecker;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameInstallStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStatusStrings;
@@ -73,7 +74,24 @@ public final class SwingApplicationPresentationFactory {
     public static SwingApplicationPresentation create(
             Duration pageTransitionDuration,
             Duration taskProgressAnimationDuration) {
-        return create(Metadata.TITLE, pageTransitionDuration, taskProgressAnimationDuration);
+        return create(
+                windowTitleFor(IntegrityChecker.verifyBuildSignature()),
+                pageTransitionDuration,
+                taskProgressAnimationDuration);
+    }
+
+    /// Formats the launcher title for one already-computed build-signature classification.
+    ///
+    /// @param status build classification, without performing signature I/O on the EDT
+    /// @return localized XYML title for that classification
+    static String windowTitleFor(IntegrityChecker.BuildStatus status) {
+        Objects.requireNonNull(status, "status");
+        String key = switch (status) {
+            case OFFICIAL -> "launcher.title";
+            case UNOFFICIAL -> "launcher.title.unofficial";
+            case MODIFIED -> "launcher.title.modified";
+        };
+        return i18n(key, Metadata.VERSION);
     }
 
     /// Creates production presentation using an explicit window title.

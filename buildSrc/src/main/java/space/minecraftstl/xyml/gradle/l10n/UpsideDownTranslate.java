@@ -23,6 +23,9 @@ import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils;
 
 import java.io.IOException;
@@ -34,7 +37,10 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/// Generates upside-down English resources while retaining non-translatable launcher captions.
+///
 /// @author Glavo
+@NotNullByDefault
 public abstract class UpsideDownTranslate extends DefaultTask {
 
     static final Locale EN_QABS = Locale.forLanguageTag("en-Qabs");
@@ -43,12 +49,22 @@ public abstract class UpsideDownTranslate extends DefaultTask {
             "datetime.format", "MMM d, yyyy, h:mm:ss a"
     );
 
+    /// Product captions that must retain their original glyphs in the generated locale.
+    private static final @Unmodifiable Set<String> NOT_TRANSLATABLE_KEYS = Set.of(
+            "launcher.title",
+            "launcher.title.unofficial",
+            "launcher.title.modified"
+    );
+
     @InputFile
     public abstract RegularFileProperty getInputFile();
 
     @OutputFile
     public abstract RegularFileProperty getOutputFile();
 
+    /// Writes the generated English locale from the configured source while retaining title identity.
+    ///
+    /// @throws IOException if the source cannot be read or the generated resource cannot be written
     @TaskAction
     public void run() throws IOException {
         Path inputFile = getInputFile().get().getAsFile().toPath();
@@ -61,6 +77,8 @@ public abstract class UpsideDownTranslate extends DefaultTask {
         english.forEach((k, v) -> {
             if (PROPERTIES.containsKey(k.toString())) {
                 output.setProperty(k.toString(), PROPERTIES.get(k.toString()));
+            } else if (NOT_TRANSLATABLE_KEYS.contains(k.toString())) {
+                output.put(k, v.toString());
             } else {
                 output.put(k, translator.translate(v.toString()));
             }
@@ -78,7 +96,7 @@ public abstract class UpsideDownTranslate extends DefaultTask {
         private static Map<Integer, Integer> loadMap() {
             var map = new LinkedHashMap<Integer, Integer>();
 
-            InputStream inputStream = UpsideDownTranslate.class.getResourceAsStream("upside_down.txt");
+            @Nullable InputStream inputStream = UpsideDownTranslate.class.getResourceAsStream("upside_down.txt");
             if (inputStream != null) {
                 try (inputStream) {
                     new String(inputStream.readAllBytes(), StandardCharsets.UTF_8).lines().forEach(line -> {

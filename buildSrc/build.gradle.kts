@@ -39,6 +39,7 @@ tasks.withType<JavaCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // ProjectBuilder injects compatibility classes through java.lang on modular JDKs.
     jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
 }
 

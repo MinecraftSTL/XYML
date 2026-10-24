@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.upgrade.IntegrityChecker;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentation;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -86,6 +87,25 @@ public final class SwingApplicationPresentationFactoryTest {
                         presentation.schematics().actions().operationFailedTitle()),
                 () -> assertEquals("Task progress", presentation.taskProgress().progressAccessibleName()),
                 () -> assertPresentationTextResolved(texts));
+    }
+
+    /// Build classifications produce distinct localized titles without doing signature I/O in the UI.
+    @Test
+    public void formatsAllBuildStatusTitles() {
+        I18n.setLocale(SupportedLocale.getLocale(Locale.ENGLISH));
+        assertAll(
+                () -> assertEquals(Metadata.TITLE, SwingApplicationPresentationFactory.windowTitleFor(
+                        IntegrityChecker.BuildStatus.OFFICIAL)),
+                () -> assertEquals(Metadata.TITLE + " (Unofficial Build)",
+                        SwingApplicationPresentationFactory.windowTitleFor(IntegrityChecker.BuildStatus.UNOFFICIAL)),
+                () -> assertEquals(Metadata.TITLE + " (Modified)",
+                        SwingApplicationPresentationFactory.windowTitleFor(IntegrityChecker.BuildStatus.MODIFIED)));
+        I18n.setLocale(SupportedLocale.getLocale(Locale.SIMPLIFIED_CHINESE));
+        assertEquals(Metadata.TITLE + " · 非官方构建",
+                SwingApplicationPresentationFactory.windowTitleFor(IntegrityChecker.BuildStatus.UNOFFICIAL));
+        I18n.setLocale(SupportedLocale.getLocale(Locale.TRADITIONAL_CHINESE));
+        assertEquals(Metadata.TITLE + " · 非官方建置",
+                SwingApplicationPresentationFactory.windowTitleFor(IntegrityChecker.BuildStatus.UNOFFICIAL));
     }
 
     /// Simplified Chinese resources localize every shell page while retaining stable mnemonic keys.

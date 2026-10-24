@@ -40,6 +40,14 @@ public interface AccountCreationGateway {
     /// @return true when no method switcher may be shown
     boolean isMicrosoftOnly();
 
+    /// Returns whether Microsoft authentication is configured and can start without configuration errors.
+    /// Implementations must answer without network I/O; unrestricted custom gateways are available by default.
+    ///
+    /// @return true when Microsoft authentication may be started
+    default boolean isMicrosoftLoginAvailable() {
+        return true;
+    }
+
     /// Persists a user-selected method for the next unrestricted workflow.
     ///
     /// @param method selected authentication method
