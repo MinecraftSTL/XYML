@@ -25,8 +25,8 @@ import java.util.Objects;
 
 /// Lightweight metadata for one local world backup ZIP archive.
 ///
-/// Archive contents are deliberately not opened during indexing. Validation and decompression only
-/// happen for an explicit restore request, preserving responsive initial page activation.
+/// Archive contents are not opened during indexing. Optional thumbnails are decoded separately on workers;
+/// full world validation and extraction remain explicit restore work.
 ///
 /// @param archive normalized ZIP archive location
 /// @param fileName visible archive filename
