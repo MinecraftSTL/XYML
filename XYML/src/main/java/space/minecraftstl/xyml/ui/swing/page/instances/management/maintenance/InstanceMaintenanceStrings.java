@@ -128,7 +128,7 @@ public record InstanceMaintenanceStrings(
                 i18n("message.success"),
                 i18n("message.cancelled"),
                 i18n("message.failed"),
-                i18n("modpack.unsupported"),
+                i18n("instance.update.not_modpack"),
                 i18n("settings.launcher.common_path.tooltip"),
                 i18n("button.remove.confirm"),
                 i18n("message.doing"),
