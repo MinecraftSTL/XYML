@@ -312,7 +312,7 @@ public enum MacroProcessor {
     /// @param document document providing the directory and locale context
     static void processLine(StringBuilder outputBuilder, String line, Document document) {
         outputBuilder.append(LINK_PATTERN.matcher(line).replaceAll(matchResult -> Matcher.quoteReplacement(
-                localizeLink(matchResult.group("path"), matchResult.group("suffix"), document)))).append('\n');
+                localizeLink(matchResult.group(1), matchResult.group(2), document)))).append('\n');
     }
 
     /// Selects a translated document only when the target has no fragment delimiter.

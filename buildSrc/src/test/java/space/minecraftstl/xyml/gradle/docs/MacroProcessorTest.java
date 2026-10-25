@@ -112,12 +112,14 @@ final class MacroProcessorTest {
 
     /// Handles each link independently without skipping an entire line that contains a fragment.
     ///
+    /// @param querySuffix query suffix preserved on the final link
     /// @throws IOException when the fixture document tree cannot be loaded
-    @Test
-    void processesMixedLinksIndependently() throws IOException {
-        assertEquals("[license](README_en.md#license) [guide](Guide_ja.md) [query](Guide_ja.md?q=1)\n",
+    @ParameterizedTest
+    @ValueSource(strings = {"", "?", "?q=1", "?q=$1\\literal", "?q=%23license"})
+    void processesMixedLinksIndependently(String querySuffix) throws IOException {
+        assertEquals("[license](README_en.md#license) [guide](Guide_ja.md) [query](Guide_ja.md" + querySuffix + ")\n",
                 process("README_ja.md",
-                        "[license](README_en.md#license) [guide](Guide_en.md) [query](Guide_en.md?q=1)"));
+                        "[license](README_en.md#license) [guide](Guide_en.md) [query](Guide_en.md" + querySuffix + ")"));
     }
 
     /// Resolves relative directory components without changing fragment targets.
