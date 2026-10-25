@@ -21,7 +21,6 @@ import org.glavo.url.WebURL;
 import space.minecraftstl.xyml.download.DownloadCandidate;
 import space.minecraftstl.xyml.download.DownloadCandidates;
 import space.minecraftstl.xyml.event.Event;
-import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.*;
@@ -635,7 +634,8 @@ public abstract class FetchTask<T extends @UnknownNullability Object> extends Ta
 
     private static final Timer timer = new Timer("DownloadSpeedRecorder", true);
     private static final AtomicLong downloadSpeed = new AtomicLong(0L);
-    public static final EventManager<SpeedEvent> SPEED_EVENT = EventBus.EVENT_BUS.channel(SpeedEvent.class);
+    /// Publishes aggregate download speed independently of the global event bus.
+    public static final EventManager<SpeedEvent> SPEED_EVENT = new EventManager<>();
 
     static {
         timer.schedule(new TimerTask() {

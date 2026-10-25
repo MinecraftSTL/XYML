@@ -998,7 +998,7 @@ c2mse2;1016;;Create 2 Mekanism: Sky Edition 2;;C2MSE2
 kumo-o-tagayasu;1017;;耕云钓月;Kumo O Tagayasu;KOTS
 ;1018;;无限战争4;Infinity War4;INF4
 ;1019;;群峦传说：工业长路;;
-;1020;;自然冒险     新生;Nature Adventure Newborn;NAB
+;1020;;自然冒险 新生;Nature Adventure Newborn;NAB
 asig;1021;;浅忆基础整合;Asai Integrated Modpack;
 create-star-valley;1022;;Create: Gears of History;;
 ;1023;;阿尔法计划;AlphaPlan;AP

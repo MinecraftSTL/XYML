@@ -16,6 +16,7 @@ dependencies {
     compileOnly(libs.jetbrains.annotations)
 
     implementation(libs.gson)
+    implementation(libs.icu4j)
     implementation(libs.kala.compress.tar)
     implementation(libs.kala.compress.ar)
     implementation(libs.weburl)

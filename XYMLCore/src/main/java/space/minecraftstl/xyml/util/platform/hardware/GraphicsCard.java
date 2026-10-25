@@ -64,13 +64,25 @@ public final class GraphicsCard {
     private final @Nullable String driverVersion;
     private final @Unmodifiable List<Path> vulkanDriverFiles;
 
-    private GraphicsCard(String name, @Nullable HardwareVendor vendor, @Nullable Type type, @Nullable String driver, @Nullable String driverVersion, List<Path> vulkanDriverFiles) {
+    /// Whether the detector identified this adapter as a known virtual display adapter.
+    private final boolean virtualDisplayAdapter;
+
+    /// Creates an adapter with the supplied metadata and detection result.
+    private GraphicsCard(String name, @Nullable HardwareVendor vendor, @Nullable Type type, @Nullable String driver, @Nullable String driverVersion, @Unmodifiable List<Path> vulkanDriverFiles, boolean virtualDisplayAdapter) {
         this.name = Objects.requireNonNull(name);
         this.vendor = vendor;
         this.type = type;
         this.driver = driver;
         this.driverVersion = driverVersion;
         this.vulkanDriverFiles = vulkanDriverFiles;
+        this.virtualDisplayAdapter = virtualDisplayAdapter;
+    }
+
+    /// Returns whether this adapter was identified as a known virtual display adapter.
+    /// A false result also includes adapters whose classification is unknown;
+    /// it does not establish that the adapter is physical.
+    public boolean isVirtualDisplayAdapter() {
+        return virtualDisplayAdapter;
     }
 
     public String getName() {
@@ -112,6 +124,8 @@ public final class GraphicsCard {
         Discrete
     }
 
+    /// Accumulates adapter metadata and creates a snapshot with immutable driver paths.
+    @NotNullByDefault
     public static final class Builder {
         private @Nullable String name;
         private @Nullable HardwareVendor vendor;
@@ -120,8 +134,12 @@ public final class GraphicsCard {
         private @Nullable String driverVersion;
         private @Nullable List<Path> vulkanDriverFiles;
 
+        /// Whether the adapter was identified as a known virtual display adapter; initially false.
+        private boolean virtualDisplayAdapter;
+
+        /// Creates an adapter, supplying a vendor-based or unknown name if no name was set.
         public GraphicsCard build() {
-            String name = this.name;
+            @Nullable String name = this.name;
             if (name == null) {
                 if (vendor != null)
                     name = vendor + " Graphics";
@@ -131,7 +149,17 @@ public final class GraphicsCard {
 
             List<Path> vulkanDriverFiles = Objects.requireNonNullElse(this.vulkanDriverFiles, List.of());
 
-            return new GraphicsCard(name, vendor, type, driver, driverVersion, List.copyOf(vulkanDriverFiles));
+            return new GraphicsCard(name, vendor, type, driver, driverVersion, List.copyOf(vulkanDriverFiles), virtualDisplayAdapter);
+        }
+
+        /// Sets whether the detector identified the adapter as a known virtual display adapter.
+        ///
+        /// @param virtualDisplayAdapter true for an identified virtual display adapter;
+        ///                              false otherwise, including when classification is unknown
+        /// @return this builder
+        public Builder setVirtualDisplayAdapter(boolean virtualDisplayAdapter) {
+            this.virtualDisplayAdapter = virtualDisplayAdapter;
+            return this;
         }
 
         public @Nullable String getName() {

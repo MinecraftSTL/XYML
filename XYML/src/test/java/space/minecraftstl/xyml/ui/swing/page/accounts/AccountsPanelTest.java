@@ -550,6 +550,8 @@ public final class AccountsPanelTest {
         onEventDispatchThread(() -> {
             AbstractButton genericButton = findButton(genericPanel, "accountsOfflineSkin");
             AbstractButton capableButton = findButton(capablePanel, "accountsOfflineSkin");
+            assertEquals("<html>" + space.minecraftstl.xyml.util.i18n.I18n.i18n("account.skin.edit") + "</html>",
+                    capableButton.getToolTipText());
             assertAll(
                     () -> assertFalse(genericButton.isVisible()),
                     () -> assertTrue(capableButton.isVisible()),

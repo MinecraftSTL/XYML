@@ -281,7 +281,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                 offlineSkinButton,
                 "accountsOfflineSkin",
                 "assets/swing/icons/image.svg",
-                i18n("account.skin"));
+                i18n("account.skin.edit"));
         offlineSkinButton.addActionListener(event -> openOfflineSkinManagement());
         offlineSkinButton.setVisible(model.offlineSkinStore().isPresent());
         actions.add(offlineSkinButton, "w 36!, h 36!");

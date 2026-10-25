@@ -253,19 +253,46 @@ final class AboutPanel extends JPanel implements AutoCloseable {
             rows.add(new AboutEntry(null, null, i18n("about.environment.memory"),
                     String.format(Locale.ROOT, "%.1f GiB", DataSizeUnit.GIGABYTES.convertFromBytes(memory)), null));
         }
-        @Nullable CentralProcessor cpu = SystemInfo.getCentralProcessor();
-        if (cpu != null)
-            rows.add(new AboutEntry(null, null, i18n("about.environment.cpu"), cpu.toString(), null));
-        @Nullable List<GraphicsCard> cards = SystemInfo.getGraphicsCards();
-        if (cards != null) {
-            for (int index = 0; index < cards.size(); index++) {
-                String title = cards.size() == 1 ? i18n("about.environment.gpu")
-                        : i18n("about.environment.gpu.n", index + 1);
-                rows.add(new AboutEntry(null, null, title, cards.get(index).getName(), null));
-            }
-        }
+        rows.addAll(hardwareRows(SystemInfo.getCentralProcessor(), SystemInfo.getGraphicsCards()));
         rows.add(new AboutEntry(null, null, "Java", "%s, %s by %s".formatted(
                 Runtime.version(), System.getProperty("java.vm.name"), System.getProperty("java.vendor")), null));
+        return List.copyOf(rows);
+    }
+
+    /// Formats detected hardware without probing the system or creating UI components.
+    ///
+    /// @param cpu detected processor, or null when unavailable
+    /// @param cards detected adapters, or null when unavailable; unknown classifications remain visible
+    /// @return immutable rows with known virtual adapters omitted and visible adapters numbered consecutively
+    static @Unmodifiable List<AboutEntry> hardwareRows(
+            @Nullable CentralProcessor cpu, @Nullable List<GraphicsCard> cards) {
+        List<AboutEntry> rows = new ArrayList<>();
+        if (cpu != null) {
+            @Nullable CentralProcessor.Cores cores = cpu.getCores();
+            int packages = cores != null && cores.packages() > 1 ? cores.packages() : 1;
+            int logical = cores == null ? 0 : cores.logical() / packages;
+            int physical = cores == null ? 0 : cores.physical() / packages;
+            String name;
+            if (logical == 0)
+                name = i18n("about.environment.cpu.name", cpu.getName());
+            else if (logical != physical)
+                name = i18n("about.environment.cpu.name.cores.hyper_threading", cpu.getName(), physical, logical);
+            else
+                name = i18n("about.environment.cpu.name.cores", cpu.getName(), physical);
+            for (int index = 1; index <= packages; index++) {
+                String title = packages == 1 ? i18n("about.environment.cpu") : i18n("about.environment.cpu.n", index);
+                rows.add(new AboutEntry(null, null, title, name, null));
+            }
+        }
+        if (cards != null) {
+            @Unmodifiable List<GraphicsCard> visible = cards.stream()
+                    .filter(card -> !card.isVirtualDisplayAdapter()).toList();
+            for (int index = 0; index < visible.size(); index++) {
+                String title = visible.size() == 1 ? i18n("about.environment.gpu")
+                        : i18n("about.environment.gpu.n", index + 1);
+                rows.add(new AboutEntry(null, null, title, visible.get(index).getName(), null));
+            }
+        }
         return List.copyOf(rows);
     }
 

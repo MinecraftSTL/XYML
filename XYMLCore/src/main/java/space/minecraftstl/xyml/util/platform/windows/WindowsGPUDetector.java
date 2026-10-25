@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemUtils;
 import space.minecraftstl.xyml.util.platform.hardware.GraphicsCard;
 import space.minecraftstl.xyml.util.platform.hardware.HardwareVendor;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
@@ -36,12 +37,14 @@ import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author Glavo
- */
+/// Detects Windows display adapters from registry metadata with a CIM fallback.
+///
+/// @author Glavo
+@NotNullByDefault
 final class WindowsGPUDetector {
 
-    private static GraphicsCard.Type fromDacType(String adapterDACType) {
+    /// Retains the integrated-adapter fallback when DAC metadata is absent or blank.
+    private static GraphicsCard.Type fromDacType(@Nullable String adapterDACType) {
         if (StringUtils.isBlank(adapterDACType)
                 || "Internal".equalsIgnoreCase(adapterDACType)
                 || "InternalDAC".equalsIgnoreCase(adapterDACType)) {
@@ -111,20 +114,29 @@ final class WindowsGPUDetector {
         }
     }
 
-    private static @Nullable String regValueToString(Object object) {
+    /// Decodes registry text, ignoring incomplete UTF-16LE code units and removing NUL characters.
+    ///
+    /// @param object registry value, or null when missing
+    /// @return decoded text, or null for a missing value
+    static @Nullable String regValueToString(@Nullable Object object) {
         if (object == null) {
             return null;
         } else if (object instanceof String[]) {
             return String.join(" ", (String[]) object);
-        } else if (object instanceof byte[]) {
-            return new String((byte[]) object, StandardCharsets.UTF_16LE)
+        } else if (object instanceof byte[] data) {
+            // Ensure an even byte length for UTF_16LE
+            int length = data.length & ~1;
+            return new String(data, 0, length, StandardCharsets.UTF_16LE)
                     .replace("\0", "");
         } else {
             return object.toString();
         }
     }
 
-    private static List<GraphicsCard> detectByRegistry(WinReg reg) {
+    /// Reads graphics card information from the display adapter registry keys.
+    /// Uses the driver description when the adapter name is missing or blank;
+    /// if both are missing or blank, leaves the name to the builder's fallback.
+    static List<GraphicsCard> detectByRegistry(WinReg reg) {
         final WinReg.HKEY hkey = WinReg.HKEY.HKEY_LOCAL_MACHINE;
         final String displayDevices = "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\";
         final Pattern graphicsCardPattern = Pattern.compile("\\\\[0-9]+\\\\?$");
@@ -134,14 +146,18 @@ final class WindowsGPUDetector {
             if (!graphicsCardPattern.matcher(subkey).find())
                 continue;
 
-            String name = regValueToString(reg.queryValue(hkey, subkey, "HardwareInformation.AdapterString"));
-            String vendor = regValueToString(reg.queryValue(hkey, subkey, "ProviderName"));
-            String driverVersion = regValueToString(reg.queryValue(hkey, subkey, "DriverVersion"));
-            String dacType = regValueToString(reg.queryValue(hkey, subkey, "HardwareInformation.DacType"));
-            Object vulkanDriverName = reg.queryValue(hkey, subkey, "VulkanDriverName");
+            @Nullable String name = regValueToString(reg.queryValue(hkey, subkey, "HardwareInformation.AdapterString"));
+            if (StringUtils.isBlank(name))
+                name = regValueToString(reg.queryValue(hkey, subkey, "DriverDesc"));
+            @Nullable String vendor = regValueToString(reg.queryValue(hkey, subkey, "ProviderName"));
+            @Nullable String driverVersion = regValueToString(reg.queryValue(hkey, subkey, "DriverVersion"));
+            @Nullable String dacType = regValueToString(reg.queryValue(hkey, subkey, "HardwareInformation.DacType"));
+            @Nullable Object vulkanDriverName = reg.queryValue(hkey, subkey, "VulkanDriverName");
+            @Nullable String matchingDeviceId = regValueToString(reg.queryValue(hkey, subkey, "MatchingDeviceId"));
 
             GraphicsCard.Builder builder = GraphicsCard.builder();
-            if (name != null)
+            builder.setVirtualDisplayAdapter("Root\\GameViewerIddDriver".equalsIgnoreCase(matchingDeviceId));
+            if (StringUtils.isNotBlank(name))
                 builder.setName(GraphicsCard.cleanName(name));
             if (vendor != null)
                 builder.setVendor(HardwareVendor.of(vendor));
