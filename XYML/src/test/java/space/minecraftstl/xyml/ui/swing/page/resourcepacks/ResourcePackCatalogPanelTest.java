@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -319,6 +320,7 @@ public final class ResourcePackCatalogPanelTest {
             list.setSelectedIndex(1);
 
             ResourcePackCatalogItem selected = rows.get(1);
+            FileDragAssertions.assertFiles(list, List.of(selected.path()));
             assertAll(
                     () -> assertEquals(ListSelectionModelValue.MULTIPLE, selectionMode(list)),
                     () -> assertEquals(STRINGS.pageTitle(),

@@ -87,6 +87,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// never opens resource-pack paths, decodes pack icons, or accesses a network service.
 @NotNullByDefault
 public final class ResourcePackCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned priority-handle and native file-copy dragging lifecycle.
+    private @Nullable ResourcePackCatalogReorderSupport reorderSupport;
+
     /// Card shown before the first lazy index request.
     private static final String IDLE_CARD = "idle";
 
@@ -368,7 +371,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                             item -> !item.enabled(),
                             item -> item.enabled()), RowBoundsCheckedList.BlankClickPolicy.CLEAR);
             choiceList = acquiredChoiceList;
-            ResourcePackCatalogReorderSupport.install(this);
+            reorderSupport = ResourcePackCatalogReorderSupport.install(this);
             ResponsiveCatalogSplitPane split = new ResponsiveCatalogSplitPane(
                     choiceList,
                     createDetailsPanel());
@@ -387,6 +390,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     this::importDroppedResourcePacks);
         } catch (RuntimeException | Error failure) {
             @Nullable Throwable cleanupFailure = null;
+            if (reorderSupport != null)
+                cleanupFailure = attemptCleanup(cleanupFailure, reorderSupport::close);
             if (acquiredDropRegistration != null) {
                 ShellFileDropHandler.RouteRegistration registration = acquiredDropRegistration;
                 cleanupFailure = attemptCleanup(cleanupFailure, registration::close);
@@ -1319,6 +1324,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         return displayedSnapshot;
     }
 
+    /// Returns the stable repository and filter context for one armed drag without I/O.
+    Object fileDragContext() {
+        return List.of(model.snapshot().contentRevision(), searchField.getText());
+    }
+
+    /// Allows file copies only from the currently displayed, idle local catalog.
+    boolean isFileDragAllowed() {
+        return !closed && !writePending && displayedSnapshot != null
+                && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                && model.snapshot().listEnabled()
+                && model.snapshot().writeStatus() != ResourcePackCatalogWriteStatus.BUSY;
+    }
+
     /// Returns whether handle interaction is currently allowed.
     ///
     /// @return whether the list may start or accept a reorder drag
@@ -1755,6 +1773,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             }
             resourcesClosed = true;
             @Nullable Throwable failure = null;
+            if (reorderSupport != null)
+                failure = attemptCleanup(failure, reorderSupport::close);
             failure = attemptCleanup(failure, dropRegistration::close);
             failure = attemptCleanup(failure, modelSubscription::unsubscribe);
             failure = attemptCleanup(

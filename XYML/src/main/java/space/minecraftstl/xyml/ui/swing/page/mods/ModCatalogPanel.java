@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
@@ -92,6 +93,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// interaction contracts. No JavaFX type or network-capable service is referenced.
 @NotNullByDefault
 public final class ModCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<ModCatalogItem> fileDragSupport;
+
     /// Shared row icon that remains available in headless and high-DPI Swing sessions.
     private static final Icon MOD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/format-list-bulleted.svg",
@@ -329,6 +333,12 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedMod,
                 this::importDroppedMods);
+        fileDragSupport = new FileListDragSupport<>(
+                choiceList.getList(), ModCatalogItem::path,
+                () -> List.of(model.snapshot().contentRevision(), searchField.getText()),
+                () -> !closed && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().listEnabled()
+                        && model.snapshot().writeStatus() != ModCatalogWriteStatus.BUSY);
         model.loadIfNeeded();
     }
 
@@ -1422,6 +1432,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         closed = true;
+        if (fileDragSupport != null) fileDragSupport.close();
         dropRegistration.close();
         searchField.setEnabled(false);
         filterBox.setEnabled(false);

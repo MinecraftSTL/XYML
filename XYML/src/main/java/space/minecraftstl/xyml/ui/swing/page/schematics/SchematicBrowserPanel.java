@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -89,6 +90,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// All worker-published model changes are coalesced and applied through [EdtDispatcher].
 @NotNullByDefault
 public final class SchematicBrowserPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<SchematicBrowserItem> fileDragSupport;
+
     /// Maximum preview side decoded for a single row icon.
     private static final int MAX_ROW_PREVIEW_SIDE = 128;
 
@@ -298,6 +302,12 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 this,
                 this::supportsDroppedSchematic,
                 this::importDroppedFiles);
+        fileDragSupport = new FileListDragSupport<>(
+                choiceList.getList(), SchematicBrowserItem::path,
+                () -> List.of(model.snapshot().contentRevision(), model.snapshot().currentDirectory()),
+                () -> !closed && displayedSnapshot != null
+                        && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().writeStatus() != SchematicBrowserWriteStatus.BUSY);
     }
 
     /// Enables the projection-mod shortcut with one explicit download navigation command.
@@ -1215,6 +1225,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             failure = attemptCleanup(failure, () -> {
                 if (directoryPrompt != null) directoryPrompt.cancel(false);
                 directoryPrompt = null;
+            });
+            failure = attemptCleanup(failure, () -> {
+                if (fileDragSupport != null) fileDragSupport.close();
             });
             failure = attemptCleanup(failure, dropRegistration::close);
             failure = attemptCleanup(failure, modelSubscription::unsubscribe);

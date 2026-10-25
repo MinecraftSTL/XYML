@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -170,6 +171,7 @@ public final class ModCatalogPanelTest {
             list.setSelectedIndex(1);
             assertEquals("mod-1", model.selectedKeys().get(0));
             assertEquals("Mod 1", findTextArea(panel, "modsDetailTitle").getText());
+            FileDragAssertions.assertFiles(list, List.of(model.items().get(1).path()));
 
             findButton(panel, "modsEnabled").doClick();
             assertEquals("mod-1:false", model.enabledCommands().get(0));
@@ -289,6 +291,24 @@ public final class ModCatalogPanelTest {
             assertEquals("", findLabel(row, "richChoiceListBadge").getText());
             assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
             panel.close();
+        });
+    }
+
+    /// Disabled Mods drag their real disabled file name instead of a reconstructed enabled archive name.
+    @Test
+    public void dragsDisabledModUsingItsActualPersistentPath() throws Exception {
+        Path actual = Path.of("mods", "disabled.jar.disabled");
+        ModCatalogItem item = new ModCatalogItem("disabled", actual, "disabled", "Disabled", "Description",
+                "Author", "1.0", "1.21.1", ModLoaderType.FABRIC, "disabled.jar", null, false);
+        RecordingModel model = new RecordingModel(List.of(item));
+        SwingUtilities.invokeAndWait(() -> {
+            try (ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, new RecordingInteractions())) {
+                panel.setSize(900, 620);
+                layoutRecursively(panel);
+                panel.choiceList().refreshLoadPlan();
+                panel.choiceList().getList().setSelectedIndex(0);
+                FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(actual));
+            }
         });
     }
 

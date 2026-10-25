@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
@@ -43,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +54,25 @@ public final class SelectedRepositoryInstancesModelTest {
     /// Neutral fixed-size icon used by model-only fixtures.
     private static final InstanceIconData TEST_ICON = new InstanceIconData(
             new int[InstanceIconData.PIXEL_COUNT]);
+
+    /// Equal instance IDs resolve only within the current repository, and closed wrappers expose no local path.
+    @Test
+    public void resolvesRootsThroughCurrentDirectoryWithoutLoadingRows() {
+        GameInstanceID id = instanceId("same-instance");
+        FakeInstancesModel first = new FakeInstancesModel("first-repository", id);
+        FakeInstancesModel second = new FakeInstancesModel("second-repository", id);
+        MutableModelSource source = new MutableModelSource(first);
+        EdtDispatcher.executeAndWait(() -> {
+            SelectedRepositoryInstancesModel model = new SelectedRepositoryInstancesModel(source);
+            assertEquals(Path.of("first-repository", "versions", id.id()), model.instanceRoot(id));
+            long originalContext = model.selectionContextRevision();
+            source.switchTo(second);
+            assertTrue(model.selectionContextRevision() > originalContext);
+            assertEquals(Path.of("second-repository", "versions", id.id()), model.instanceRoot(id));
+            model.close();
+            assertNull(model.instanceRoot(id));
+        });
+    }
 
     /// A directory switch replaces all visible state and closes the previous repository model.
     @Test
@@ -214,6 +235,7 @@ public final class SelectedRepositoryInstancesModelTest {
         /// Stable item returned by this repository.
         private final InstanceListItem item;
 
+
         /// Stable repository snapshot.
         private final InstancesSnapshot snapshot;
 
@@ -251,6 +273,12 @@ public final class SelectedRepositoryInstancesModelTest {
             snapshot = new InstancesSnapshot(
                     OptionalInt.of(0), 1, 0L, status,
                     false, true, true, true, true);
+        }
+
+        /// Returns a stable synthetic root without requesting row metadata or files.
+        @Override
+        public Path instanceRoot(GameInstanceID instanceId) {
+            return Path.of(status, "versions", instanceId.id());
         }
 
         /// Returns the stable snapshot.
