@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -179,6 +180,8 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.choiceList().doLayout();
             panel.choiceList().getViewport().setExtentSize(new Dimension(320, 160));
             panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(world.path()));
             panel.choiceList().getList().setSelectedIndex(0);
             layoutRecursively(panel);
 

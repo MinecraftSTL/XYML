@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
@@ -102,6 +103,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<WorldCatalogItem> fileDragSupport;
+
     /// Fallback icon used when a world has no readable embedded PNG.
     private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/image.svg",
@@ -400,6 +404,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedWorld,
                 this::importWorldArchive);
+        fileDragSupport = new FileListDragSupport<>(
+                choiceList.getList(), WorldCatalogItem::path,
+                () -> model.snapshot().contentRevision(),
+                () -> !closed.get() && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().listEnabled()
+                        && !model.snapshot().operationPending());
     }
 
     /// Installs the remote world-catalog navigation command.
@@ -1923,6 +1933,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Detaches all UI listeners and closes owned resources on the EDT.
     private void closeOnEventDispatchThread() {
+        if (fileDragSupport != null) fileDragSupport.close();
         dropRegistration.close();
         quickPlayOperationRevision++;
         quickPlayOperationText = null;

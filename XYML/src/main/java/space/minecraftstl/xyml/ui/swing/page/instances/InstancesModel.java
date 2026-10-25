@@ -18,12 +18,14 @@
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -67,6 +69,17 @@ public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListI
     default CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
         GameInstanceID checked = Objects.requireNonNull(instanceId, "instanceId");
         return CompletableFuture.completedFuture(new InstanceAddonContext(checked, null, null));
+    }
+
+    /// Returns one known instance's root without filesystem access, or null when unavailable.
+    ///
+    /// This is not the potentially shared game running directory. Models without local files retain null.
+    ///
+    /// @param instanceId stable instance identifier in the current repository
+    /// @return actual instance root, or null for an unknown or unsupported instance
+    default @Nullable Path instanceRoot(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        return null;
     }
 
     /// Selects a loaded instance by its stable repository identifier.

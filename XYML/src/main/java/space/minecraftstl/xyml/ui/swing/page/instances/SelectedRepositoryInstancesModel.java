@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.List;
 import java.util.OptionalInt;
@@ -189,6 +190,15 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
             }
             return Objects.requireNonNull(context, "delegate returned null add-on context");
         });
+    }
+
+    /// Returns the current delegate's local root while excluding concurrent repository replacement.
+    @Override
+    public @Nullable Path instanceRoot(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        synchronized (stateLock) {
+            return closed ? null : delegate.instanceRoot(instanceId);
+        }
     }
 
     /// Loads one identified row while rejecting a completion from a replaced repository.

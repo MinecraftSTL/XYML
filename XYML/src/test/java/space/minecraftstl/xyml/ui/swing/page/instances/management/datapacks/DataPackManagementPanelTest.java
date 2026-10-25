@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -119,6 +120,12 @@ final class DataPackManagementPanelTest {
             awaitBackgroundWork(executor);
             EdtDispatcher.executeAndWait(() -> {
                 assertEquals(OptionalInt.of(1), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                FileDragAssertions.assertFiles(panel.worldChoiceList().getList(), List.of(worldDirectory));
+                prepareViewport(panel.dataPackChoiceList());
+                panel.dataPackChoiceList().getList().setSelectedIndex(0);
+                FileDragAssertions.assertFiles(panel.dataPackChoiceList().getList(),
+                        List.of(Objects.requireNonNull(Objects.requireNonNull(
+                                panel.dataPackChoiceList().getList().getSelectedValue()).value()).getPath()));
                 JButton openDirectory = findNamed(panel, "dataPacksOpenDirectory", JButton.class);
                 JButton importButton = findNamed(panel, "dataPacksImport", JButton.class);
                 assertNotNull(openDirectory);

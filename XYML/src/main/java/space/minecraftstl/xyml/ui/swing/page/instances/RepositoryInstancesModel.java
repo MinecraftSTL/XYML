@@ -41,6 +41,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
@@ -212,6 +213,16 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             entries.add(new InstanceSearchEntry(entry.id(), entry.id().id()));
         }
         return List.copyOf(entries);
+    }
+
+    /// Returns a known instance root using only the current repository's pure path resolver.
+    @Override
+    public @Nullable Path instanceRoot(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        synchronized (stateLock) {
+            if (closed || state.source().entries().stream().noneMatch(entry -> entry.id().equals(instanceId))) return null;
+            return repository.instanceRoot(instanceId);
+        }
     }
 
     /// Resolves one instance's analyzed version and primary loader on the background executor.
@@ -953,6 +964,14 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return new InstanceAddonContext(Objects.requireNonNull(instanceId, "instanceId"), null, null);
         }
 
+        /// Returns an instance root without I/O, or null for a non-file-backed repository adapter.
+        ///
+        /// @param instanceId known stable instance identifier
+        /// @return local instance root, or null when unsupported
+        default @Nullable Path instanceRoot(GameInstanceID instanceId) {
+            return null;
+        }
+
         /// Performs a blocking repository refresh on a background thread.
         void refresh();
     }
@@ -1002,6 +1021,12 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                                     repository.getGameVersion(manifest).orElse(null),
                                     unknownVersionDetail)))
                     .toList();
+        }
+
+        /// Returns the actual instance root rather than the potentially shared run directory.
+        @Override
+        public Path instanceRoot(GameInstanceID instanceId) {
+            return repository.getInstanceRoot(instanceId);
         }
 
         /// Returns the persisted selected repository instance ID.

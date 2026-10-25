@@ -36,6 +36,7 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -62,6 +63,23 @@ public final class RepositoryInstancesModelTest {
     private static final RepositoryInstancesStatusStrings STATUS_STRINGS =
             new RepositoryInstancesStatusStrings(
                     "Loading", "Ready", "Refreshing", "Refresh failed", "Unknown version");
+
+    /// Root queries use only known repository identities and never request lazy metadata or icons.
+    @Test
+    public void resolvesOnlyKnownInstanceRootsWithoutLoadingDetails() {
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
+        QueuedExecutor executor = new QueuedExecutor();
+        GameInstanceID id = instanceId("local-instance");
+        FakeRepository repository = new FakeRepository(events, List.of(id), id);
+        RepositoryInstancesModel model = new RepositoryInstancesModel(
+                repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
+        assertEquals(Path.of("instance-roots", id.id()), model.instanceRoot(id));
+        assertNull(model.instanceRoot(instanceId("missing")));
+        assertEquals(List.of(), repository.resolvedIds());
+        assertEquals(List.of(), repository.resolvedIconIds());
+        model.close();
+        assertNull(model.instanceRoot(id));
+    }
 
     /// A viewport request resolves only its captured range and delegates stable-ID commands.
     @Test
@@ -466,6 +484,7 @@ public final class RepositoryInstancesModelTest {
     /// Mutable fake implementing only repository behavior required by the production adapter.
     @NotNullByDefault
     private static final class FakeRepository implements RepositoryInstancesModel.RepositoryAccess {
+
         /// Event manager used to publish configured successful refreshes.
         private final EventManager<RefreshedGameInstancesEvent> events;
 
@@ -526,6 +545,12 @@ public final class RepositoryInstancesModelTest {
             this.events = events;
             this.displayedIds = List.copyOf(displayedIds);
             this.selectedId = selectedId;
+        }
+
+        /// Supplies a pure root resolver separate from lazy row presentation.
+        @Override
+        public Path instanceRoot(GameInstanceID instanceId) {
+            return Path.of("instance-roots", instanceId.id());
         }
 
         /// Returns this fake as its event source identity.

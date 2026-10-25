@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -239,6 +240,8 @@ public final class SchematicBrowserPanelTest {
             int viewportHeight = panel.choiceList().getViewport().getExtentSize().height;
             int rowHeight = list.getFixedCellHeight();
             int expectedVisibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
+            list.setSelectedIndex(0);
+            FileDragAssertions.assertFiles(list, List.of(rows.get(0).path()));
             assertAll(
                     () -> assertEquals(expectedVisibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < rows.size()),
