@@ -163,6 +163,24 @@ public final class ShellFileDropHandler extends TransferHandler {
         return Objects.requireNonNull(result.get(), "text route registration was not created");
     }
 
+    /// Tests an existing page-scoped route for a custom child export handler without decoding native drop data.
+    ///
+    /// @param support proposed transfer targeting a child component
+    /// @return whether the nearest ancestor handler accepts this transfer
+    public static boolean canImportAncestor(TransferSupport support) {
+        @Nullable ShellFileDropHandler handler = findAncestorHandler(support.getComponent());
+        return handler != null && handler.canImport(support);
+    }
+
+    /// Delivers a child drop to its existing nearest page-scoped route.
+    ///
+    /// @param support accepted transfer targeting a child component
+    /// @return whether a route imported the transfer
+    public static boolean importAncestor(TransferSupport support) {
+        @Nullable ShellFileDropHandler handler = findAncestorHandler(support.getComponent());
+        return handler != null && handler.importData(support);
+    }
+
     /// Reports whether a custom child transfer handler can delegate text to a shell ancestor.
     ///
     /// Native drop-over inspection uses advertised flavors only, preserving deferred Windows OLE
