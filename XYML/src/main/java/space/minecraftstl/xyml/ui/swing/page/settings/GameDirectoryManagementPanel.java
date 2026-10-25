@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.PortablePath;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
@@ -50,6 +51,7 @@ import java.awt.BorderLayout;
 import java.awt.Font;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -58,12 +60,15 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Manages effective local and user game directories through the established directory manager.
 ///
-/// The list renders persisted [PortablePath] values without probing the filesystem. Path parsing and relative-path
-/// conversion run on the injected background executor before a state mutation is dispatched back to the EDT. The
-/// production service preserves `GameDirectoryManager`'s local/user storage, selected-repository, and read-only
-/// backup-and-overwrite behavior.
+/// Rendering and native drag identity lookup do not probe the filesystem. Drags normalize persisted paths
+/// syntactically, while save-time path preparation runs on the injected background executor before a mutation is
+/// dispatched back to the EDT. The production service preserves `GameDirectoryManager`'s local/user storage,
+/// selected-repository, and read-only backup-and-overwrite behavior.
 @NotNullByDefault
 public final class GameDirectoryManagementPanel extends JPanel implements AutoCloseable {
+    /// Owned copy-only dragging of persisted game-directory rows.
+    private final FileListDragSupport<GameDirectoryManagementEntry> fileDragging;
+
     /// Conventional game-directory path used to seed the add form.
     private static final Path DEFAULT_GAME_DIRECTORY = Path.of(".minecraft");
 
@@ -187,6 +192,11 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         configureComponents();
         serviceSubscription = service.subscribe(this::serviceSnapshotChanged);
         applySnapshot(service.snapshot());
+        fileDragging = FileListDragSupport.forValues(directoryList,
+                GameDirectoryManagementPanel::dragDirectoryPath,
+                () -> List.of(service.snapshot().revision(), editSequence),
+                () -> !closed && !savePending && displayedSnapshot != null
+                        && displayedSnapshot.revision() == service.snapshot().revision());
     }
 
     /// Returns the immutable directory state currently represented by the list.
@@ -215,6 +225,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
             closed = true;
         pendingSaveRetry = null;
             editSequence++;
+            fileDragging.close();
             serviceSubscription.unsubscribe();
             service.close();
             setControlsEnabled(false);
@@ -464,6 +475,19 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
         try {
             return Path.of(candidate).toAbsolutePath().normalize();
+        } catch (InvalidPathException failure) {
+            return null;
+        }
+    }
+
+    /// Resolves a persisted local or absolute directory without touching the filesystem or unsaved editor fields.
+    ///
+    /// @param entry rendered persisted directory identity
+    /// @return normalized local path, or null when the stored path is blank or invalid on this platform
+    private static @Nullable Path dragDirectoryPath(GameDirectoryManagementEntry entry) {
+        if (entry.path().getPath().isBlank()) return null;
+        try {
+            return Metadata.CURRENT_DIRECTORY.resolve(entry.path().toPath()).toAbsolutePath().normalize();
         } catch (InvalidPathException failure) {
             return null;
         }

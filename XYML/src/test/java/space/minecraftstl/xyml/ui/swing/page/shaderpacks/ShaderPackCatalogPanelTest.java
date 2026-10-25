@@ -23,6 +23,8 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
@@ -54,61 +56,66 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 /// Verifies the shader-pack panel's single-enable and multi-delete interaction surface.
 @NotNullByDefault
 final class ShaderPackCatalogPanelTest {
+    /// ZIP files and directory packs export in selection order while refreshed or busy snapshots reject stale drags.
+    @Test
+    void dragsActualShaderZipAndDirectoryPathsWithoutSorting() {
+        EdtDispatcher.executeAndWait(() -> {
+            List<ShaderPackCatalogItem> items = List.of(
+                    new ShaderPackCatalogItem(Path.of("shaderpacks", "pack.zip"), "pack.zip", "Pack", true,
+                            Set.of(ShaderPackBackend.IRIS_OCULUS), "Archive"),
+                    new ShaderPackCatalogItem(Path.of("shaderpacks", "unpacked"), "unpacked", "Directory", true,
+                            Set.of(ShaderPackBackend.IRIS_OCULUS), "Directory"));
+            FakeModel model = new FakeModel(true);
+            model.snapshot = shaderSnapshot(items, 2L, ShaderPackCatalogStatus.READY, ShaderPackCatalogWriteStatus.IDLE);
+            ShaderPackCatalogPanel panel = newPanel(model);
+            try {
+                JList<?> list = java.util.Objects.requireNonNull(findNamed(panel, "shaderPacksList", JList.class));
+                list.setFixedCellHeight(68);
+                list.setSize(520, 220);
+                list.setSelectedIndices(new int[] {0, 1});
+                FileDragAssertions.assertFiles(list, items.stream().map(ShaderPackCatalogItem::path).toList());
+                model.publish(shaderSnapshot(items, 3L, ShaderPackCatalogStatus.READY, ShaderPackCatalogWriteStatus.IDLE));
+                FileDragAssertions.assertPendingUnavailable(list);
+                list.setSelectedIndex(1);
+                FileDragAssertions.assertFiles(list, List.of(items.get(1).path()));
+                model.publish(shaderSnapshot(items, 3L, ShaderPackCatalogStatus.LOADING, ShaderPackCatalogWriteStatus.IDLE));
+                list.setSelectedIndex(1);
+                FileDragAssertions.assertCannotStart(list);
+                model.publish(shaderSnapshot(items, 3L, ShaderPackCatalogStatus.READY, ShaderPackCatalogWriteStatus.BUSY));
+                list.setSelectedIndex(0);
+                FileDragAssertions.assertCannotStart(list);
+                model.publish(shaderSnapshot(items, 4L, ShaderPackCatalogStatus.READY, ShaderPackCatalogWriteStatus.IDLE));
+                list.setSelectedIndex(0);
+                FileDragAssertions.assertFiles(list, List.of(items.get(0).path()));
+                assertEquals(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION, list.getSelectionMode());
+                assertNull(findNamed(panel, "shaderPacksSort", JComponent.class));
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Creates one deterministic shader snapshot without accessing the filesystem.
+    ///
+    /// @param items immutable actual-path rows
+    /// @param revision visible content generation
+    /// @param status scan status
+    /// @param writeStatus mutation status
+    /// @return coherent fixture snapshot
+    private static ShaderPackCatalogSnapshot shaderSnapshot(
+            @org.jetbrains.annotations.Unmodifiable List<ShaderPackCatalogItem> items,
+            long revision,
+            ShaderPackCatalogStatus status,
+            ShaderPackCatalogWriteStatus writeStatus) {
+        return new ShaderPackCatalogSnapshot(OptionalInt.empty(), items.size(), revision, status, "Fixture",
+                writeStatus, "", items, Set.of(ShaderPackBackend.IRIS_OCULUS));
+    }
+
     /// Verifies the list is multi-select only for deletion and has no batch enable controls.
     @Test
     void exposesSingleEnableAndBatchDeleteWithoutSorting() {
         EdtDispatcher.executeAndWait(() -> {
-            ShaderPackCatalogPanel panel = new ShaderPackCatalogPanel(
-                    new FakeModel(true),
-                    new ShaderPackCatalogStrings(
-                            "Shader Packs",
-                            "Refresh",
-                            "Refreshing",
-                            "Refresh",
-                            "Retry",
-                            "Retry",
-                            "Details",
-                            "No selection",
-                            "File",
-                            "Path",
-                            "Enabled",
-                            "Enabled",
-                            "Disabled",
-                            "Invalid",
-                            "Backends",
-                            "No backend"),
-                    new ShaderPackCatalogStatusStrings(
-                            "Idle",
-                            "Loading",
-                            "Ready",
-                            "Empty",
-                            "Failed",
-                            "Writing",
-                            "Write failed"),
-                    new ShaderPackCatalogActionStrings(
-                            "Import",
-                            "Import",
-                            "Import",
-                            "ZIP",
-                            "Enable",
-                            "Enable",
-                            "Disable",
-                            "Disable",
-                            "Delete",
-                            "Delete",
-                            "Delete %s?",
-                            "Delete %s items?",
-                            "Reveal",
-                            "Reveal",
-                            "Open",
-                            "Open",
-                            "Operation failed",
-                            "Reveal failed",
-                            "Open failed",
-                            "Backend",
-                            "Choose backends"),
-                    new FakeInteractions(),
-                    Path.of("shaderpacks"));
+            ShaderPackCatalogPanel panel = newPanel(new FakeModel(true));
             try {
                 JList<?> list = findNamed(panel, "shaderPacksList", JList.class);
                 assertNotNull(list);
@@ -242,6 +249,64 @@ final class ShaderPackCatalogPanelTest {
         return null;
     }
 
+    /// Constructs a page with the existing localized labels and deterministic interactions.
+    ///
+    /// @param model controlled local shader model
+    /// @return initialized page on the EDT
+    private static ShaderPackCatalogPanel newPanel(FakeModel model) {
+        return new ShaderPackCatalogPanel(
+                    model,
+                    new ShaderPackCatalogStrings(
+                            "Shader Packs",
+                            "Refresh",
+                            "Refreshing",
+                            "Refresh",
+                            "Retry",
+                            "Retry",
+                            "Details",
+                            "No selection",
+                            "File",
+                            "Path",
+                            "Enabled",
+                            "Enabled",
+                            "Disabled",
+                            "Invalid",
+                            "Backends",
+                            "No backend"),
+                    new ShaderPackCatalogStatusStrings(
+                            "Idle",
+                            "Loading",
+                            "Ready",
+                            "Empty",
+                            "Failed",
+                            "Writing",
+                            "Write failed"),
+                    new ShaderPackCatalogActionStrings(
+                            "Import",
+                            "Import",
+                            "Import",
+                            "ZIP",
+                            "Enable",
+                            "Enable",
+                            "Disable",
+                            "Disable",
+                            "Delete",
+                            "Delete",
+                            "Delete %s?",
+                            "Delete %s items?",
+                            "Reveal",
+                            "Reveal",
+                            "Open",
+                            "Open",
+                            "Operation failed",
+                            "Reveal failed",
+                            "Open failed",
+                            "Backend",
+                            "Choose backends"),
+                    new FakeInteractions(),
+                    Path.of("shaderpacks"));
+    }
+
     /// Minimal ready model for panel construction tests.
     @NotNullByDefault
     private static final class FakeModel implements ShaderPackCatalogModel {
@@ -249,7 +314,10 @@ final class ShaderPackCatalogPanelTest {
         private final boolean valid;
 
         /// Snapshot returned by the fixture.
-        private final ShaderPackCatalogSnapshot snapshot;
+        private ShaderPackCatalogSnapshot snapshot;
+
+        /// Controlled page-state publication for refresh and busy-gesture tests.
+        private final ValueChangeSupport<ShaderPackCatalogSnapshot> changes = new ValueChangeSupport<>(this);
 
         /// Creates one fixture with the requested validity.
         ///
@@ -274,16 +342,25 @@ final class ShaderPackCatalogPanelTest {
                     Set.of(ShaderPackBackend.IRIS_OCULUS));
         }
 
+        /// Publishes one controlled snapshot without reading shader files.
+        ///
+        /// @param replacement new coherent page state
+        private void publish(ShaderPackCatalogSnapshot replacement) {
+            ShaderPackCatalogSnapshot previous = snapshot;
+            snapshot = replacement;
+            changes.fireChange(previous, replacement);
+        }
+
         /// Returns the fixture snapshot.
         @Override
         public ShaderPackCatalogSnapshot snapshot() {
             return snapshot;
         }
 
-        /// Returns a no-op registration.
+        /// Registers one listener for controlled refresh and write-state publications.
         @Override
         public Subscription subscribe(ValueChangeListener<ShaderPackCatalogSnapshot> listener) {
-            return Subscription.create(() -> { });
+            return changes.subscribe(listener);
         }
 
         /// Ignores lazy loading.

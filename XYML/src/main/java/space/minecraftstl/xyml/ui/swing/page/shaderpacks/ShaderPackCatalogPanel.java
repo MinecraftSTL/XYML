@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -66,6 +67,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Swing management page for locally installed shader packs.
 @NotNullByDefault
 public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned native COPY dragging of the displayed shader files and directories.
+    private final FileListDragSupport<ShaderPackCatalogItem> fileDragging;
+
     /// Owned catalog model.
     private final ShaderPackCatalogModel model;
 
@@ -218,6 +222,12 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
         subscription = model.subscribe(this::modelChanged);
         addHierarchyListener(showingListener);
         applySnapshot(snapshot);
+        fileDragging = FileListDragSupport.forValues(list, ShaderPackCatalogItem::path,
+                () -> model.snapshot().contentRevision(),
+                () -> !closed && !writePending
+                        && snapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().status() != ShaderPackCatalogStatus.LOADING
+                        && model.snapshot().writeStatus() != ShaderPackCatalogWriteStatus.BUSY);
     }
 
     /// Installs the download navigation command.
@@ -819,6 +829,7 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
             return;
         }
         closed = true;
+        EdtDispatcher.executeAndWait(fileDragging::close);
         removeHierarchyListener(showingListener);
         if (subscription != null) {
             subscription.unsubscribe();

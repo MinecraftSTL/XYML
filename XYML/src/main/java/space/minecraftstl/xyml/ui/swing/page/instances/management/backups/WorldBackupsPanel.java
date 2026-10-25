@@ -27,12 +27,15 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -65,6 +68,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// parsing, compression, decompression, deletion, and desktop operations remain asynchronous.
 @NotNullByDefault
 public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
+    /// Bundled archive icon using the same logical icon size as the shared rich catalog rows.
+    private static final Icon BACKUP_ICON = new FlatSVGIcon("assets/swing/icons/save.svg", 40, 40);
+
+    /// Owned copy-only dragging of the original backup ZIP files.
+    private final FileListDragSupport<WorldBackupArchive> fileDragging;
+
     /// Catalog performing all background filesystem and Core world operations.
     private final WorldBackupCatalog catalog;
 
@@ -147,6 +156,8 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         configureComponents();
         updateControls();
+        fileDragging = FileListDragSupport.forValues(archiveList, WorldBackupArchive::archive,
+                () -> requestSequence, () -> !closed.get() && !operationPending);
     }
 
     /// Returns the tab title used by an instance-management host.
@@ -194,7 +205,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.executeAndWait(this::closeOnEventDispatchThread);
     }
 
-    /// Builds the unframed compact page structure and wires user commands.
+    /// Builds the unframed page with large archive rows and the existing backup commands.
     private void configureComponents() {
         setName("worldBackupsPage");
         setOpaque(false);
@@ -207,17 +218,14 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         archiveList.setName("worldBackupsList");
         archiveList.setOpaque(false);
         archiveList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        DefaultListCellRenderer archiveRenderer = new DefaultListCellRenderer();
-        archiveList.setCellRenderer((list, value, index, selected, focus) -> {
-            JLabel label = (JLabel) archiveRenderer.getListCellRendererComponent(
-                    list,
-                    value,
-                    index,
-                    selected,
-                    focus);
-            label.setOpaque(selected);
-            return label;
-        });
+        archiveList.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
+        archiveList.setCellRenderer(new RichValueListCellRenderer<>(
+                WorldBackupArchive::fileName,
+                WorldBackupsPanel::formatArchiveDetail,
+                archive -> "",
+                archive -> BACKUP_ICON,
+                archive -> archive.archive().toString(),
+                archive -> false));
         archiveList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 updateArchiveDetail();
@@ -724,6 +732,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     /// Disables commands and detaches displayed model data during terminal page cleanup.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        fileDragging.close();
         operationPending = false;
         pendingRetry = null;
         sourceModel.removeAllElements();

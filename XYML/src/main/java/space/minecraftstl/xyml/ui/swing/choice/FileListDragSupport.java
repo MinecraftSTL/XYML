@@ -55,7 +55,10 @@ import java.util.function.Supplier;
 @NotNullByDefault
 public final class FileListDragSupport<T> extends MouseAdapter implements AutoCloseable, ListDataListener {
     /// Owning list, never a toolbar selector unless explicitly installed there.
-    private final JList<ChoiceListEntry<T>> list;
+    private final JList<?> list;
+
+    /// Typed row access preserving sparse load status or ordinary model values.
+    private final RowAccess<T> rows;
 
     /// Pure path lookup for an already loaded row.
     private final Function<? super T, @Nullable Path> pathProvider;
@@ -132,8 +135,43 @@ public final class FileListDragSupport<T> extends MouseAdapter implements AutoCl
             Supplier<Object> contextProvider,
             BooleanSupplier available,
             Predicate<Point> excluded) {
+        this(new LoadedRows<>(Objects.requireNonNull(list, "list")),
+                pathProvider, contextProvider, available, excluded);
+    }
+
+    /// Installs copy-only file dragging on an ordinary value list without replacing its model or row type.
+    ///
+    /// @param list page-owned value list
+    /// @param pathProvider nonblocking local-path lookup, returning null for non-file rows
+    /// @param contextProvider stable page, filter, and model context
+    /// @param available page lifecycle and operation gate
+    /// @param <T> ordinary row value type
+    /// @return owned file-drag lifecycle
+    public static <T> FileListDragSupport<T> forValues(
+            JList<T> list,
+            Function<? super T, @Nullable Path> pathProvider,
+            Supplier<Object> contextProvider,
+            BooleanSupplier available) {
+        return new FileListDragSupport<>(new ValueRows<>(Objects.requireNonNull(list, "list")),
+                pathProvider, contextProvider, available, point -> false);
+    }
+
+    /// Installs one shared gesture controller over typed row access.
+    ///
+    /// @param rows typed, nonblocking row access
+    /// @param pathProvider actual local-path lookup
+    /// @param contextProvider stable page and model context
+    /// @param available lifecycle and operation gate
+    /// @param excluded points reserved for existing priority handles
+    private FileListDragSupport(
+            RowAccess<T> rows,
+            Function<? super T, @Nullable Path> pathProvider,
+            Supplier<Object> contextProvider,
+            BooleanSupplier available,
+            Predicate<Point> excluded) {
         EdtDispatcher.requireEventDispatchThread();
-        this.list = Objects.requireNonNull(list, "list");
+        this.rows = rows;
+        list = rows.list();
         this.pathProvider = Objects.requireNonNull(pathProvider, "pathProvider");
         this.contextProvider = Objects.requireNonNull(contextProvider, "contextProvider");
         this.available = Objects.requireNonNull(available, "available");
@@ -161,12 +199,12 @@ public final class FileListDragSupport<T> extends MouseAdapter implements AutoCl
         if (reservedGesture) return;
         int index = list.locationToIndex(event.getPoint());
         if (index < 0 || !Objects.requireNonNull(list.getCellBounds(index, index)).contains(event.getPoint())) return;
-        ChoiceListEntry<T> entry = list.getModel().getElementAt(index);
-        if (entry.status() != ChoiceLoadStatus.LOADED || entry.value() == null) return;
+        @Nullable T value = rows.valueAt(index);
+        if (value == null) return;
         if (!list.isSelectedIndex(index)) list.setSelectedIndex(index);
         armedPaths = selectedPaths();
         if (armedPaths.isEmpty()) return;
-        armedValue = entry.value();
+        armedValue = value;
         armedIndex = index;
         armedContext = Objects.requireNonNull(contextProvider.get(), "drag context");
         pressedX = event.getX();
@@ -229,9 +267,9 @@ public final class FileListDragSupport<T> extends MouseAdapter implements AutoCl
     private @Unmodifiable List<Path> selectedPaths() {
         List<Path> paths = new ArrayList<>();
         for (int index : list.getSelectedIndices()) {
-            ChoiceListEntry<T> entry = list.getModel().getElementAt(index);
-            if (entry.status() != ChoiceLoadStatus.LOADED || entry.value() == null) return List.of();
-            @Nullable Path path = pathProvider.apply(entry.value());
+            @Nullable T value = rows.valueAt(index);
+            if (value == null) return List.of();
+            @Nullable Path path = pathProvider.apply(value);
             if (path == null || !path.getFileSystem().equals(java.nio.file.FileSystems.getDefault())) return List.of();
             paths.add(path.toAbsolutePath().normalize());
         }
@@ -245,8 +283,8 @@ public final class FileListDragSupport<T> extends MouseAdapter implements AutoCl
         if (closed || !available.getAsBoolean() || !list.isEnabled() || armedIndex < 0
                 || armedIndex >= list.getModel().getSize()
                 || !Objects.equals(armedContext, contextProvider.get())) return null;
-        ChoiceListEntry<T> entry = list.getModel().getElementAt(armedIndex);
-        if (entry.status() != ChoiceLoadStatus.LOADED || !Objects.equals(armedValue, entry.value())
+        @Nullable T value = rows.valueAt(armedIndex);
+        if (value == null || !Objects.equals(armedValue, value)
                 || !list.isSelectedIndex(armedIndex) || !armedPaths.equals(selectedPaths())) return null;
         return new FileTransferable(list, armedPaths.stream().map(Path::toFile).toList());
     }
@@ -316,6 +354,50 @@ public final class FileListDragSupport<T> extends MouseAdapter implements AutoCl
         private boolean isOwnTransfer(TransferSupport support) {
             return !support.isDrop() && support.getTransferable() instanceof FileTransferable files
                     && files.source == list;
+        }
+    }
+
+    /// Supplies typed row values without exposing sparse placeholders as real files.
+    ///
+    /// @param <T> loaded row value type
+    @NotNullByDefault
+    private interface RowAccess<T> {
+        /// Returns the owned source list without changing its row type or model.
+        ///
+        /// @return page-owned list
+        JList<?> list();
+
+        /// Returns an exportable row value, or null for a missing or unloaded value.
+        ///
+        /// @param index existing row index
+        /// @return loaded value, or null when unavailable
+        @Nullable T valueAt(int index);
+    }
+
+    /// Preserves the original sparse-list load-state contract.
+    ///
+    /// @param list existing sparse list
+    /// @param <T> loaded row value type
+    @NotNullByDefault
+    private record LoadedRows<T>(JList<ChoiceListEntry<T>> list) implements RowAccess<T> {
+        /// Returns only successfully loaded values, never loading or error placeholders.
+        @Override
+        public @Nullable T valueAt(int index) {
+            @Nullable ChoiceListEntry<T> entry = list.getModel().getElementAt(index);
+            return entry != null && entry.status() == ChoiceLoadStatus.LOADED ? entry.value() : null;
+        }
+    }
+
+    /// Provides ordinary list values directly without casts, wrappers, or model replacement.
+    ///
+    /// @param list existing value list
+    /// @param <T> ordinary row value type
+    @NotNullByDefault
+    private record ValueRows<T>(JList<T> list) implements RowAccess<T> {
+        /// Returns the model value, allowing null rows to be rejected by the common gesture controller.
+        @Override
+        public @Nullable T valueAt(int index) {
+            return list.getModel().getElementAt(index);
         }
     }
 
