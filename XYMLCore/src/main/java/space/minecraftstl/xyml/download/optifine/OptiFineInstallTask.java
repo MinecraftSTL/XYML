@@ -153,9 +153,7 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
             throw new IOException("Minecraft client JAR not found: " + minecraftJar);
         }
         Path installerFile = Objects.requireNonNull(dest);
-        String originalMainClass = manifest.mainClass();
-        if (!GameComponentAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
-            throw new UnsupportedInstallationException(UnsupportedInstallationException.UNSUPPORTED_LAUNCH_WRAPPER);
+        String originalMainClass = resolveCompatibleMainClass(dependencyManager, manifest);
 
         List<Library> libraries = new ArrayList<>(4);
         libraries.add(optiFineLibrary);
@@ -247,6 +245,23 @@ public final class OptiFineInstallTask extends Task<GameInstancePatch> {
         ));
 
         dependencies.add(new space.minecraftstl.xyml.download.game.GameLibrariesTask(dependencyManager, manifest, true, getResult().getLibraries()));
+    }
+
+    /// Resolves the target manifest and requires a launch entry point supported by OptiFine.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest working manifest receiving the OptiFine patch
+    /// @return resolved supported launcher main class
+    /// @throws NoSuchGameInstanceException if the manifest cannot be resolved
+    /// @throws UnsupportedInstallationException if the resolved launcher is unsupported
+    static String resolveCompatibleMainClass(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest)
+            throws NoSuchGameInstanceException, UnsupportedInstallationException {
+        String originalMainClass = manifest.resolve(dependencyManager.getGameRepository()).mainClass();
+        if (originalMainClass == null || !GameComponentAnalyzer.FORGE_OPTIFINE_MAIN.contains(originalMainClass))
+            throw new UnsupportedInstallationException(UnsupportedInstallationException.UNSUPPORTED_LAUNCH_WRAPPER);
+        return originalMainClass;
     }
 
     /// Creates a task that installs OptiFine from a local installer JAR.
