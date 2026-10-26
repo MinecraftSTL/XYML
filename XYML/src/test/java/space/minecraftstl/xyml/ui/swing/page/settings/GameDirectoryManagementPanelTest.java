@@ -1,25 +1,12 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -55,6 +42,56 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Tests Swing game-directory selection and protected local management actions through the toolkit-neutral service.
 @NotNullByDefault
 public final class GameDirectoryManagementPanelTest {
+    /// Exports persisted roots rather than unsaved editor text and invalidates a replaced snapshot.
+    @Test
+    public void dragsPersistedAbsoluteAndRelativeDirectoriesWithoutUsingUnsavedEdits() {
+        GameDirectoryManagementEntry relative = entry("Relative", "instances/relative", true);
+        Path absolutePath = Metadata.CURRENT_DIRECTORY.resolve("absolute-game").normalize();
+        GameDirectoryManagementEntry absolute = entry("Absolute", absolutePath.toString(), false);
+        FakeGameDirectoryManagementService service = new FakeGameDirectoryManagementService(relative, absolute);
+        GameDirectoryManagementPanel panel = onEventDispatchThread(() -> new GameDirectoryManagementPanel(
+                service, new FakeInteraction(), new WorkerExecutor()));
+        onEventDispatchThread(() -> {
+            try {
+                JList<?> list = findDirectoryList(panel);
+                list.setSize(600, 240);
+                list.setSelectedIndex(0);
+                FileDragAssertions.assertFiles(list, List.of(Metadata.CURRENT_DIRECTORY.resolve("instances/relative")));
+                findComponent(panel, "gameDirectoryManagementEdit", AbstractButton.class).doClick();
+                findComponent(panel, "gameDirectoryManagementPath", JTextField.class).setText("unsaved/wrong-root");
+                FileDragAssertions.assertFiles(list, List.of(Metadata.CURRENT_DIRECTORY.resolve("instances/relative")));
+                service.update(relative.id(), new GameDirectoryManagementEdit("Moved", PortablePath.of("stored/moved")), false);
+                FileDragAssertions.assertPendingUnavailable(list);
+                list.setSelectedIndex(0);
+                FileDragAssertions.assertFiles(list, List.of(Metadata.CURRENT_DIRECTORY.resolve("stored/moved")));
+                list.setSelectedIndex(1);
+                FileDragAssertions.assertFiles(list, List.of(absolutePath));
+            } finally {
+                panel.close();
+            }
+        });
+    }
+
+    /// Invalid and blank persisted paths cannot fall back to the launcher's working directory.
+    @Test
+    public void refusesInvalidAndBlankPersistedDirectoryPaths() {
+        for (String invalid : List.of("\0", "")) {
+            FakeGameDirectoryManagementService service = new FakeGameDirectoryManagementService(entry("Invalid", invalid, true));
+            GameDirectoryManagementPanel panel = onEventDispatchThread(() -> new GameDirectoryManagementPanel(
+                    service, new FakeInteraction(), new WorkerExecutor()));
+            onEventDispatchThread(() -> {
+                try {
+                    JList<?> list = findDirectoryList(panel);
+                    list.setSize(600, 160);
+                    list.setSelectedIndex(0);
+                    FileDragAssertions.assertCannotStart(list);
+                } finally {
+                    panel.close();
+                }
+            });
+        }
+    }
+
     /// Distinguishes the active game directory with a filled folder icon without adding a radio indicator.
     @Test
     public void rendersDynamicDirectoryIcons() {

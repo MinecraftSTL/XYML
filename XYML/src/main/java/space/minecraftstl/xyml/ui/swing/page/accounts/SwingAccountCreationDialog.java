@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
 import net.miginfocom.swing.MigLayout;
@@ -58,6 +44,7 @@ import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.DefaultEditorKit;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Desktop;
@@ -432,6 +419,7 @@ public final class SwingAccountCreationDialog extends JDialog
             throw new IllegalArgumentException("Initial account method is not displayed: " + initialMethod);
         }
         methodTabs.setSelectedIndex(initialIndex);
+        setBusy(false);
         methodTabs.addChangeListener(event -> storeSelectedMethod());
         root.add(methodTabs, "grow, wrap");
 
@@ -510,9 +498,35 @@ public final class SwingAccountCreationDialog extends JDialog
         panel.add(new JLabel(i18n("account.methods")));
         JPanel choices = createMicrosoftModeChoices(microsoftBrowser, microsoftDevice);
         panel.add(choices, "growx, wrap");
-        JLabel hint = new JLabel("<html>" + i18n("account.methods.microsoft.hint") + "</html>");
+        JLabel hint = createMicrosoftConfigurationHint(gateway.isMicrosoftLoginAvailable());
         panel.add(hint, "span 2, growx, wrap");
         return panel;
+    }
+
+    /// Creates the configured Microsoft form hint or an actionable configuration error.
+    ///
+    /// @param available whether Microsoft authentication has a client ID
+    /// @return localized hint label with error styling when unavailable
+    static JLabel createMicrosoftConfigurationHint(boolean available) {
+        JLabel hint = new JLabel("<html>" + i18n(available
+                ? "account.methods.microsoft.hint" : "account.methods.microsoft.unavailable") + "</html>");
+        if (!available) {
+            @Nullable Color errorColor = UIManager.getColor("Component.error.focusedBorderColor");
+            if (errorColor != null)
+                hint.setForeground(errorColor);
+        }
+        return hint;
+    }
+
+    /// Tests whether a method may start while respecting operation ownership and Microsoft configuration.
+    ///
+    /// @param method selected authentication method
+    /// @param busy whether another operation owns the dialog
+    /// @param microsoftAvailable whether the configured Microsoft flow can start
+    /// @return true when the login command may be enabled
+    static boolean canStartAuthentication(AccountCreationMethod method, boolean busy, boolean microsoftAvailable) {
+        Objects.requireNonNull(method, "method");
+        return !busy && (method != AccountCreationMethod.MICROSOFT || microsoftAvailable);
     }
 
     /// Creates a mutually exclusive FlatLaf segmented control for Microsoft grant modes.
@@ -626,7 +640,11 @@ public final class SwingAccountCreationDialog extends JDialog
     /// Persists a user-selected method away from the EDT through the gateway dispatcher.
     private void storeSelectedMethod() {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || displayedMethods.size() == 1) {
+        if (closed.get()) {
+            return;
+        }
+        setBusy(operation.get() != null);
+        if (displayedMethods.size() == 1) {
             return;
         }
         AccountCreationMethod selectedMethod = methodAt(methodTabs.getSelectedIndex());
@@ -709,13 +727,14 @@ public final class SwingAccountCreationDialog extends JDialog
         methodTabs.setEnabled(!busy);
         offlineUsername.setEnabled(!busy);
         offlineUuid.setEnabled(!busy);
-        microsoftBrowser.setEnabled(!busy);
-        microsoftDevice.setEnabled(!busy);
+        boolean microsoftAvailable = gateway.isMicrosoftLoginAvailable();
+        microsoftBrowser.setEnabled(!busy && microsoftAvailable);
+        microsoftDevice.setEnabled(!busy && microsoftAvailable);
         authlibServer.setEnabled(!busy);
         authlibUsername.setEnabled(!busy);
         authlibPassword.setEnabled(!busy);
         portable.setEnabled(!busy);
-        login.setEnabled(!busy);
+        login.setEnabled(canStartAuthentication(methodAt(methodTabs.getSelectedIndex()), busy, microsoftAvailable));
         cancel.setText(i18n("button.cancel"));
     }
 

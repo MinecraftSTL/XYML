@@ -79,7 +79,7 @@ uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 's
 
 ʞuɐɥʇ osꞁɐ ǝM
 ǝɥ⟘ ˙[ʎɹoʇsᴉɥ sʇᴉ ʇnoɥᵷnoɹɥʇ sɹoʇnqᴉɹʇuoɔ puɐ sɹoɥʇnɐ s,ꞀƆWH](https://github.com/HMCL-dev/HMCL/graphs/contributors)
-ʞɹoʍ sɐ pǝʇuǝsǝɹdǝɹ ǝq ʇou pꞁnoɥs puɐ ʎɹoʇsᴉɥ ɯɐǝɹʇsdn ʇɐɥʇ oʇ sᵷuoꞁǝq ꞀWʎX ʎq pǝʇᴉɹǝɥuᴉ ʇuǝɯdoꞁǝʌǝp ᵷuᴉuunɹ-ᵷuoꞁ
+ʞɹoʍ ɹoɟ uǝʞɐʇsᴉɯ ǝq ʇou pꞁnoɥs puɐ ʎɹoʇsᴉɥ ɯɐǝɹʇsdn ʇɐɥʇ oʇ sᵷuoꞁǝq ꞀWʎX ʎq pǝʇᴉɹǝɥuᴉ ʇuǝɯdoꞁǝʌǝp ᵷuᴉuunɹ-ᵷuoꞁ
 ˙ʇɔǝɾoɹd ꞀWʎX ǝɥʇ ʎq ʎꞁǝꞁos pǝɔnpoɹd
 
 ## ǝsuǝɔᴉꞀ
@@ -88,7 +88,7 @@ uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 's
 :ꞀƆWH ɯoɹɟ pǝʇᴉɹǝɥuᴉ sʇuǝɯǝɹᴉnbǝɹ ꞁɐuoᴉʇᴉppɐ
 
 1. ʇɐɥʇ os ɹǝqɯnu uoᴉsɹǝʌ ɹo ǝɯɐu sʇᴉ ǝᵷuɐɥɔ ʎꞁqɐuosɐǝɹ ʇsnɯ noʎ 'ɯɐɹᵷoɹd sᴉɥʇ ɟo uoᴉsɹǝʌ pǝᴉɟᴉpoɯ ɐ ᵷuᴉʇnqᴉɹʇsᴉp uǝɥM
-   ɹǝpun) uoᴉsɹǝʌ ꞁɐuᴉᵷᴉɹo ǝɥʇ ɯoɹɟ pǝɥsᴉnᵷuᴉʇsᴉp ǝq uɐɔ ʇᴉ
+   ɹǝpun) (ꞀƆWH) ʇɔǝɾoɹd ɯɐǝɹʇsdn sʇᴉ puɐ (ꞀWʎX) ʇɔǝɾoɹd sᴉɥʇ ɥʇoq ɟo suoᴉsɹǝʌ ꞁɐuᴉᵷᴉɹo ǝɥʇ ɯoɹɟ pǝɥsᴉnᵷuᴉʇsᴉp ǝq uɐɔ ʇᴉ
    uᴉ pǝuᴉɟǝp ǝɹɐ uoᴉsɹǝʌ puɐ ǝɯɐu ɯɐɹᵷoɹd ǝɥ⟘ ˙([(ɔ)ㄥ uoᴉʇɔǝS ƐʌꞀԀ⅁](../LICENSE#L372-L374)
    ˙[`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java)
 2. ˙([(q)ㄥ uoᴉʇɔǝS ƐʌꞀԀ⅁](../LICENSE#L368-L370) ɹǝpun) ɯɐɹᵷoɹd ǝɥʇ ʎq pǝʎɐꞁdsᴉp sǝɔᴉʇou ʇɥᵷᴉɹʎdoɔ ǝʌoɯǝɹ ʇou ʇsnɯ noʎ

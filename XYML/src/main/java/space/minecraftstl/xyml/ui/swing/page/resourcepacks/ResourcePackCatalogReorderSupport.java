@@ -1,25 +1,12 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 
@@ -30,34 +17,130 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Point;
 import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Objects;
 
-/// Installs handle-only resource-pack priority dragging without exposing Swing to the model.
+/// Owns mutually exclusive handle-only priority moves and copy-only native resource-pack file dragging.
 @NotNullByDefault
-final class ResourcePackCatalogReorderSupport {
-    /// Prevents utility-class construction.
-    private ResourcePackCatalogReorderSupport() {
-    }
+final class ResourcePackCatalogReorderSupport implements AutoCloseable {
+    /// Component whose original handler and listeners are restored on close.
+    private final JList<ChoiceListEntry<ResourcePackCatalogItem>> list;
 
-    /// Installs drag support on the panel-owned enabled-row list.
+    /// Handler owned by the list before priority dragging was installed.
+    private final @Nullable TransferHandler previousHandler;
+
+    /// Native drag configuration before this lifecycle was installed.
+    private final boolean previousDragEnabled;
+
+    /// Original drop gap configuration.
+    private final javax.swing.DropMode previousDropMode;
+
+    /// Existing priority gesture controller.
+    private final ResourcePackReorderDragController controller;
+
+    /// Existing priority transfer handler using a process-local payload.
+    private final ResourcePackReorderTransferHandler reorderHandler;
+
+    /// File-only COPY handler composed around priority dragging.
+    private final FileListDragSupport<ResourcePackCatalogItem> fileDragging;
+
+    /// Whether all owned listeners have been released.
+    private boolean closed;
+
+    /// Installs both drag modes on the owning list.
     ///
     /// @param panel owning resource-pack catalog panel
-    static void install(ResourcePackCatalogPanel panel) {
-        JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.resourcePackList();
-        ResourcePackReorderDragController controller = new ResourcePackReorderDragController(panel);
+    private ResourcePackCatalogReorderSupport(ResourcePackCatalogPanel panel) {
+        list = panel.resourcePackList();
+        previousHandler = list.getTransferHandler();
+        previousDragEnabled = list.getDragEnabled();
+        previousDropMode = list.getDropMode();
+        controller = new ResourcePackReorderDragController(panel);
+        reorderHandler = new ResourcePackReorderTransferHandler(panel);
         list.setDragEnabled(false);
         list.setDropMode(javax.swing.DropMode.INSERT);
-        list.setTransferHandler(new ResourcePackReorderTransferHandler(panel));
+        list.setTransferHandler(reorderHandler);
         list.addMouseListener(controller);
         list.addMouseMotionListener(controller);
+        fileDragging = new FileListDragSupport<>(list, ResourcePackCatalogItem::path,
+                panel::fileDragContext, panel::isFileDragAllowed, point -> {
+                    int index = list.locationToIndex(point);
+                    return index >= 0 && RichChoiceListCellRenderer.dragHandleBounds(list, index).contains(point);
+                });
     }
 
+    /// Installs dragging only for this explicit file-backed catalog.
+    ///
+    /// @param panel owning resource-pack catalog panel
+    /// @return owned drag lifecycle
+    static ResourcePackCatalogReorderSupport install(ResourcePackCatalogPanel panel) {
+        return new ResourcePackCatalogReorderSupport(panel);
+    }
+
+    /// Restores the original handler and removes both gesture controllers.
+    @Override
+    public void close() {
+        if (closed) return;
+        closed = true;
+        fileDragging.close();
+        controller.reset();
+        reorderHandler.exportDone(list, null, TransferHandler.NONE);
+        list.removeMouseListener(controller);
+        list.removeMouseMotionListener(controller);
+        if (list.getTransferHandler() == reorderHandler) {
+            list.setTransferHandler(previousHandler);
+            list.setDragEnabled(previousDragEnabled);
+            list.setDropMode(previousDropMode);
+        }
+    }
+
+    /// Private process-local flavor that cannot be mistaken for files or path text.
+    private static final DataFlavor REORDER_FLAVOR = new DataFlavor(
+            DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ReorderTransferable.class.getName(),
+            "XYML resource-pack priority");
+
+    /// Process-local priority identity, never exposed as a file list or text.
+    @NotNullByDefault
+    static final class ReorderTransferable implements Transferable {
+        /// Source handler owning the active priority gesture.
+        private final TransferHandler owner;
+
+        /// Stable resource-pack path used only for identity checks.
+        private final Path path;
+
+        /// Creates one local priority identity.
+        ///
+        /// @param owner source priority handler
+        /// @param path actual resource-pack path
+        ReorderTransferable(TransferHandler owner, Path path) {
+            this.owner = owner;
+            this.path = path;
+        }
+
+        /// Returns only the process-local priority flavor.
+        @Override
+        public DataFlavor @org.jetbrains.annotations.Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[] {REORDER_FLAVOR};
+        }
+
+        /// Rejects file-list and text interpretations of priority gestures.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return REORDER_FLAVOR.equals(flavor);
+        }
+
+        /// Returns this immutable priority identity for the private local flavor.
+        @Override
+        public ReorderTransferable getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) throw new UnsupportedFlavorException(flavor);
+            return this;
+        }
+    }
 
     /// Mouse gesture controller that starts dragging only from an enabled row handle.
     @NotNullByDefault
@@ -70,6 +153,12 @@ final class ResourcePackCatalogReorderSupport {
 
         /// Armed row index, or -1 while inactive.
         private int armedIndex = -1;
+
+        /// Exact row path captured when the priority handle was pressed.
+        private @Nullable Path armedPath;
+
+        /// Repository and filter context captured when the handle was pressed.
+        private @Nullable Object armedContext;
 
         /// Pointer x-coordinate captured when armed.
         private int armedX;
@@ -104,6 +193,11 @@ final class ResourcePackCatalogReorderSupport {
             }
             list.setSelectedIndex(index);
             armedIndex = index;
+            armedContext = panel.fileDragContext();
+            if (list.getModel().getElementAt(index) instanceof ChoiceListEntry<?> entry
+                    && entry.value() instanceof ResourcePackCatalogItem item) {
+                armedPath = item.path();
+            }
             armedX = event.getX();
             armedY = event.getY();
             dragging = false;
@@ -113,6 +207,15 @@ final class ResourcePackCatalogReorderSupport {
         @Override
         public void mouseDragged(MouseEvent event) {
             if (armedIndex < 0 || dragging || !(event.getSource() instanceof JList<?> list)) {
+                return;
+            }
+            if (!Objects.equals(armedContext, panel.fileDragContext()) || !panel.isReorderInteractionAllowed()
+                    || list.getSelectedIndex() != armedIndex
+                    || armedIndex >= list.getModel().getSize()
+                    || !(list.getModel().getElementAt(armedIndex) instanceof ChoiceListEntry<?> entry)
+                    || !(entry.value() instanceof ResourcePackCatalogItem item)
+                    || !Objects.equals(armedPath, item.path())) {
+                reset();
                 return;
             }
             if (Math.abs(event.getX() - armedX) + Math.abs(event.getY() - armedY)
@@ -175,6 +278,8 @@ final class ResourcePackCatalogReorderSupport {
         /// Clears the current armed gesture state.
         private void reset() {
             armedIndex = -1;
+            armedContext = null;
+            armedPath = null;
             dragging = false;
         }
     }
@@ -184,6 +289,9 @@ final class ResourcePackCatalogReorderSupport {
     private static final class ResourcePackReorderTransferHandler extends TransferHandler {
         /// Owning catalog panel.
         private final ResourcePackCatalogPanel panel;
+
+        /// Context captured when one priority transfer starts.
+        private @Nullable Object draggedContext;
 
         /// Source list of the active drag, or null outside a drag.
         private @Nullable Component dragSource;
@@ -200,7 +308,7 @@ final class ResourcePackCatalogReorderSupport {
 
         /// Creates one path transfer for the loaded selected row.
         @Override
-        protected Transferable createTransferable(JComponent component) {
+        protected @Nullable Transferable createTransferable(JComponent component) {
             JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.resourcePackList();
             if (!panel.isReorderInteractionAllowed() || component != list) {
                 return null;
@@ -217,7 +325,8 @@ final class ResourcePackCatalogReorderSupport {
             }
             dragSource = component;
             draggedPath = selected.path();
-            return new StringSelection(draggedPath.toString());
+            draggedContext = panel.fileDragContext();
+            return new ReorderTransferable(this, draggedPath);
         }
 
         /// Enables move semantics for the resource-pack list.
@@ -232,10 +341,11 @@ final class ResourcePackCatalogReorderSupport {
             JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.resourcePackList();
             if (!panel.isReorderInteractionAllowed()
                     || !support.isDrop()
-                    || !support.isDataFlavorSupported(DataFlavor.stringFlavor)
+                    || !support.isDataFlavorSupported(REORDER_FLAVOR)
                     || support.getComponent() != dragSource
                     || dragSource != list
-                    || draggedPath == null) {
+                    || draggedPath == null
+                    || !Objects.equals(draggedContext, panel.fileDragContext())) {
                 return false;
             }
             @Nullable ResourcePackCatalogSnapshot snapshot = panel.displayedSnapshotValue();
@@ -269,17 +379,19 @@ final class ResourcePackCatalogReorderSupport {
 
         /// Clears one completed or cancelled drag.
         @Override
-        protected void exportDone(JComponent source, Transferable data, int action) {
+        protected void exportDone(JComponent source, @Nullable Transferable data, int action) {
             dragSource = null;
             draggedPath = null;
+            draggedContext = null;
             super.exportDone(source, data, action);
         }
 
         /// Reads and compares the dragged stable path.
         private boolean transferredPathMatches(TransferSupport support) {
             try {
-                Object value = support.getTransferable().getTransferData(DataFlavor.stringFlavor);
-                return value instanceof String text && draggedPath.toString().equals(text);
+                Object value = support.getTransferable().getTransferData(REORDER_FLAVOR);
+                return value instanceof ReorderTransferable transfer
+                        && transfer.owner == this && transfer.path.equals(draggedPath);
             } catch (UnsupportedFlavorException | IOException failure) {
                 return false;
             }

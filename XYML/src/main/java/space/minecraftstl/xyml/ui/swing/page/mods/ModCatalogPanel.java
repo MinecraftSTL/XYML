@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -32,6 +18,7 @@ import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
@@ -92,6 +79,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// interaction contracts. No JavaFX type or network-capable service is referenced.
 @NotNullByDefault
 public final class ModCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<ModCatalogItem> fileDragSupport;
+
     /// Shared row icon that remains available in headless and high-DPI Swing sessions.
     private static final Icon MOD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/format-list-bulleted.svg",
@@ -329,6 +319,12 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedMod,
                 this::importDroppedMods);
+        fileDragSupport = new FileListDragSupport<>(
+                choiceList.getList(), ModCatalogItem::path,
+                () -> List.of(model.snapshot().contentRevision(), searchField.getText()),
+                () -> !closed && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().listEnabled()
+                        && model.snapshot().writeStatus() != ModCatalogWriteStatus.BUSY);
         model.loadIfNeeded();
     }
 
@@ -1422,6 +1418,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         closed = true;
+        if (fileDragSupport != null) fileDragSupport.close();
         dropRegistration.close();
         searchField.setEnabled(false);
         filterBox.setEnabled(false);

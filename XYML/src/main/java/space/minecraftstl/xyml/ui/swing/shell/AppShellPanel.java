@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import net.miginfocom.swing.MigLayout;
@@ -220,7 +206,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (instancesPage instanceof InstancesPanel panel) {
             panel.setRevealDefaultPageCommand(this::revealDefaultPage);
         }
-        navigationRail = new ShellNavigationRail(pagePresentations, this::togglePage);
+        navigationRail = new ShellNavigationRail(pagePresentations, this::returnHome, this::togglePage);
         toolbar = new ShellToolbarPanel(
                 Objects.requireNonNull(windowTitle, "windowTitle"),
                 toolbarModels.home(),
@@ -556,6 +542,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         navigateTo(destination);
     }
 
+    /// Returns to the persistent homepage without repeating management restoration while already at home.
+    private void returnHome() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || navigationState.selectedPage() == null) {
+            return;
+        }
+        showDefaultPage();
+    }
+
     /// Reveals the persistent main page and clears every side-navigation selection.
     private void showDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
@@ -566,12 +561,11 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Exposes the cached persistent page without starting another management transition.
     private void revealDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable ShellPageId previousPage = navigationState.selectedPage();
         navigationState.clear();
         pageDeck.showPage(
                 instancesPage,
                 true,
-                transitionDirection(previousPage, ShellPageId.INSTANCES));
+                SwingContentTransition.Direction.VERTICAL_BACKWARD);
         updateSelection(null);
     }
 
@@ -745,8 +739,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     private static SwingContentTransition.Direction transitionDirection(
             @Nullable ShellPageId previous,
             ShellPageId destination) {
-        ShellPageId origin = previous != null ? previous : ShellPageId.INSTANCES;
-        return NAVIGATION_ORDER.indexOf(destination) > NAVIGATION_ORDER.indexOf(origin)
+        int originIndex = previous == null ? -1 : NAVIGATION_ORDER.indexOf(previous);
+        return NAVIGATION_ORDER.indexOf(destination) > originIndex
                 ? SwingContentTransition.Direction.VERTICAL_FORWARD
                 : SwingContentTransition.Direction.VERTICAL_BACKWARD;
     }

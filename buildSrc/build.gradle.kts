@@ -16,6 +16,7 @@ dependencies {
     compileOnly(libs.jetbrains.annotations)
 
     implementation(libs.gson)
+    implementation(libs.icu4j)
     implementation(libs.kala.compress.tar)
     implementation(libs.kala.compress.ar)
     implementation(libs.weburl)
@@ -35,10 +36,12 @@ java {
 
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
+    options.release.set(17)
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // ProjectBuilder injects compatibility classes through java.lang on modular JDKs.
     jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
 }
 

@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import com.formdev.flatlaf.FlatClientProperties;
@@ -26,6 +12,7 @@ import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -179,6 +166,8 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.choiceList().doLayout();
             panel.choiceList().getViewport().setExtentSize(new Dimension(320, 160));
             panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(world.path()));
             panel.choiceList().getList().setSelectedIndex(0);
             layoutRecursively(panel);
 

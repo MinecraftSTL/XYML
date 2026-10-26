@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -31,6 +17,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
@@ -43,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +40,25 @@ public final class SelectedRepositoryInstancesModelTest {
     /// Neutral fixed-size icon used by model-only fixtures.
     private static final InstanceIconData TEST_ICON = new InstanceIconData(
             new int[InstanceIconData.PIXEL_COUNT]);
+
+    /// Equal instance IDs resolve only within the current repository, and closed wrappers expose no local path.
+    @Test
+    public void resolvesRootsThroughCurrentDirectoryWithoutLoadingRows() {
+        GameInstanceID id = instanceId("same-instance");
+        FakeInstancesModel first = new FakeInstancesModel("first-repository", id);
+        FakeInstancesModel second = new FakeInstancesModel("second-repository", id);
+        MutableModelSource source = new MutableModelSource(first);
+        EdtDispatcher.executeAndWait(() -> {
+            SelectedRepositoryInstancesModel model = new SelectedRepositoryInstancesModel(source);
+            assertEquals(Path.of("first-repository", "versions", id.id()), model.instanceRoot(id));
+            long originalContext = model.selectionContextRevision();
+            source.switchTo(second);
+            assertTrue(model.selectionContextRevision() > originalContext);
+            assertEquals(Path.of("second-repository", "versions", id.id()), model.instanceRoot(id));
+            model.close();
+            assertNull(model.instanceRoot(id));
+        });
+    }
 
     /// A directory switch replaces all visible state and closes the previous repository model.
     @Test
@@ -214,6 +221,7 @@ public final class SelectedRepositoryInstancesModelTest {
         /// Stable item returned by this repository.
         private final InstanceListItem item;
 
+
         /// Stable repository snapshot.
         private final InstancesSnapshot snapshot;
 
@@ -251,6 +259,12 @@ public final class SelectedRepositoryInstancesModelTest {
             snapshot = new InstancesSnapshot(
                     OptionalInt.of(0), 1, 0L, status,
                     false, true, true, true, true);
+        }
+
+        /// Returns a stable synthetic root without requesting row metadata or files.
+        @Override
+        public Path instanceRoot(GameInstanceID instanceId) {
+            return Path.of(status, "versions", instanceId.id());
         }
 
         /// Returns the stable snapshot.

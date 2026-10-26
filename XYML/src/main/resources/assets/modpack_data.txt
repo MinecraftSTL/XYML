@@ -1,6 +1,6 @@
 #
 # Hello Minecraft! Launcher
-# Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors
+# Copyright (C) 2025 The HMCL Authors
 #
 # mcmod.cn
 # Copyright (C) 2025. All Rights Reserved.
@@ -498,7 +498,7 @@ other-body;504;;Other Body;;
 ;506;;莱姆星云;Lime Nebula;LN
 void-genesis;507;;Void Genesis;;
 create-flavored;508;;Create Flavored;;
-terrafirmagreg-vintage;509;;群峦格雷;TerraFirmaGreg;TFG
+terrafirmagreg-modern;509;;群峦格雷;TerraFirmaGreg;TFG
 create-astral;510;;机械动力：星辰;Create: Astral;
 ;511;;起源创造;CreateOrigin;CO
 random-item-skyblock-recondite-i;512;;Random Item Island - Recondite I;;
@@ -726,7 +726,7 @@ atlanabyss;735;;亚特兰深渊;AtlanAbyss;
 all-the-mods-9-no-frills;738;;All the Mods 9 - No Frills;;ATM9NF
 toms-cobblemon;739;;Tom's Cobblemon;;
 life-in-the-village-3;740;;Life in the village 3;;LitV3
-;741;;联缘：NEXUS;;
+;741;;NEXUSrpg;;
 ;742;;Create: Cinematic;;
 ;743;;神秘纪元;Thaumic Epoch;ThE
 ;745;;FTB Genesis;;
@@ -998,7 +998,7 @@ c2mse2;1016;;Create 2 Mekanism: Sky Edition 2;;C2MSE2
 kumo-o-tagayasu;1017;;耕云钓月;Kumo O Tagayasu;KOTS
 ;1018;;无限战争4;Infinity War4;INF4
 ;1019;;群峦传说：工业长路;;
-;1020;;自然冒险     新生;Nature Adventure Newborn;NAB
+;1020;;自然冒险 新生;Nature Adventure Newborn;NAB
 asig;1021;;浅忆基础整合;Asai Integrated Modpack;
 create-star-valley;1022;;Create: Gears of History;;
 ;1023;;阿尔法计划;AlphaPlan;AP
@@ -1164,7 +1164,7 @@ pokehaan-craft-2;1186;;Pokehaan Craft 2;;
 project-nope-zone;1187;;Project Nope Zone;;PNZ
 all-the-simple-zero;1188;;一切简易;All the Simple;ATS
 ;1189;;匠战妖域;Tinkers' Warfare Demon Realm;twdr
-;1190;;空想生存;;
+reverie-survival;1190;;空想生存;;
 ;1191;;东方起源鉴;Touhou Origins Annals;TOA
 realm-of-destiny;1192;;生命之境;Realm of Destiny;ROD
 ;1193;;奇妙的世界;Special World;
@@ -1498,3 +1498,20 @@ statech-industry-2;1522;;StaTech Industry 2;;
 create-village-to-sky;1524;;机械动力：下村上天;Create Village to Sky;
 essence-odyssey;1525;;本源远征;Essence Odyssey;
 ftb-presents-architects-exodus;1526;;FTB Presents Architect's Exodus;;
+;1527;;机械动力 x 格雷科技;Create x GregTech;CTGT
+infinity-legacy-2;1528;;无限遗产2;Infinity Legacy 2;IL2
+;1529;;千界万刃;Myriad Dimension Blades;
+;1530;;更好的我的世界铁路;Better MTR;BMTR
+space-tech-integrated;1531;;航天科技：集成;Space Tech: Integrated;
+;1532;;AE-无限工厂;AE2 Infinite Factory;AIF
+verdant-sky;1533;;Verdant Sky;;
+;1534;;空天工程师;Aerogineer;
+generations-modpack-forge;1535;;Generations;;
+;1536;;农夫但是劲大;Farmers But Powerful;
+;1537;;神道传说;;GR
+createintegrated;1538;;Create Integrated;;
+vcmc1-16-5;1539;;唯我生存;VeselfCraft;VCMC
+;1540;;侏罗纪重生之旅;Jurassic Reborn;
+;1541;;暗涌：深岩恐惧;Undercurrent: Fear In the Deep Rock;FIDR
+cube-warper;1542;;Cube Warper;;
+ftb-evolution-2;1543;;FTB Evolution 2;;

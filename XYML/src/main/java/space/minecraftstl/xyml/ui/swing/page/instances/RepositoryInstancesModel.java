@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -41,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
@@ -212,6 +199,16 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             entries.add(new InstanceSearchEntry(entry.id(), entry.id().id()));
         }
         return List.copyOf(entries);
+    }
+
+    /// Returns a known instance root using only the current repository's pure path resolver.
+    @Override
+    public @Nullable Path instanceRoot(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        synchronized (stateLock) {
+            if (closed || state.source().entries().stream().noneMatch(entry -> entry.id().equals(instanceId))) return null;
+            return repository.instanceRoot(instanceId);
+        }
     }
 
     /// Resolves one instance's analyzed version and primary loader on the background executor.
@@ -953,6 +950,14 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return new InstanceAddonContext(Objects.requireNonNull(instanceId, "instanceId"), null, null);
         }
 
+        /// Returns an instance root without I/O, or null for a non-file-backed repository adapter.
+        ///
+        /// @param instanceId known stable instance identifier
+        /// @return local instance root, or null when unsupported
+        default @Nullable Path instanceRoot(GameInstanceID instanceId) {
+            return null;
+        }
+
         /// Performs a blocking repository refresh on a background thread.
         void refresh();
     }
@@ -1002,6 +1007,12 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                                     repository.getGameVersion(manifest).orElse(null),
                                     unknownVersionDetail)))
                     .toList();
+        }
+
+        /// Returns the actual instance root rather than the potentially shared run directory.
+        @Override
+        public Path instanceRoot(GameInstanceID instanceId) {
+            return repository.getInstanceRoot(instanceId);
         }
 
         /// Returns the persisted selected repository instance ID.

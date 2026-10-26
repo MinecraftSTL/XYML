@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -31,6 +17,7 @@ import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogModel;
@@ -79,6 +66,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// are created on the supplied executor only after the user selects a visible loaded world row.
 @NotNullByDefault
 public final class DataPackManagementPanel extends JPanel implements AutoCloseable {
+    /// Owned file dragging for the world selector's large icon rows.
+    private @Nullable FileListDragSupport<WorldCatalogItem> worldFileDragSupport;
+
+    /// Owned file dragging for actual data-pack files and directories.
+    private @Nullable FileListDragSupport<DataPack.Pack> dataPackFileDragSupport;
+
     /// Fallback icon for a world row in the two-pane data-pack manager.
     private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/image.svg",
@@ -343,6 +336,16 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 this,
                 this::supportsDroppedDataPack,
                 this::importDroppedDataPacks);
+        worldFileDragSupport = new FileListDragSupport<>(
+                worldChoiceList.getList(), WorldCatalogItem::path,
+                () -> worlds.snapshot().contentRevision(),
+                () -> !closed.get() && !dataPackOperationPending
+                        && displayedWorldSnapshot.contentRevision() == worlds.snapshot().contentRevision()
+                        && worlds.snapshot().listEnabled());
+        dataPackFileDragSupport = new FileListDragSupport<>(
+                dataPackChoiceList.getList(), DataPack.Pack::getPath,
+                () -> List.of(dataPackSource.sourceRevision(), searchDataPacksField.getText()),
+                () -> !closed.get() && !dataPackOperationPending);
     }
 
     /// Returns the visible tab title.
@@ -1260,6 +1263,8 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Releases all listeners and owned model resources on the Swing event-dispatch thread.
     private void closeOnEventDispatchThread() {
         searchTimer.stop();
+        if (worldFileDragSupport != null) worldFileDragSupport.close();
+        if (dataPackFileDragSupport != null) dataPackFileDragSupport.close();
         dropRegistration.close();
         worldSubscription.unsubscribe();
         worldChoiceList.getList().removeListSelectionListener(worldSelectionListener);

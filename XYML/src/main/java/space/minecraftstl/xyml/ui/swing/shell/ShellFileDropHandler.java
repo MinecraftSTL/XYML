@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -161,6 +147,24 @@ public final class ShellFileDropHandler extends TransferHandler {
                     () -> handler.textRoutes.remove(route)));
         });
         return Objects.requireNonNull(result.get(), "text route registration was not created");
+    }
+
+    /// Tests an existing page-scoped route for a custom child export handler without decoding native drop data.
+    ///
+    /// @param support proposed transfer targeting a child component
+    /// @return whether the nearest ancestor handler accepts this transfer
+    public static boolean canImportAncestor(TransferSupport support) {
+        @Nullable ShellFileDropHandler handler = findAncestorHandler(support.getComponent());
+        return handler != null && handler.canImport(support);
+    }
+
+    /// Delivers a child drop to its existing nearest page-scoped route.
+    ///
+    /// @param support accepted transfer targeting a child component
+    /// @return whether a route imported the transfer
+    public static boolean importAncestor(TransferSupport support) {
+        @Nullable ShellFileDropHandler handler = findAncestorHandler(support.getComponent());
+        return handler != null && handler.importData(support);
     }
 
     /// Reports whether a custom child transfer handler can delegate text to a shell ancestor.

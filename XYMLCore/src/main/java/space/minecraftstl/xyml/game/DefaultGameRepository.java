@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.game;
 
 import com.google.gson.JsonParseException;
@@ -183,17 +169,18 @@ public class DefaultGameRepository implements GameRepository {
 
                     if (Files.notExists(json)) {
                         List<Path> jsons = FileUtils.listFilesByExtension(dir, "json");
-                        if (jsons.size() == 1) {
-                            LOG.info("Renaming json file " + jsons.get(0) + " to " + json);
+                        @Nullable Path candidate = jsons.size() == 1 ? jsons.get(0) : findInstanceManifest(jsons);
+                        if (candidate != null) {
+                            LOG.info("Renaming json file " + candidate + " to " + json);
 
                             try {
-                                Files.move(jsons.get(0), json);
+                                Files.move(candidate, json);
                             } catch (IOException e) {
                                 LOG.warning("Cannot rename json file, ignoring instance " + id, e);
                                 return Stream.empty();
                             }
 
-                            Path jar = dir.resolve(FileUtils.getNameWithoutExtension(jsons.get(0)) + ".jar");
+                            Path jar = dir.resolve(FileUtils.getNameWithoutExtension(candidate) + ".jar");
                             if (Files.exists(jar)) {
                                 try {
                                     Files.move(jar, dir.resolve(id + ".jar"));
@@ -261,6 +248,28 @@ public class DefaultGameRepository implements GameRepository {
         newStatus.instances.putAll(loadedInstances);
         gameVersions.clear();
         this.status = newStatus;
+    }
+
+    /// Finds the first usable instance manifest in file-name order, leaving candidate files unchanged.
+    ///
+    /// @param jsons candidate JSON files that may also contain unrelated settings or malformed content
+    /// @return a manifest with a main class, inheritance, or patches, or null if none is usable
+    private static @Nullable Path findInstanceManifest(List<Path> jsons) {
+        for (Path json : jsons.stream().sorted(Comparator.comparing(FileUtils::getName)).toList()) {
+            try {
+                GameInstanceManifest manifest = readInstanceManifest(json);
+                @Nullable String mainClass = manifest.mainClass();
+                if ((mainClass != null && !mainClass.isBlank())
+                        || manifest.inheritsFrom() != null
+                        || !manifest.getPatches().isEmpty()) {
+                    return json;
+                }
+            } catch (IOException | RuntimeException ignore) {
+                LOG.info("Ignoring invalid instance manifest candidate " + json
+                        + " (" + ignore.getClass().getSimpleName() + ")");
+            }
+        }
+        return null;
     }
 
     private static GameInstanceManifest readInstanceManifest(Path json) throws IOException, JsonParseException {

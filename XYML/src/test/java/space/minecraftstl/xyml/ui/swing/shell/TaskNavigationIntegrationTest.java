@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -46,6 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,6 +93,33 @@ public final class TaskNavigationIntegrationTest {
                     .allMatch(snapshot -> snapshot.status() == TaskExecutionStatus.SUCCEEDED));
             assertEquals(1, fixture.taskPageCreations.get());
         }
+    }
+
+    /// Returning home preserves the cached task page and its manually selected history tab.
+    @Test
+    public void homepageNavigationRetainsManualTaskTabAndSessionRecords() {
+        EdtDispatcher.executeAndWait(() -> {
+            try (ShellFixture fixture = new ShellFixture()) {
+                fixture.panel.openRunningTasks();
+                TaskManagerPanel page = fixture.taskPage();
+                JTabbedPane tabs = fixture.tabs();
+                ShellNavigationRail rail = assertInstanceOf(
+                        ShellNavigationRail.class,
+                        fixture.panel.navigationButton(ShellPageId.TASKS).getParent().getParent());
+                for (int historyTab : new int[] {1, 2}) {
+                    tabs.setSelectedIndex(historyTab);
+                    rail.homeButton().doClick(0);
+                    rail.homeButton().doClick(0);
+                    assertNull(fixture.panel.selectedPage());
+                    assertTrue(rail.homeButton().isSelected());
+                    fixture.panel.navigationButton(ShellPageId.TASKS).doClick(0);
+                    assertSame(page, fixture.panel.activePage());
+                    assertEquals(historyTab, tabs.getSelectedIndex());
+                    assertEquals(1, fixture.taskPageCreations.get());
+                    assertTrue(fixture.registry.snapshots().isEmpty());
+                }
+            }
+        });
     }
 
     /// Background completion never steals a history tab and local launches do not navigate away.

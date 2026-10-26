@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import com.formdev.flatlaf.FlatDarkLaf;
@@ -82,6 +68,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -194,9 +181,11 @@ final class NBTEditorPanelTest {
             assertEquals(1, ioExecutor.pendingCount());
             ioExecutor.runNext();
             awaitControllerStatus(controller, NBTEditorStatus.READY);
-            assertFalse(controller.snapshot().document().requiresRepair());
-            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
-            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            onEdt(() -> {
+                assertFalse(controller.snapshot().document().requiresRepair());
+                assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+                assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            });
             assertEquals(1, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
         } finally {
             panel.close();
@@ -254,15 +243,44 @@ final class NBTEditorPanelTest {
             assertEquals(1, ioExecutor.pendingCount());
             ioExecutor.runNext();
             awaitControllerStatus(controller, NBTEditorStatus.READY);
-            assertFalse(controller.snapshot().document().requiresRepair());
-            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
-            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            onEdt(() -> {
+                assertFalse(controller.snapshot().document().requiresRepair());
+                assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+                assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            });
             assertEquals(8192L, Files.size(source));
         } finally {
             panel.close();
             ioExecutor.runAll();
             flushEdt();
         }
+    }
+
+    /// Evaluates even an already-satisfied condition on the EDT rather than taking a test-thread shortcut.
+    @Test
+    void evaluatesSatisfiedWaitConditionOnEdt() {
+        AtomicBoolean observedOnEdt = new AtomicBoolean();
+        awaitEdtCondition(() -> {
+            observedOnEdt.set(SwingUtilities.isEventDispatchThread());
+            return true;
+        });
+        assertTrue(observedOnEdt.get());
+    }
+
+    /// Observes a queued publication only after its inline presentation callback has completed.
+    @Test
+    void waitsForQueuedPublicationBeforeObservingPresentation() {
+        AtomicBoolean ready = new AtomicBoolean();
+        AtomicBoolean rendered = new AtomicBoolean();
+        EdtDispatcher.executeLater(() -> {
+            ready.set(true);
+            rendered.set(true);
+        });
+        awaitEdtCondition(() -> {
+            assertTrue(SwingUtilities.isEventDispatchThread());
+            return ready.get();
+        });
+        assertTrue(rendered.get());
     }
 
     /// Keeps fixed heading actions visible when the displayed source path exceeds the available width.
@@ -1571,17 +1589,17 @@ final class NBTEditorPanelTest {
         EdtDispatcher.executeAndWait(() -> { });
     }
 
-    /// Waits for an asynchronous controller transition while keeping the Swing event queue responsive.
+    /// Waits outside the EDT, evaluating the condition on the EDT after previously queued publication callbacks.
     ///
-    /// @param condition expected state predicate
+    /// @param condition non-blocking expected-state predicate executed on the EDT
     private static void awaitEdtCondition(BooleanSupplier condition) {
+        assertFalse(SwingUtilities.isEventDispatchThread(), "The controller waiter must run outside the EDT");
         BooleanSupplier selected = Objects.requireNonNull(condition, "condition");
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
-        while (!selected.getAsBoolean() && System.nanoTime() < deadline) {
-            flushEdt();
+        while (!onEdt(selected::getAsBoolean) && System.nanoTime() < deadline) {
             Thread.yield();
         }
-        assertTrue(selected.getAsBoolean(), "Timed out waiting for the Swing controller transition");
+        assertTrue(onEdt(selected::getAsBoolean), "Timed out waiting for the Swing controller transition");
     }
 
     /// Waits for one controller status from a non-EDT test call.

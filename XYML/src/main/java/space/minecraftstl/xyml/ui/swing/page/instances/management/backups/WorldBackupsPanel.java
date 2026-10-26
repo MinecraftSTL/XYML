@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -23,16 +9,20 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -41,14 +31,21 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import javax.swing.event.ChangeListener;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.HierarchyEvent;
+import java.awt.event.HierarchyListener;
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
@@ -65,6 +62,27 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// parsing, compression, decompression, deletion, and desktop operations remain asynchronous.
 @NotNullByDefault
 public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
+    /// Bundled archive icon using the same logical icon size as the shared rich catalog rows.
+    private static final Icon BACKUP_ICON = new FlatSVGIcon("assets/swing/icons/save.svg", 40, 40);
+
+    /// Owned copy-only dragging of the original backup ZIP files.
+    private final FileListDragSupport<WorldBackupArchive> fileDragging;
+
+    /// Bounded page-owned thumbnail state; the renderer never opens or queues archive reads.
+    private final WorldBackupIconCache iconCache;
+
+    /// Visibility predicate, injectable for headless viewport integration tests.
+    private final Predicate<JList<?>> iconVisibility;
+
+    /// Coalesces geometry changes into one latest viewport demand calculation.
+    private final ChangeListener iconViewportListener = event -> scheduleVisibleIcons();
+
+    /// Pauses hidden pages without treating temporary hierarchy removal as terminal disposal.
+    private final HierarchyListener iconHierarchyListener = this::iconHierarchyChanged;
+
+    /// Whether one deferred viewport request is already queued on the EDT.
+    private boolean iconRequestScheduled;
+
     /// Catalog performing all background filesystem and Core world operations.
     private final WorldBackupCatalog catalog;
 
@@ -82,6 +100,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
 
     /// Displays existing backup archives and drives archive-specific commands.
     private final JList<WorldBackupArchive> archiveList = new RowBoundsCheckedList<>(archiveModel, RowBoundsCheckedList.BlankClickPolicy.CLEAR);
+
+    /// Shared scroll viewport used to select only currently visible archive rows.
+    private final JScrollPane archiveScroll = new JScrollPane(archiveList);
 
     /// Starts a fresh shallow directory index.
     private final JButton refreshButton = new JButton();
@@ -133,7 +154,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                         Objects.requireNonNull(repository, "repository"),
                         Objects.requireNonNull(instanceId, "instanceId"),
                         Objects.requireNonNull(executor, "executor")),
-                new DefaultWorldBackupInteractions(executor));
+                new DefaultWorldBackupInteractions(executor), executor);
     }
 
     /// Creates a page with injected catalog and interaction boundaries for focused Swing tests.
@@ -141,12 +162,41 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     /// @param catalog asynchronous local-world backup catalog
     /// @param interactions native dialog and desktop boundary
     WorldBackupsPanel(WorldBackupCatalog catalog, WorldBackupInteractions interactions) {
+        this(catalog, interactions, Schedulers.io());
+    }
+
+    /// Creates a page using the caller-owned background executor for optional thumbnail work.
+    ///
+    /// @param catalog asynchronous shallow catalog
+    /// @param interactions native dialog boundary
+    /// @param executor caller-owned background executor, never closed by the page
+    WorldBackupsPanel(WorldBackupCatalog catalog, WorldBackupInteractions interactions, Executor executor) {
+        this(catalog, interactions, executor, WorldBackupThumbnailLoader::load, list -> list.isShowing());
+    }
+
+    /// Creates a page with deterministic thumbnail loading and visibility boundaries for headless tests.
+    ///
+    /// @param catalog asynchronous shallow catalog
+    /// @param interactions native dialog boundary
+    /// @param executor caller-owned background executor
+    /// @param thumbnailLoader blocking background thumbnail boundary
+    /// @param iconVisibility current real or simulated list visibility
+    WorldBackupsPanel(
+            WorldBackupCatalog catalog,
+            WorldBackupInteractions interactions,
+            Executor executor,
+            WorldBackupIconCache.Loader thumbnailLoader,
+            Predicate<JList<?>> iconVisibility) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.iconVisibility = Objects.requireNonNull(iconVisibility, "iconVisibility");
+        iconCache = new WorldBackupIconCache(executor, thumbnailLoader, BACKUP_ICON, archiveList::repaint);
         configureComponents();
         updateControls();
+        fileDragging = FileListDragSupport.forValues(archiveList, WorldBackupArchive::archive,
+                () -> requestSequence, () -> !closed.get() && !operationPending);
     }
 
     /// Returns the tab title used by an instance-management host.
@@ -194,7 +244,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.executeAndWait(this::closeOnEventDispatchThread);
     }
 
-    /// Builds the unframed compact page structure and wires user commands.
+    /// Builds the unframed page with large archive rows and the existing backup commands.
     private void configureComponents() {
         setName("worldBackupsPage");
         setOpaque(false);
@@ -207,17 +257,15 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         archiveList.setName("worldBackupsList");
         archiveList.setOpaque(false);
         archiveList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        DefaultListCellRenderer archiveRenderer = new DefaultListCellRenderer();
-        archiveList.setCellRenderer((list, value, index, selected, focus) -> {
-            JLabel label = (JLabel) archiveRenderer.getListCellRendererComponent(
-                    list,
-                    value,
-                    index,
-                    selected,
-                    focus);
-            label.setOpaque(selected);
-            return label;
-        });
+        archiveList.setFixedCellHeight(RichChoiceListCellRenderer.ROW_HEIGHT);
+        archiveList.addHierarchyListener(iconHierarchyListener);
+        archiveList.setCellRenderer(new RichValueListCellRenderer<>(
+                WorldBackupArchive::fileName,
+                WorldBackupsPanel::formatArchiveDetail,
+                archive -> "",
+                iconCache::viewFor,
+                archive -> archive.archive().toString(),
+                archive -> false));
         archiveList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 updateArchiveDetail();
@@ -283,7 +331,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         sourceRow.add(createButton);
         content.add(sourceRow, "growx");
 
-        JScrollPane archiveScroll = new JScrollPane(archiveList);
+        archiveScroll.getViewport().addChangeListener(iconViewportListener);
         archiveScroll.setName("worldBackupsScroll");
         archiveScroll.setBorder(BorderFactory.createEmptyBorder());
         SwingTransparency.revealBackgroundThroughScrollPane(archiveScroll);
@@ -316,6 +364,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (closed.get() || operationPending) {
             return;
         }
+        iconCache.retryFailures();
         long request = beginOperation(i18n("swing.world_backup.loading"));
         try {
             observeSnapshot(catalog.load(), request, i18n("swing.world_backup.loaded"));
@@ -401,16 +450,25 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         long request = beginOperation(i18n("swing.world_backup.deleting"));
         try {
             observeDeletion(
-                    catalog.deleteBackup(archive, mode),
+                    deleteAfterThumbnailReads(archive, mode),
                     request,
                     i18n("swing.world_backup.deleted"),
-                    () -> catalog.deleteBackup(archive, DeletionMode.PERMANENT),
+                    () -> deleteAfterThumbnailReads(archive, DeletionMode.PERMANENT),
                     () -> interactions.confirmPermanentFallback(this, archive),
                     true,
                     () -> pendingRetry = () -> deleteBackup(archive, DeletionMode.PERMANENT));
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
+    }
+
+    /// Defers a confirmed delete until readers close, without blocking the EDT or cancelling a confirmed action on close.
+    ///
+    /// @param archive exact archive selected for deletion
+    /// @param mode confirmed deletion mode
+    /// @return original catalog mutation after all thumbnail file handles are released
+    private CompletionStage<WorldBackupSnapshot> deleteAfterThumbnailReads(WorldBackupArchive archive, DeletionMode mode) {
+        return iconCache.pauseAndDrain().thenCompose(ignored -> catalog.deleteBackup(archive, mode));
     }
 
     /// Schedules one exact backup restoration and captures the same request for retry.
@@ -437,6 +495,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private long beginOperation(String status) {
         EdtDispatcher.requireEventDispatchThread();
         operationPending = true;
+        iconCache.setPaused(true);
         requestSequence++;
         statusLabel.setText(Objects.requireNonNull(status, "status"));
         updateControls();
@@ -574,6 +633,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         @Nullable WorldBackupSource previousSource = selectedSource();
         @Nullable WorldBackupArchive previousArchive = selectedArchive();
         displayedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
+        iconCache.setIndex(snapshot.archives());
         sourceModel.removeAllElements();
         for (WorldBackupSource source : snapshot.sources()) {
             sourceModel.addElement(source);
@@ -585,6 +645,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         restoreSourceSelection(previousSource);
         restoreArchiveSelection(previousArchive);
         updateArchiveDetail();
+        scheduleVisibleIcons();
     }
 
     /// Restores a source selection by directory path, falling back to the first source.
@@ -641,6 +702,51 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         boolean archiveSelected = selectedArchive() != null;
         restoreButton.setEnabled(interactive && archiveSelected);
         deleteButton.setEnabled(interactive && archiveSelected);
+        scheduleVisibleIcons();
+    }
+
+    /// Pauses actual hidden pages immediately while preserving cached thumbnails for a later return.
+    ///
+    /// @param event component hierarchy or visibility transition
+    private void iconHierarchyChanged(HierarchyEvent event) {
+        if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
+            if (!iconVisibility.test(archiveList)) iconCache.setPaused(true);
+            scheduleVisibleIcons();
+        }
+    }
+
+    /// Coalesces viewport and index changes without loading through renderer or layout callbacks.
+    private void scheduleVisibleIcons() {
+        if (closed.get() || iconRequestScheduled) return;
+        iconRequestScheduled = true;
+        SwingUtilities.invokeLater(() -> {
+            iconRequestScheduled = false;
+            updateVisibleIcons();
+        });
+    }
+
+    /// Requests visible rows first and at most two neighbors on each side after layout provides a real view rectangle.
+    private void updateVisibleIcons() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) return;
+        if (!activated || operationPending || !iconVisibility.test(archiveList)) {
+            iconCache.setPaused(true);
+            return;
+        }
+        int first = archiveList.getFirstVisibleIndex();
+        int last = Math.min(archiveList.getLastVisibleIndex(), archiveModel.size() - 1);
+        if (first < 0 || last < first) {
+            iconCache.setPaused(true);
+            return;
+        }
+        List<WorldBackupArchive> wanted = new ArrayList<>();
+        for (int index = first; index <= last; index++) wanted.add(archiveModel.get(index));
+        for (int distance = 1; distance <= 2; distance++) {
+            if (first - distance >= 0) wanted.add(archiveModel.get(first - distance));
+            if (last + distance < archiveModel.size()) wanted.add(archiveModel.get(last + distance));
+        }
+        iconCache.setDemand(List.copyOf(wanted));
+        iconCache.setPaused(false);
     }
 
     /// Returns the currently selected shallow source directory, if any.
@@ -724,6 +830,10 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     /// Disables commands and detaches displayed model data during terminal page cleanup.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        archiveScroll.getViewport().removeChangeListener(iconViewportListener);
+        archiveList.removeHierarchyListener(iconHierarchyListener);
+        iconCache.close();
+        fileDragging.close();
         operationPending = false;
         pendingRetry = null;
         sourceModel.removeAllElements();

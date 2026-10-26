@@ -1,29 +1,17 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -67,6 +55,17 @@ public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListI
     default CompletionStage<InstanceAddonContext> resolveAddonContext(GameInstanceID instanceId) {
         GameInstanceID checked = Objects.requireNonNull(instanceId, "instanceId");
         return CompletableFuture.completedFuture(new InstanceAddonContext(checked, null, null));
+    }
+
+    /// Returns one known instance's root without filesystem access, or null when unavailable.
+    ///
+    /// This is not the potentially shared game running directory. Models without local files retain null.
+    ///
+    /// @param instanceId stable instance identifier in the current repository
+    /// @return actual instance root, or null for an unknown or unsupported instance
+    default @Nullable Path instanceRoot(GameInstanceID instanceId) {
+        Objects.requireNonNull(instanceId, "instanceId");
+        return null;
     }
 
     /// Selects a loaded instance by its stable repository identifier.

@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
@@ -28,6 +14,7 @@ import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -119,6 +106,12 @@ final class DataPackManagementPanelTest {
             awaitBackgroundWork(executor);
             EdtDispatcher.executeAndWait(() -> {
                 assertEquals(OptionalInt.of(1), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                FileDragAssertions.assertFiles(panel.worldChoiceList().getList(), List.of(worldDirectory));
+                prepareViewport(panel.dataPackChoiceList());
+                panel.dataPackChoiceList().getList().setSelectedIndex(0);
+                FileDragAssertions.assertFiles(panel.dataPackChoiceList().getList(),
+                        List.of(Objects.requireNonNull(Objects.requireNonNull(
+                                panel.dataPackChoiceList().getList().getSelectedValue()).value()).getPath()));
                 JButton openDirectory = findNamed(panel, "dataPacksOpenDirectory", JButton.class);
                 JButton importButton = findNamed(panel, "dataPacksImport", JButton.class);
                 assertNotNull(openDirectory);

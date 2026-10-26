@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import net.miginfocom.swing.MigLayout;
@@ -28,6 +14,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
@@ -62,6 +49,9 @@ import java.util.concurrent.CompletionStage;
 /// shell page is permanently discarded.
 @NotNullByDefault
 public final class InstancesPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<InstanceListItem> fileDragSupport;
+
     /// Root card name used while the installed-instance list is visible.
     private static final String INSTANCES_VIEW_CARD = "instances";
 
@@ -241,8 +231,16 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                     this.managementCoordinator.attachHost(managementHost),
                     "management coordinator returned null host lease");
             applySnapshot(model.snapshot());
+            fileDragSupport = new FileListDragSupport<>(
+                    choiceList.getList(), item -> model.instanceRoot(item.id()),
+                    () -> List.of(model.snapshot().contentRevision(), model.selectionContextRevision(), searchField.getText()),
+                    () -> !closed && displayedSnapshot != null
+                            && displayedSnapshot.contentRevision() == model.snapshot().contentRevision());
         } catch (RuntimeException | Error failure) {
             @Nullable Throwable cleanupFailure = failure;
+            cleanupFailure = attempt(cleanupFailure, () -> {
+                if (fileDragSupport != null) fileDragSupport.close();
+            });
             @Nullable Subscription hostLease = createdManagementHostLease;
             @Nullable Subscription modelLease = createdModelSubscription;
             cleanupFailure = attempt(cleanupFailure, () -> unsubscribeNullable(hostLease));
@@ -658,6 +656,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         manageButton.setEnabled(false);
 
         @Nullable Throwable failure = null;
+        failure = attempt(failure, () -> {
+            if (fileDragSupport != null) fileDragSupport.close();
+        });
         failure = attempt(failure, () -> unsubscribeNullable(managementHostLease));
         failure = attempt(failure, modelSubscription::unsubscribe);
         failure = attempt(

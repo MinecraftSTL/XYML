@@ -11,6 +11,8 @@ import space.minecraftstl.xyml.gradle.pack.GitVersionResolver
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
 import java.util.Properties
 import org.gradle.jvm.tasks.Jar
+import space.minecraftstl.xyml.gradle.l10n.UpdateLanguageSubtagRegistry
+import space.minecraftstl.xyml.gradle.l10n.UpdateTimeZoneRegions
 
 plugins {
     id("checkstyle")
@@ -454,6 +456,19 @@ tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
 
     sublanguagesFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/sublanguages.csv"))
     defaultScriptFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/default_script.csv"))
+}
+
+tasks.register<UpdateLanguageSubtagRegistry>("updateLanguageSubtagRegistry") {
+    description = "Update the checked-in IANA sublanguage and default-script mappings"
+
+    sublanguagesFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/sublanguages.csv"))
+    defaultScriptFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/default_script.csv"))
+}
+
+tasks.register<UpdateTimeZoneRegions>("updateTimeZoneRegions") {
+    description = "Update the checked-in IANA time zone to region mapping"
+    tzdbVersion.set("2026e")
+    outputFile.set(layout.projectDirectory.file("XYML/src/main/resources/assets/timezone_regions.csv"))
 }
 
 tasks.register<UpdateDocuments>("updateDocuments") {

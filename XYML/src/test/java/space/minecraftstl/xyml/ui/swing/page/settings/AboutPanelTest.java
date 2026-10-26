@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -91,17 +77,17 @@ public final class AboutPanelTest {
                 () -> assertTrue(allConfiguredImagesExist(dependencies)));
     }
 
-    /// The concrete panel exposes all four acknowledgement sections while delegating external opening to settings.
+    /// The concrete panel exposes environment and all four acknowledgement sections while delegating external opening to settings.
     @Test
     public void createsCompleteGroupedPanel() {
         AtomicReference<@Nullable URI> opened = new AtomicReference<>();
         AtomicReference<@Nullable AboutPanel> panelRef = new AtomicReference<>();
 
-        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(opened::set)));
+        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(opened::set, Runnable::run, List::of)));
 
         AboutPanel panel = Objects.requireNonNull(panelRef.get());
         assertAll(
-                () -> assertEquals(8, panel.getComponentCount()),
+                () -> assertEquals(10, panel.getComponentCount()),
                 () -> assertEquals(14, panel.acknowledgements().size()),
                 () -> assertEquals(13, panel.dependencies().size()),
                 () -> assertFalse(panel.isOpaque()),
@@ -112,7 +98,7 @@ public final class AboutPanelTest {
     @Test
     public void rendersLegacyGroupedAboutPage() {
         AtomicReference<@Nullable AboutPanel> panelRef = new AtomicReference<>();
-        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(uri -> { })));
+        EdtDispatcher.executeAndWait(() -> panelRef.set(new AboutPanel(uri -> { }, Runnable::run, List::of)));
 
         AboutPanel panel = Objects.requireNonNull(panelRef.get());
         JPanel stage = new JPanel(new BorderLayout());

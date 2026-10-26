@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import com.formdev.flatlaf.FlatDarkLaf;
@@ -33,6 +19,7 @@ import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -59,6 +46,7 @@ import java.awt.Graphics2D;
 import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
 import java.time.Duration;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -173,6 +161,52 @@ public final class InstancesPanelTest {
                             (Container) selectedRow,
                             JRadioButton.class)));
             panel.close();
+            coordinator.close();
+        });
+    }
+
+    /// Native dragging uses the explicitly supplied instance root without changing record constructors.
+    @Test
+    public void dragsInstanceRootAndInvalidatesSameIdRepositorySwitch() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
+        model.rootDirectory = Path.of("repository-one", "versions");
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(new RecordingManagementFactory(null));
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            GameInstanceID id = model.items.get(0).id();
+            FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(Objects.requireNonNull(model.instanceRoot(id))));
+            model.rootDirectory = Path.of("repository-two", "versions");
+            model.selectionContextRevision++;
+            FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(Objects.requireNonNull(model.instanceRoot(id))));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
+    /// Cached page detachment preserves file dragging; only the final close removes its listeners.
+    @Test
+    public void preservesFileDraggingWhenCachedInstancePageLeavesTheHierarchy() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        model.rootDirectory = Path.of("cached-repository", "versions");
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(new RecordingManagementFactory(null));
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            JList<?> list = panel.choiceList().getList();
+            list.setSelectedIndex(0);
+            Path expected = Objects.requireNonNull(model.instanceRoot(model.items.get(0).id()));
+            FileDragAssertions.assertFiles(list, List.of(expected));
+            panel.removeNotify();
+            FileDragAssertions.assertFiles(list, List.of(expected));
+            panel.close();
+            assertFalse(java.util.Arrays.stream(list.getMouseListeners()).anyMatch(
+                    space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport.class::isInstance));
             coordinator.close();
         });
     }
@@ -1142,6 +1176,9 @@ public final class InstancesPanelTest {
     /// Thread-safe fake model supporting immediate and explicitly controlled viewport loads.
     @NotNullByDefault
     private static final class FakeInstancesModel implements InstancesModel {
+        /// Optional local roots supplied only by native file-drag tests.
+        private @Nullable Path rootDirectory;
+
         /// Latest immutable source rows.
         private volatile @Unmodifiable List<InstanceListItem> items;
 
@@ -1227,6 +1264,12 @@ public final class InstancesPanelTest {
         @Override
         public InstancesSnapshot snapshot() {
             return current.get();
+        }
+
+        /// Returns a fixture's explicit instance root without reading files or resolving metadata.
+        @Override
+        public @Nullable Path instanceRoot(GameInstanceID instanceId) {
+            return rootDirectory == null ? null : rootDirectory.resolve(instanceId.id());
         }
 
         /// Registers a fake page-state listener.

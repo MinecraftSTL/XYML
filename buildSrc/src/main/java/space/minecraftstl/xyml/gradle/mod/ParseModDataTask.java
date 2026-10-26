@@ -1,23 +1,12 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2025 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.gradle.mod;
 
 import com.google.gson.*;
+import com.ibm.icu.lang.UCharacter;
+import com.ibm.icu.lang.UProperty;
+import com.ibm.icu.text.BreakIterator;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.reflect.TypeToken;
 import org.glavo.url.WebURL;
@@ -29,6 +18,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -41,9 +32,10 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * @author Glavo
- */
+/// Generates the existing six-field addon translation resources from mcmod JSON snapshots.
+///
+/// @author Glavo
+@NotNullByDefault
 public abstract class ParseModDataTask extends DefaultTask {
 
     @InputFile
@@ -81,30 +73,42 @@ public abstract class ParseModDataTask extends DefaultTask {
         return "";
     }
 
-    private static String cleanChineseName(String chineseName) {
+    /// Matches repeated ordinary spaces after grapheme filtering.
+    private static final Pattern MULTI_SPACE = Pattern.compile("  +");
+
+    /// Removes complete RGI emoji sequences while preserving ordinary text and existing bracket normalization.
+    ///
+    /// @param chineseName source display name, or null when absent
+    /// @return normalized name, or an empty string for absent or blank input
+    private static String cleanChineseName(@Nullable String chineseName) {
         if (chineseName == null || chineseName.isBlank())
             return "";
 
         chineseName = chineseName.trim();
-
         StringBuilder builder = new StringBuilder(chineseName.length());
-        int[] codePoints = chineseName.codePoints().toArray();
-        for (int i = 0; i < codePoints.length; i++) {
-            int ch = codePoints[i];
-            int prev = i > 0 ? codePoints[i - 1] : 0;
-
-            switch (ch) {
-                case '（' -> {
-                    if (Character.isWhitespace(prev) || prev == '！' || prev == '。')
+        BreakIterator iterator = BreakIterator.getCharacterInstance(Locale.ROOT);
+        iterator.setText(chineseName);
+        int start = iterator.first();
+        @Nullable String previous = null;
+        for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
+            String grapheme = chineseName.substring(start, end);
+            switch (grapheme) {
+                case "（" -> {
+                    if (previous != null && previous.isBlank() || "！".equals(previous) || "。".equals(previous))
                         builder.append('(');
                     else
                         builder.append(" (");
                 }
-                case '）' -> builder.append(')');
-                default -> builder.appendCodePoint(ch);
+                case "）" -> builder.append(')');
+                case "\t" -> builder.append(' ');
+                default -> {
+                    if (!UCharacter.hasBinaryProperty(grapheme, UProperty.RGI_EMOJI))
+                        builder.append(grapheme);
+                }
             }
+            previous = grapheme;
         }
-        return builder.toString().trim();
+        return MULTI_SPACE.matcher(builder).replaceAll(" ").trim();
     }
 
     private static final Set<String> SKIP = Set.of(
@@ -127,7 +131,7 @@ public abstract class ParseModDataTask extends DefaultTask {
         try (BufferedWriter writer = Files.newBufferedWriter(outputFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
             writer.write("#\n" +
                     "# Hello Minecraft! Launcher\n" +
-                    "# Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors\n" +
+                    "# Copyright (C) 2025 The HMCL Authors\n" +
                     "#\n" +
                     "# mcmod.cn\n" +
                     "# Copyright (C) 2025. All Rights Reserved.\n" +
@@ -156,8 +160,8 @@ public abstract class ParseModDataTask extends DefaultTask {
                 String mcmodId = "";
 
                 Map<String, List<ModData.Link>> links = mod.links.list;
-                List<ModData.Link> curseforgeLinks = links.get("curseforge");
-                List<ModData.Link> mcmodLinks = links.get("mcmod");
+                @Nullable List<ModData.Link> curseforgeLinks = links.get("curseforge");
+                @Nullable List<ModData.Link> mcmodLinks = links.get("mcmod");
 
                 if (curseforgeLinks != null && !curseforgeLinks.isEmpty()) {
                     boolean reportError = true;
@@ -225,12 +229,15 @@ public abstract class ParseModDataTask extends DefaultTask {
         }
     }
 
+    /// Represents one mcmod JSON entry consumed by the resource generator.
+    @NotNullByDefault
     public static final class ModData {
 
         public Name name;
 
         @JsonAdapter(ModIdDeserializer.class)
-        public List<String> modid;
+        /// Declared mod identifiers, or null when the source omits them.
+        public @Nullable List<String> modid;
 
         public Links links;
 
@@ -249,7 +256,9 @@ public abstract class ParseModDataTask extends DefaultTask {
             public Map<String, List<Link>> list;
         }
 
-        public static final class ModIdDeserializer implements JsonDeserializer<List<String>> {
+        /// Accepts the array and object forms of optional source mod identifiers.
+    @NotNullByDefault
+    public static final class ModIdDeserializer implements JsonDeserializer<List<String>> {
             private static final Type STRING_LIST = TypeToken.getParameterized(List.class, String.class).getType();
 
             @Override

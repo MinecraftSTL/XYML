@@ -1,26 +1,9 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2020 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.launch;
 
-import space.minecraftstl.xyml.event.EventBus;
-import space.minecraftstl.xyml.event.JVMLaunchFailedEvent;
-import space.minecraftstl.xyml.event.ProcessExitedAbnormallyEvent;
-import space.minecraftstl.xyml.event.ProcessStoppedEvent;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.util.Log4jLevel;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
@@ -30,9 +13,10 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-/**
- * @author huangyuhui
- */
+/// Waits for process termination and reports the classified result to its listener.
+///
+/// @author huangyuhui
+@NotNullByDefault
 final class ExitWaiter implements Runnable {
 
     private final ManagedProcess process;
@@ -51,6 +35,7 @@ final class ExitWaiter implements Runnable {
         this.watcher = watcher;
     }
 
+    /// Waits for output pumps before classifying termination and invoking the listener.
     @Override
     public void run() {
         try {
@@ -70,13 +55,10 @@ final class ExitWaiter implements Runnable {
                     "Could not create the Java Virtual Machine.",
                     "Error occurred during initialization of VM",
                     "A fatal exception has occurred. Program will exit.")) {
-                EventBus.EVENT_BUS.fireEvent(new JVMLaunchFailedEvent(this, process));
                 exitType = ProcessListener.ExitType.JVM_ERROR;
             } else if (exitCode != 0 || StringUtils.containsOne(errorLines,
                     "Crash report saved to", "Could not save crash report to", "This crash report has been saved to:",
                     "Unable to launch", "An exception was thrown, the game will display an error screen and halt.")) {
-                EventBus.EVENT_BUS.fireEvent(new ProcessExitedAbnormallyEvent(this, process));
-
                 if (exitCode == 137 && OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
                     exitType = ProcessListener.ExitType.SIGKILL;
                 } else {
@@ -85,8 +67,6 @@ final class ExitWaiter implements Runnable {
             } else {
                 exitType = ProcessListener.ExitType.NORMAL;
             }
-
-            EventBus.EVENT_BUS.fireEvent(new ProcessStoppedEvent(this, process));
 
             watcher.accept(exitCode, exitType);
         } catch (InterruptedException e) {

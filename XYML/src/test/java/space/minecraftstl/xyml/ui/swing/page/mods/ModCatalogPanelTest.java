@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
@@ -27,6 +13,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -170,6 +157,7 @@ public final class ModCatalogPanelTest {
             list.setSelectedIndex(1);
             assertEquals("mod-1", model.selectedKeys().get(0));
             assertEquals("Mod 1", findTextArea(panel, "modsDetailTitle").getText());
+            FileDragAssertions.assertFiles(list, List.of(model.items().get(1).path()));
 
             findButton(panel, "modsEnabled").doClick();
             assertEquals("mod-1:false", model.enabledCommands().get(0));
@@ -289,6 +277,24 @@ public final class ModCatalogPanelTest {
             assertEquals("", findLabel(row, "richChoiceListBadge").getText());
             assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
             panel.close();
+        });
+    }
+
+    /// Disabled Mods drag their real disabled file name instead of a reconstructed enabled archive name.
+    @Test
+    public void dragsDisabledModUsingItsActualPersistentPath() throws Exception {
+        Path actual = Path.of("mods", "disabled.jar.disabled");
+        ModCatalogItem item = new ModCatalogItem("disabled", actual, "disabled", "Disabled", "Description",
+                "Author", "1.0", "1.21.1", ModLoaderType.FABRIC, "disabled.jar", null, false);
+        RecordingModel model = new RecordingModel(List.of(item));
+        SwingUtilities.invokeAndWait(() -> {
+            try (ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, new RecordingInteractions())) {
+                panel.setSize(900, 620);
+                layoutRecursively(panel);
+                panel.choiceList().refreshLoadPlan();
+                panel.choiceList().getList().setSelectedIndex(0);
+                FileDragAssertions.assertFiles(panel.choiceList().getList(), List.of(actual));
+            }
         });
     }
 

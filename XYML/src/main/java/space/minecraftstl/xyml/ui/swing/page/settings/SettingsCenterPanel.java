@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
@@ -114,6 +100,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Launcher-log actions embedded in the general settings page and closed with this center.
     private final LauncherLogPanel launcherLogPanel;
+
+    /// Lazily created About page whose asynchronous work is owned by this settings center.
+    private @Nullable AboutPanel aboutPanel;
 
     /// NBT file tool exposed only as a settings page and closed with this center.
     private final NBTSettingsPanel nbtSettingsPanel;
@@ -474,6 +463,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 gameSettingsPresetsPanel.close();
                 gameDirectoryManagementPanel.close();
                 launcherLogPanel.close();
+                if (aboutPanel != null)
+                    aboutPanel.close();
                 nbtSettingsPanel.close();
                 maintenanceActions.close();
                 restartPanel.close();
@@ -855,7 +846,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     ///
     /// @return about content
     private JPanel createAboutPage() {
-        return new AboutPanel(this::openExternalLink);
+        if (aboutPanel == null)
+            aboutPanel = new AboutPanel(this::openExternalLink);
+        return aboutPanel;
     }
 
     /// Creates a button that opens one trusted metadata URL through the native browser.

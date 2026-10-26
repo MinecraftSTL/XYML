@@ -68,7 +68,7 @@ XYML 是一個由社群驅動的開源專案，歡迎任何人參與貢獻程式
 
 ### 附加條款 (依據 GPLv3 開源協議第七條)
 
-1. 當你分發該程式的修改版本時，你必須以一種合理的方式修改該程式的名稱或版本號，以示其與原始版本不同。(依據 [GPLv3, 7(c)](https://github.com/HMCL-dev/HMCL/blob/11820e31a85d8989e41d97476712b07e7094b190/LICENSE#L372-L374))
+1. 當你分發該程式的修改版本時，你必須以一種合理的方式修改該程式的名稱或版本號，使其能夠與本專案（XYML）及上游專案（HMCL）的原始版本區分。(依據 [GPLv3, 7(c)](https://github.com/HMCL-dev/HMCL/blob/11820e31a85d8989e41d97476712b07e7094b190/LICENSE#L372-L374))
 
    該程式的名稱及版本號可在 [此處](https://github.com/MinecraftSTL/XYML/blob/main/XYML/src/main/java/space/minecraftstl/xyml/Metadata.java) 修改。
 

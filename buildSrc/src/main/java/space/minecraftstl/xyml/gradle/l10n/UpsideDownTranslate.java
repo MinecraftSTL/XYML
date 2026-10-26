@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2025 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.gradle.l10n;
 
 import org.gradle.api.DefaultTask;
@@ -23,6 +9,9 @@ import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils;
 
 import java.io.IOException;
@@ -34,7 +23,10 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/// Generates upside-down English resources while retaining non-translatable launcher captions.
+///
 /// @author Glavo
+@NotNullByDefault
 public abstract class UpsideDownTranslate extends DefaultTask {
 
     static final Locale EN_QABS = Locale.forLanguageTag("en-Qabs");
@@ -43,12 +35,22 @@ public abstract class UpsideDownTranslate extends DefaultTask {
             "datetime.format", "MMM d, yyyy, h:mm:ss a"
     );
 
+    /// Product captions that must retain their original glyphs in the generated locale.
+    private static final @Unmodifiable Set<String> NOT_TRANSLATABLE_KEYS = Set.of(
+            "launcher.title",
+            "launcher.title.unofficial",
+            "launcher.title.modified"
+    );
+
     @InputFile
     public abstract RegularFileProperty getInputFile();
 
     @OutputFile
     public abstract RegularFileProperty getOutputFile();
 
+    /// Writes the generated English locale from the configured source while retaining title identity.
+    ///
+    /// @throws IOException if the source cannot be read or the generated resource cannot be written
     @TaskAction
     public void run() throws IOException {
         Path inputFile = getInputFile().get().getAsFile().toPath();
@@ -61,6 +63,8 @@ public abstract class UpsideDownTranslate extends DefaultTask {
         english.forEach((k, v) -> {
             if (PROPERTIES.containsKey(k.toString())) {
                 output.setProperty(k.toString(), PROPERTIES.get(k.toString()));
+            } else if (NOT_TRANSLATABLE_KEYS.contains(k.toString())) {
+                output.put(k, v.toString());
             } else {
                 output.put(k, translator.translate(v.toString()));
             }
@@ -78,7 +82,7 @@ public abstract class UpsideDownTranslate extends DefaultTask {
         private static Map<Integer, Integer> loadMap() {
             var map = new LinkedHashMap<Integer, Integer>();
 
-            InputStream inputStream = UpsideDownTranslate.class.getResourceAsStream("upside_down.txt");
+            @Nullable InputStream inputStream = UpsideDownTranslate.class.getResourceAsStream("upside_down.txt");
             if (inputStream != null) {
                 try (inputStream) {
                     new String(inputStream.readAllBytes(), StandardCharsets.UTF_8).lines().forEach(line -> {

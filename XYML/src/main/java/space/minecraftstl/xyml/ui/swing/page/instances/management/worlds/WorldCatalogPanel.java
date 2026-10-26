@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import com.formdev.flatlaf.FlatClientProperties;
@@ -32,6 +18,7 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
@@ -102,6 +89,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Owned native copy-only file dragging for this explicit catalog.
+    private @Nullable FileListDragSupport<WorldCatalogItem> fileDragSupport;
+
     /// Fallback icon used when a world has no readable embedded PNG.
     private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
             "assets/swing/icons/image.svg",
@@ -400,6 +390,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedWorld,
                 this::importWorldArchive);
+        fileDragSupport = new FileListDragSupport<>(
+                choiceList.getList(), WorldCatalogItem::path,
+                () -> model.snapshot().contentRevision(),
+                () -> !closed.get() && displayedSnapshot.contentRevision() == model.snapshot().contentRevision()
+                        && model.snapshot().listEnabled()
+                        && !model.snapshot().operationPending());
     }
 
     /// Installs the remote world-catalog navigation command.
@@ -1923,6 +1919,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Detaches all UI listeners and closes owned resources on the EDT.
     private void closeOnEventDispatchThread() {
+        if (fileDragSupport != null) fileDragSupport.close();
         dropRegistration.close();
         quickPlayOperationRevision++;
         quickPlayOperationText = null;

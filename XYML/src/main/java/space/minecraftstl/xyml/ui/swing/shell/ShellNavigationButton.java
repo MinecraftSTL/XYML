@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -190,7 +176,15 @@ final class ShellNavigationButton extends JToggleButton {
     /// @param page destination represented by the returned icon
     /// @return configured 20-pixel SVG icon
     private static FlatSVGIcon createNavigationIcon(ShellPageId page) {
-        FlatSVGIcon icon = new FlatSVGIcon(iconResource(page), 20, 20);
+        return createNavigationIcon(iconResource(page));
+    }
+
+    /// Creates a theme-aware navigation icon from a bundled SVG asset.
+    ///
+    /// @param resource classpath-relative SVG resource path
+    /// @return configured 20-pixel SVG icon
+    static FlatSVGIcon createNavigationIcon(String resource) {
+        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(resource, "resource"), 20, 20);
         icon.setColorFilter(new FlatSVGIcon.ColorFilter(ShellNavigationButton::resolveIconColor));
         return icon;
     }
