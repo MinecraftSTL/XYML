@@ -57,8 +57,10 @@
 
 ### 许可证与结构
 
-- 除现有 Checkstyle 豁免外，首方 Java 文件必须带 `config/checkstyle/license-header.txt` 所定义的**完整 GPLv3-or-later 头**。
-  新文件从相邻首方文件精确复制该头；已有头必须保留。不得缩写、改写或猜测版权归属或年份。
+- 除现有 Checkstyle 豁免和独立第三方许可证外，首方 Java 文件必须带 `config/checkstyle/license-header.txt` 定义的双行 SPDX 文件头：
+  `SPDX-FileCopyrightText` 保留原有年份并使用 `The HMCL Authors`，`SPDX-License-Identifier` 为 `GPL-3.0-or-later WITH AdditionRef-HMCL`。
+  新文件精确沿用相邻首方文件的声明格式；不得猜测版权年份、覆盖其他权利人的声明或改写独立第三方许可证。
+  `AdditionRef-HMCL` 对应根 `LICENSE` 中的 `Additional Terms for Hello Minecraft! Launcher`，不得将该标题改成 XYML。
 - 每个文件只能有一个顶层类型，文件名必须与外层类型一致。只含静态工具成员的类必须为 `final` 且拥有私有构造器。
 - 使用标准数组声明形式；含 type-use 注解的数组写作 `String @Unmodifiable []`，不要写成变量名后置的数组形式。
 - 方法最多 12 个参数，`throws` 最多 5 个。需要更多输入时优先引入有语义的值对象、record 或参数对象。

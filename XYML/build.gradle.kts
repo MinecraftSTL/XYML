@@ -204,7 +204,7 @@ tasks.shadowJar {
     }
 
     manifest.attributes(
-        "Created-By" to "Copyright(c) 2013-2025 huangyuhui.",
+        "Created-By" to "Copyright(c) 2013-2026 The HMCL Authors",
         "Implementation-Version" to xymlDisplayVersion,
         "Main-Class" to "space.minecraftstl.xyml.Main",
         "Multi-Release" to "true",

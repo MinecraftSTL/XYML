@@ -155,6 +155,10 @@ val verifyXoyzNbtLicenseHeaders = tasks.register("verifyXoyzNbtLicenseHeaders") 
             val preamble = source.substring(0, minOf(source.length, 1_500))
             val hasKnownLicense = "Licensed under the Apache License, Version 2.0" in preamble
                 || "GNU General Public License as published by" in preamble
+                || preamble.startsWith(
+                    "// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors\n" +
+                        "// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL\n"
+                )
             check(hasKnownLicense) { "Missing preserved upstream license in $sourceFile" }
             check("Copyright" in preamble) { "Missing preserved copyright in $sourceFile" }
             check("Modified by MinecraftSTL" in preamble || "Added by MinecraftSTL" in preamble) {

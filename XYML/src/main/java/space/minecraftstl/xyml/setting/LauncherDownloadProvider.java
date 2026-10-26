@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.setting;
 
 import org.glavo.url.WebURL;
@@ -39,6 +25,8 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.*;
 
+/// Selects official, configured mirror, and service fallback URLs without changing catalog task ownership.
+///
 /// @author Glavo
 @NotNullByDefault
 public final class LauncherDownloadProvider extends DownloadProvider {
@@ -62,6 +50,12 @@ public final class LauncherDownloadProvider extends DownloadProvider {
         }
     }
 
+    /// Applies matching mirror policies while retaining regional and explicit official-source preferences.
+    ///
+    /// @param source configured selection policy
+    /// @param rules ordered mirror rules
+    /// @param urls nonempty source URL list
+    /// @return immutable ordered download candidates
     private static DownloadCandidates getCandidates(DownloadSource source, List<MirrorRule> rules, List<String> urls) {
         if (urls.isEmpty()) {
             throw new IllegalArgumentException("urls cannot be empty");
@@ -94,62 +88,58 @@ public final class LauncherDownloadProvider extends DownloadProvider {
                 continue;
             }
 
-            @Nullable DownloadCandidate mirrorCandidate = null;
-            boolean fallback = false;
+            boolean added = false;
             for (MirrorRule rule : rules) {
-                if (url.startsWith(rule.source)) {
-                    mirrorCandidate = DownloadCandidate.of(rule.target + url.substring(rule.source.length()));
-                    fallback = rule.fallback;
+                @Nullable @Unmodifiable List<DownloadCandidate> matches = rule.getCandidates(candidate, mirrorFirst);
+                if (matches != null) {
+                    candidates.addAll(matches);
+                    added = true;
                     break;
                 }
             }
-
-            if (mirrorCandidate == null) {
+            if (!added)
                 candidates.add(candidate);
-            } else if (mirrorFirst && !fallback) {
-                candidates.add(mirrorCandidate);
-                candidates.add(candidate);
-            } else {
-                candidates.add(candidate);
-                candidates.add(mirrorCandidate);
-            }
         }
 
         return DownloadCandidates.of(List.copyOf(candidates));
     }
 
     private final String bmclRoot;
-    private final List<MirrorRule> rules;
+    /// Immutable mirror policies evaluated in declaration order.
+    private final @Unmodifiable List<MirrorRule> rules;
 
+    /// Creates a launcher provider using the supplied BMCLAPI root and the current regional preference.
+    ///
+    /// @param bmclRoot root URL used by BMCLAPI mirror policies
     public LauncherDownloadProvider(String bmclRoot) {
         this.bmclRoot = bmclRoot;
         this.rules = List.of(
-                new MirrorRule("https://bmclapi2.bangbang93.com", bmclRoot),
-                new MirrorRule("https://launchermeta.mojang.com", bmclRoot),
-                new MirrorRule("https://piston-meta.mojang.com", bmclRoot),
-                new MirrorRule("https://piston-data.mojang.com", bmclRoot),
-                new MirrorRule("https://launcher.mojang.com", bmclRoot),
-                new MirrorRule("https://libraries.minecraft.net", bmclRoot + "/libraries"),
-                new MirrorRule("http://files.minecraftforge.net/maven", bmclRoot + "/maven"),
-                new MirrorRule("https://files.minecraftforge.net/maven", bmclRoot + "/maven"),
-                new MirrorRule("https://maven.minecraftforge.net", bmclRoot + "/maven"),
-                new MirrorRule("https://maven.neoforged.net/releases/", bmclRoot + "/maven/"),
-                new MirrorRule("http://dl.liteloader.com/versions", bmclRoot + "/maven"),
-                new MirrorRule("https://dl.liteloader.com/versions", bmclRoot + "/maven"),
-                new MirrorRule("https://meta.fabricmc.net", bmclRoot + "/fabric-meta"),
-                new MirrorRule("https://maven.fabricmc.net", bmclRoot + "/maven"),
-                new MirrorRule("https://authlib-injector.yushi.moe", bmclRoot + "/mirrors/authlib-injector"),
-                new MirrorRule("https://repo1.maven.org/maven2", "https://mirrors.cloud.tencent.com/nexus/repository/maven-public"),
-                new MirrorRule("https://repo.maven.apache.org/maven2", "https://mirrors.cloud.tencent.com/nexus/repository/maven-public"),
-                new MirrorRule("https://hmcl.glavo.site/metadata/cleanroom", "https://alist.8mi.tech/d/mirror/HMCL-Metadata/Auto/cleanroom"),
-                new MirrorRule("https://hmcl.glavo.site/metadata/fmllibs", "https://alist.8mi.tech/d/mirror/HMCL-Metadata/Auto/fmllibs"),
-                new MirrorRule("https://zkitefly.github.io/unlisted-versions-of-minecraft", "https://alist.8mi.tech/d/mirror/unlisted-versions-of-minecraft/Auto"),
+                new SimpleRule("https://bmclapi2.bangbang93.com", bmclRoot),
+                new SimpleRule("https://launchermeta.mojang.com", bmclRoot),
+                new SimpleRule("https://piston-meta.mojang.com", bmclRoot),
+                new SimpleRule("https://piston-data.mojang.com", bmclRoot),
+                new SimpleRule("https://launcher.mojang.com", bmclRoot),
+                new SimpleRule("https://libraries.minecraft.net", bmclRoot + "/libraries"),
+                new SimpleRule("http://files.minecraftforge.net/maven", bmclRoot + "/maven"),
+                new SimpleRule("https://files.minecraftforge.net/maven", bmclRoot + "/maven"),
+                new SimpleRule("https://maven.minecraftforge.net", bmclRoot + "/maven"),
+                (candidate, mirrorFirst) -> neoForgeCandidates(candidate, mirrorFirst, bmclRoot),
+                new SimpleRule("http://dl.liteloader.com/versions", bmclRoot + "/maven"),
+                new SimpleRule("https://dl.liteloader.com/versions", bmclRoot + "/maven"),
+                new SimpleRule("https://meta.fabricmc.net", bmclRoot + "/fabric-meta"),
+                new SimpleRule("https://maven.fabricmc.net", bmclRoot + "/maven"),
+                new SimpleRule("https://authlib-injector.yushi.moe", bmclRoot + "/mirrors/authlib-injector"),
+                new SimpleRule("https://repo1.maven.org/maven2", "https://mirrors.cloud.tencent.com/nexus/repository/maven-public"),
+                new SimpleRule("https://repo.maven.apache.org/maven2", "https://mirrors.cloud.tencent.com/nexus/repository/maven-public"),
+                new SimpleRule("https://hmcl.glavo.site/metadata/cleanroom", "https://alist.8mi.tech/d/mirror/HMCL-Metadata/Auto/cleanroom"),
+                new SimpleRule("https://hmcl.glavo.site/metadata/fmllibs", "https://alist.8mi.tech/d/mirror/HMCL-Metadata/Auto/fmllibs"),
+                new SimpleRule("https://zkitefly.github.io/unlisted-versions-of-minecraft", "https://alist.8mi.tech/d/mirror/unlisted-versions-of-minecraft/Auto"),
 
                 // https://github.com/mcmod-info-mirror/mcim-rust-api
-                new MirrorRule("https://api.modrinth.com", "https://mod.mcimirror.top/modrinth", true),
-                new MirrorRule("https://cdn.modrinth.com", "https://mod.mcimirror.top", true),
-                new MirrorRule("https://api.curseforge.com", "https://mod.mcimirror.top/curseforge", true),
-                new MirrorRule("https://edge.forgecdn.net", "https://mod.mcimirror.top", true)
+                new SimpleRule("https://api.modrinth.com", null, "https://mod.mcimirror.top/modrinth"),
+                new SimpleRule("https://cdn.modrinth.com", null, "https://mod.mcimirror.top"),
+                new SimpleRule("https://api.curseforge.com", null, "https://mod.mcimirror.top/curseforge"),
+                new SimpleRule("https://edge.forgecdn.net", null, "https://mod.mcimirror.top")
         );
     }
 
@@ -298,10 +288,76 @@ public final class LauncherDownloadProvider extends DownloadProvider {
         }
     }
 
-    private record MirrorRule(String source, String target, boolean fallback) {
-        public MirrorRule(String source, String target) {
-            this(source, target, false);
+    /// Produces ordered NeoForge fallbacks without changing the configured regional preference.
+    ///
+    /// @param source original metadata or artifact URL
+    /// @param mirrorFirst whether BMCLAPI precedes the official release URL
+    /// @param bmclRoot configured BMCLAPI root
+    /// @return immutable candidates, or null when this is not an official NeoForge Maven URL
+    static @Nullable @Unmodifiable List<DownloadCandidate> neoForgeCandidates(
+            DownloadCandidate source, boolean mirrorFirst, String bmclRoot) {
+        String maven = "https://maven.neoforged.net/";
+        String releases = maven + "releases/";
+        if (source.url() == null || !source.url().href().startsWith(maven))
+            return null;
+        String url = source.url().href();
+        List<DownloadCandidate> candidates = new ArrayList<>();
+        if (url.startsWith(releases)) {
+            DownloadCandidate mirror = DownloadCandidate.of(bmclRoot + "/maven/" + url.substring(releases.length()));
+            if (mirrorFirst) {
+                candidates.add(mirror);
+                candidates.add(source);
+            } else {
+                candidates.add(source);
+                candidates.add(mirror);
+            }
+        } else {
+            candidates.add(source);
+        }
+        candidates.add(DownloadCandidate.of("https://neoforged.forgecdn.net/" + url.substring(maven.length())));
+        return List.copyOf(candidates);
+    }
+
+    /// Matches one service and returns its ordered immutable download candidates.
+    @NotNullByDefault
+    @FunctionalInterface
+    private interface MirrorRule {
+        /// Returns candidates, or null when the source URL does not match this policy.
+        @Nullable @Unmodifiable List<DownloadCandidate> getCandidates(DownloadCandidate source, boolean mirrorFirst);
+    }
+
+    /// Rewrites a URL prefix while preserving source-first behavior for fallback-only services.
+    ///
+    /// @param source matched source URL prefix
+    /// @param first preferred mirror prefix, or null for a fallback-only service
+    /// @param fallback trailing fallback prefix, or null when no additional fallback exists
+    @NotNullByDefault
+    private record SimpleRule(String source, @Nullable String first, @Nullable String fallback) implements MirrorRule {
+        /// Creates a policy with one preferred mirror and no additional fallback.
+        ///
+        /// @param source matched source URL prefix
+        /// @param target preferred mirror prefix
+        public SimpleRule(String source, String target) {
+            this(source, target, null);
+        }
+
+        /// Returns a defensive immutable candidate snapshot, or null when the source prefix does not match.
+        @Override
+        public @Nullable @Unmodifiable List<DownloadCandidate> getCandidates(DownloadCandidate source, boolean mirrorFirst) {
+            if (source.url() == null || !source.url().href().startsWith(this.source))
+                return null;
+            String suffix = source.url().href().substring(this.source.length());
+            boolean sourceFirst = !mirrorFirst || first == null;
+            List<DownloadCandidate> candidates = new ArrayList<>();
+            if (sourceFirst)
+                candidates.add(source);
+            if (first != null)
+                candidates.add(DownloadCandidate.of(first + suffix));
+            if (!sourceFirst)
+                candidates.add(source);
+            if (fallback != null)
+                candidates.add(DownloadCandidate.of(fallback + suffix));
+            return List.copyOf(candidates);
         }
     }
 }
-

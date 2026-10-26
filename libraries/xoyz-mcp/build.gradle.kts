@@ -108,23 +108,8 @@ publishing {
 }
 
 val expectedLicenseHeader = """
-    /*
-     * Hello Minecraft! Launcher
-     * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
-     *
-     * This program is free software: you can redistribute it and/or modify
-     * it under the terms of the GNU General Public License as published by
-     * the Free Software Foundation, either version 3 of the License, or
-     * (at your option) any later version.
-     *
-     * This program is distributed in the hope that it will be useful,
-     * but WITHOUT ANY WARRANTY; without even the implied warranty of
-     * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-     * GNU General Public License for more details.
-     *
-     * You should have received a copy of the GNU General Public License
-     * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-     */
+    // SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+    // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
 """.trimIndent()
 
 val xoyzMcpJavaFiles = fileTree("src") {
@@ -133,13 +118,13 @@ val xoyzMcpJavaFiles = fileTree("src") {
 
 val verifyXoyzMcpLicenseHeaders = tasks.register("verifyXoyzMcpLicenseHeaders") {
     group = "verification"
-    description = "Verifies the complete GPLv3-or-later header on every XoyzMCP Java source."
+    description = "Verifies the declared SPDX copyright and license header on every XoyzMCP Java source."
     inputs.files(xoyzMcpJavaFiles)
 
     doLast {
         xoyzMcpJavaFiles.files.sorted().forEach { sourceFile ->
             check(sourceFile.readText(Charsets.UTF_8).startsWith(expectedLicenseHeader)) {
-                "Missing complete GPLv3-or-later license header in $sourceFile"
+                "Missing declared SPDX license header in $sourceFile"
             }
         }
     }

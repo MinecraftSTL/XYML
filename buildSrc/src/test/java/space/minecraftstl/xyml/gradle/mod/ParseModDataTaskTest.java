@@ -1,20 +1,6 @@
-/*
- * Hello Minecraft! Launcher
- * Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2025 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
+
 package space.minecraftstl.xyml.gradle.mod;
 
 import com.google.gson.Gson;
@@ -46,6 +32,8 @@ final class ParseModDataTaskTest {
     @Test
     void filtersCompleteEmojiAndPreservesText() throws IOException {
         String output = generate(List.of("20W14✨", "钓🐟🐠", "家👩‍👩‍👧‍👦庭🇨🇳1️⃣👍🏽", "123 # * © e\u0301"));
+        assertTrue(output.contains("# Copyright (C) 2025 The HMCL Authors"));
+        assertTrue(output.contains("# mcmod.cn\n# Copyright (C) 2025. All Rights Reserved."));
         @Unmodifiable List<String> rows = output.lines().filter(line -> !line.startsWith("#")).toList();
         assertEquals(4, rows.size());
         assertEquals("20W14", rows.get(0).split(";", -1)[3]);
