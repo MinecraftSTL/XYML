@@ -56,9 +56,13 @@ public final class FabricInstallTask extends Task<GameInstancePatch> {
         return true;
     }
 
+    /// Rejects installation when the resolved base manifest uses a non-vanilla launcher.
     @Override
     public void preExecute() throws Exception {
-        if (!Objects.equals(GameComponentAnalyzer.VANILLA_MAIN, manifest.mainClass()))
+        GameInstanceManifest resolved = dependencyManager.getGameRepository()
+                .resolve(manifest)
+                .launchManifest();
+        if (!Objects.equals(GameComponentAnalyzer.VANILLA_MAIN, resolved.mainClass()))
             throw new UnsupportedInstallationException(FABRIC_NOT_COMPATIBLE_WITH_FORGE);
     }
 

@@ -49,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -91,9 +92,9 @@ public final class SettingsCenterPanelTest {
         }
     };
 
-    /// Keeps the MCP enablement warning preference on the miscellaneous page instead of the MCP page.
+    /// Keeps the MCP enablement warning preference on the general page without retaining the miscellaneous page.
     @Test
-    public void mcpEnablementWarningAppearsOnMiscPage() throws Exception {
+    public void mcpEnablementWarningAppearsOnGeneralPage() throws Exception {
         try (SettingsFixture ignored = SettingsFixture.install()) {
             FakeSettingsStore store = new FakeSettingsStore(snapshot(false, true));
             SettingsCenterPanel panel = createPanel(
@@ -105,12 +106,12 @@ public final class SettingsCenterPanelTest {
                     JCheckBox warning = findComponent(
                             panel, "settingsMcpEnablementWarning", JCheckBox.class);
                     int warningTabIndex = findContainingTab(settingsTabs, warning);
-                    int mcpTabIndex = findTabIndex(settingsTabs, i18n("settings.mcp.title"));
+                    int generalTabIndex = findTabIndex(settingsTabs, i18n("settings.launcher.general"));
                     assertAll(
-                            () -> assertEquals(
-                                    i18n("settings.launcher.misc"),
-                                    settingsTabs.getTitleAt(warningTabIndex)),
-                            () -> assertNotEquals(mcpTabIndex, warningTabIndex));
+                            () -> assertEquals(generalTabIndex, warningTabIndex),
+                            () -> assertThrows(
+                                    AssertionError.class,
+                                    () -> findTabIndex(settingsTabs, i18n("settings.launcher.misc"))));
                 });
             } finally {
                 onEventDispatchThread(panel::close);
