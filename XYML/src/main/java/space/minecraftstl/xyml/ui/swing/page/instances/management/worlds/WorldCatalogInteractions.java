@@ -5,6 +5,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -57,6 +58,19 @@ public interface WorldCatalogInteractions extends AutoCloseable, RetryableFailur
     /// @return whether permanent deletion was approved
     default boolean confirmPermanentFallback(Component owner, WorldCatalogItem world) {
         return confirmDelete(owner, world);
+    }
+
+    /// Chooses how to recover one world that could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param world current selected world
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(
+            Component owner,
+            WorldCatalogItem world) {
+        return confirmPermanentFallback(owner, world)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
     }
 
     /// Prompts for a sibling name for a copied world.

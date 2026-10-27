@@ -13,12 +13,14 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
-import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -64,8 +66,8 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -126,6 +128,90 @@ public final class ModCatalogPanelTest {
             "Mod archives",
             "Delete %s?",
             "Mod operation failed");
+
+    /// Covers repeated recycle-bin failures followed by retry, permanent deletion, or cancellation.
+    @Test
+    public void retriesOnlyFailedModTargetsWithoutRepeatingSuccessfulKeys() throws Exception {
+        for (boolean batch : List.of(false, true)) {
+            for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+                assertModDeletionRecovery(batch, decision, false);
+            }
+            assertModDeletionRecovery(batch, DeletionFallbackDecision.RETRY_RECYCLE_BIN, true);
+        }
+    }
+
+    /// Exercises one deterministic deletion scenario against the actual panel controls.
+    ///
+    /// @param batch whether all rows are selected, including rows outside the viewport
+    /// @param finalDecision choice after a second recycle-bin failure
+    /// @param ordinaryFailure whether the backend fails with an ordinary I/O error
+    private static void assertModDeletionRecovery(
+            boolean batch,
+            DeletionFallbackDecision finalDecision,
+            boolean ordinaryFailure) throws Exception {
+        RecordingModel model = new RecordingModel(items(100));
+        RecordingInteractions interactions = new RecordingInteractions();
+        interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+        ModCatalogItem failed = model.items().get(batch ? 99 : 1);
+        if (ordinaryFailure) {
+            model.deletionFailures.add(new IOException("ordinary failure"));
+        } else {
+            model.deletionFailures.add(new TrashMoveException(List.of(failed.path())));
+            model.deletionFailures.add(new TrashMoveException(List.of(failed.path())));
+            interactions.fallbackDecisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.fallbackDecisions.add(finalDecision);
+        }
+        AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panelReference.set(panel);
+            panel.setSize(new Dimension(1120, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            if (batch) {
+                panel.choiceList().getList().setSelectionInterval(0, 1);
+                findButton(panel, "modsSelectAll").doClick();
+                findButton(panel, "modsDeleteSelected").doClick();
+            } else {
+                panel.choiceList().getList().setSelectedIndex(1);
+                panel.choiceList().refreshLoadPlan();
+                findButton(panel, "modsDelete").doClick();
+            }
+        });
+        for (int turn = 0; turn < 8; turn++) {
+            SwingUtilities.invokeAndWait(() -> { });
+        }
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = java.util.Objects.requireNonNull(panelReference.get());
+            try {
+                if (ordinaryFailure) {
+                    assertEquals(List.of(), interactions.fallbackCounts);
+                    assertNotNull(interactions.retryAction);
+                    assertEquals(1, model.deletionModes.size());
+                    return;
+                }
+                assertEquals(List.of(1, 1), interactions.fallbackCounts);
+                List<DeletionMode> expected = new ArrayList<>(List.of(
+                        DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                if (finalDecision != DeletionFallbackDecision.CANCEL) {
+                    expected.add(finalDecision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                            ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                }
+                assertEquals(expected, model.deletionModes);
+                if (batch) {
+                    assertEquals(100, model.deletedBatches.get(0).size());
+                    for (int attempt = 1; attempt < model.deletedBatches.size(); attempt++) {
+                        assertEquals(List.of(failed.localKey()), model.deletedBatches.get(attempt));
+                    }
+                } else {
+                    assertTrue(model.deletedKeys.stream().allMatch(failed.localKey()::equals));
+                    assertEquals(expected.size(), model.deletedKeys.size());
+                }
+            } finally {
+                panel.close();
+            }
+        });
+    }
 
     /// Verifies viewport range loading, single selection, details, and every command boundary.
     @Test
@@ -972,6 +1058,42 @@ public final class ModCatalogPanelTest {
         /// Stable-key batches submitted for permanent deletion.
         private final List<@Unmodifiable List<String>> deletedBatches = new ArrayList<>();
 
+        /// Queued asynchronous deletion failures.
+        private final List<Throwable> deletionFailures = new ArrayList<>();
+
+        /// Modes recorded for every deletion attempt.
+        private final List<DeletionMode> deletionModes = new ArrayList<>();
+
+        /// Captures all row paths, including rows outside the loaded viewport.
+        @Override
+        public @Unmodifiable Map<Path, String> deletionKeysByPath(@Unmodifiable List<String> keys) {
+            Map<Path, String> result = new java.util.HashMap<>();
+            for (ModCatalogItem item : items) {
+                if (keys.contains(item.localKey())) {
+                    result.put(item.path().toAbsolutePath().normalize(), item.localKey());
+                }
+            }
+            return Map.copyOf(result);
+        }
+
+        /// Records a mode-aware single deletion and consumes its queued outcome.
+        @Override
+        public CompletionStage<ModCatalogSnapshot> deleteMod(String key, DeletionMode mode) {
+            deletionModes.add(mode);
+            deletedKeys.add(key);
+            return deletionFailures.isEmpty() ? CompletableFuture.completedFuture(snapshot)
+                    : CompletableFuture.failedFuture(deletionFailures.remove(0));
+        }
+
+        /// Records a mode-aware batch deletion and consumes its queued outcome.
+        @Override
+        public CompletionStage<ModCatalogSnapshot> deleteMods(@Unmodifiable List<String> keys, DeletionMode mode) {
+            deletionModes.add(mode);
+            deletedBatches.add(List.copyOf(keys));
+            return deletionFailures.isEmpty() ? CompletableFuture.completedFuture(snapshot)
+                    : CompletableFuture.failedFuture(deletionFailures.remove(0));
+        }
+
         /// Current immutable snapshot.
         private ModCatalogSnapshot snapshot;
 
@@ -1283,6 +1405,28 @@ public final class ModCatalogPanelTest {
     /// Headless interaction boundary recording every desktop and confirmation command.
     @NotNullByDefault
     private static final class RecordingInteractions implements ModCatalogInteractions {
+        /// Initial deletion behavior used by headless tests.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Ordered recovery choices supplied by a scenario.
+        private final List<DeletionFallbackDecision> fallbackDecisions = new ArrayList<>();
+
+        /// Failed counts shown by fallback dialogs.
+        private final List<Integer> fallbackCounts = new ArrayList<>();
+
+        /// Resolves a single-target fallback through the same decision queue.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, ModCatalogItem target) {
+            return choosePermanentFallbackSelected(owner, 1);
+        }
+
+        /// Records only the actual failed count and returns a queued choice.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int count) {
+            fallbackCounts.add(count);
+            return fallbackDecisions.isEmpty() ? DeletionFallbackDecision.CANCEL : fallbackDecisions.remove(0);
+        }
+
         /// Latest revealed exact path.
         private @Nullable Path revealedPath;
 
@@ -1340,7 +1484,7 @@ public final class ModCatalogPanelTest {
         /// @return permanent mode when confirmed, otherwise null
         @Override
         public @Nullable DeletionMode chooseDeleteMode(Component owner, ModCatalogItem target) {
-            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+            return confirmDelete(owner, target) ? deletionMode : null;
         }
 
         /// Maps the batch deletion confirmation to permanent mode for this headless test.
@@ -1350,7 +1494,7 @@ public final class ModCatalogPanelTest {
         /// @return permanent mode when confirmed, otherwise null
         @Override
         public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
-            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+            return confirmDeleteSelected(owner, selectedCount) ? deletionMode : null;
         }
 
         /// Records one exact reveal path.

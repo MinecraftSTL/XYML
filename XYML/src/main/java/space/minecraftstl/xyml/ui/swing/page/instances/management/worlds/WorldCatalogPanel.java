@@ -8,7 +8,6 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
@@ -17,11 +16,13 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
-import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -76,7 +77,6 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -1735,74 +1735,50 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         }
         @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
         if (mode != null) {
-            startDeletion(
-                    () -> model.deleteWorld(selected, mode),
-                    () -> model.deleteWorld(selected, DeletionMode.PERMANENT),
-                    () -> interactions.confirmPermanentFallback(this, selected),
-                    true);
+            startDeletion(selected, mode);
         }
     }
 
-    /// Observes one world deletion and preserves recycle-bin fallback plus exact retry behavior.
+    /// Deletes the captured world and queues each recycle-bin fallback round on the EDT.
     ///
-    /// @param operation initial deletion operation
-    /// @param permanentRetry permanent retry operation
-    /// @param confirmFallback original warning decision
-    /// @param allowFallback whether recycle-bin failure may prompt again
-    private void startDeletion(
-            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
-            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
-            boolean allowFallback) {
-        Supplier<CompletionStage<WorldCatalogSnapshot>> capturedOperation =
-                Objects.requireNonNull(operation, "operation");
+    /// @param target captured world
+    /// @param mode selected deletion behavior
+    private void startDeletion(WorldCatalogItem target, DeletionMode mode) {
+        if (closed.get()) {
+            return;
+        }
         CompletionStage<WorldCatalogSnapshot> stage;
         try {
-            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+            stage = Objects.requireNonNull(model.deleteWorld(target, mode), "deletion returned null");
         } catch (RuntimeException failure) {
-            handleDeletionFailure(capturedOperation, permanentRetry, confirmFallback, allowFallback, failure);
-            return;
+            stage = java.util.concurrent.CompletableFuture.failedFuture(failure);
         }
         stage.whenComplete((@Nullable WorldCatalogSnapshot ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
-                Throwable resolved = unwrapFailure(failure);
-                EdtDispatcher.execute(() -> handleDeletionFailure(
-                        capturedOperation,
-                        permanentRetry,
-                        confirmFallback,
-                        allowFallback,
-                        resolved));
+                EdtDispatcher.executeLater(() -> handleDeletionFailure(target, mode, unwrapFailure(failure)));
             }
         });
     }
 
-    /// Handles one deletion failure on the EDT while preserving fallback and retry.
+    /// Keeps ordinary failures on the existing retry boundary and offers three recycle-bin actions.
     ///
-    /// @param operation exact deletion retry operation
-    /// @param permanentRetry permanent retry operation
-    /// @param confirmFallback original warning decision
-    /// @param allowFallback whether recycle-bin failure may prompt again
-    /// @param failure original deletion failure
-    private void handleDeletionFailure(
-            Supplier<CompletionStage<WorldCatalogSnapshot>> operation,
-            Supplier<CompletionStage<WorldCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
-            boolean allowFallback,
-            Throwable failure) {
+    /// @param target captured world
+    /// @param mode failed deletion behavior
+    /// @param failure original failure
+    private void handleDeletionFailure(WorldCatalogItem target, DeletionMode mode, Throwable failure) {
         if (closed.get()) {
             return;
         }
-        if (allowFallback && failure instanceof TrashMoveException) {
-            if (confirmFallback.getAsBoolean()) {
-                startDeletion(permanentRetry, permanentRetry, confirmFallback, false);
+        if (mode == DeletionMode.RECYCLE_BIN_FIRST && failure instanceof TrashMoveException) {
+            DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, target);
+            if (!closed.get() && decision != DeletionFallbackDecision.CANCEL) {
+                startDeletion(target, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
             }
             return;
         }
-        interactions.showRetryableFailure(
-                this,
-                strings.failureTitle(),
-                failureDetail(failure),
-                () -> startDeletion(operation, permanentRetry, confirmFallback, allowFallback));
+        interactions.showRetryableFailure(this, strings.failureTitle(), failureDetail(failure),
+                () -> startDeletion(target, mode));
     }
 
     /// Unwraps one completion exception when present.

@@ -14,12 +14,14 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
-import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
@@ -127,6 +129,49 @@ public final class SchematicBrowserPanelTest {
                     "%d pixels; rendering deferred",
                     "Unavailable"),
             ACTION_STRINGS);
+
+    /// Keeps the exact captured path through repeated recycle-bin failures and all recovery choices.
+    @Test
+    public void retriesSameSchematicTargetAfterRecycleFailure() {
+        for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+            Path root = Path.of("schematics").toAbsolutePath().normalize();
+            SchematicDirectoryItem target = new SchematicDirectoryItem(root.resolve("target"), "target");
+            FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(List.of(target),
+                    snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
+            model.deletionFailures.add(new TrashMoveException(List.of(target.path())));
+            model.deletionFailures.add(new TrashMoveException(List.of(target.path())));
+            FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+            interactions.deletionConfirmed = true;
+            interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+            interactions.decisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.decisions.add(decision);
+            SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS,
+                    interactions));
+            onEventDispatchThread(() -> {
+                prepareLoadedList(panel);
+                panel.choiceList().getList().setSelectedIndex(0);
+                findButton(panel, "schematicsDelete").doClick();
+            });
+            for (int turn = 0; turn < 8; turn++) {
+                onEventDispatchThread(() -> { });
+            }
+            onEventDispatchThread(() -> {
+                try {
+                    List<DeletionMode> expected = new ArrayList<>(List.of(
+                            DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                    if (decision != DeletionFallbackDecision.CANCEL) {
+                        expected.add(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                    }
+                    assertEquals(expected, model.deletionModes);
+                    assertEquals(java.util.Collections.nCopies(expected.size(), target.path()), model.deletedTargets);
+                    assertEquals(2, interactions.fallbackCount);
+                } finally {
+                    panel.close();
+                }
+            });
+        }
+    }
 
     /// Construction stays I/O-free, start is lazy, and repeated close releases the model only once.
     @Test
@@ -1112,6 +1157,22 @@ public final class SchematicBrowserPanelTest {
     /// Deterministic modal and desktop interaction fake for action-focused panel tests.
     @NotNullByDefault
     private static final class FakeSchematicBrowserInteractions implements SchematicBrowserInteractions {
+        /// Controlled initial deletion behavior.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Queued recovery choices.
+        private final List<DeletionFallbackDecision> decisions = new ArrayList<>();
+
+        /// Number of recycle-bin failure prompts.
+        private int fallbackCount;
+
+        /// Returns the next explicit recovery choice.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, SchematicBrowserItem target) {
+            fallbackCount++;
+            return decisions.remove(0);
+        }
+
         /// Import selection returned by the next and subsequent chooser calls.
         private @Unmodifiable List<Path> importSelection = List.of();
 
@@ -1201,7 +1262,7 @@ public final class SchematicBrowserPanelTest {
         /// @return permanent mode when confirmed, otherwise null
         @Override
         public @Nullable DeletionMode chooseDeleteMode(Component owner, SchematicBrowserItem target) {
-            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+            return confirmDelete(owner, target) ? deletionMode : null;
         }
 
         /// Captures the exact reveal target and returns the configured completion.
@@ -1397,6 +1458,23 @@ public final class SchematicBrowserPanelTest {
         public synchronized CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName) {
             createdDirectories.add(directoryName);
             return takeWriteCompletion();
+        }
+
+        /// Queued deletion failures.
+        private final List<Throwable> deletionFailures = new ArrayList<>();
+
+        /// Modes requested for every deletion.
+        private final List<DeletionMode> deletionModes = new ArrayList<>();
+
+        /// Records a mode-aware deletion and preserves existing controlled write completions.
+        @Override
+        public synchronized CompletionStage<SchematicBrowserSnapshot> delete(Path target, DeletionMode mode) {
+            deletionModes.add(mode);
+            if (deletionFailures.isEmpty()) {
+                return delete(target);
+            }
+            deletedTargets.add(target);
+            return CompletableFuture.failedFuture(deletionFailures.remove(0));
         }
 
         /// Captures an exact deletion path and returns the configured completion.

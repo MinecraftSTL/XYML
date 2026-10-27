@@ -5,6 +5,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -51,6 +52,19 @@ public interface WorldBackupInteractions extends RetryableFailureInteraction {
     /// @return whether permanent deletion was approved
     default boolean confirmPermanentFallback(Component owner, WorldBackupArchive archive) {
         return confirmDelete(owner, archive);
+    }
+
+    /// Chooses how to recover one backup that could not enter the recycle bin.
+    ///
+    /// @param owner Swing dialog owner
+    /// @param archive selected archive
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(
+            Component owner,
+            WorldBackupArchive archive) {
+        return confirmPermanentFallback(owner, archive)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
     }
 
     /// Requests a new destination save directory name for a backup restore.

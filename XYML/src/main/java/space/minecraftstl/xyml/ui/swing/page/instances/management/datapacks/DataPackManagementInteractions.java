@@ -7,6 +7,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -60,6 +61,19 @@ public interface DataPackManagementInteractions extends RetryableFailureInteract
             Component owner,
             @Unmodifiable List<DataPack.Pack> dataPacks) {
         return confirmDelete(owner, dataPacks);
+    }
+
+    /// Chooses how to recover data packs that could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param dataPacks failed durable data-pack entries
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        return confirmPermanentFallback(owner, dataPacks)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
     }
 
     /// Schedules creation and platform opening of one local directory outside the EDT.

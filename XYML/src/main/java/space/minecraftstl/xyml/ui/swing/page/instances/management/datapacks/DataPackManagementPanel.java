@@ -8,29 +8,30 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
-import space.minecraftstl.xyml.util.io.DeletionMode;
-import space.minecraftstl.xyml.util.io.TrashMoveException;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
@@ -89,6 +90,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
 
     /// Caller-owned executor for Core world and data-pack filesystem operations.
     private final Executor executor;
+
+    /// Blocking deletion boundary executed only on the caller-owned background executor.
+    private final DataPackDeletion dataPackDeletion;
 
     /// Stable visible text and dialog labels.
     private final DataPackManagementStrings strings;
@@ -290,6 +294,24 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             DataPackManagementInteractions interactions,
             Executor executor,
             @Nullable Path boundWorldPath) {
+        this(worlds, strings, interactions, executor, boundWorldPath, DataPack::deletePacks);
+    }
+
+    /// Creates a page with an explicit background deletion boundary for deterministic verification.
+    ///
+    /// @param worlds owned lazy world catalog
+    /// @param strings localized presentation
+    /// @param interactions dialog and desktop boundary
+    /// @param executor caller-owned background executor
+    /// @param boundWorldPath optional fixed world directory
+    /// @param dataPackDeletion blocking pack deletion operation
+    DataPackManagementPanel(
+            WorldCatalogModel worlds,
+            DataPackManagementStrings strings,
+            DataPackManagementInteractions interactions,
+            Executor executor,
+            @Nullable Path boundWorldPath,
+            DataPackDeletion dataPackDeletion) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -299,6 +321,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.dataPackDeletion = Objects.requireNonNull(dataPackDeletion, "dataPackDeletion");
         this.boundWorldPath = boundWorldPath == null
                 ? null
                 : boundWorldPath.toAbsolutePath().normalize();
@@ -961,7 +984,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, captured, mode);
         beginDataPackOperation();
         try {
-            executor.execute(() -> deleteDataPacksOnExecutor(context, captured, mode, true));
+            executor.execute(() -> deleteDataPacksOnExecutor(context, captured, mode));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
@@ -1078,37 +1101,58 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         scheduleDataPacksDeletion(context, selected, mode);
     }
 
-    /// Deletes selected packs through their owning Core data-pack manager outside the EDT.
+    /// Deletes selected packs off the EDT, narrowing each recovery round to its actual failed paths.
     ///
-    /// @param context stable selected-world data-pack context
-    /// @param selected immutable durable selected pack rows
-    /// @param mode selected deletion behavior
-    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// @param context captured selected-world context
+    /// @param selected immutable original targets
+    /// @param mode initial deletion behavior
     private void deleteDataPacksOnExecutor(
             SelectedWorld context,
             @Unmodifiable List<DataPack.Pack> selected,
-            DeletionMode mode,
-            boolean allowFallback) {
-        try {
-            requireBackgroundThread();
-            context.dataPack().deletePacks(selected, mode);
-            finishDataPackOperation(context, null);
-        } catch (IOException | RuntimeException failure) {
-            if (allowFallback && failure instanceof TrashMoveException) {
-                boolean[] approved = {false};
-                EdtDispatcher.executeAndWait(() -> approved[0] = interactions.confirmPermanentFallback(this, selected));
-                if (approved[0]) {
-                    pendingDataPackRetry = () -> scheduleDataPacksDeletion(
-                            context,
-                            selected,
-                            DeletionMode.PERMANENT);
-                    deleteDataPacksOnExecutor(context, selected, DeletionMode.PERMANENT, false);
-                } else {
-                    finishDataPackOperation(context, null);
-                }
+            DeletionMode mode) {
+        requireBackgroundThread();
+        @Unmodifiable List<DataPack.Pack> remaining = selected;
+        DeletionMode currentMode = mode;
+        while (true) {
+            try {
+                dataPackDeletion.delete(context.dataPack(), remaining, currentMode);
+                finishDataPackOperation(context, null);
                 return;
+            } catch (IOException | RuntimeException failure) {
+                if (currentMode != DeletionMode.RECYCLE_BIN_FIRST || !(failure instanceof TrashMoveException trashFailure)) {
+                    finishDataPackOperation(context, failure);
+                    return;
+                }
+                @Unmodifiable List<DataPack.Pack> failedPacks = remaining.stream()
+                        .filter(pack -> trashFailure.failedPaths().stream().anyMatch(path ->
+                                path.toAbsolutePath().normalize().equals(pack.getPath().toAbsolutePath().normalize())))
+                        .toList();
+                if (failedPacks.isEmpty()) {
+                    finishDataPackOperation(context, failure);
+                    return;
+                }
+                DeletionFallbackDecision[] decision = {DeletionFallbackDecision.CANCEL};
+                EdtDispatcher.executeAndWait(() -> {
+                    if (!closed.get() && selectedWorld == context) {
+                        decision[0] = interactions.choosePermanentFallback(this, failedPacks);
+                        if (closed.get() || selectedWorld != context) {
+                            decision[0] = DeletionFallbackDecision.CANCEL;
+                        }
+                        if (decision[0] != DeletionFallbackDecision.CANCEL) {
+                            DeletionMode retryMode = decision[0] == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                    ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT;
+                            pendingDataPackRetry = () -> scheduleDataPacksDeletion(context, failedPacks, retryMode);
+                        }
+                    }
+                });
+                if (decision[0] == DeletionFallbackDecision.CANCEL) {
+                    finishDataPackOperation(context, null);
+                    return;
+                }
+                remaining = failedPacks;
+                currentMode = decision[0] == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT;
             }
-            finishDataPackOperation(context, failure);
         }
     }
 
@@ -1361,4 +1405,18 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             return supportsDataPacks;
         }
     }
+
+    /// Blocking Core deletion boundary owned by this page's background mutation loop.
+    @NotNullByDefault
+    @FunctionalInterface
+    interface DataPackDeletion {
+        /// Deletes the exact current subset using the selected behavior.
+        ///
+        /// @param dataPack selected world's Core manager
+        /// @param packs immutable current deletion targets
+        /// @param mode selected deletion behavior
+        /// @throws IOException when deletion leaves one or more targets
+        void delete(DataPack dataPack, @Unmodifiable List<DataPack.Pack> packs, DeletionMode mode) throws IOException;
+    }
+
 }

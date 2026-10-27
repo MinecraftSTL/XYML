@@ -10,11 +10,12 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
-import space.minecraftstl.xyml.task.TaskListener;
-import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
-import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -384,8 +385,18 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             if (kind == MutationKind.DELETE
                     && deletionMode == DeletionMode.RECYCLE_BIN_FIRST
                     && hasTrashMoveFailure(failure)) {
-                if (interactions.confirmPermanentFallback(this, instanceId)) {
-                    submitMutation(MutationKind.DELETE, null, false, DeletionMode.PERMANENT);
+                DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, instanceId);
+                if (closed.get()) {
+                    return;
+                }
+                if (decision != DeletionFallbackDecision.CANCEL) {
+                    EdtDispatcher.executeLater(() -> {
+                        if (!closed.get()) {
+                            submitMutation(MutationKind.DELETE, null, false,
+                                    decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                            ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                        }
+                    });
                 } else {
                     statusLabel.setText(strings.deleteFailure());
                     updateActionState();

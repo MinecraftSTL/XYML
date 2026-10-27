@@ -5,6 +5,7 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.io.DeletionBatchException;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -30,84 +31,63 @@ final class ResourcePackDeletionFallback {
     private ResourcePackDeletionFallback() {
     }
 
-    /// Starts one deletion when the panel still permits a write.
+    /// Starts a deletion and releases the write gate before a three-way fallback decision.
     ///
-    /// @param initial initial deletion operation
-    /// @param permanentRetry permanent deletion retry
-    /// @param confirmFallback original-warning confirmation
-    /// @param allowFallback whether recycle-bin failure may prompt again
+    /// @param operation exact current deletion
+    /// @param allowFallback whether recycle-bin failures allow recovery
+    /// @param fallback callback receiving the actual failed targets
     /// @param canStart current panel write predicate
-    /// @param beginWrite callback entering busy state and updating controls
-    /// @param clearWriteGate callback clearing busy state
-    /// @param onFailure callback reporting a non-fallback failure
-    static void start(
-            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
-            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
+    /// @param beginWrite enters the panel busy state
+    /// @param clearWriteGate releases the panel busy state
+    /// @param onFailure receives ordinary failures or null on success
+    static void startWithFallback(
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> operation,
             boolean allowFallback,
+            Consumer<TrashMoveException> fallback,
             BooleanSupplier canStart,
             Runnable beginWrite,
             Runnable clearWriteGate,
-            Consumer<Throwable> onFailure) {
+            Consumer<@Nullable Throwable> onFailure) {
         EdtDispatcher.requireEventDispatchThread();
-        if (!Objects.requireNonNull(canStart, "canStart").getAsBoolean()) {
+        if (!canStart.getAsBoolean()) {
             return;
         }
         beginWrite.run();
+        CompletionStage<ResourcePackCatalogSnapshot> stage;
         try {
-            observe(
-                    Objects.requireNonNull(initial.get(), "resource-pack deletion returned null"),
-                    permanentRetry,
-                    confirmFallback,
-                    allowFallback,
-                    clearWriteGate,
-                    onFailure);
+            stage = Objects.requireNonNull(operation.get(), "resource-pack deletion returned null");
         } catch (RuntimeException failure) {
-            onFailure.accept(failure);
+            stage = CompletableFuture.failedFuture(failure);
         } catch (Error failure) {
             clearWriteGate.run();
             throw failure;
         }
+        stage.whenComplete((@Nullable ResourcePackCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+            Runnable complete = () -> {
+                @Nullable Throwable resolved = failure == null ? null : unwrapFailure(failure);
+                if (allowFallback && resolved instanceof TrashMoveException trashFailure) {
+                    clearWriteGate.run();
+                    fallback.accept(trashFailure);
+                } else {
+                    onFailure.accept(resolved);
+                }
+            };
+            if (failure == null) {
+                EdtDispatcher.execute(complete);
+            } else {
+                EdtDispatcher.executeLater(complete);
+            }
+        });
     }
 
-    /// Observes one deletion and retries permanently after an approved recycle-bin fallback warning.
+    /// Retains only captured targets that appear in the normalized failed-path set.
     ///
-    /// @param initial initial deletion stage
-    /// @param permanentRetry permanent deletion retry
-    /// @param confirmFallback original-warning confirmation
-    /// @param allowFallback whether recycle-bin failure may prompt again
-    /// @param clearWriteGate callback clearing the panel write gate
-    /// @param onFailure callback reporting a non-fallback failure
-    static void observe(
-            CompletionStage<ResourcePackCatalogSnapshot> initial,
-            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
-            boolean allowFallback,
-            Runnable clearWriteGate,
-            Consumer<Throwable> onFailure) {
-        Objects.requireNonNull(initial, "initial").whenComplete((
-                @Nullable ResourcePackCatalogSnapshot ignored,
-                @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
-            if (failure == null) {
-                onFailure.accept(null);
-                return;
-            }
-            Throwable resolved = unwrapFailure(failure);
-            if (allowFallback && resolved instanceof TrashMoveException) {
-                clearWriteGate.run();
-                if (confirmFallback.getAsBoolean()) {
-                    observe(
-                            permanentRetry.get(),
-                            permanentRetry,
-                            confirmFallback,
-                            false,
-                            clearWriteGate,
-                            onFailure);
-                }
-                return;
-            }
-            onFailure.accept(failure);
-        }));
+    /// @param paths immutable current deletion targets
+    /// @param failure actual failed recycle-bin targets
+    /// @return immutable failed subset in original target order
+    static @Unmodifiable List<Path> failedPaths(@Unmodifiable List<Path> paths, TrashMoveException failure) {
+        return paths.stream().filter(path -> failure.failedPaths().stream().anyMatch(failed ->
+                failed.toAbsolutePath().normalize().equals(path.toAbsolutePath().normalize()))).toList();
     }
 
     /// Deletes paths serially while attempting every target and aggregating all failures.
@@ -154,7 +134,8 @@ final class ResourcePackDeletionFallback {
             if (failedPaths.isEmpty()) {
                 return CompletableFuture.completedFuture(snapshot.get());
             }
-            if (mode == DeletionMode.RECYCLE_BIN_FIRST) {
+            if (mode == DeletionMode.RECYCLE_BIN_FIRST
+                    && failures.stream().allMatch(TrashMoveException.class::isInstance)) {
                 TrashMoveException aggregate = new TrashMoveException(failedPaths);
                 addSuppressedFailures(aggregate, failures);
                 return CompletableFuture.failedFuture(aggregate);

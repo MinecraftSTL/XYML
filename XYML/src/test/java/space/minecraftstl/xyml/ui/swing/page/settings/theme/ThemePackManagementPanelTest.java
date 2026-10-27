@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingBackgroundSource;
 import space.minecraftstl.xyml.ui.swing.SwingWindowAppearanceRequest;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
@@ -28,6 +29,8 @@ import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsSnapshot
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettings;
 import space.minecraftstl.xyml.ui.swing.page.settings.ThemeColorAppearanceSettings;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -72,6 +75,52 @@ public final class ThemePackManagementPanelTest {
     /// Temporary installed paths and fallback screenshot directory.
     @TempDir
     private Path temporaryDirectory;
+
+    /// The same installed theme is retained across repeated recycle-bin recovery choices.
+    @Test
+    public void retriesSameInstalledThemeAfterRepeatedRecycleFailure() {
+        for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+            @Unmodifiable List<ThemePackItem> inventory = items(2);
+            ThemePackItem target = inventory.get(1);
+            ImmediateBackend backend = new ImmediateBackend(inventory);
+            backend.deletionFailures.add(new TrashMoveException(List.of(Objects.requireNonNull(target.installedDirectory()))));
+            backend.deletionFailures.add(new TrashMoveException(List.of(Objects.requireNonNull(target.installedDirectory()))));
+            RecordingInteractions interactions = new RecordingInteractions();
+            interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+            interactions.decisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.decisions.add(decision);
+            ThemePackManagementModel model = new ThemePackManagementModel(backend, new RecordingApplication(),
+                    Runnable::run, inventory.get(0).reference());
+            ManualExecutor icons = new ManualExecutor();
+            ThemePackManagementPanel panel = onEdt(() -> new ThemePackManagementPanel(model,
+                    ThemePackManagementStrings.english(), interactions, icons));
+            onEdt(() -> {
+                panel.setSize(1120, 620);
+                layoutRecursively(panel);
+                panel.choiceList().refreshLoadPlan();
+                panel.choiceList().getList().setSelectedIndex(1);
+                findNamed(panel, "themePacksDelete", AbstractButton.class).doClick();
+            });
+            for (int turn = 0; turn < 10; turn++) {
+                flushEdt();
+            }
+            onEdt(() -> {
+                try {
+                    List<DeletionMode> expected = new ArrayList<>(List.of(
+                            DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                    if (decision != DeletionFallbackDecision.CANCEL) {
+                        expected.add(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                    }
+                    assertEquals(expected, backend.deletionModes);
+                    assertEquals(java.util.Collections.nCopies(expected.size(), target), backend.deletionTargets);
+                    assertEquals(2, interactions.fallbackCount);
+                } finally {
+                    panel.close();
+                }
+            });
+        }
+    }
 
     /// The optional toolbar command exports through the worker and reports one successful archive.
     @Test
@@ -591,6 +640,24 @@ public final class ThemePackManagementPanelTest {
             return CompletableFuture.completedFuture(items);
         }
 
+        /// Queued deletion failures.
+        private final List<Throwable> deletionFailures = new ArrayList<>();
+
+        /// Modes requested by the panel through the real model.
+        private final List<DeletionMode> deletionModes = new ArrayList<>();
+
+        /// Captured installed theme requested by each deletion.
+        private final List<ThemePackItem> deletionTargets = new ArrayList<>();
+
+        /// Records a deletion and resolves its controlled asynchronous result.
+        @Override
+        public CompletionStage<@Nullable Void> deleteInstalled(ThemePackItem item, DeletionMode mode, Executor executor) {
+            deletionModes.add(mode);
+            deletionTargets.add(item);
+            return deletionFailures.isEmpty() ? CompletableFuture.completedFuture(null)
+                    : CompletableFuture.failedFuture(deletionFailures.remove(0));
+        }
+
         /// Completes unused deletion immediately.
         @Override
         public CompletionStage<@Nullable Void> deleteInstalled(ThemePackItem item, Executor executor) {
@@ -651,6 +718,28 @@ public final class ThemePackManagementPanelTest {
     /// Dialog and desktop fake with no external side effects.
     @NotNullByDefault
     private static final class RecordingInteractions implements ThemePackManagementInteractions {
+        /// Initial deletion mode.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Ordered fallback choices.
+        private final List<DeletionFallbackDecision> decisions = new ArrayList<>();
+
+        /// Number of fallback decisions requested.
+        private int fallbackCount;
+
+        /// Returns the controlled initial mode.
+        @Override
+        public DeletionMode chooseDeleteMode(Component owner, ThemePackItem item) {
+            return deletionMode;
+        }
+
+        /// Returns the next recovery action for the same captured installed theme.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, ThemePackItem item) {
+            fallbackCount++;
+            return decisions.remove(0);
+        }
+
         /// Optional target returned by the export chooser fake.
         private final @Nullable Path exportTarget;
 

@@ -10,6 +10,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.task.TaskLaunchController;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -240,6 +241,51 @@ final class InstanceLifecyclePanelTest {
         }
     }
 
+    /// Allows repeated recycling and keeps cancellation distinct from permanent deletion.
+    @Test
+    public void repeatsRecycleBinFallbackUntilExplicitDecision() throws Exception {
+        for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            RecordingService service = new RecordingService();
+            service.remainingTrashFailures.set(2);
+            RecordingInteractions interactions = new RecordingInteractions();
+            interactions.deleteMode.set(DeletionMode.RECYCLE_BIN_FIRST);
+            interactions.fallbackDecisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.fallbackDecisions.add(decision);
+            CountDownLatch completed = new CountDownLatch(1);
+            AtomicReference<@Nullable InstanceLifecyclePanel> reference = new AtomicReference<>();
+            try {
+                EdtDispatcher.executeAndWait(() -> {
+                    InstanceLifecyclePanel panel = new InstanceLifecyclePanel(new GameInstanceID("source"), service,
+                            executor, InstanceLifecycleStrings.english(), interactions, completed::countDown);
+                    reference.set(panel);
+                    panel.setTaskLaunchController(new TaskLaunchController(() -> {
+                        throw new AssertionError("Unexpected navigation");
+                    }));
+                    Objects.requireNonNull(findNamed(panel, "instanceLifecycleDelete", JButton.class)).doClick();
+                });
+                assertTrue(interactions.fallbackHandled.await(5, TimeUnit.SECONDS));
+                if (decision != DeletionFallbackDecision.CANCEL) {
+                    assertTrue(completed.await(5, TimeUnit.SECONDS));
+                }
+                EdtDispatcher.executeAndWait(() -> { });
+                List<DeletionMode> expected = new java.util.ArrayList<>(List.of(
+                        DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                if (decision != DeletionFallbackDecision.CANCEL) {
+                    expected.add(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                            ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                }
+                assertEquals(expected, service.deleteModes);
+                assertEquals(2, interactions.fallbackRequests.get());
+                assertFalse(service.mutationRanOnEdt.get());
+            } finally {
+                closePanel(reference.get());
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            }
+        }
+    }
+
     /// Rejects an invalid dialog destination before any background filesystem mutation can be submitted.
     @Test
     void invalidDestinationShowsFailureWithoutSubmittingMutation() throws Exception {
@@ -338,6 +384,9 @@ final class InstanceLifecyclePanelTest {
         /// Deletion modes observed in request order.
         private final List<DeletionMode> deleteModes = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+        /// Number of additional recycle-bin failures before a successful task.
+        private final AtomicInteger remainingTrashFailures = new AtomicInteger();
+
         /// Whether the next recycle-bin request should fail.
         private final AtomicBoolean failNextTrashMove = new AtomicBoolean();
 
@@ -406,7 +455,8 @@ final class InstanceLifecyclePanelTest {
                 mutationRanOnEdt.compareAndSet(false, SwingUtilities.isEventDispatchThread());
                 deleteCount.incrementAndGet();
                 deleteModes.add(mode);
-                if (mode == DeletionMode.RECYCLE_BIN_FIRST && failNextTrashMove.compareAndSet(true, false)) {
+                if (mode == DeletionMode.RECYCLE_BIN_FIRST && (failNextTrashMove.compareAndSet(true, false)
+                        || remainingTrashFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0)) {
                     throw new TrashMoveException(List.of(Path.of(sourceId.id())));
                 }
                 EdtDispatcher.executeAndWait(() -> reconcileSelection(null));
@@ -435,6 +485,24 @@ final class InstanceLifecyclePanelTest {
 
         /// Configured deletion decision, or null for cancellation.
         private final AtomicReference<@Nullable DeletionMode> deleteMode = new AtomicReference<>();
+
+        /// Controlled three-way decisions for repeated fallback scenarios.
+        private final List<DeletionFallbackDecision> fallbackDecisions = new java.util.ArrayList<>();
+
+        /// Signals the second controlled fallback has been handled.
+        private final CountDownLatch fallbackHandled = new CountDownLatch(2);
+
+        /// Uses queued three-way decisions or preserves the existing boolean compatibility boundary.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, GameInstanceID sourceId) {
+            if (fallbackDecisions.isEmpty()) {
+                return InstanceLifecycleInteractions.super.choosePermanentFallback(owner, sourceId);
+            }
+            fallbackRequests.incrementAndGet();
+            DeletionFallbackDecision result = fallbackDecisions.remove(0);
+            fallbackHandled.countDown();
+            return result;
+        }
 
         /// Whether permanent deletion fallback should be approved.
         private final AtomicBoolean fallbackApproved = new AtomicBoolean();

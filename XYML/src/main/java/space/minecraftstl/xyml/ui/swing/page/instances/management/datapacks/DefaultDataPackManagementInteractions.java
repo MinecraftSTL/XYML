@@ -3,13 +3,14 @@
 
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
-import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
-
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
@@ -136,7 +137,7 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
             @Unmodifiable List<DataPack.Pack> dataPacks) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(owner, "owner");
-        List.copyOf(Objects.requireNonNull(dataPacks, "dataPacks"));
+        @Unmodifiable List<DataPack.Pack> selected = List.copyOf(Objects.requireNonNull(dataPacks, "dataPacks"));
         if (trashOperations.isSupported()) {
             return DeletionMode.RECYCLE_BIN_FIRST;
         }
@@ -150,6 +151,23 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
             @Unmodifiable List<DataPack.Pack> dataPacks) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmDelete(owner, dataPacks);
+    }
+
+    /// Chooses how to recover data packs that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(
+            Component owner,
+            @Unmodifiable List<DataPack.Pack> dataPacks) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        @Unmodifiable List<DataPack.Pack> selected = List.copyOf(Objects.requireNonNull(dataPacks, "dataPacks"));
+        if (selected.isEmpty()) {
+            return DeletionFallbackDecision.CANCEL;
+        }
+        String message = selected.size() == 1
+                ? strings.deleteConfirmationFormat().formatted(selected.get(0).getId())
+                : i18n("button.remove.confirm");
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteDialogTitle(), message);
     }
 
     /// Schedules directory creation followed by platform reveal outside the EDT.

@@ -6,6 +6,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
@@ -118,6 +120,17 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
     public boolean confirmPermanentFallback(Component owner, WorldBackupArchive archive) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmDelete(owner, archive);
+    }
+
+    /// Chooses how to recover one backup that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, WorldBackupArchive archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        WorldBackupArchive selectedArchive = Objects.requireNonNull(archive, "archive");
+        return SwingDeletionFallbackDialog.choose(
+                owner,
+                i18n("swing.world_backup.delete_title"),
+                i18n("swing.world_backup.delete_confirmation", selectedArchive.fileName()));
     }
 
     /// Prompts for one new save directory name without inspecting archive contents on the EDT.

@@ -10,6 +10,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -237,10 +238,14 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
         }
         return submitMutation(() -> {
             @Nullable Throwable firstFailure = null;
+            List<Path> failedPaths = new ArrayList<>();
+            boolean allTrashFailures = true;
             for (Path path : checkedPaths) {
                 try {
                     access.delete(path.toAbsolutePath().normalize(), checkedMode);
-                } catch (RuntimeException | Error | java.io.IOException failure) {
+                } catch (RuntimeException | java.io.IOException failure) {
+                    failedPaths.add(path.toAbsolutePath().normalize());
+                    allTrashFailures &= failure instanceof TrashMoveException;
                     if (firstFailure == null) {
                         firstFailure = failure;
                     } else if (firstFailure != failure) {
@@ -251,6 +256,11 @@ public final class DefaultShaderPackCatalogModel implements ShaderPackCatalogMod
             ShaderPackCatalogSnapshot next = scan();
             publish(next);
             if (firstFailure != null) {
+                if (checkedMode == DeletionMode.RECYCLE_BIN_FIRST && allTrashFailures) {
+                    TrashMoveException aggregate = new TrashMoveException(List.copyOf(failedPaths));
+                    aggregate.addSuppressed(firstFailure);
+                    throw aggregate;
+                }
                 throw unchecked(firstFailure);
             }
             return next;

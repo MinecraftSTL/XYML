@@ -19,6 +19,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
@@ -482,25 +483,30 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         }
         @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
         if (mode != null) {
-            observeDeletion(selected, mode, true);
+            observeDeletion(selected, mode);
         }
     }
 
-    /// Starts one theme deletion and retries permanently only after the original warning is approved.
+    /// Deletes the same installed theme after each explicit recycle-bin recovery choice.
     ///
-    /// @param selected selected installed item
+    /// @param selected captured installed theme
     /// @param mode selected deletion behavior
-    /// @param allowFallback whether recycle-bin failure may prompt again
-    private void observeDeletion(ThemePackItem selected, DeletionMode mode, boolean allowFallback) {
-        model.delete(selected, mode).whenComplete((@Nullable ThemePackManagementSnapshot ignored, @Nullable Throwable failure) ->
-                EdtDispatcher.execute(() -> {
-                    if (failure == null) {
+    private void observeDeletion(ThemePackItem selected, DeletionMode mode) {
+        if (closed.get()) {
+            return;
+        }
+        model.deleteWithFallback(selected, mode).whenComplete((@Nullable ThemePackManagementSnapshot ignored, @Nullable Throwable failure) ->
+                EdtDispatcher.executeLater(() -> {
+                    if (failure == null || closed.get()) {
                         return;
                     }
                     Throwable resolved = unwrapFailure(failure);
-                    if (allowFallback && resolved instanceof TrashMoveException
-                            && interactions.confirmPermanentFallback(this, selected)) {
-                        observeDeletion(selected, DeletionMode.PERMANENT, false);
+                    if (mode == DeletionMode.RECYCLE_BIN_FIRST && resolved instanceof TrashMoveException) {
+                        DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, selected);
+                        if (!closed.get() && decision != DeletionFallbackDecision.CANCEL) {
+                            observeDeletion(selected, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                    ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                        }
                     }
                 }));
     }

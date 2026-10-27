@@ -6,6 +6,8 @@ package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -84,6 +86,20 @@ public final class DefaultShaderPackCatalogInteractions implements ShaderPackCat
         }
         return chooseDeleteMode(
                 owner,
+                strings.batchDeleteConfirmationFormat().formatted(selectedCount));
+    }
+
+    /// Shows the existing single-pack warning with three recovery actions.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, ShaderPackCatalogItem target) {
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteAction(),
+                strings.deleteConfirmationFormat().formatted(target.fileName()));
+    }
+
+    /// Shows the existing batch warning for only the unresolved packs.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int selectedCount) {
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteAction(),
                 strings.batchDeleteConfirmationFormat().formatted(selectedCount));
     }
 
