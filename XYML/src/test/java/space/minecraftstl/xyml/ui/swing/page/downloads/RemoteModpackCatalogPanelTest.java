@@ -839,7 +839,7 @@ final class RemoteModpackCatalogPanelTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/fixture-pack.mrpack", "fixture-pack.mrpack"),
                 List.of(),
                 List.of("1.20.1"),
-                List.<ModLoaderType>of());
+                List.<ModLoaderType>of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Deterministic backend recording actual user-triggered Core boundary requests.

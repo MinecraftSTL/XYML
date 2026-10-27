@@ -159,7 +159,7 @@ final class RepositoryAddonUpdateScanAccessTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/normal.jar", "normal.jar"),
                 List.of(),
                 List.of("1.21.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Minimal local add-on fixture used only by the package-visible winner-modeling seam.

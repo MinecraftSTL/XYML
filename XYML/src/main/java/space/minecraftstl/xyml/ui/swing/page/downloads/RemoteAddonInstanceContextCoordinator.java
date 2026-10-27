@@ -49,8 +49,14 @@ final class RemoteAddonInstanceContextCoordinator {
     /// Discards any query retained for a later layout pass.
     private final Runnable clearPendingSearch;
 
+    /// Invalidates selected versions whenever the owning instance context changes.
+    private final Runnable invalidateVersions;
+
     /// Optional local target selector attached after construction.
     private @Nullable RemoteAddonTargetInstanceSelector targetInstanceSelector;
+
+    /// Analyzed loader of the applied instance context, or null while unresolved.
+    private @Nullable ModLoaderType modLoader;
 
     /// Monotonic revision identifying the latest applied resolution.
     private long revision;
@@ -68,6 +74,7 @@ final class RemoteAddonInstanceContextCoordinator {
     /// @param resetSortOptions restores the provider-default ordering
     /// @param searchField project query field cleared by programmatic navigation
     /// @param clearPendingSearch discards a retained project query
+    /// @param invalidateVersions invalidates recommendations belonging to an earlier instance context
     RemoteAddonInstanceContextCoordinator(
             @Nullable InstancesModel source,
             JComboBox<RemoteAddonCatalogSource> sourceBox,
@@ -76,7 +83,8 @@ final class RemoteAddonInstanceContextCoordinator {
             BooleanSupplier categoriesReady,
             Runnable resetSortOptions,
             JTextField searchField,
-            Runnable clearPendingSearch) {
+            Runnable clearPendingSearch,
+            Runnable invalidateVersions) {
         this.source = source;
         this.sourceBox = Objects.requireNonNull(sourceBox, "sourceBox");
         this.gameVersionField = Objects.requireNonNull(gameVersionField, "gameVersionField");
@@ -85,6 +93,7 @@ final class RemoteAddonInstanceContextCoordinator {
         this.resetSortOptions = Objects.requireNonNull(resetSortOptions, "resetSortOptions");
         this.searchField = Objects.requireNonNull(searchField, "searchField");
         this.clearPendingSearch = Objects.requireNonNull(clearPendingSearch, "clearPendingSearch");
+        this.invalidateVersions = Objects.requireNonNull(invalidateVersions, "invalidateVersions");
     }
 
     /// Attaches the owning catalog's optional local target selector.
@@ -112,6 +121,10 @@ final class RemoteAddonInstanceContextCoordinator {
     /// @param gameVersion analyzed Minecraft version, or null when unavailable
     /// @param modLoader current instance mod loader, or null when unavailable or unsupported
     void apply(@Nullable String gameVersion, @Nullable ModLoaderType modLoader) {
+        revision++;
+        this.modLoader = modLoader;
+        resolvingInstanceId = null;
+        invalidateVersions.run();
         sourceBox.setSelectedItem(RemoteAddonCatalogSource.MODRINTH);
         boolean ready = categoriesReady.getAsBoolean();
         @Nullable String dependencyCategoryId = RemoteAddonCategoryControls.dependencyCategoryId(modLoader);
@@ -130,6 +143,30 @@ final class RemoteAddonInstanceContextCoordinator {
         }
     }
 
+    /// Captures one version request's game, loader and instance identity on the EDT.
+    RecommendationContext recommendationContext(String gameVersion, RemoteAddonCatalogKind kind) {
+        return new RecommendationContext(revision, gameVersion, kind == RemoteAddonCatalogKind.MOD ? modLoader : null);
+    }
+
+    /// Immutable request-local recommendation criteria; null loader retains general browsing.
+    ///
+    /// @param revision owning instance context identity
+    /// @param gameVersion requested game version, or empty for general browsing
+    /// @param modLoader known instance loader, or null when unrestricted
+    @NotNullByDefault
+    record RecommendationContext(long revision, String gameVersion, @Nullable ModLoaderType modLoader) {
+    }
+
+    /// Reports whether a selected instance still has an outstanding context resolution.
+    boolean isResolving() {
+        return resolvingInstanceId != null;
+    }
+
+    /// Returns the context revision used to reject stale version recommendations.
+    long revision() {
+        return revision;
+    }
+
     /// Starts one asynchronous resolution unless the same instance request is already pending.
     ///
     /// @param instanceId instance whose analyzed context should be applied
@@ -139,7 +176,9 @@ final class RemoteAddonInstanceContextCoordinator {
             return;
         }
         resolvingInstanceId = instanceId;
+        modLoader = null;
         long requestRevision = ++revision;
+        invalidateVersions.run();
         try {
             availableSource.resolveAddonContext(instanceId).whenComplete((context, failure) ->
                     EdtDispatcher.execute(() -> applyResult(requestRevision, context, failure)));
@@ -151,6 +190,7 @@ final class RemoteAddonInstanceContextCoordinator {
 
     /// Clears pending resolution state after the owning catalog closes.
     void clear() {
+        modLoader = null;
         resolvingInstanceId = null;
         revision++;
     }

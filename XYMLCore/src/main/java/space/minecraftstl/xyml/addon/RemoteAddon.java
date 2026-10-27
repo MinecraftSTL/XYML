@@ -180,6 +180,51 @@ public record RemoteAddon(String slug, String author, String title, String descr
         Source getSource();
     }
 
+    /// Provider-declared runtime environment; unknown metadata never asserts incompatibility.
+    @NotNullByDefault
+    public enum Environment {
+        /// No recognized provider environment was supplied.
+        UNKNOWN,
+        /// Functionality runs on the logical client.
+        CLIENT_ONLY,
+        /// Server functionality also works in an integrated singleplayer server.
+        SERVER_ONLY,
+        /// Functionality requires a dedicated server and does not work in singleplayer.
+        DEDICATED_SERVER_ONLY,
+        /// Installation is required on both logical sides.
+        CLIENT_AND_SERVER,
+        /// Required on the server with optional client enhancements.
+        SERVER_ONLY_CLIENT_OPTIONAL,
+        /// Required on the client with optional server enhancements.
+        CLIENT_ONLY_SERVER_OPTIONAL,
+        /// Either side works, with enhanced functionality on both.
+        CLIENT_OR_SERVER_PREFERS_BOTH,
+        /// Either side provides the same functionality.
+        CLIENT_OR_SERVER,
+        /// Functionality only works in singleplayer.
+        SINGLEPLAYER_ONLY;
+
+        /// Maps documented provider values without guessing future or absent metadata.
+        ///
+        /// @param value raw provider environment, or null when omitted
+        /// @return recognized environment, otherwise unknown
+        public static Environment fromProvider(@Nullable String value) {
+            if (value == null) return UNKNOWN;
+            return switch (value) {
+                case "client_only" -> CLIENT_ONLY;
+                case "server_only" -> SERVER_ONLY;
+                case "dedicated_server_only" -> DEDICATED_SERVER_ONLY;
+                case "client_and_server" -> CLIENT_AND_SERVER;
+                case "server_only_client_optional" -> SERVER_ONLY_CLIENT_OPTIONAL;
+                case "client_only_server_optional" -> CLIENT_ONLY_SERVER_OPTIONAL;
+                case "client_or_server_prefers_both" -> CLIENT_OR_SERVER_PREFERS_BOTH;
+                case "client_or_server" -> CLIENT_OR_SERVER;
+                case "singleplayer_only" -> SINGLEPLAYER_ONLY;
+                default -> UNKNOWN;
+            };
+        }
+    }
+
     /// Immutable provider version metadata. Changelog text is loaded on demand through the repository.
     ///
     /// @param self provider-specific version value
@@ -193,17 +238,19 @@ public record RemoteAddon(String slug, String author, String title, String descr
     /// @param dependencies immutable provider dependency snapshot
     /// @param gameVersions immutable compatible game-version snapshot
     /// @param loaders immutable compatible loader snapshot
+    /// @param environment provider runtime environment, unknown when absent
     @NotNullByDefault
     public record Version(IVersion self, String versionId, String projectId, String name, String version,
                           Instant datePublished, VersionType versionType, File file,
                           @Unmodifiable List<Dependency> dependencies,
                           @Unmodifiable List<String> gameVersions,
-                          @Unmodifiable List<ModLoaderType> loaders) {
+                          @Unmodifiable List<ModLoaderType> loaders, Environment environment) {
         /// Defensively snapshots provider-owned collections.
         public Version {
             dependencies = List.copyOf(dependencies);
             gameVersions = List.copyOf(gameVersions);
             loaders = List.copyOf(loaders);
+            environment = environment == null ? Environment.UNKNOWN : environment;
         }
     }
 

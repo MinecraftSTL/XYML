@@ -22,6 +22,7 @@ import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.NoCandidatesException;
 import space.minecraftstl.xyml.util.io.ResponseCodeException;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -422,15 +423,17 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                              @SerializedName("dependency_type") String dependencyType) {
     }
 
-    public record ProjectVersion(String name, @SerializedName("version_number") String versionNumber, String changelog,
+    /// Modrinth version metadata and its provider-ordered downloadable artifacts.
+    @NotNullByDefault
+    public record ProjectVersion(String name, @SerializedName("version_number") String versionNumber, @Nullable String changelog,
                                  List<Dependency> dependencies,
                                  @SerializedName("game_versions") List<String> gameVersions,
                                  @SerializedName("version_type") String versionType, List<String> loaders,
                                  boolean featured, String id, @SerializedName("project_id") String projectId,
                                  @SerializedName("author_id") String authorId,
                                  @SerializedName("date_published") Instant datePublished, int downloads,
-                                 @SerializedName("changelog_url") String changelogUrl,
-                                 List<ProjectVersionFile> files) implements RemoteAddon.IVersion {
+                                 @SerializedName("changelog_url") @Nullable String changelogUrl,
+                                 List<ProjectVersionFile> files, @Nullable String environment) implements RemoteAddon.IVersion {
         private static final Map<String, RemoteAddon.@Nullable DependencyType> DEPENDENCY_TYPE = mapOf(
                 pair("required", RemoteAddon.DependencyType.REQUIRED),
                 pair("optional", RemoteAddon.DependencyType.OPTIONAL),
@@ -443,6 +446,9 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
             return RemoteAddon.Source.MODRINTH;
         }
 
+        /// Converts this provider version using its first primary artifact, or its first artifact as a fallback.
+        ///
+        /// @return the converted version, or an empty optional when no artifacts are available
         public Optional<RemoteAddon.Version> toVersion() {
             RemoteAddon.VersionType type = switch (versionType) {
                 case "release" -> RemoteAddon.VersionType.Release;
@@ -463,7 +469,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                     versionNumber,
                     datePublished,
                     type,
-                    files.get(0).toFile(),
+                    files.stream().filter(ProjectVersionFile::primary).findFirst().orElse(files.get(0)).toFile(),
                     dependencies.stream().map(dependency -> {
                         if (dependency.projectId == null) {
                             return RemoteAddon.Dependency.ofBroken();
@@ -484,7 +490,8 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                         else if ("quilt".equalsIgnoreCase(loader)) return Stream.of(ModLoaderType.QUILT);
                         else if ("liteloader".equalsIgnoreCase(loader)) return Stream.of(ModLoaderType.LITE_LOADER);
                         else return Stream.empty();
-                    }).collect(Collectors.toList())
+                    }).collect(Collectors.toList()),
+                    RemoteAddon.Environment.fromProvider(environment)
             ));
         }
     }

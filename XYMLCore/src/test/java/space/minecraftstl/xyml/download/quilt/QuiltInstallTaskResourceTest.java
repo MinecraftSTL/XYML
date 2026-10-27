@@ -71,7 +71,7 @@ final class QuiltInstallTaskResourceTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/quilt-api.jar", "quilt-api.jar"),
                 List.of(),
                 List.of("1.20.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
         return new QuiltAPIRemoteVersion(
                 GameVersionNumber.asGameVersion("1.20.1"),
                 "11.0.0",

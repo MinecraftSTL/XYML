@@ -563,7 +563,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
                         fileName),
                 List.of(),
                 List.of("1.21.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Creates one real file-backed fake local add-on.

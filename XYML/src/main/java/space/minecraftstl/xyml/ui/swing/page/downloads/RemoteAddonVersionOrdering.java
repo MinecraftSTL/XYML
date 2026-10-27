@@ -7,6 +7,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 
@@ -86,6 +87,33 @@ final class RemoteAddonVersionOrdering {
             }
         }
         return first;
+    }
+
+    /// Recommends only artifacts explicitly supporting the known instance loader and requested game version.
+    ///
+    /// Unknown or absent loader context preserves general browsing. Known loader context also requires
+    /// an exact game-version match when one is supplied, without changing the complete browsing list.
+    /// Loader compatibility follows the explicit provider metadata membership used by local mod update discovery.
+    /// Known client instances also exclude dedicated-server-only functionality; server-only mods remain
+    /// eligible because their functionality works in integrated singleplayer servers. Manual choices remain intact.
+    ///
+    /// @param versions complete provider response retained for manual browsing
+    /// @param requestedGameVersion optional exact game-version context
+    /// @param requestedLoader analyzed instance loader, or null when no loader is known
+    /// @return compatible recommendation, or null when no compatible artifact exists
+    static @Nullable RemoteAddon.Version recommended(
+            @Unmodifiable List<RemoteAddon.Version> versions,
+            String requestedGameVersion,
+            @Nullable ModLoaderType requestedLoader) {
+        if (requestedLoader == null || requestedLoader == ModLoaderType.UNKNOWN) {
+            return recommended(versions, requestedGameVersion);
+        }
+        String requested = Objects.requireNonNull(requestedGameVersion, "requestedGameVersion").trim();
+        return recommended(versions.stream()
+                .filter(version -> version.environment() != RemoteAddon.Environment.DEDICATED_SERVER_ONLY)
+                .filter(version -> version.loaders().contains(requestedLoader))
+                .filter(version -> requested.isEmpty() || hasGameVersion(version, requested))
+                .toList(), requested);
     }
 
     /// Formats a version for the compact Swing selector, including both version dimensions.

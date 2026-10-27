@@ -45,7 +45,7 @@ final class DefaultRemoteAddonInstallLauncherResourceTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/fixture.jar", "fixture.jar"),
                 List.of(),
                 List.of("1.21"),
-                List.<ModLoaderType>of());
+                List.<ModLoaderType>of(), RemoteAddon.Environment.UNKNOWN);
         RemoteAddonInstallRequest request = new RemoteAddonInstallRequest(
                 new RemoteAddonCatalogItem(
                         RemoteAddon.BROKEN,

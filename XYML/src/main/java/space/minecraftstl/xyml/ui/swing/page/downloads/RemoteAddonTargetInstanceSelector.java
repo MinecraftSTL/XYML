@@ -36,8 +36,8 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
     /// Compact local selector rendered with each instance's cheap display name.
     private final JComboBox<InstanceSearchEntry> comboBox = new JComboBox<>();
 
-    /// Notified whenever the local target changes to a different non-null instance.
-    private final Consumer<GameInstanceID> selectionListener;
+    /// Notified whenever the local target changes to a different instance or repository context.
+    private final Consumer<@Nullable GameInstanceID> selectionListener;
 
     /// Independently removable model listener, or null before the page becomes displayable.
     private @Nullable Subscription modelSubscription;
@@ -70,8 +70,8 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
     /// Creates a local target selector that reports every changed target instance.
     ///
     /// @param model application-owned source of installed-instance identities
-    /// @param selectionListener notified with a different non-null target instance on the EDT
-    RemoteAddonTargetInstanceSelector(InstancesModel model, Consumer<GameInstanceID> selectionListener) {
+    /// @param selectionListener notified with a changed target, including null when absent, on the EDT
+    RemoteAddonTargetInstanceSelector(InstancesModel model, Consumer<@Nullable GameInstanceID> selectionListener) {
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.selectionListener = Objects.requireNonNull(selectionListener, "selectionListener");
@@ -166,9 +166,14 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         } finally {
             applyingEntries = false;
         }
+        boolean contextChanged = selectionContextRevision != currentContextRevision;
         selectionContextRevision = currentContextRevision;
         selectedInstanceId = nextSelection;
-        publishSelection(previousSelection, nextSelection);
+        if (contextChanged) {
+            selectionListener.accept(nextSelection);
+        } else {
+            publishSelection(previousSelection, nextSelection);
+        }
     }
 
     /// Releases the borrowed model subscription without closing the application-owned model.
@@ -197,14 +202,14 @@ final class RemoteAddonTargetInstanceSelector implements AutoCloseable {
         publishSelection(previousSelection, selectedInstanceId);
     }
 
-    /// Reports one changed non-null target instance to the owning catalog.
+    /// Reports one changed target instance, including an empty selection, to the owning catalog.
     ///
     /// @param previous previous local selection, or null when none was selected
     /// @param current new local selection, or null when the selector became empty
     private void publishSelection(
             @Nullable GameInstanceID previous,
             @Nullable GameInstanceID current) {
-        if (current != null && !current.equals(previous)) {
+        if (!Objects.equals(current, previous)) {
             selectionListener.accept(current);
         }
     }
