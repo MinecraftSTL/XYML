@@ -76,7 +76,7 @@ final class LegacyFabricInstallTaskResourceTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/legacy-fabric-api.jar", "legacy-fabric-api.jar"),
                 List.of(),
                 List.of("1.20.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
         return new LegacyFabricAPIRemoteVersion(
                 GameVersionNumber.asGameVersion("1.20.1"),
                 "1.0.0",

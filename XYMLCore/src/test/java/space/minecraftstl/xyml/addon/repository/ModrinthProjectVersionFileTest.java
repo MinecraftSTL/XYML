@@ -63,6 +63,21 @@ public final class ModrinthProjectVersionFileTest {
         assertEquals(Optional.empty(), version(List.of()).toVersion());
     }
 
+    /// Retains each documented runtime environment through provider deserialization.
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"client_only", "server_only", "dedicated_server_only",
+            "client_and_server", "server_only_client_optional", "client_only_server_optional",
+            "client_or_server_prefers_both", "client_or_server", "singleplayer_only", "unknown", "future_value"})
+    void retainsProviderEnvironment(String environment) {
+        var source = version(List.of(file("primary.jar", true)));
+        var object = space.minecraftstl.xyml.util.gson.JsonUtils.GSON.toJsonTree(source).getAsJsonObject();
+        object.addProperty("environment", environment);
+        var parsed = space.minecraftstl.xyml.util.gson.JsonUtils.GSON.fromJson(object,
+                ModrinthRemoteAddonRepository.ProjectVersion.class).toVersion().orElseThrow();
+        String expected = "future_value".equals(environment) ? "UNKNOWN" : environment.toUpperCase(java.util.Locale.ROOT);
+        assertEquals(expected, parsed.environment().name());
+    }
+
     /// Creates an artifact with distinct URL and hash metadata.
     ///
     /// @param filename provider artifact name
@@ -82,6 +97,6 @@ public final class ModrinthProjectVersionFileTest {
         return new ModrinthRemoteAddonRepository.ProjectVersion(
                 "Addon", "1.0", "", List.of(), List.of("1.21"), "release", List.of("fabric"),
                 false, "version-id", "project-id", "author-id", Instant.parse("2026-01-01T00:00:00Z"),
-                0, "", files);
+                0, "", files, null);
     }
 }

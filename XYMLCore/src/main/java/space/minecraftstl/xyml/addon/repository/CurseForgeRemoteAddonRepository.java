@@ -616,7 +616,8 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
                             else if ("quilt".equalsIgnoreCase(version)) return Stream.of(ModLoaderType.QUILT);
                             else if ("neoforge".equalsIgnoreCase(version)) return Stream.of(ModLoaderType.NEO_FORGE);
                             else return Stream.empty();
-                        }).collect(Collectors.toList())
+                        }).collect(Collectors.toList()),
+                        RemoteAddon.Environment.UNKNOWN
                 );
             }
         }

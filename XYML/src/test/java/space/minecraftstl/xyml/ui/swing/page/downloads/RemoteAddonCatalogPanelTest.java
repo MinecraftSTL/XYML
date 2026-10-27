@@ -1687,7 +1687,7 @@ final class RemoteAddonCatalogPanelTest {
                         "fixture-mod.jar"),
                 dependencies,
                 List.of("1.20.1"),
-                List.<ModLoaderType>of());
+                List.<ModLoaderType>of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Creates a stable selected-instance install target without touching the local filesystem.

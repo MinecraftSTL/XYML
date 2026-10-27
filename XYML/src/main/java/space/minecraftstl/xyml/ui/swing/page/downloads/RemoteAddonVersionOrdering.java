@@ -94,6 +94,8 @@ final class RemoteAddonVersionOrdering {
     /// Unknown or absent loader context preserves general browsing. Known loader context also requires
     /// an exact game-version match when one is supplied, without changing the complete browsing list.
     /// Loader compatibility follows the explicit provider metadata membership used by local mod update discovery.
+    /// Known client instances also exclude dedicated-server-only functionality; server-only mods remain
+    /// eligible because their functionality works in integrated singleplayer servers. Manual choices remain intact.
     ///
     /// @param versions complete provider response retained for manual browsing
     /// @param requestedGameVersion optional exact game-version context
@@ -108,6 +110,7 @@ final class RemoteAddonVersionOrdering {
         }
         String requested = Objects.requireNonNull(requestedGameVersion, "requestedGameVersion").trim();
         return recommended(versions.stream()
+                .filter(version -> version.environment() != RemoteAddon.Environment.DEDICATED_SERVER_ONLY)
                 .filter(version -> version.loaders().contains(requestedLoader))
                 .filter(version -> requested.isEmpty() || hasGameVersion(version, requested))
                 .toList(), requested);

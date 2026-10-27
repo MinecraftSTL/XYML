@@ -386,7 +386,7 @@ final class AddonUpdatesPanelTest {
                         fileName),
                 List.of(),
                 List.of("1.21.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Creates one panel with deterministic task presentation and no native desktop side effects.

@@ -166,7 +166,7 @@ final class SwingRemoteWorldSaveTargetResolverTest {
                         Objects.requireNonNull(fileName, "fileName")),
                 List.of(),
                 List.of("1.20.1"),
-                List.<ModLoaderType>of());
+                List.<ModLoaderType>of(), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Provides unused Core contracts required by the remote world fixture.

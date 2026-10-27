@@ -11,6 +11,7 @@ import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
+import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -124,7 +125,7 @@ final class RemoteAddonLoaderRecommendationTest {
         RemoteAddon.Version base = version("preview", "1.0", "1.21.1", ModLoaderType.FABRIC);
         RemoteAddon.Version preview = new RemoteAddon.Version(base.self(), base.versionId(), base.projectId(),
                 base.name(), base.version(), base.datePublished(), RemoteAddon.VersionType.Beta, base.file(),
-                base.dependencies(), base.gameVersions(), base.loaders());
+                base.dependencies(), base.gameVersions(), base.loaders(), RemoteAddon.Environment.UNKNOWN);
         assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
                 List.of(old, preview), preview);
     }
@@ -174,7 +175,7 @@ final class RemoteAddonLoaderRecommendationTest {
         assertNull(RemoteAddonVersionOrdering.recommended(List.of(forge), "1.21.1", ModLoaderType.NEO_FORGE));
         RemoteAddon.Version multiple = new RemoteAddon.Version(fabric.self(), fabric.versionId(), fabric.projectId(),
                 fabric.name(), fabric.version(), fabric.datePublished(), fabric.versionType(), fabric.file(),
-                fabric.dependencies(), fabric.gameVersions(), List.of(ModLoaderType.FABRIC, ModLoaderType.QUILT));
+                fabric.dependencies(), fabric.gameVersions(), List.of(ModLoaderType.FABRIC, ModLoaderType.QUILT), RemoteAddon.Environment.UNKNOWN);
         assertSame(multiple, RemoteAddonVersionOrdering.recommended(List.of(multiple), "1.21.1", ModLoaderType.QUILT));
     }
 
@@ -185,7 +186,7 @@ final class RemoteAddonLoaderRecommendationTest {
         RemoteAddon.Version old = version("old", "99.0", "1.20.1", ModLoaderType.FABRIC);
         RemoteAddon.Version preview = new RemoteAddon.Version(stable.self(), "preview", stable.projectId(),
                 "preview", "99.0", stable.datePublished(), RemoteAddon.VersionType.Beta, stable.file(),
-                stable.dependencies(), stable.gameVersions(), stable.loaders());
+                stable.dependencies(), stable.gameVersions(), stable.loaders(), RemoteAddon.Environment.UNKNOWN);
         assertSame(stable, RemoteAddonVersionOrdering.recommended(List.of(preview, old, stable), "1.21.1",
                 ModLoaderType.FABRIC));
     }
@@ -196,6 +197,55 @@ final class RemoteAddonLoaderRecommendationTest {
         RemoteAddon.Version fabric = version("fabric", "0.8.13", "1.21.1", ModLoaderType.FABRIC);
         assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
                 List.of(fabric), null, true);
+    }
+
+    /// Only dedicated-server-only versions are unsuitable for the client's integrated-server context.
+    @Test
+    void appliesAllProviderEnvironmentsThroughTheCatalog() {
+        for (String environment : List.of("client_only", "server_only", "dedicated_server_only",
+                "client_and_server", "server_only_client_optional", "client_only_server_optional",
+                "client_or_server_prefers_both", "client_or_server", "singleplayer_only", "unknown", "future_value")) {
+            RemoteAddon.Version candidate = providerVersion(environment);
+            assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                    List.of(candidate), environment.equals("dedicated_server_only") ? null : candidate, false);
+        }
+    }
+
+    /// Missing environment metadata remains eligible rather than inventing runtime incompatibility.
+    @Test
+    void acceptsMissingProviderEnvironment() {
+        RemoteAddon.Version candidate = providerVersion(null);
+        assertEquals(RemoteAddon.Environment.UNKNOWN, candidate.environment());
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                List.of(candidate), candidate);
+    }
+
+    /// Environment restrictions neither filter unrelated catalogs nor change unknown-context browsing.
+    @Test
+    void preservesEnvironmentBrowsingOutsideKnownModInstances() {
+        RemoteAddon.Version dedicated = providerVersion("dedicated_server_only");
+        for (RemoteAddonCatalogKind kind : List.of(RemoteAddonCatalogKind.RESOURCE_PACK,
+                RemoteAddonCatalogKind.SHADER_PACK)) {
+            assertPanelRecommendation(kind, "1.21.1", ModLoaderType.FABRIC, List.of(dedicated), dedicated);
+        }
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", null, List.of(dedicated), dedicated);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.UNKNOWN,
+                List.of(dedicated), dedicated);
+    }
+
+    /// Converts current provider JSON through the production adapter before any recommendation is made.
+    private static RemoteAddon.Version providerVersion(@Nullable String environment) {
+        String json = """
+                {"id":"fixture","project_id":"fixture","name":"Fixture","version_number":"1.0",
+                 "date_published":"2026-01-01T00:00:00Z","version_type":"release",
+                 "game_versions":["1.21.1","1.21"],"loaders":["fabric","quilt"],"dependencies":[],
+                 "files":[{"hashes":{},"url":"https://example.invalid/fixture.jar",
+                           "filename":"fixture.jar","primary":true}]}
+                """;
+        var object = JsonUtils.GSON.fromJson(json, com.google.gson.JsonObject.class);
+        if (environment != null) object.addProperty("environment", environment);
+        return JsonUtils.GSON.fromJson(object, ModrinthRemoteAddonRepository.ProjectVersion.class)
+                .toVersion().orElseThrow();
     }
 
     /// Searches, selects and completes versions through deterministic queued worker callbacks.
@@ -295,7 +345,7 @@ final class RemoteAddonLoaderRecommendationTest {
         return new RemoteAddon.Version(() -> RemoteAddon.Source.MODRINTH, id, "fixture", id, number,
                 "neoforge".equals(id) ? Instant.EPOCH.plusSeconds(1) : Instant.EPOCH, RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(Map.of(), "https://example.invalid/" + id, id + ".jar"),
-                List.of(), List.of(game), loader == null ? List.of() : List.of(loader));
+                List.of(), List.of(game), loader == null ? List.of() : List.of(loader), RemoteAddon.Environment.UNKNOWN);
     }
 
     /// Supplies local provider fixtures while exercising the production panel callback and ordering.

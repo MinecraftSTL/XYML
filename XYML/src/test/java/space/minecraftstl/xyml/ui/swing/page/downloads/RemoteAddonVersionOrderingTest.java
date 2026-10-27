@@ -139,6 +139,6 @@ final class RemoteAddonVersionOrderingTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/" + id, id + ".jar"),
                 List.of(),
                 List.of(gameVersion),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
     }
 }

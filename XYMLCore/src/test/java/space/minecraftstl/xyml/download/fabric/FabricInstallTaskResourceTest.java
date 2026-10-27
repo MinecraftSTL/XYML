@@ -138,7 +138,7 @@ final class FabricInstallTaskResourceTest {
                 new RemoteAddon.File(Map.of(), "https://example.invalid/fabric-api.jar", "fabric-api.jar"),
                 List.of(),
                 List.of("1.20.1"),
-                List.of());
+                List.of(), RemoteAddon.Environment.UNKNOWN);
         return new FabricAPIRemoteVersion(
                 GameVersionNumber.asGameVersion("1.20.1"),
                 "0.100.0",

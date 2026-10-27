@@ -433,7 +433,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                                  @SerializedName("author_id") String authorId,
                                  @SerializedName("date_published") Instant datePublished, int downloads,
                                  @SerializedName("changelog_url") @Nullable String changelogUrl,
-                                 List<ProjectVersionFile> files) implements RemoteAddon.IVersion {
+                                 List<ProjectVersionFile> files, @Nullable String environment) implements RemoteAddon.IVersion {
         private static final Map<String, RemoteAddon.@Nullable DependencyType> DEPENDENCY_TYPE = mapOf(
                 pair("required", RemoteAddon.DependencyType.REQUIRED),
                 pair("optional", RemoteAddon.DependencyType.OPTIONAL),
@@ -490,7 +490,8 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                         else if ("quilt".equalsIgnoreCase(loader)) return Stream.of(ModLoaderType.QUILT);
                         else if ("liteloader".equalsIgnoreCase(loader)) return Stream.of(ModLoaderType.LITE_LOADER);
                         else return Stream.empty();
-                    }).collect(Collectors.toList())
+                    }).collect(Collectors.toList()),
+                    RemoteAddon.Environment.fromProvider(environment)
             ));
         }
     }
