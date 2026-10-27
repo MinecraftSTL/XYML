@@ -85,6 +85,21 @@ final class AboutPanel extends JPanel implements AutoCloseable {
     /// Exact icon size used by the two-line list.
     private static final int ENTRY_ICON_SIZE = 32;
 
+    /// Operating-system environment glyph bundled with the Swing page.
+    private static final String SYSTEM_ICON = "/assets/swing/icons/app-window.svg";
+
+    /// Memory environment glyph bundled with the Swing page.
+    private static final String MEMORY_ICON = "/assets/swing/icons/memory-stick.svg";
+
+    /// Processor environment glyph bundled with the Swing page.
+    private static final String CPU_ICON = "/assets/swing/icons/cpu.svg";
+
+    /// Graphics-adapter environment glyph bundled with the Swing page.
+    private static final String GPU_ICON = "/assets/swing/icons/gpu.svg";
+
+    /// Java runtime environment glyph bundled with the Swing page.
+    private static final String JAVA_ICON = "/assets/swing/icons/local-cafe.svg";
+
     /// Small command icon size for rows that open an external page.
     private static final int LINK_ICON_SIZE = 16;
 
@@ -227,21 +242,38 @@ final class AboutPanel extends JPanel implements AutoCloseable {
     ///
     /// @return immutable rows, omitting unavailable hardware instead of fabricating values
     private static @Unmodifiable List<AboutEntry> readEnvironment() {
-        List<AboutEntry> rows = new ArrayList<>();
         String system = OperatingSystem.OS_RELEASE_PRETTY_NAME == null
                 ? "%s %s (%s)".formatted(OperatingSystem.SYSTEM_NAME,
                         OperatingSystem.SYSTEM_VERSION.getVersion(), Architecture.SYSTEM_ARCH.getDisplayName())
                 : "%s (%s %s, %s)".formatted(OperatingSystem.OS_RELEASE_PRETTY_NAME, OperatingSystem.SYSTEM_NAME,
                         OperatingSystem.SYSTEM_VERSION.getVersion(), Architecture.SYSTEM_ARCH.getDisplayName());
-        rows.add(new AboutEntry(null, null, i18n("about.environment.system"), system, null));
         long memory = SystemInfo.getTotalMemorySize();
+        @Nullable CentralProcessor cpu = SystemInfo.getCentralProcessor();
+        @Nullable List<GraphicsCard> cards = SystemInfo.getGraphicsCards();
+        String java = "%s, %s by %s".formatted(
+                Runtime.version(), System.getProperty("java.vm.name"), System.getProperty("java.vendor"));
+        return environmentEntries(system, memory, cpu, cards, java);
+    }
+
+    /// Formats collected environment information without probing hardware or creating Swing components.
+    ///
+    /// @param system operating-system description
+    /// @param memory total bytes, or a non-positive value when unavailable
+    /// @param cpu detected processor, or null when unavailable
+    /// @param cards detected adapters, or null when unavailable
+    /// @param java Java runtime description
+    /// @return immutable ordered environment rows with their bundled icon resources
+    static @Unmodifiable List<AboutEntry> environmentEntries(
+            String system, long memory, @Nullable CentralProcessor cpu,
+            @Nullable List<GraphicsCard> cards, String java) {
+        List<AboutEntry> rows = new ArrayList<>();
+        rows.add(new AboutEntry(SYSTEM_ICON, null, i18n("about.environment.system"), system, null));
         if (memory > 0) {
-            rows.add(new AboutEntry(null, null, i18n("about.environment.memory"),
+            rows.add(new AboutEntry(MEMORY_ICON, null, i18n("about.environment.memory"),
                     String.format(Locale.ROOT, "%.1f GiB", DataSizeUnit.GIGABYTES.convertFromBytes(memory)), null));
         }
-        rows.addAll(hardwareRows(SystemInfo.getCentralProcessor(), SystemInfo.getGraphicsCards()));
-        rows.add(new AboutEntry(null, null, "Java", "%s, %s by %s".formatted(
-                Runtime.version(), System.getProperty("java.vm.name"), System.getProperty("java.vendor")), null));
+        rows.addAll(hardwareRows(cpu, cards));
+        rows.add(new AboutEntry(JAVA_ICON, null, "Java", java, null));
         return List.copyOf(rows);
     }
 
@@ -267,7 +299,7 @@ final class AboutPanel extends JPanel implements AutoCloseable {
                 name = i18n("about.environment.cpu.name.cores", cpu.getName(), physical);
             for (int index = 1; index <= packages; index++) {
                 String title = packages == 1 ? i18n("about.environment.cpu") : i18n("about.environment.cpu.n", index);
-                rows.add(new AboutEntry(null, null, title, name, null));
+                rows.add(new AboutEntry(CPU_ICON, null, title, name, null));
             }
         }
         if (cards != null) {
@@ -276,7 +308,7 @@ final class AboutPanel extends JPanel implements AutoCloseable {
             for (int index = 0; index < visible.size(); index++) {
                 String title = visible.size() == 1 ? i18n("about.environment.gpu")
                         : i18n("about.environment.gpu.n", index + 1);
-                rows.add(new AboutEntry(null, null, title, visible.get(index).getName(), null));
+                rows.add(new AboutEntry(GPU_ICON, null, title, visible.get(index).getName(), null));
             }
         }
         return List.copyOf(rows);
@@ -500,6 +532,11 @@ final class AboutPanel extends JPanel implements AutoCloseable {
     /// @return row icon, using an empty placeholder when no image is configured
     private static Icon createEntryIcon(AboutEntry entry) {
         AboutEntry validatedEntry = Objects.requireNonNull(entry, "entry");
+        if (validatedEntry.darkImageResource() == null) {
+            @Nullable Icon vector = loadSvgIcon(validatedEntry.lightImageResource());
+            if (vector != null)
+                return vector;
+        }
         @Nullable ImageIcon lightIcon = loadImageIcon(validatedEntry.lightImageResource());
         @Nullable ImageIcon darkIcon = loadImageIcon(validatedEntry.darkImageResource());
         if (lightIcon != null && darkIcon != null) {
@@ -512,6 +549,23 @@ final class AboutPanel extends JPanel implements AutoCloseable {
             return darkIcon;
         }
         return new ImageIcon(new BufferedImage(ENTRY_ICON_SIZE, ENTRY_ICON_SIZE, BufferedImage.TYPE_INT_ARGB));
+    }
+
+    /// Loads one optional single SVG using the application class loader and FlatLaf's theme palette.
+    ///
+    /// @param resourcePath absolute classpath resource path, or null for a row without an image
+    /// @return fixed-size SVG icon, or null when the resource is absent, unsupported, or invalid
+    private static @Nullable Icon loadSvgIcon(@Nullable String resourcePath) {
+        if (resourcePath == null || !resourcePath.endsWith(".svg") || !hasClasspathResource(resourcePath))
+            return null;
+        String name = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+        try {
+            FlatSVGIcon icon = new FlatSVGIcon(name, ENTRY_ICON_SIZE, ENTRY_ICON_SIZE, AboutPanel.class.getClassLoader());
+            return icon.hasFound() ? icon : null;
+        } catch (RuntimeException failure) {
+            LOG.warning("Failed to load About-page SVG icon " + resourcePath, failure);
+            return null;
+        }
     }
 
     /// Loads and scales one bundled raster resource.
