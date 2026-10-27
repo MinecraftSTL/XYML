@@ -256,6 +256,28 @@ public final class ThemePackManagementModel
     public CompletionStage<ThemePackManagementSnapshot> delete(
             ThemePackItem item,
             DeletionMode mode) {
+        return delete(item, mode, false);
+    }
+
+    /// Deletes with exceptional failure delivery for the page's recycle-bin recovery boundary.
+    ///
+    /// The visible failure snapshot is still published identically to an ordinary deletion.
+    ///
+    /// @param item captured installed theme
+    /// @param mode selected deletion behavior
+    /// @return terminal snapshot, or the original backend failure
+    CompletionStage<ThemePackManagementSnapshot> deleteWithFallback(ThemePackItem item, DeletionMode mode) {
+        return delete(item, mode, true);
+    }
+
+    /// Submits deletion while preserving each caller's failure-delivery contract.
+    ///
+    /// @param item captured installed theme
+    /// @param mode selected deletion behavior
+    /// @param propagateFailure whether the terminal stage exposes backend failures
+    /// @return terminal deletion stage
+    private CompletionStage<ThemePackManagementSnapshot> delete(
+            ThemePackItem item, DeletionMode mode, boolean propagateFailure) {
         DeletionMode requestedMode = Objects.requireNonNull(mode, "mode");
         ThemePackItem current;
         synchronized (stateLock) {
@@ -272,11 +294,11 @@ public final class ThemePackManagementModel
                     backend.deleteInstalled(current, requestedMode, executor),
                     "backend returned null delete stage");
         } catch (RuntimeException failure) {
-            completeDelete(generation, current.reference().packId(), failure, completion);
+            completeDelete(generation, current.reference().packId(), failure, completion, propagateFailure);
             return completion.minimalCompletionStage();
         }
         stage.whenComplete((ignored, failure) ->
-                completeDelete(generation, current.reference().packId(), failure, completion));
+                completeDelete(generation, current.reference().packId(), failure, completion, propagateFailure));
         return completion.minimalCompletionStage();
     }
 
@@ -530,12 +552,19 @@ public final class ThemePackManagementModel
         changes.fireChange(previous, replacement);
     }
 
-    /// Commits deletion by removing every theme belonging to the deleted package.
+    /// Publishes the deletion result while preserving the caller's failure-delivery contract.
+    ///
+    /// @param generation operation owner generation
+    /// @param packageId exact installed package identifier
+    /// @param failure original backend failure, or null on success
+    /// @param completion caller-owned terminal future
+    /// @param propagateFailure whether backend failures complete the future exceptionally
     private void completeDelete(
             long generation,
             String packageId,
             @Nullable Throwable failure,
-            CompletableFuture<ThemePackManagementSnapshot> completion) {
+            CompletableFuture<ThemePackManagementSnapshot> completion,
+            boolean propagateFailure) {
         @Nullable Throwable resolvedFailure = unwrap(failure);
         ThemePackManagementSnapshot previous;
         ThemePackManagementSnapshot replacement;
@@ -559,7 +588,11 @@ public final class ThemePackManagementModel
             }
             snapshot = replacement;
         }
-        completion.complete(replacement);
+        if (propagateFailure && resolvedFailure != null) {
+            completion.completeExceptionally(resolvedFailure);
+        } else {
+            completion.complete(replacement);
+        }
         changes.fireChange(previous, replacement);
     }
 

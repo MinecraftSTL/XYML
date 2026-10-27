@@ -3,27 +3,31 @@
 
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
-import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
-import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import javax.swing.SwingUtilities;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogImport;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStatus;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -65,6 +69,80 @@ final class DataPackManagementPanelTest {
     /// Temporary instance root containing a valid saved world and data-pack fixtures.
     @TempDir
     private Path temporaryDirectory;
+
+    /// Keeps successful packs deleted and retries only the failed subset through the background loop.
+    @Test
+    public void retriesOnlyFailedDataPacksAfterPartialSuccess() throws Exception {
+        for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+            Path saves = Files.createDirectories(temporaryDirectory.resolve(decision.name()).resolve("saves"));
+            Path worldPath = createWorldDirectory(saves, "fixture-world");
+            Path directory = Files.createDirectories(worldPath.resolve("datapacks"));
+            createDirectoryDataPack(directory, "a-success");
+            createDirectoryDataPack(directory, "z-failed");
+            Path failedPath = directory.resolve("z-failed").toAbsolutePath().normalize();
+            WorldCatalogItem world = new WorldCatalogItem(worldPath, "fixture-world", "Fixture", 1L,
+                    "1.20.1", false, null);
+            SingleWorldCatalogModel worlds = new SingleWorldCatalogModel(saves, world);
+            RecordingInteractions interactions = new RecordingInteractions(temporaryDirectory.resolve("unused.zip"));
+            interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+            interactions.decisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.decisions.add(decision);
+            List<@Unmodifiable List<Path>> attempts = new java.util.concurrent.CopyOnWriteArrayList<>();
+            List<DeletionMode> modes = new java.util.concurrent.CopyOnWriteArrayList<>();
+            AtomicInteger recycleFailures = new AtomicInteger(2);
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            AtomicReference<@Nullable DataPackManagementPanel> reference = new AtomicReference<>();
+            try {
+                EdtDispatcher.executeAndWait(() -> {
+                    DataPackManagementPanel panel = new DataPackManagementPanel(worlds,
+                            DataPackManagementStrings.english(), interactions, executor, null, (dataPack, packs, mode) -> {
+                                assertFalse(SwingUtilities.isEventDispatchThread());
+                                attempts.add(packs.stream().map(DataPack.Pack::getPath).toList());
+                                modes.add(mode);
+                                if (mode == DeletionMode.RECYCLE_BIN_FIRST && recycleFailures.getAndDecrement() > 0) {
+                                    @Unmodifiable List<DataPack.Pack> successful = packs.stream()
+                                            .filter(pack -> !pack.getPath().equals(failedPath)).toList();
+                                    dataPack.deletePacks(successful, DeletionMode.PERMANENT);
+                                    throw new TrashMoveException(List.of(failedPath));
+                                }
+                                dataPack.deletePacks(packs, DeletionMode.PERMANENT);
+                            });
+                    reference.set(panel);
+                    panel.activate();
+                    prepareViewport(panel.worldChoiceList());
+                });
+                drainEdt();
+                DataPackManagementPanel panel = Objects.requireNonNull(reference.get());
+                EdtDispatcher.executeAndWait(() -> panel.worldChoiceList().getList().setSelectedIndex(0));
+                awaitBackgroundWork(executor);
+                EdtDispatcher.executeAndWait(() -> {
+                    prepareViewport(panel.dataPackChoiceList());
+                    panel.dataPackChoiceList().getList().setSelectionInterval(0, 1);
+                    Objects.requireNonNull(findNamed(panel, "dataPacksDelete", JButton.class)).doClick();
+                });
+                awaitBackgroundWork(executor);
+                drainEdt();
+                List<DeletionMode> expected = new java.util.ArrayList<>(List.of(
+                        DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                if (decision != DeletionFallbackDecision.CANCEL) {
+                    expected.add(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                            ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                }
+                assertEquals(expected, modes);
+                assertEquals(2, attempts.get(0).size());
+                for (int attempt = 1; attempt < attempts.size(); attempt++) {
+                    assertEquals(List.of(failedPath), attempts.get(attempt));
+                }
+                assertEquals(List.of(List.of(failedPath), List.of(failedPath)), interactions.fallbackPaths);
+                assertFalse(Files.exists(directory.resolve("a-success")));
+                assertEquals(decision == DeletionFallbackDecision.CANCEL, Files.exists(failedPath));
+            } finally {
+                EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(reference.get()).close());
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            }
+        }
+    }
 
     /// Starts world indexing only after activation, then performs selected-world pack mutations locally.
     @Test
@@ -591,6 +669,28 @@ final class DataPackManagementPanelTest {
     /// Native-interaction substitute that records true panel requests without opening dialogs or Desktop.
     @NotNullByDefault
     private static final class RecordingInteractions implements DataPackManagementInteractions {
+        /// Initial deletion behavior for headless tests.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Ordered recovery choices.
+        private final List<DeletionFallbackDecision> decisions = new java.util.ArrayList<>();
+
+        /// Failed pack paths shown by each recovery prompt.
+        private final List<@Unmodifiable List<Path>> fallbackPaths = new java.util.ArrayList<>();
+
+        /// Returns the controlled deletion behavior without using a native dialog.
+        @Override
+        public DeletionMode chooseDeleteMode(Component owner, @Unmodifiable List<DataPack.Pack> packs) {
+            return deletionMode;
+        }
+
+        /// Records only failed pack identities and returns the next recovery decision.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, @Unmodifiable List<DataPack.Pack> packs) {
+            fallbackPaths.add(packs.stream().map(DataPack.Pack::getPath).toList());
+            return decisions.remove(0);
+        }
+
         /// Archive returned by the deterministic import chooser.
         private final Path archive;
 

@@ -3,18 +3,19 @@
 
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
-import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
-
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
 import space.minecraftstl.xyml.util.io.TrashOperations;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
-import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -168,6 +169,16 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     public boolean confirmPermanentFallback(Component owner, WorldCatalogItem world) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmDelete(owner, world);
+    }
+
+    /// Chooses how to recover one world that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(world, "world");
+        String message = strings.deleteConfirmationFormat().formatted(world.displayText());
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteDialogTitle(), message);
     }
 
     /// Prompts for one sibling copy name on the EDT.

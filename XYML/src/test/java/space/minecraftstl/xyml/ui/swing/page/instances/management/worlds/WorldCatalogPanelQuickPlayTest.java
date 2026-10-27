@@ -12,13 +12,16 @@ import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
+import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import javax.imageio.ImageIO;
@@ -68,6 +71,51 @@ import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.file
 /// Verifies native world quick-play controls, immutable folder capture, and asynchronous completion handling.
 @NotNullByDefault
 final class WorldCatalogPanelQuickPlayTest {
+    /// Repeated recovery decisions always delete the originally captured world.
+    @Test
+    public void retriesSameWorldAfterRepeatedRecycleFailure() {
+        for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+            WorldCatalogItem world = new WorldCatalogItem(Path.of("build", "retry-world"), "retry-world",
+                    "Retry World", 1L, "1.21.1", false, null);
+            ImmediateWorldCatalogModel model = new ImmediateWorldCatalogModel(world);
+            model.deletionFailures.add(new TrashMoveException(List.of(world.path())));
+            model.deletionFailures.add(new TrashMoveException(List.of(world.path())));
+            RecordingInteractions interactions = new RecordingInteractions(Path.of("unused.bat"));
+            interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+            interactions.decisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+            interactions.decisions.add(decision);
+            AtomicReference<@Nullable WorldCatalogPanel> reference = new AtomicReference<>();
+            EdtDispatcher.executeAndWait(() -> {
+                WorldCatalogPanel panel = new WorldCatalogPanel(model, WorldCatalogStrings.english(), interactions,
+                        WorldQuickPlayActions.unavailable());
+                reference.set(panel);
+                panel.setSize(1120, 620);
+                layoutRecursively(panel);
+                panel.choiceList().refreshLoadPlan();
+                panel.choiceList().getList().setSelectedIndex(0);
+                findNamed(panel, "worldsDelete", JButton.class).doClick();
+            });
+            for (int turn = 0; turn < 8; turn++) {
+                EdtDispatcher.executeAndWait(() -> { });
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                try {
+                    List<DeletionMode> expected = new java.util.ArrayList<>(List.of(
+                            DeletionMode.RECYCLE_BIN_FIRST, DeletionMode.RECYCLE_BIN_FIRST));
+                    if (decision != DeletionFallbackDecision.CANCEL) {
+                        expected.add(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+                    }
+                    assertEquals(expected, model.deletionModes);
+                    assertEquals(java.util.Collections.nCopies(expected.size(), world), model.deletionTargets);
+                    assertEquals(2, interactions.fallbackCount);
+                } finally {
+                    Objects.requireNonNull(reference.get()).close();
+                }
+            });
+        }
+    }
+
     /// Renders the nested data-pack return action from the localized catalog instead of its key.
     @Test
     void localizesDataPackBackButton() {
@@ -626,6 +674,24 @@ final class WorldCatalogPanelQuickPlayTest {
     /// Immediate one-row model for deterministic viewport loading.
     @NotNullByDefault
     private static final class ImmediateWorldCatalogModel implements WorldCatalogModel {
+        /// Queued deletion failures.
+        private final List<Throwable> deletionFailures = new java.util.ArrayList<>();
+
+        /// Requested deletion modes.
+        private final List<DeletionMode> deletionModes = new java.util.ArrayList<>();
+
+        /// Exact world identities submitted to deletion.
+        private final List<WorldCatalogItem> deletionTargets = new java.util.ArrayList<>();
+
+        /// Records a mode-aware deletion and returns its controlled result.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem target, DeletionMode mode) {
+            deletionModes.add(mode);
+            deletionTargets.add(target);
+            return deletionFailures.isEmpty() ? CompletableFuture.completedFuture(snapshot)
+                    : CompletableFuture.failedFuture(deletionFailures.remove(0));
+        }
+
         /// Exact loaded world row.
         private final WorldCatalogItem world;
 
@@ -1022,6 +1088,28 @@ final class WorldCatalogPanelQuickPlayTest {
     /// Records script chooser feedback while avoiding native dialogs and desktop calls.
     @NotNullByDefault
     private static final class RecordingInteractions implements WorldCatalogInteractions {
+        /// Mode chosen before initial deletion.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Ordered fallback decisions.
+        private final List<DeletionFallbackDecision> decisions = new java.util.ArrayList<>();
+
+        /// Number of failed recycle attempts presented.
+        private int fallbackCount;
+
+        /// Returns the controlled initial deletion mode.
+        @Override
+        public DeletionMode chooseDeleteMode(Component owner, WorldCatalogItem world) {
+            return deletionMode;
+        }
+
+        /// Records a fallback prompt and returns its controlled choice.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, WorldCatalogItem world) {
+            fallbackCount++;
+            return decisions.remove(0);
+        }
+
         /// Script destination returned by the chooser.
         private final Path destination;
 

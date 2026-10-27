@@ -5,21 +5,25 @@ package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
-import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.CatalogLayoutAssertions;
+import space.minecraftstl.xyml.ui.swing.choice.FileDragAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
-import javax.swing.JList;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
 import java.awt.Component;
@@ -27,6 +31,7 @@ import java.awt.Container;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -42,6 +47,58 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 /// Verifies the shader-pack panel's single-enable and multi-delete interaction surface.
 @NotNullByDefault
 final class ShaderPackCatalogPanelTest {
+    /// Covers repeated failures and the three recovery actions for single and batch deletes.
+    @Test
+    public void retriesOnlyFailedShaderPaths() {
+        for (boolean batch : List.of(false, true)) {
+            for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+                FakeModel model = new FakeModel(true);
+                Path failedPath = Path.of("B").toAbsolutePath().normalize();
+                ShaderPackCatalogItem failed = new ShaderPackCatalogItem(failedPath, "B", "B", true,
+                        Set.of(), "Failed pack");
+                model.snapshot = shaderSnapshot(List.of(model.snapshot.items().get(0), failed), 2L,
+                        ShaderPackCatalogStatus.READY, ShaderPackCatalogWriteStatus.IDLE);
+                model.deletionFailures.add(new TrashMoveException(List.of(failedPath)));
+                model.deletionFailures.add(new TrashMoveException(List.of(failedPath)));
+                FakeInteractions interactions = new FakeInteractions();
+                interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+                interactions.decisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+                interactions.decisions.add(decision);
+                java.util.concurrent.atomic.AtomicReference<@Nullable ShaderPackCatalogPanel> reference =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                EdtDispatcher.executeAndWait(() -> reference.set(newPanel(model, interactions)));
+                ShaderPackCatalogPanel panel = java.util.Objects.requireNonNull(reference.get());
+                EdtDispatcher.executeAndWait(() -> {
+                    JList<?> list = java.util.Objects.requireNonNull(findNamed(panel, "shaderPacksList", JList.class));
+                    list.setSelectionInterval(batch ? 0 : 1, 1);
+                    CatalogLayoutAssertions.requireNamed(panel, batch ? "shaderPacksDeleteSelected" : "shaderPacksDelete",
+                            JButton.class).doClick();
+                });
+                for (int turn = 0; turn < 8; turn++) {
+                    EdtDispatcher.executeAndWait(() -> { });
+                }
+                EdtDispatcher.executeAndWait(() -> {
+                    try {
+                        assertEquals(List.of(1, 1), interactions.fallbackCounts);
+                        int attempts = decision == DeletionFallbackDecision.CANCEL ? 2 : 3;
+                        assertEquals(attempts, model.deletionModes.size());
+                        assertEquals(DeletionMode.RECYCLE_BIN_FIRST, model.deletionModes.get(1));
+                        if (attempts == 3) {
+                            assertEquals(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                    ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT, model.deletionModes.get(2));
+                        }
+                        assertEquals(batch ? 2 : 1, model.deletionPaths.get(0).size());
+                        for (int attempt = 1; attempt < attempts; attempt++) {
+                            assertEquals(List.of(failedPath), model.deletionPaths.get(attempt));
+                        }
+                    } finally {
+                        panel.close();
+                    }
+                });
+            }
+        }
+    }
+
     /// ZIP files and directory packs export in selection order while refreshed or busy snapshots reject stale drags.
     @Test
     void dragsActualShaderZipAndDirectoryPathsWithoutSorting() {
@@ -240,6 +297,15 @@ final class ShaderPackCatalogPanelTest {
     /// @param model controlled local shader model
     /// @return initialized page on the EDT
     private static ShaderPackCatalogPanel newPanel(FakeModel model) {
+        return newPanel(model, new FakeInteractions());
+    }
+
+    /// Constructs a headless panel with a controlled fallback interaction boundary.
+    ///
+    /// @param model controlled local shader model
+    /// @param interactions controlled user choices
+    /// @return initialized panel on the EDT
+    private static ShaderPackCatalogPanel newPanel(FakeModel model, FakeInteractions interactions) {
         return new ShaderPackCatalogPanel(
                     model,
                     new ShaderPackCatalogStrings(
@@ -289,7 +355,7 @@ final class ShaderPackCatalogPanelTest {
                             "Open failed",
                             "Backend",
                             "Choose backends"),
-                    new FakeInteractions(),
+                    interactions,
                     Path.of("shaderpacks"));
     }
 
@@ -384,10 +450,19 @@ final class ShaderPackCatalogPanelTest {
             return CompletableFuture.completedFuture(snapshot);
         }
 
+        /// Queued backend failures, consumed one per deletion attempt.
+        private final List<Throwable> deletionFailures = new ArrayList<>();
+
+        /// Exact paths requested in each attempt.
+        private final List<@Unmodifiable List<Path>> deletionPaths = new ArrayList<>();
+
+        /// Deletion modes requested in order.
+        private final List<DeletionMode> deletionModes = new ArrayList<>();
+
         /// Returns the current snapshot after a deletion.
         @Override
         public CompletionStage<ShaderPackCatalogSnapshot> deleteShaderPack(Path path, DeletionMode mode) {
-            return CompletableFuture.completedFuture(snapshot);
+            return deleteShaderPacks(List.of(path), mode);
         }
 
         /// Returns the current snapshot after a batch deletion.
@@ -395,7 +470,10 @@ final class ShaderPackCatalogPanelTest {
         public CompletionStage<ShaderPackCatalogSnapshot> deleteShaderPacks(
                 List<Path> paths,
                 DeletionMode mode) {
-            return CompletableFuture.completedFuture(snapshot);
+            deletionPaths.add(List.copyOf(paths));
+            deletionModes.add(mode);
+            return deletionFailures.isEmpty() ? CompletableFuture.completedFuture(snapshot)
+                    : CompletableFuture.failedFuture(deletionFailures.remove(0));
         }
 
         /// Ignores close.
@@ -407,6 +485,28 @@ final class ShaderPackCatalogPanelTest {
     /// Minimal interaction boundary for panel construction tests.
     @NotNullByDefault
     private static final class FakeInteractions implements ShaderPackCatalogInteractions {
+        /// Initial deletion mode.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Queued recovery choices.
+        private final List<DeletionFallbackDecision> decisions = new ArrayList<>();
+
+        /// Exact failed counts presented by fallback dialogs.
+        private final List<Integer> fallbackCounts = new ArrayList<>();
+
+        /// Returns a controlled single-target fallback decision.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, ShaderPackCatalogItem target) {
+            return choosePermanentFallbackSelected(owner, 1);
+        }
+
+        /// Records the failed subset size and returns the next choice.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int count) {
+            fallbackCounts.add(count);
+            return decisions.remove(0);
+        }
+
         /// Returns no selected sources.
         @Override
         public List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
@@ -416,13 +516,13 @@ final class ShaderPackCatalogPanelTest {
         /// Returns permanent deletion.
         @Override
         public DeletionMode chooseDeleteMode(Component owner, ShaderPackCatalogItem target) {
-            return DeletionMode.PERMANENT;
+            return deletionMode;
         }
 
         /// Returns permanent deletion.
         @Override
         public DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
-            return DeletionMode.PERMANENT;
+            return deletionMode;
         }
 
         /// Returns the sole backend.

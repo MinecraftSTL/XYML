@@ -17,10 +17,11 @@ import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTextAreas;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
-import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.DeletionMode;
@@ -39,11 +40,11 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
-import javax.swing.ScrollPaneConstants;
 import javax.swing.JTextArea;
-import javax.swing.JViewport;
 import javax.swing.JTextField;
+import javax.swing.JViewport;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -64,11 +65,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -1039,12 +1040,36 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         if (isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
-            observeDeletion(
-                    () -> model.deleteMods(selectedKeys, mode),
-                    mode,
-                    () -> model.deleteMods(selectedKeys, DeletionMode.PERMANENT),
-                    () -> interactions.confirmPermanentFallbackSelected(this, selectedCount));
+            observeBatchDeletion(selectedKeys, model.deletionKeysByPath(selectedKeys), mode);
         }
+    }
+
+    /// Deletes only the captured batch, retaining its pre-refresh physical identities.
+    ///
+    /// @param localKeys exact stable keys still requiring deletion
+    /// @param keysByPath immutable pre-deletion path mapping
+    /// @param mode selected deletion behavior
+    private void observeBatchDeletion(
+            @Unmodifiable List<String> localKeys,
+            @Unmodifiable Map<Path, String> keysByPath,
+            DeletionMode mode) {
+        observeDeletion(() -> model.deleteMods(localKeys, mode), mode, failure -> {
+            @Unmodifiable List<String> failedKeys = failure.failedPaths().stream()
+                    .map(path -> keysByPath.get(path.toAbsolutePath().normalize()))
+                    .filter(Objects::nonNull)
+                    .filter(localKeys::contains)
+                    .distinct()
+                    .toList();
+            if (failedKeys.isEmpty()) {
+                interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+                return;
+            }
+            DeletionFallbackDecision decision = interactions.choosePermanentFallbackSelected(this, failedKeys.size());
+            if (!closed && decision != DeletionFallbackDecision.CANCEL) {
+                observeBatchDeletion(failedKeys, keysByPath, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+            }
+        });
     }
 
     /// Opens the chooser and submits selected archives as one serialized import.
@@ -1176,11 +1201,21 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         if (mode == null) {
             return;
         }
-        observeDeletion(
-                () -> model.deleteMod(selected.localKey(), mode),
-                mode,
-                () -> model.deleteMod(selected.localKey(), DeletionMode.PERMANENT),
-                () -> interactions.confirmPermanentFallback(this, selected));
+        observeSingleDeletion(selected, mode);
+    }
+
+    /// Deletes one captured Mod and preserves its three-way recycle-bin fallback.
+    ///
+    /// @param target exact captured target
+    /// @param mode selected deletion behavior
+    private void observeSingleDeletion(ModCatalogItem target, DeletionMode mode) {
+        observeDeletion(() -> model.deleteMod(target.localKey(), mode), mode, failure -> {
+            DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, target);
+            if (!closed && decision != DeletionFallbackDecision.CANCEL) {
+                observeSingleDeletion(target, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+            }
+        });
     }
 
     /// Submits one enabled-state change from the checkbox.
@@ -1216,84 +1251,58 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 () -> submitModEnabled(capturedKey, enabled));
     }
 
-    /// Observes one deletion and preserves recycle-bin fallback plus exact retry behavior.
+    /// Observes deletion and queues failure handling to avoid recursive completed-stage retries.
     ///
-    /// @param operation initial deletion operation
-    /// @param mode mode used by the initial operation
-    /// @param permanentRetry permanent deletion retry
-    /// @param confirmFallback fallback confirmation
+    /// @param operation exact deletion operation
+    /// @param mode selected deletion behavior
+    /// @param fallback decision handler for a recycle-bin failure
     private void observeDeletion(
             Supplier<CompletionStage<?>> operation,
             DeletionMode mode,
-            Supplier<CompletionStage<?>> permanentRetry,
-            BooleanSupplier confirmFallback) {
-        Supplier<CompletionStage<?>> capturedOperation = Objects.requireNonNull(operation, "operation");
+            Consumer<TrashMoveException> fallback) {
+        if (closed) {
+            return;
+        }
         CompletionStage<?> stage;
         try {
-            stage = Objects.requireNonNull(capturedOperation.get(), "deletion returned null");
+            stage = Objects.requireNonNull(operation.get(), "deletion returned null");
         } catch (RuntimeException failure) {
-            handleDeletionFailure(capturedOperation, mode, permanentRetry, confirmFallback, failure);
+            EdtDispatcher.executeLater(() -> handleDeletionFailure(operation, mode, fallback, failure));
             return;
         }
         stage.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) -> {
             if (failure != null) {
-                Throwable cause = unwrapFailure(failure);
-                EdtDispatcher.execute(() -> handleDeletionFailure(
-                        capturedOperation,
-                        mode,
-                        permanentRetry,
-                        confirmFallback,
-                        cause));
+                EdtDispatcher.executeLater(() -> handleDeletionFailure(operation, mode, fallback, unwrapFailure(failure)));
             }
         });
     }
 
-    /// Handles one deletion failure after restoring the Swing failure boundary.
+    /// Resolves recycle-bin failures separately from the existing ordinary-error retry boundary.
     ///
     /// @param operation exact deletion retry operation
-    /// @param mode mode used by the failed operation
-    /// @param permanentRetry permanent deletion retry
-    /// @param confirmFallback fallback confirmation
-    /// @param failure original deletion failure
+    /// @param mode failed deletion behavior
+    /// @param fallback recycle-bin failure handler
+    /// @param failure original failure
     private void handleDeletionFailure(
             Supplier<CompletionStage<?>> operation,
             DeletionMode mode,
-            Supplier<CompletionStage<?>> permanentRetry,
-            BooleanSupplier confirmFallback,
+            Consumer<TrashMoveException> fallback,
             Throwable failure) {
         if (closed) {
             return;
         }
-        if (mode == DeletionMode.RECYCLE_BIN_FIRST && hasTrashMoveFailure(failure)) {
-            if (confirmFallback.getAsBoolean()) {
-                observeDeletion(
-                        permanentRetry,
-                        DeletionMode.PERMANENT,
-                        permanentRetry,
-                        confirmFallback);
+        if (mode == DeletionMode.RECYCLE_BIN_FIRST) {
+            @Nullable Throwable current = failure;
+            while (current != null) {
+                if (current instanceof TrashMoveException trashFailure) {
+                    fallback.accept(trashFailure);
+                    return;
+                }
+                current = current.getCause();
             }
-            return;
         }
-        interactions.showRetryableFailure(
-                this,
-                actionStrings.errorTitle(),
-                failureDetail(failure),
-                () -> observeDeletion(operation, mode, permanentRetry, confirmFallback));
-    }
-
-    /// Detects a recycle-bin failure through asynchronous wrappers.
-    ///
-    /// @param failure unwrapped operation failure
-    /// @return whether a [TrashMoveException] exists in the cause chain
-    private static boolean hasTrashMoveFailure(Throwable failure) {
-        @Nullable Throwable current = failure;
-        while (current != null) {
-            if (current instanceof TrashMoveException) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
+        interactions.showRetryableFailure(this, actionStrings.errorTitle(), failureDetail(failure),
+                () -> observeDeletion(operation, mode, fallback));
     }
 
     /// Shows asynchronous model or desktop failures exactly once while open.

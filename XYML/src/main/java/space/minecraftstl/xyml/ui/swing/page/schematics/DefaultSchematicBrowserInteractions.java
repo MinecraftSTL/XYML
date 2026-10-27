@@ -3,12 +3,13 @@
 
 package space.minecraftstl.xyml.ui.swing.page.schematics;
 
-import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
-
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
@@ -179,6 +180,15 @@ public final class DefaultSchematicBrowserInteractions implements SchematicBrows
             return DeletionMode.RECYCLE_BIN_FIRST;
         }
         return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+    }
+
+    /// Chooses how to recover one schematic that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, SchematicBrowserItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(target, "target");
+        String message = strings.deleteConfirmationFormat().formatted(target.fileName());
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteAction(), message);
     }
 
     /// Shows the original warning after a recycle-bin move fails.

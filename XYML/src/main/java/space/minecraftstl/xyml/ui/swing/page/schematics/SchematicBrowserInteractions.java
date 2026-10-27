@@ -6,6 +6,7 @@ package space.minecraftstl.xyml.ui.swing.page.schematics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -72,6 +73,19 @@ public interface SchematicBrowserInteractions extends RetryableFailureInteractio
     /// @return whether permanent deletion was approved
     default boolean confirmPermanentFallback(Component owner, SchematicBrowserItem target) {
         return confirmDelete(owner, target);
+    }
+
+    /// Chooses how to recover one schematic that could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact row proposed for deletion
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(
+            Component owner,
+            SchematicBrowserItem target) {
+        return confirmPermanentFallback(owner, target)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
     }
 
     /// Schedules revealing one row through the platform desktop integration.

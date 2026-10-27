@@ -5,10 +5,10 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -41,6 +41,14 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     ///
     /// @return immutable filtered local keys in logical list order
     @Unmodifiable List<String> filteredLocalKeys();
+
+    /// Captures physical paths and stable keys before a deletion can refresh the index.
+    ///
+    /// @param localKeys immutable selected stable keys
+    /// @return immutable exact path-to-key mapping, or an empty map when unavailable
+    default @Unmodifiable Map<Path, String> deletionKeysByPath(@Unmodifiable List<String> localKeys) {
+        return Map.of();
+    }
 
     /// Starts the first background `ModManager` refresh when still idle.
     void loadIfNeeded();

@@ -6,10 +6,14 @@ package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
@@ -21,11 +25,52 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the asynchronous catalog model lifecycle and serialized mutation boundary.
 @NotNullByDefault
 final class DefaultShaderPackCatalogModelTest {
+    /// Aggregates every failed recycle-bin path without dropping successful attempts or later failures.
+    @Test
+    public void aggregatesAllFailedTrashPaths() {
+        FakeAccess access = new FakeAccess();
+        Path first = Path.of("first").toAbsolutePath().normalize();
+        Path second = Path.of("second").toAbsolutePath().normalize();
+        Path successful = Path.of("successful").toAbsolutePath().normalize();
+        access.failedDeletionPaths.add(first);
+        access.failedDeletionPaths.add(second);
+        try (DefaultShaderPackCatalogModel model = model(access, Runnable::run)) {
+            model.loadIfNeeded();
+            CompletionException failure = assertThrows(CompletionException.class,
+                    () -> model.deleteShaderPacks(List.of(first, successful, second), DeletionMode.RECYCLE_BIN_FIRST)
+                            .toCompletableFuture().join());
+            TrashMoveException trash = assertInstanceOf(TrashMoveException.class, failure.getCause());
+            assertEquals(List.of(first, second), trash.failedPaths());
+            assertEquals(List.of(first, successful, second), access.deletionAttempts);
+            assertEquals(1, trash.getSuppressed().length);
+        }
+    }
+
+    /// An ordinary I/O failure must not be relabeled as a recycle-bin failure.
+    @Test
+    public void preservesOrdinaryDeletionFailure() {
+        FakeAccess access = new FakeAccess();
+        access.failedDeletionPaths.add(access.path);
+        access.ordinaryDeletionFailure = true;
+        try (DefaultShaderPackCatalogModel model = model(access, Runnable::run)) {
+            model.loadIfNeeded();
+            CompletionException failure = assertThrows(CompletionException.class,
+                    () -> model.deleteShaderPacks(List.of(access.path), DeletionMode.RECYCLE_BIN_FIRST)
+                            .toCompletableFuture().join());
+            java.io.UncheckedIOException ordinary = assertInstanceOf(java.io.UncheckedIOException.class,
+                    failure.getCause());
+            assertInstanceOf(IOException.class, ordinary.getCause());
+            assertFalse(ordinary.getCause() instanceof TrashMoveException);
+        }
+    }
+
     /// Verifies initial scanning and successful mutation publication.
     @Test
     void publishesScanAndMutationSnapshots() {
@@ -141,6 +186,15 @@ final class DefaultShaderPackCatalogModelTest {
     /// Minimal synchronous access implementation used by model tests.
     @NotNullByDefault
     private static final class FakeAccess implements ShaderPackCatalogAccess {
+        /// Paths whose deletion should fail.
+        private final List<Path> failedDeletionPaths = new ArrayList<>();
+
+        /// Exact attempted paths, including successful targets.
+        private final List<Path> deletionAttempts = new ArrayList<>();
+
+        /// Whether failures are ordinary I/O rather than recycle-bin errors.
+        private boolean ordinaryDeletionFailure;
+
         /// Path returned by the fixture.
         private final Path path = Path.of("pack").toAbsolutePath().normalize();
 
@@ -178,7 +232,14 @@ final class DefaultShaderPackCatalogModelTest {
 
         /// Records a successful deletion.
         @Override
-        public void delete(Path path, DeletionMode mode) {
+        public void delete(Path path, DeletionMode mode) throws IOException {
+            deletionAttempts.add(path);
+            if (failedDeletionPaths.contains(path)) {
+                if (ordinaryDeletionFailure) {
+                    throw new IOException("ordinary deletion failure");
+                }
+                throw new TrashMoveException(List.of(path));
+            }
         }
     }
 

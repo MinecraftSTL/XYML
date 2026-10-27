@@ -6,6 +6,7 @@ package space.minecraftstl.xyml.ui.swing.page.shaderpacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import java.awt.Component;
@@ -37,6 +38,24 @@ public interface ShaderPackCatalogInteractions {
     /// @param selectedCount positive selected pack count
     /// @return selected deletion mode, or null after cancellation
     @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount);
+
+    /// Chooses recovery after one pack fails to enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param target captured deletion target
+    /// @return safe cancellation unless an implementation supplies a fallback dialog
+    default DeletionFallbackDecision choosePermanentFallback(Component owner, ShaderPackCatalogItem target) {
+        return DeletionFallbackDecision.CANCEL;
+    }
+
+    /// Chooses recovery for the actual failed subset of a batch.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount number of failed targets
+    /// @return safe cancellation unless an implementation supplies a fallback dialog
+    default DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int selectedCount) {
+        return DeletionFallbackDecision.CANCEL;
+    }
 
     /// Chooses one or more backends for an enable or disable operation.
     ///

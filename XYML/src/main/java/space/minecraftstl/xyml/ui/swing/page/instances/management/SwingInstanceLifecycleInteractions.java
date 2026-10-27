@@ -9,6 +9,8 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
@@ -147,6 +149,17 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
     public boolean confirmPermanentFallback(Component owner, GameInstanceID sourceId) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmDeletionWarning(owner, sourceId);
+    }
+
+    /// Chooses how to recover an instance that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, GameInstanceID sourceId) {
+        EdtDispatcher.requireEventDispatchThread();
+        String source = Objects.requireNonNull(sourceId, "sourceId").id();
+        return SwingDeletionFallbackDialog.choose(
+                owner,
+                strings.deleteAction(),
+                strings.deleteConfirmation().formatted(source));
     }
 
     /// Displays the original irreversible-deletion warning.

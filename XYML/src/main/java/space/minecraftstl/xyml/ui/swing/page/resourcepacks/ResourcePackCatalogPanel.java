@@ -20,12 +20,14 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
-import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -35,8 +37,8 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.ListSelectionModel;
 import javax.swing.KeyStroke;
+import javax.swing.ListSelectionModel;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
@@ -46,9 +48,9 @@ import javax.swing.event.ListSelectionListener;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.ActionEvent;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.HierarchyListener;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.nio.file.Path;
 import java.util.List;
@@ -59,7 +61,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -1241,19 +1243,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         if (mode != null && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
-            startDeletion(
-                    () -> ResourcePackDeletionFallback.deleteSerially(
-                            selectedPaths,
-                            mode,
-                            path -> model.deleteResourcePack(path, mode),
-                            model::snapshot),
-                    () -> ResourcePackDeletionFallback.deleteSerially(
-                            selectedPaths,
-                            DeletionMode.PERMANENT,
-                            path -> model.deleteResourcePack(path, DeletionMode.PERMANENT),
-                            model::snapshot),
-                    () -> interactions.confirmPermanentFallbackSelected(this, selectedCount),
-                    true);
+            deleteResourcePacks(selectedPaths, mode, null);
         }
     }
 
@@ -1416,11 +1406,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         if (mode != null && isSelectedActionCurrent(expectedRevision, expectedPath)) {
-            startDeletion(
-                    () -> model.deleteResourcePack(expectedPath, mode),
-                    () -> model.deleteResourcePack(expectedPath, DeletionMode.PERMANENT),
-                    () -> interactions.confirmPermanentFallback(this, selected),
-                    true);
+            deleteResourcePacks(List.of(selected.path()), mode, selected);
         }
     }
 
@@ -1500,19 +1486,46 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         }
     }
 
-    /// Starts one deletion and delegates fallback ownership to the focused helper.
+    /// Deletes captured paths and narrows every recovery round to actual failures.
+    ///
+    /// @param paths immutable current targets
+    /// @param mode selected deletion behavior
+    /// @param singleTarget captured single-pack presentation, or null for a batch
+    private void deleteResourcePacks(
+            @Unmodifiable List<Path> paths, DeletionMode mode, @Nullable ResourcePackCatalogItem singleTarget) {
+        startDeletion(() -> singleTarget == null
+                ? ResourcePackDeletionFallback.deleteSerially(paths, mode,
+                        path -> model.deleteResourcePack(path, mode), model::snapshot)
+                : model.deleteResourcePack(singleTarget.path(), mode), mode, failure -> {
+            @Unmodifiable List<Path> failedPaths = ResourcePackDeletionFallback.failedPaths(paths, failure);
+            if (!isOpen() || failedPaths.isEmpty()) {
+                return;
+            }
+            DeletionFallbackDecision decision = singleTarget == null
+                    ? interactions.choosePermanentFallbackSelected(this, failedPaths.size())
+                    : interactions.choosePermanentFallback(this, singleTarget);
+            if (isOpen() && decision != DeletionFallbackDecision.CANCEL) {
+                deleteResourcePacks(failedPaths, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT, singleTarget);
+            }
+        });
+    }
+
+    /// Starts deletion with the same write ownership and ordinary-error retry as other actions.
+    ///
+    /// @param operation exact deletion operation
+    /// @param mode selected deletion behavior
+    /// @param fallback handles the current failed subset
     private void startDeletion(
-            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> initial,
-            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
-            boolean allowFallback) {
-        ResourcePackDeletionFallback.start(
-                initial,
-                permanentRetry,
-                confirmFallback,
-                allowFallback,
+            Supplier<CompletionStage<ResourcePackCatalogSnapshot>> operation,
+            DeletionMode mode, Consumer<TrashMoveException> fallback) {
+        ResourcePackDeletionFallback.startWithFallback(
+                operation,
+                mode == DeletionMode.RECYCLE_BIN_FIRST,
+                fallback,
                 () -> !writePending && currentWritableSnapshot() != null,
                 () -> {
+                    activeWriteOperation = operation;
                     writePending = true;
                     synchronized (stateLock) {
                         writeStartUpdateRevision = updateRevision;
@@ -1520,6 +1533,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                     updateActionAvailability(choiceList.getSelectedValue());
                 },
                 () -> {
+                    activeWriteOperation = null;
                     writePending = false;
                     updateSelectionDetails();
                 },

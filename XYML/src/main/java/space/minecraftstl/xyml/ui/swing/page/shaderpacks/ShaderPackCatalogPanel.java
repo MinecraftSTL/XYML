@@ -12,11 +12,13 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingHorizontalScrollPane;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichValueListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
-import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -697,7 +699,7 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
             return;
         }
         List<Path> paths = selected.stream().map(ShaderPackCatalogItem::path).toList();
-        startWrite(() -> model.deleteShaderPacks(paths, mode));
+        deleteShaderPacks(List.copyOf(paths), mode);
     }
 
     /// Toggles the selected pack through the backend chooser.
@@ -740,8 +742,90 @@ public final class ShaderPackCatalogPanel extends JPanel implements AutoCloseabl
         }
         @Nullable DeletionMode mode = interactions.chooseDeleteMode(this, selected);
         if (mode != null) {
-            startWrite(() -> model.deleteShaderPack(selected.path(), mode));
+            deleteShaderPack(selected, mode);
         }
+    }
+
+    /// Deletes the same captured pack after each fallback choice.
+    ///
+    /// @param target captured pack
+    /// @param mode selected deletion behavior
+    private void deleteShaderPack(ShaderPackCatalogItem target, DeletionMode mode) {
+        startDeletion(() -> model.deleteShaderPack(target.path(), mode), mode, failure -> {
+            DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, target);
+            if (!closed && decision != DeletionFallbackDecision.CANCEL) {
+                deleteShaderPack(target, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+            }
+        });
+    }
+
+    /// Retries only paths that the previous batch actually failed to recycle.
+    ///
+    /// @param paths immutable current targets
+    /// @param mode selected deletion behavior
+    private void deleteShaderPacks(@org.jetbrains.annotations.Unmodifiable List<Path> paths, DeletionMode mode) {
+        startDeletion(() -> model.deleteShaderPacks(paths, mode), mode, failure -> {
+            List<Path> failedPaths = paths.stream().filter(path -> failure.failedPaths().stream().anyMatch(failed ->
+                    failed.toAbsolutePath().normalize().equals(path.toAbsolutePath().normalize()))).toList();
+            if (failedPaths.isEmpty()) {
+                return;
+            }
+            DeletionFallbackDecision decision = interactions.choosePermanentFallbackSelected(this, failedPaths.size());
+            if (!closed && decision != DeletionFallbackDecision.CANCEL) {
+                deleteShaderPacks(failedPaths, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                        ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
+            }
+        });
+    }
+
+    /// Observes deletion independently from ordinary writes and queues every fallback round.
+    ///
+    /// @param operation exact deletion operation
+    /// @param mode selected deletion behavior
+    /// @param fallback handles the actual recycle-bin failures
+    private void startDeletion(
+            Supplier<CompletionStage<ShaderPackCatalogSnapshot>> operation,
+            DeletionMode mode,
+            java.util.function.Consumer<TrashMoveException> fallback) {
+        if (closed || writePending) {
+            return;
+        }
+        writePending = true;
+        updateActionAvailability();
+        CompletionStage<ShaderPackCatalogSnapshot> stage;
+        try {
+            stage = Objects.requireNonNull(operation.get(), "deletion returned null");
+        } catch (RuntimeException failure) {
+            stage = java.util.concurrent.CompletableFuture.failedFuture(failure);
+        } catch (Error failure) {
+            writePending = false;
+            updateActionAvailability();
+            throw failure;
+        }
+        stage.whenComplete((@Nullable ShaderPackCatalogSnapshot next, @Nullable Throwable failure) -> {
+            Runnable complete = () -> {
+                writePending = false;
+                if (closed) {
+                    return;
+                }
+                applySnapshot(next == null ? model.snapshot() : next);
+                updateActionAvailability();
+                if (failure != null) {
+                    Throwable cause = unwrap(failure);
+                    if (mode == DeletionMode.RECYCLE_BIN_FIRST && cause instanceof TrashMoveException trashFailure) {
+                        fallback.accept(trashFailure);
+                    } else {
+                        showFailure(actionStrings.operationFailedTitle(), cause);
+                    }
+                }
+            };
+            if (failure == null) {
+                EdtDispatcher.execute(complete);
+            } else {
+                EdtDispatcher.executeLater(complete);
+            }
+        });
     }
 
     /// Returns the single selected item, or null.

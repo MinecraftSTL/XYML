@@ -5,9 +5,11 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.util.io.DeletionBatchException;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +52,19 @@ final class ResourcePackDeletionFallbackTest {
 
         assertEquals(List.of(first, failed, last), attempts);
         assertEquals(List.of(failed), failure.failedPaths());
+    }
+
+    /// Ordinary I/O failures remain ordinary aggregate errors instead of offering permanent deletion.
+    @Test
+    public void doesNotClassifyOrdinaryIoAsTrashFailure() {
+        Path path = Path.of("ordinary.zip");
+        CompletionStage<ResourcePackCatalogSnapshot> result = ResourcePackDeletionFallback.deleteSerially(
+                List.of(path), DeletionMode.RECYCLE_BIN_FIRST,
+                ignored -> CompletableFuture.failedFuture(new IOException("ordinary")),
+                ResourcePackDeletionFallbackTest::snapshot);
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> result.toCompletableFuture().join());
+        assertInstanceOf(DeletionBatchException.class, failure.getCause());
     }
 
     /// Creates one valid terminal snapshot for deterministic stages.

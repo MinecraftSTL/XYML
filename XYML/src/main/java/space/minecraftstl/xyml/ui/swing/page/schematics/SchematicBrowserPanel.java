@@ -20,16 +20,17 @@ import space.minecraftstl.xyml.ui.swing.choice.FileListDragSupport;
 import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.RowBoundsCheckedList;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.TrashMoveException;
-import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -63,7 +64,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -776,11 +776,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         if (mode == null || !isSelectedActionCurrent(expectedDirectory, capturedPath)) {
             return;
         }
-        startDeletion(
-                model.delete(capturedPath, mode),
-                () -> model.delete(capturedPath, DeletionMode.PERMANENT),
-                () -> interactions.confirmPermanentFallback(this, selected),
-                true);
+        startDeletion(selected, mode);
     }
 
     /// Starts one asynchronous platform reveal while keeping unrelated browser commands available.
@@ -825,38 +821,46 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 @Nullable Throwable failure) -> EdtDispatcher.execute(() -> writeCompleted(failure)));
     }
 
-    /// Observes one deletion and retries permanently only after the original warning is approved.
+    /// Deletes only the captured path and defers every fallback round to a fresh EDT turn.
     ///
-    /// @param initial initial deletion stage
-    /// @param permanentRetry permanent retry stage
-    /// @param confirmFallback original warning decision
-    /// @param allowFallback whether recycle-bin failure may prompt again
-    private void startDeletion(
-            CompletionStage<SchematicBrowserSnapshot> initial,
-            Supplier<CompletionStage<SchematicBrowserSnapshot>> permanentRetry,
-            BooleanSupplier confirmFallback,
-            boolean allowFallback) {
-        final CompletionStage<SchematicBrowserSnapshot> completion;
-        try {
-            completion = Objects.requireNonNull(initial, "schematic deletion returned null");
-        } catch (RuntimeException failure) {
-            writeCompleted(failure);
+    /// @param target captured schematic target
+    /// @param mode selected deletion behavior
+    private void startDeletion(SchematicBrowserItem target, DeletionMode mode) {
+        if (!isOpen()) {
             return;
         }
-        completion.whenComplete((@Nullable SchematicBrowserSnapshot ignored, @Nullable Throwable failure) ->
-                EdtDispatcher.execute(() -> {
-                    if (failure == null || !isOpen()) {
-                        return;
+        Supplier<CompletionStage<SchematicBrowserSnapshot>> operation = () -> model.delete(target.path(), mode);
+        activeWriteOperation = operation;
+        CompletionStage<SchematicBrowserSnapshot> completion;
+        try {
+            completion = Objects.requireNonNull(operation.get(), "schematic deletion returned null");
+        } catch (RuntimeException failure) {
+            completion = java.util.concurrent.CompletableFuture.failedFuture(failure);
+        }
+        completion.whenComplete((@Nullable SchematicBrowserSnapshot ignored, @Nullable Throwable failure) -> {
+            Runnable complete = () -> {
+                if (!isOpen()) {
+                    activeWriteOperation = null;
+                    return;
+                }
+                @Nullable Throwable resolved = failure == null ? null : unwrapCompletionFailure(failure);
+                if (mode == DeletionMode.RECYCLE_BIN_FIRST && resolved instanceof TrashMoveException) {
+                    activeWriteOperation = null;
+                    DeletionFallbackDecision decision = interactions.choosePermanentFallback(this, target);
+                    if (isOpen() && decision != DeletionFallbackDecision.CANCEL) {
+                        startDeletion(target, decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT);
                     }
-                    Throwable resolved = unwrapCompletionFailure(failure);
-                    if (allowFallback && resolved instanceof TrashMoveException) {
-                        if (confirmFallback.getAsBoolean()) {
-                            startDeletion(permanentRetry.get(), permanentRetry, confirmFallback, false);
-                        }
-                        return;
-                    }
-                    writeCompleted(failure);
-                }));
+                    return;
+                }
+                writeCompleted(failure);
+            };
+            if (failure == null) {
+                EdtDispatcher.execute(complete);
+            } else {
+                EdtDispatcher.executeLater(complete);
+            }
+        });
     }
 
     /// Reports only write failures that were not already published in the browser status.

@@ -3,12 +3,13 @@
 
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
-import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
-
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.ui.swing.dialog.SwingFailureRetryDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
@@ -238,6 +239,26 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
     public boolean confirmPermanentFallbackSelected(Component owner, int selectedCount) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmSelectedDelete(owner, selectedCount);
+    }
+
+    /// Chooses how to recover one pack that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, ResourcePackCatalogItem target) {
+        EdtDispatcher.requireEventDispatchThread();
+        String message = strings.deleteConfirmationFormat().formatted(
+                Objects.requireNonNull(target, "target").fileName());
+        return SwingDeletionFallbackDialog.choose(owner, strings.deleteAction(), message);
+    }
+
+    /// Chooses how to recover a failed subset of one batch that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        requirePositiveSelectionCount(selectedCount);
+        return SwingDeletionFallbackDialog.choose(
+                owner,
+                i18n("button.remove"),
+                i18n("button.remove.confirm"));
     }
 
     /// Shows one single-target permanent deletion warning.

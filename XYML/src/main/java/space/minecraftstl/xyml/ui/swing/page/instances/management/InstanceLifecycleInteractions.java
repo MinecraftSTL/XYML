@@ -6,6 +6,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 
@@ -44,6 +45,17 @@ public interface InstanceLifecycleInteractions extends RetryableFailureInteracti
     /// @param sourceId current instance identifier
     /// @return whether permanent deletion was approved
     boolean confirmPermanentFallback(Component owner, GameInstanceID sourceId);
+
+    /// Chooses how to recover an instance that could not enter the recycle bin.
+    ///
+    /// @param owner native dialog owner
+    /// @param sourceId current instance identifier
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(Component owner, GameInstanceID sourceId) {
+        return confirmPermanentFallback(owner, sourceId)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
+    }
 
     /// Displays one terminal lifecycle failure.
     ///

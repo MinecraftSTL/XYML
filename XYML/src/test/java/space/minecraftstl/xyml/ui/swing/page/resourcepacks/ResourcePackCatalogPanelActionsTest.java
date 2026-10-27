@@ -4,7 +4,6 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.ui.swing.choice.CatalogDragHitAssertions;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -13,11 +12,14 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.CatalogDragHitAssertions;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.util.io.DeletionMode;
+import space.minecraftstl.xyml.util.io.TrashMoveException;
 
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
@@ -28,8 +30,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.Rectangle;
 import java.awt.Dimension;
+import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
@@ -56,8 +58,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -120,6 +122,58 @@ public final class ResourcePackCatalogPanelActionsTest {
                     "Resource-pack operation failed",
                     "Unable to reveal resource pack",
                     "Unable to open resource-pack directory");
+
+    /// Exercises repeated recycle-bin failures without resubmitting successful batch paths.
+    @Test
+    public void recoversOnlyFailedResourcePackPaths() {
+        for (boolean batch : List.of(false, true)) {
+            for (DeletionFallbackDecision decision : DeletionFallbackDecision.values()) {
+                Path directory = testPath("resourcepacks");
+                ResourcePackCatalogItem first = item(directory.resolve("first.zip"),
+                        ResourcePackCompatibility.COMPATIBLE, false);
+                ResourcePackCatalogItem failed = item(directory.resolve("failed.zip"),
+                        ResourcePackCompatibility.COMPATIBLE, false);
+                FakeResourcePackCatalogModel model = readyModel(List.of(first, failed), 1L);
+                model.recycleFailurePath = failed.path();
+                model.recycleFailuresRemaining = 2;
+                FakeResourcePackCatalogInteractions interactions = new FakeResourcePackCatalogInteractions();
+                interactions.deleteConfirmed = true;
+                interactions.deletionMode = DeletionMode.RECYCLE_BIN_FIRST;
+                interactions.fallbackDecisions.add(DeletionFallbackDecision.RETRY_RECYCLE_BIN);
+                interactions.fallbackDecisions.add(decision);
+                ResourcePackCatalogPanel panel = onEventDispatchThread(() -> new ResourcePackCatalogPanel(
+                        model, STRINGS, ACTION_STRINGS, interactions, directory));
+                onEventDispatchThread(() -> {
+                    panel.setSize(new Dimension(1120, 620));
+                    layoutRecursively(panel);
+                    panel.choiceList().refreshLoadPlan();
+                    panel.choiceList().getList().setSelectionInterval(batch ? 0 : 1, 1);
+                    findButton(panel, batch ? "resourcePacksDeleteSelected" : "resourcePacksDelete").doClick();
+                });
+                for (int turn = 0; turn < 8; turn++) {
+                    onEventDispatchThread(() -> { });
+                }
+                onEventDispatchThread(() -> {
+                    try {
+                        assertEquals(List.of(1, 1), interactions.fallbackCounts);
+                        int attempts = (batch ? 1 : 0) + (decision == DeletionFallbackDecision.CANCEL ? 2 : 3);
+                        assertEquals(attempts, model.deletionModes.size());
+                        int start = batch ? 1 : 0;
+                        for (int index = start; index < model.deletedPaths.size(); index++) {
+                            assertEquals(failed.path(), model.deletedPaths.get(index));
+                        }
+                        if (decision != DeletionFallbackDecision.CANCEL) {
+                            assertEquals(decision == DeletionFallbackDecision.RETRY_RECYCLE_BIN
+                                    ? DeletionMode.RECYCLE_BIN_FIRST : DeletionMode.PERMANENT,
+                                    model.deletionModes.get(attempts - 1));
+                        }
+                    } finally {
+                        panel.close();
+                    }
+                });
+            }
+        }
+    }
 
     /// An exact empty ready catalog accepts imports while chooser cancellation remains side-effect free.
     @Test
@@ -1221,6 +1275,29 @@ public final class ResourcePackCatalogPanelActionsTest {
             return CompletableFuture.completedFuture(current.get());
         }
 
+        /// Optional path whose recycling should fail.
+        private @Nullable Path recycleFailurePath;
+
+        /// Number of failures still pending for that path.
+        private int recycleFailuresRemaining;
+
+        /// Exact deletion modes for every requested path.
+        private final List<DeletionMode> deletionModes = new ArrayList<>();
+
+        /// Records each path attempt and simulates repeated recycle-bin failures.
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path, DeletionMode mode) {
+            Path normalized = path.toAbsolutePath().normalize();
+            deletionModes.add(mode);
+            deletedPaths.add(normalized);
+            if (mode == DeletionMode.RECYCLE_BIN_FIRST && normalized.equals(recycleFailurePath)
+                    && recycleFailuresRemaining > 0) {
+                recycleFailuresRemaining--;
+                return CompletableFuture.failedFuture(new TrashMoveException(List.of(normalized)));
+            }
+            return CompletableFuture.completedFuture(current.get());
+        }
+
         /// Records one exact delete path.
         ///
         /// @param path selected pack path
@@ -1331,6 +1408,28 @@ public final class ResourcePackCatalogPanelActionsTest {
     @NotNullByDefault
     private static final class FakeResourcePackCatalogInteractions
             implements ResourcePackCatalogInteractions {
+        /// Controlled initial deletion mode.
+        private DeletionMode deletionMode = DeletionMode.PERMANENT;
+
+        /// Recovery choices consumed after each failed recycle attempt.
+        private final List<DeletionFallbackDecision> fallbackDecisions = new ArrayList<>();
+
+        /// Failed counts shown by recovery dialogs.
+        private final List<Integer> fallbackCounts = new ArrayList<>();
+
+        /// Chooses recovery for one failed resource pack.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallback(Component owner, ResourcePackCatalogItem target) {
+            return choosePermanentFallbackSelected(owner, 1);
+        }
+
+        /// Records only failed targets and returns the queued choice.
+        @Override
+        public DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int count) {
+            fallbackCounts.add(count);
+            return fallbackDecisions.remove(0);
+        }
+
         /// Selected import paths returned by the chooser.
         private @Unmodifiable List<Path> importSelection = List.of();
 
@@ -1452,7 +1551,7 @@ public final class ResourcePackCatalogPanelActionsTest {
         /// @return permanent mode when confirmed, otherwise null
         @Override
         public @Nullable DeletionMode chooseDeleteMode(Component owner, ResourcePackCatalogItem target) {
-            return confirmDelete(owner, target) ? DeletionMode.PERMANENT : null;
+            return confirmDelete(owner, target) ? deletionMode : null;
         }
 
         /// Maps batch deletion confirmation to permanent mode for this headless test.
@@ -1462,7 +1561,7 @@ public final class ResourcePackCatalogPanelActionsTest {
         /// @return permanent mode when confirmed, otherwise null
         @Override
         public @Nullable DeletionMode chooseDeleteModeSelected(Component owner, int selectedCount) {
-            return confirmDeleteSelected(owner, selectedCount) ? DeletionMode.PERMANENT : null;
+            return confirmDeleteSelected(owner, selectedCount) ? deletionMode : null;
         }
 
         /// Records a reveal and returns its controlled completion.

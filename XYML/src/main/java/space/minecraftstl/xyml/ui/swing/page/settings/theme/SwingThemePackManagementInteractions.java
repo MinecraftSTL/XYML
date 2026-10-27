@@ -4,13 +4,14 @@
 package space.minecraftstl.xyml.ui.swing.page.settings.theme;
 
 import net.miginfocom.swing.MigLayout;
-import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
-
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.theme.ThemePackExporter;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.dialog.SwingDeletionFallbackDialog;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.SystemTrashOperations;
 import space.minecraftstl.xyml.util.io.TrashOperations;
@@ -194,6 +195,17 @@ public final class SwingThemePackManagementInteractions implements ThemePackMana
     public boolean confirmPermanentFallback(Component owner, ThemePackItem item) {
         EdtDispatcher.requireEventDispatchThread();
         return confirmDelete(owner, item);
+    }
+
+    /// Chooses how to recover one theme package that could not enter the recycle bin.
+    @Override
+    public DeletionFallbackDecision choosePermanentFallback(Component owner, ThemePackItem item) {
+        EdtDispatcher.requireEventDispatchThread();
+        ThemePackItem checked = Objects.requireNonNull(item, "item");
+        return SwingDeletionFallbackDialog.choose(
+                owner,
+                strings.confirmDeleteTitle(),
+                strings.confirmDeleteFormat().formatted(checked.packageName()));
     }
 
     /// Opens one revalidated directory on the caller-owned worker.

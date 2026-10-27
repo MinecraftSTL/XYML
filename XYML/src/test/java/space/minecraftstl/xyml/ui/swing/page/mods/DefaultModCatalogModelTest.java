@@ -99,6 +99,26 @@ public final class DefaultModCatalogModelTest {
         model.close();
     }
 
+    /// Captures disabled physical paths without depending on filtering or loaded viewport rows.
+    @Test
+    public void capturesStableDeletionKeysFromCompleteIndex() {
+        ManualExecutor executor = new ManualExecutor();
+        ModCatalogEntry enabled = entry("enabled-key", "Visible", true, ModLoaderType.FABRIC);
+        ModCatalogEntry disabled = entry("disabled-key", "Hidden", false, ModLoaderType.FABRIC);
+        FakeAccess access = new FakeAccess(List.of(enabled, disabled));
+        try (DefaultModCatalogModel model = new DefaultModCatalogModel(access, executor, STATUS_STRINGS)) {
+            model.loadIfNeeded();
+            executor.runNext();
+            model.setSearchQuery("Visible");
+            assertEquals(List.of(enabled.localKey()), model.filteredLocalKeys());
+            @Unmodifiable Map<Path, String> captured = model.deletionKeysByPath(List.of(disabled.localKey()));
+            assertEquals(Map.of(disabled.path(), disabled.localKey()), captured);
+            assertTrue(disabled.path().toString().endsWith(".jar.disabled"));
+            assertEquals(1, access.refreshCount());
+            assertThrows(UnsupportedOperationException.class, () -> captured.clear());
+        }
+    }
+
     /// Installed keys and earlier same-key sources are both classified before import begins.
     @Test
     public void classifiesInstalledAndWithinBatchImportConflicts() {

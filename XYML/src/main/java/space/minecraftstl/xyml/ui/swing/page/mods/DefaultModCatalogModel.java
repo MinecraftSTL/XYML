@@ -11,15 +11,16 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
-import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.DeletionMode;
 
 import javax.swing.SwingUtilities;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -132,6 +133,19 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
         return state.filteredEntries().stream()
                 .map(ModCatalogEntry::localKey)
                 .toList();
+    }
+
+    /// Captures selected physical paths from the complete index without loading viewport metadata.
+    @Override
+    public @Unmodifiable Map<Path, String> deletionKeysByPath(@Unmodifiable List<String> localKeys) {
+        Set<String> selectedKeys = new HashSet<>(localKeys);
+        Map<Path, String> keysByPath = new HashMap<>();
+        for (ModCatalogEntry entry : state.allEntries()) {
+            if (selectedKeys.contains(entry.localKey())) {
+                keysByPath.put(entry.path().toAbsolutePath().normalize(), entry.localKey());
+            }
+        }
+        return Map.copyOf(keysByPath);
     }
 
     /// Returns the exact filtered count only after a successful refresh.

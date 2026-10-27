@@ -6,6 +6,7 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.ui.swing.dialog.DeletionFallbackDecision;
 import space.minecraftstl.xyml.ui.swing.dialog.RetryableFailureInteraction;
 import space.minecraftstl.xyml.util.io.DeletionMode;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -100,6 +101,28 @@ public interface ResourcePackCatalogInteractions extends RetryableFailureInterac
     /// @return whether permanent batch deletion was approved
     default boolean confirmPermanentFallbackSelected(Component owner, int selectedCount) {
         return confirmDeleteSelected(owner, selectedCount);
+    }
+
+    /// Chooses how to recover one pack that could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param target exact pack proposed for deletion
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallback(Component owner, ResourcePackCatalogItem target) {
+        return confirmPermanentFallback(owner, target)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
+    }
+
+    /// Chooses how to recover a failed subset of one batch that could not enter the recycle bin.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive failed path count
+    /// @return selected fallback action, never null
+    default DeletionFallbackDecision choosePermanentFallbackSelected(Component owner, int selectedCount) {
+        return confirmPermanentFallbackSelected(owner, selectedCount)
+                ? DeletionFallbackDecision.DELETE_PERMANENTLY
+                : DeletionFallbackDecision.CANCEL;
     }
 
     /// Schedules revealing one installed resource pack through platform desktop integration.
