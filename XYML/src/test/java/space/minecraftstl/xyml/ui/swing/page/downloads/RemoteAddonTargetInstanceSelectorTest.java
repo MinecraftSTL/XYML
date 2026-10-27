@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /// Tests the download page's local target choice independently from global instance selection.
@@ -206,6 +207,38 @@ public final class RemoteAddonTargetInstanceSelectorTest {
                 selector.start();
 
                 assertEquals(List.of(FIRST_ID), reported);
+            }
+        });
+    }
+
+    /// Re-resolves a same-named target when the game-directory context changes.
+    @Test
+    void reportsSameIdentityInAnotherRepositoryContext() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 0);
+            List<@Nullable GameInstanceID> reported = new ArrayList<>();
+            try (RemoteAddonTargetInstanceSelector selector =
+                         new RemoteAddonTargetInstanceSelector(model, reported::add)) {
+                selector.start();
+                model.publish(entries(FIRST_ID, SECOND_ID), 0, 1L);
+                assertEquals(List.of(FIRST_ID, FIRST_ID), reported);
+            }
+        });
+    }
+
+    /// Reports removal of the last instance so no loader context can leak into general browsing.
+    @Test
+    void reportsEmptyTargetSelection() {
+        EdtDispatcher.executeAndWait(() -> {
+            FakeInstancesModel model = new FakeInstancesModel(entries(FIRST_ID, SECOND_ID), 0);
+            List<@Nullable GameInstanceID> reported = new ArrayList<>();
+            try (RemoteAddonTargetInstanceSelector selector =
+                         new RemoteAddonTargetInstanceSelector(model, reported::add)) {
+                selector.start();
+                selector.component().setSelectedItem(null);
+                assertEquals(2, reported.size());
+                assertEquals(FIRST_ID, reported.get(0));
+                assertNull(reported.get(1));
             }
         });
     }

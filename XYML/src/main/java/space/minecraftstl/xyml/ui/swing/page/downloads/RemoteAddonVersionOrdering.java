@@ -7,6 +7,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 
@@ -86,6 +87,27 @@ final class RemoteAddonVersionOrdering {
             }
         }
         return first;
+    }
+
+    /// Recommends only artifacts explicitly supporting the known instance loader.
+    ///
+    /// Unknown or absent loader context preserves general browsing. Loader compatibility follows
+    /// the explicit provider metadata membership also used by local mod update discovery.
+    ///
+    /// @param versions complete provider response retained for manual browsing
+    /// @param requestedGameVersion optional exact game-version context
+    /// @param requestedLoader analyzed instance loader, or null when no loader is known
+    /// @return compatible recommendation, or null when no compatible artifact exists
+    static @Nullable RemoteAddon.Version recommended(
+            @Unmodifiable List<RemoteAddon.Version> versions,
+            String requestedGameVersion,
+            @Nullable ModLoaderType requestedLoader) {
+        if (requestedLoader == null || requestedLoader == ModLoaderType.UNKNOWN) {
+            return recommended(versions, requestedGameVersion);
+        }
+        return recommended(versions.stream()
+                .filter(version -> version.loaders().contains(requestedLoader))
+                .toList(), requestedGameVersion);
     }
 
     /// Formats a version for the compact Swing selector, including both version dimensions.

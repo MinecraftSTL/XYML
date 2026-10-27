@@ -428,7 +428,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         instanceContext = new RemoteAddonInstanceContextCoordinator(
                 this.kind == RemoteAddonCatalogKind.WORLD ? null : instancesModel, sourceBox, gameVersionField,
                 categoryControls, () -> loadedCategorySource == RemoteAddonCatalogSource.MODRINTH && !categoryLoading,
-                this::resetSortOptions, searchField, () -> pendingSearchText = null);
+                this::resetSortOptions, searchField, () -> pendingSearchText = null, this::invalidateVersionContext);
         targetInstanceSelector = this.kind == RemoteAddonCatalogKind.WORLD || instancesModel == null
                 ? null
                 : new RemoteAddonTargetInstanceSelector(instancesModel, this::instanceSelectionChanged);
@@ -548,10 +548,21 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     }
 
     /// Follows one changed local target instance unless programmatic navigation owns the criteria.
-    private void instanceSelectionChanged(GameInstanceID instanceId) {
+    private void instanceSelectionChanged(@Nullable GameInstanceID instanceId) {
         if (!closed && !dependencyNavigationInProgress) {
-            instanceContext.request(instanceId);
+            instanceContext.clear();
+            invalidateVersionContext();
+            if (instanceId != null) {
+                instanceContext.request(instanceId);
+            }
         }
+    }
+
+    /// Clears selected artifacts immediately when their instance context is no longer current.
+    private void invalidateVersionContext() {
+        selectionRequestRevision.incrementAndGet();
+        clearSelectedProject();
+        updateControls();
     }
 
     /// Queues one pending-search check after the current EDT event completes.
@@ -1035,7 +1046,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             }
             if (previousSelection != null && orderedVersions.contains(previousSelection)) {
                 versionBox.setSelectedItem(previousSelection);
-            } else if (this.recommendedVersion != null) {
+            } else {
                 versionBox.setSelectedItem(this.recommendedVersion);
             }
         } finally {
@@ -1386,7 +1397,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Resolves versions only for a selected materialized result row on the worker executor.
     private void selectedRowChanged() {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed || catalogLoading) {
+        if (closed || catalogLoading || instanceContext.isResolving()) {
             return;
         }
         @Nullable RemoteAddonCatalogItem item = choiceList.getSelectedValue();
@@ -1403,7 +1414,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         setStatus(strings.loadingVersionsStatus());
         updateControls();
         try {
-            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision));
+            var context = instanceContext.recommendationContext(SwingTextFields.comboText(gameVersionField), kind);
+            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision, context));
         } catch (RuntimeException schedulingFailure) {
             LOG.warning("Failed to schedule remote add-on version loading", schedulingFailure);
             applyVersionFailure(item, requestRevision);
@@ -1434,7 +1446,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         setStatus(strings.loadingVersionsStatus());
         updateControls();
         try {
-            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision));
+            var context = instanceContext.recommendationContext(SwingTextFields.comboText(gameVersionField), kind);
+            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision, context));
         } catch (RuntimeException schedulingFailure) {
             LOG.warning("Failed to schedule remote add-on version loading retry", schedulingFailure);
             applyVersionFailure(item, requestRevision);
@@ -1474,10 +1487,13 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     ///
     /// @param item selected materialized project row
     /// @param requestRevision selection identity captured before worker scheduling
-    private void loadSelectedVersions(RemoteAddonCatalogItem item, long requestRevision) {
+    /// @param context immutable instance recommendation criteria captured on the EDT
+    private void loadSelectedVersions(
+            RemoteAddonCatalogItem item, long requestRevision,
+            RemoteAddonInstanceContextCoordinator.RecommendationContext context) {
         try {
             List<RemoteAddon.Version> versions = backend.loadVersions(item);
-            SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> applyVersions(item, versions, requestRevision));
+            SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> applyVersions(item, versions, requestRevision, context));
         } catch (IOException | RuntimeException failure) {
             LOG.warning("Failed to load remote add-on versions", failure);
             applyVersionFailure(item, requestRevision);
@@ -1489,31 +1505,25 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @param item selected result represented by the loaded versions
     /// @param versions provider-order installable versions
     /// @param requestRevision selection identity captured before worker scheduling
-    private void applyVersions(
-            RemoteAddonCatalogItem item,
-            List<RemoteAddon.Version> versions,
-            long requestRevision) {
+    /// @param context immutable instance recommendation criteria captured on the EDT
+    private void applyVersions(RemoteAddonCatalogItem item, List<RemoteAddon.Version> versions,
+                               long requestRevision, RemoteAddonInstanceContextCoordinator.RecommendationContext context) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed || selectionRequestRevision.get() != requestRevision || selectedItem != item) {
+        if (closed || selectionRequestRevision.get() != requestRevision || selectedItem != item
+                || instanceContext.revision() != context.revision()) {
             return;
         }
         versionLoading = false;
         loadedVersions = List.copyOf(Objects.requireNonNull(versions, "versions"));
         @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
-        String requestedGameVersion = SwingTextFields.comboText(gameVersionField);
         recommendedVersion = RemoteAddonVersionOrdering.recommended(
-                loadedVersions,
-                requestedGameVersion);
-        versionRenderer.setSelectionContext(recommendedVersion, requestedGameVersion);
+                loadedVersions, context.gameVersion(), context.modLoader());
+        versionRenderer.setSelectionContext(recommendedVersion, context.gameVersion());
         for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
         if (versionBox.getItemCount() > 0) {
-            if (recommendedVersion == null) {
-                versionBox.setSelectedIndex(0);
-            } else {
-                versionBox.setSelectedItem(recommendedVersion);
-            }
+            versionBox.setSelectedItem(recommendedVersion);
             updateProjectDetails(item, (RemoteAddon.Version) versionBox.getSelectedItem());
             setStatus("");
         } else {
