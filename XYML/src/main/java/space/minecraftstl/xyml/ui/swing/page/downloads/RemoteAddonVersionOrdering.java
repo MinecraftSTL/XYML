@@ -89,10 +89,11 @@ final class RemoteAddonVersionOrdering {
         return first;
     }
 
-    /// Recommends only artifacts explicitly supporting the known instance loader.
+    /// Recommends only artifacts explicitly supporting the known instance loader and requested game version.
     ///
-    /// Unknown or absent loader context preserves general browsing. Loader compatibility follows
-    /// the explicit provider metadata membership also used by local mod update discovery.
+    /// Unknown or absent loader context preserves general browsing. Known loader context also requires
+    /// an exact game-version match when one is supplied, without changing the complete browsing list.
+    /// Loader compatibility follows the explicit provider metadata membership used by local mod update discovery.
     ///
     /// @param versions complete provider response retained for manual browsing
     /// @param requestedGameVersion optional exact game-version context
@@ -105,9 +106,11 @@ final class RemoteAddonVersionOrdering {
         if (requestedLoader == null || requestedLoader == ModLoaderType.UNKNOWN) {
             return recommended(versions, requestedGameVersion);
         }
+        String requested = Objects.requireNonNull(requestedGameVersion, "requestedGameVersion").trim();
         return recommended(versions.stream()
                 .filter(version -> version.loaders().contains(requestedLoader))
-                .toList(), requestedGameVersion);
+                .filter(version -> requested.isEmpty() || hasGameVersion(version, requested))
+                .toList(), requested);
     }
 
     /// Formats a version for the compact Swing selector, including both version dimensions.

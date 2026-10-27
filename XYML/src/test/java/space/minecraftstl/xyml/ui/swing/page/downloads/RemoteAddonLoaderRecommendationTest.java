@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
+import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -97,6 +99,70 @@ final class RemoteAddonLoaderRecommendationTest {
         RemoteAddon.Version missing = version("missing", "0.8.13", "1.21.1", null);
         assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
                 List.of(neoforge, missing), null, false);
+    }
+
+    /// A matching loader cannot make an artifact for a different game version eligible.
+    @Test
+    void rejectsMatchingLoaderForDifferentGameVersion() {
+        RemoteAddon.Version old = version("old", "99.0", "1.20.1", ModLoaderType.FABRIC);
+        assertNull(RemoteAddonVersionOrdering.recommended(List.of(old), "1.21.1", ModLoaderType.FABRIC));
+    }
+
+    /// A project matching the game only through another loader must leave automatic selection empty.
+    @Test
+    void keepsCrossLoaderGameMatchesManualAcrossSorting() {
+        RemoteAddon.Version old = version("old", "99.0", "1.20.1", ModLoaderType.FABRIC);
+        RemoteAddon.Version neoforge = version("neoforge", "1.0", "1.21.1", ModLoaderType.NEO_FORGE);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                List.of(old, neoforge), null, false);
+    }
+
+    /// Preview channels remain eligible when they explicitly support both known instance dimensions.
+    @Test
+    void retainsPreviewFallbackWithinExactGameAndLoader() {
+        RemoteAddon.Version old = version("old", "99.0", "1.20.1", ModLoaderType.FABRIC);
+        RemoteAddon.Version base = version("preview", "1.0", "1.21.1", ModLoaderType.FABRIC);
+        RemoteAddon.Version preview = new RemoteAddon.Version(base.self(), base.versionId(), base.projectId(),
+                base.name(), base.version(), base.datePublished(), RemoteAddon.VersionType.Beta, base.file(),
+                base.dependencies(), base.gameVersions(), base.loaders());
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                List.of(old, preview), preview);
+    }
+
+    /// Missing game or loader context preserves the existing general fallback rather than guessing compatibility.
+    @Test
+    void preservesFallbackWithIncompleteInstanceContext() {
+        RemoteAddon.Version old = version("old", "1.0", "1.20.1", ModLoaderType.FABRIC);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "", ModLoaderType.FABRIC, List.of(old), old);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", null, List.of(old), old);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.UNKNOWN, List.of(old), old);
+    }
+
+    /// CurseForge metadata follows the same exact game/loader eligibility through its production adapter.
+    @Test
+    void enforcesExactGameAcrossCurseForgeArtifacts() {
+        String json = """
+                [
+                  {"id":1,"modId":123,"displayName":"Old","fileName":"old.jar","releaseType":1,
+                   "fileDate":"2026-01-01T00:00:00Z","downloadUrl":"https://example.invalid/old.jar",
+                   "gameVersions":["1.20.1","Fabric"],"dependencies":[]},
+                  {"id":2,"modId":123,"displayName":"Other loader","fileName":"other.jar","releaseType":1,
+                   "fileDate":"2026-01-01T00:00:00Z","downloadUrl":"https://example.invalid/other.jar",
+                   "gameVersions":["1.21.1","NeoForge"],"dependencies":[]},
+                  {"id":3,"modId":123,"displayName":"Preview","fileName":"preview.jar","releaseType":2,
+                   "fileDate":"2026-01-01T00:00:00Z","downloadUrl":"https://example.invalid/preview.jar",
+                   "gameVersions":["1.21.1","Fabric"],"dependencies":[]}
+                ]
+                """;
+        CurseForgeRemoteAddonRepository.CurseAddon.LatestFile[] files = JsonUtils.GSON.fromJson(json,
+                CurseForgeRemoteAddonRepository.CurseAddon.LatestFile[].class);
+        RemoteAddon.Version old = files[0].toVersion();
+        RemoteAddon.Version other = files[1].toVersion();
+        RemoteAddon.Version preview = files[2].toVersion();
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                List.of(old, other), null, false);
+        assertPanelRecommendation(RemoteAddonCatalogKind.MOD, "1.21.1", ModLoaderType.FABRIC,
+                List.of(old, other, preview), preview);
     }
 
     /// Provider-declared loader membership does not invent Fabric/Quilt or Forge/NeoForge compatibility.
